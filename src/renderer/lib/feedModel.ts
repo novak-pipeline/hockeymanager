@@ -30,12 +30,13 @@ export function feedModelBridge(): FeedModelBridge | null {
 
 const LS_KEY = 'hockey.feed.localWriter'
 
-/** The local writer is ON BY DEFAULT — it's the shipped experience, so it works
- *  out of the box once the model is present (bundled with the app, or downloaded).
- *  Only an explicit opt-OUT disables it; when the model is absent everything
- *  falls back to the template writer, so default-on is always safe. */
+/** The local writer is an experimental OPT-IN. The authored template writer is the
+ *  shipped experience; when enabled but the model is absent, everything still falls
+ *  back to the template writer. */
 export function getFeedWriterEnabled(): boolean {
-  return localStorage.getItem(LS_KEY) !== 'false'
+  // OFF by default for 1.0 (owner decision 2026-09-26): with the facts it's given
+  // the model adds little over the authored template writer. 'true' opts in.
+  try { return localStorage.getItem(LS_KEY) === 'true' } catch { return false }
 }
 export function setFeedWriterEnabled(v: boolean): void {
   localStorage.setItem(LS_KEY, String(v))

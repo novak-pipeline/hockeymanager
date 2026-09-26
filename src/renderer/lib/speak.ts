@@ -31,7 +31,8 @@ let _autoLoadInFlight = false // a background download is running right now
 let _autoLoadFailures = 0 // consecutive failures, for the retry backoff
 let _autoRetryAt = 0 // epoch ms before which we don't try again
 
-/** Neural-voice auto-download — default: ON (opt-OUT).
+/** Neural-voice auto-download — default: OFF (opt-IN) since 2026-09-26; the text
+ *  below records why it was once ON.
  *
  *  History: the neural (Kokoro) engine runs onnxruntime-web's WASM runtime in the
  *  renderer. The renderer used to run with the Chromium sandbox OFF
@@ -48,7 +49,9 @@ let _autoRetryAt = 0 // epoch ms before which we don't try again
  *  set localStorage 'hockey.voice.autoNeural' to 'false' to opt out. */
 const LS_AUTO = 'hockey.voice.autoNeural'
 function autoNeuralEnabled(): boolean {
-  try { return localStorage.getItem(LS_AUTO) !== 'false' } catch { return true }
+  // OFF by default for 1.0 (owner decision 2026-09-26): no model download on
+  // first launch. Opt in from Settings; 'true' enables.
+  try { return localStorage.getItem(LS_AUTO) === 'true' } catch { return false }
 }
 
 /** Persist the GM's neural-voice preference (Settings toggle). */

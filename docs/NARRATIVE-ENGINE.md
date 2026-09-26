@@ -211,5 +211,16 @@ acknowledges what the reader did/knows.
 
 ## Non-goals
 
-No new sim mechanics. No LLM in the default path. No new screens — this feeds
-the inbox, feed, phone, and meeting surfaces that exist.
+No LLM in the default path. No new screens for delivery — this feeds the inbox,
+feed, phone, and meeting surfaces that exist.
+
+~~No new sim mechanics.~~ **Lifted 2026-09-26 (owner decision).** The depth audit
+(docs/depth-audit-2026-09/) found this rule capped the whole people layer at
+delivery: with morale as the only lever, every consequence became a `morale += n`
+that drifts away in about two weeks. Consequence needs STATE: a happiness ledger
+of caused, persistent factors; GM–player trust and interaction history; promises
+with real due dates and checks; staff advice receipts; owner commitments. New
+state is allowed when it (a) is read by the sim or by a decision, never write-only,
+(b) is visible to the GM through a person or a panel, and (c) is measured by the
+lever-audit method before it ships. Fun outweighs realism: penalties land only on
+exploit patterns, are telegraphed, and fade.

@@ -340,7 +340,7 @@ function VoicePanel(): JSX.Element {
           checked={autoNeural}
           onChange={(e) => { const on = e.target.checked; setAutoNeuralEnabled(on); setAutoNeural(on) }}
         />
-        <span>Download & use enhanced neural voices automatically <span className="muted">(recommended)</span></span>
+        <span>Download & use enhanced neural voices automatically <span className="muted">(experimental)</span></span>
       </label>
       <div className="stack" style={{ gap: 6, marginBottom: 12 }}>
         <div style={{ fontSize: 12, fontWeight: 600 }}>Fidelity</div>
@@ -471,7 +471,7 @@ function FeedModelPanel(): JSX.Element | null {
   return (
     <Panel title="Local AI Feed writer">
       <div className="muted small" style={{ marginBottom: 'var(--sp-3)' }}>
-        On by default — the Feed's posts are rewritten into natural prose by a small model
+        Experimental, off by default — the Feed's posts can be rewritten by a small model
         that runs entirely on your machine (no account, no internet). The template writer
         is always the fallback, so the Feed works even when the model isn't installed.
       </div>

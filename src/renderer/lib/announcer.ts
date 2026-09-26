@@ -69,9 +69,11 @@ const MAX_QUEUE = 2
 
 function readEnabled(): boolean {
   try {
-    return localStorage.getItem(LS_ENABLED) !== 'false'
+    // Voice is OFF by default for 1.0 (owner decision 2026-09-26): synthesis ran
+    // below realtime and casting was inconsistent. Opt in from Settings.
+    return localStorage.getItem(LS_ENABLED) === 'true'
   } catch {
-    return true
+    return false
   }
 }
 
