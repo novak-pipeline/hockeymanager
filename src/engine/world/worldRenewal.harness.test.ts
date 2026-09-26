@@ -138,6 +138,7 @@ describe.skipIf(!process.env.WR_RUN || !existsSync(MOD_DB))('world renewal harne
           let hist = 0
           for (const p of career.data.players.values()) {
             const gen = p.externalId?.startsWith('gen-') ? 'gen' : 'imp'
+            if (p.retiredYear !== undefined && rostered.has(p.id as string)) bump('retiredButRostered')
             const st = p.retiredYear !== undefined ? 'retired' : rostered.has(p.id as string) ? 'rostered' : fa.has(p.id as string) ? 'fa' : 'limbo'
             bump(gen + ':' + st)
             hist += p.careerHistory?.length ?? 0

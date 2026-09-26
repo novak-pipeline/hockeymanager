@@ -1871,6 +1871,46 @@ describe('Career — wider-world quick-sim', () => {
     }
   })
 
+  it('world renewal: the OHL crowns a champion, archives careers, and renews its cohort at rollover', () => {
+    const { data, amateurIds } = withJuniorProspects(211)
+    const career = new Career(data, 211, data.league.teams[0]!)
+    while (career.getDashboard().phase === 'regularSeason') career.step()
+    while (career.getDashboard().phase === 'playoffs') career.step()
+    const hist = data.league.worldHistory!
+    const ohl = hist.seasons.find((s) => s.competitionId === 'ohl' && s.year === career.year)!
+    expect(ohl).toBeDefined()
+    expect(ohl.trophy).toBe('J. Ross Robertson Cup')
+    expect(ohl.championTeamId).toMatch(/^ohl-jt/)
+    expect(ohl.topScorer).toBeDefined()
+    // Champion roster honours are world-scoped (profiles yes, NHL awards tab no).
+    const view = career.getWorldHistory()
+    expect(view.leagues.find((l) => l.competitionId === 'ohl')?.seasons.length).toBe(1)
+    // Every junior who played has this season on his career record.
+    const played = [...amateurIds].map((id) => data.players.get(asPlayerId(id))!).filter((p) => (p.careerHistory ?? []).length > 0)
+    expect(played.length).toBeGreaterThan(100)
+    expect(played[0]!.careerHistory![0]!.league).toBe('Ontario Hockey League')
+    // Through the offseason to rollover: the intake adds a nation-true cohort.
+    const before = data.players.size
+    let guard = 0
+    const y0 = career.year
+    while (career.year === y0 && guard++ < 2000) {
+      if (career.draftPending()) { career.autoDraft(); continue }
+      career.step()
+    }
+    expect(career.year).toBe(y0 + 1)
+    const newgens = [...data.players.values()].filter((p) => p.externalId?.startsWith('gen-'))
+    expect(newgens.length).toBeGreaterThan(20)
+    expect(data.players.size).toBeGreaterThan(before)
+    for (const p of newgens.slice(0, 20)) {
+      expect(p.nationality).toMatch(/Canada|United States|Czechia|Slovakia|Russia|Sweden|Finland|Germany|Latvia|Switzerland|Norway|Denmark|Austria|Belarus/)
+      expect(p.age).toBeLessThanOrEqual(17)
+    }
+    // Nobody over the OHL age limit is still playing junior.
+    for (const tid of data.league.competitions![0]!.teamIds) {
+      for (const pid of data.teams.get(tid)!.roster) expect(data.players.get(pid)!.age).toBeLessThanOrEqual(20)
+    }
+  })
+
   it('draft: pick-by-pick stepping, staff war-room advice, and enriched prospect info', () => {
     const { data } = withJuniorProspects(207)
     const career = new Career(data, 207, data.league.teams[0]!)
