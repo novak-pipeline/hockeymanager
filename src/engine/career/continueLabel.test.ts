@@ -23,7 +23,7 @@ type Gates = {
   reviewFacts: unknown
   trainingCamp: unknown
   tradeOffers: unknown[]
-  news: Array<{ headline: string }>
+  news: Array<{ headline: string; body: string; category: string }>
 }
 
 function seasonCareer(): { career: Career; gates: Gates } {
@@ -168,7 +168,8 @@ describe('a standing trade offer is a beat gate (playtest A6, bar B2.2)', () => 
     expect(career.getDashboard().continueLabel).toMatch(/^Continue to /)
     // The GM is told what was turned down in his name — a delegated decision is
     // still a decision, and it has to leave a trace.
-    expect(gates.news.some((n) => /passes on 2 offers/.test(n.headline))).toBe(true)
+    // (Headlines are pooled; the body is the stable record of what was declined.)
+    expect(gates.news.some((n) => n.category === 'trade' && /turned down/.test(n.body))).toBe(true)
   })
 
   it('cannot softlock: a day simmed past the gate delegates to the AGM', () => {

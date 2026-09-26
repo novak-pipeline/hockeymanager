@@ -191,7 +191,7 @@ function buildFiring(seat: CoachSeat, window: 'midseason' | 'offseason', rng: Rn
     window === 'midseason'
       ? `${seat.teamName} have dismissed ${seat.coachName} ${seat.gamesPlayed} games into the season. ` +
         `Picked ${ord(seat.predictedRank)} in September, they sit ${ord(seat.currentRank)} on ${pace}. ` +
-        `${tenureLine} An interim takes the room until the summer.`
+        `${tenureLine} An interim takes over until the summer.`
       : `${seat.teamName} will not bring ${seat.coachName} back. ` +
         `The club was projected ${ord(seat.predictedRank)} and finished ${ord(seat.currentRank)} on ${pace}. ` +
         `${tenureLine} His name joins the market.`

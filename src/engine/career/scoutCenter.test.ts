@@ -44,7 +44,8 @@ describe('scouting center — report delivery', () => {
         const key = `${n.day}|${n.headline}`
         if (seen.has(key)) continue
         seen.add(key)
-        if (n.category === 'scouting' && n.headline.startsWith('Scout report:')) cards.push(n)
+        // Headlines are pooled; the card's body is the stable marker.
+        if (n.category === 'scouting' && n.body.startsWith('Our scouts have filed a full report')) cards.push(n)
       }
     }
     // The old emitter never fired — this is the regression guard.
@@ -163,7 +164,7 @@ describe('scout digest interaction (#10)', () => {
     c.emitScoutDigest(7)
 
     // The digest mail carries the structured card for the untriaged prospect.
-    const digest = c.getInbox().items.find((n: NewsItem) => n.headline === 'Weekly scouting digest')
+    const digest = c.getInbox().items.find((n: NewsItem) => n.press?.kind === 'scoutDigest')
     expect(digest).toBeTruthy()
     expect((digest!.prospects ?? []).map((p: { playerId: string }) => p.playerId)).toContain(p1)
     // The inbox view exposes the live triage state for the cards.
@@ -224,7 +225,7 @@ describe('scout digest interaction (#10)', () => {
 
     // The next digest only carries the untriaged prospect.
     c.emitScoutDigest(7)
-    const digest = c.getInbox().items.find((n: NewsItem) => n.headline === 'Weekly scouting digest')
+    const digest = c.getInbox().items.find((n: NewsItem) => n.press?.kind === 'scoutDigest')
     const cardIds = (digest!.prospects ?? []).map((p: { playerId: string }) => p.playerId)
     expect(cardIds).toContain(p3)
     expect(cardIds).not.toContain(p1)

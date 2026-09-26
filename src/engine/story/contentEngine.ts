@@ -89,20 +89,22 @@ export function selectVariant(args: {
     const best = fresh.filter((v) => Object.keys(v.conditions ?? {}).length === top)
     return best[rng.int(best.length)]
   }
-  // Exhausted: repeat the one whose last use is oldest.
+  // Exhausted: repeat the one whose last use is oldest. The ledger is append-
+  // only, so a variant's POSITION is its recency — a day stamp is not: when a
+  // pool is exhausted inside one day (eighteen free-agent offers on the first
+  // morning of July), every stamp ties and the sort handed back the same first
+  // variant every time.
   const lastUse = new Map<string, number>()
-  for (const u of ledger) {
-    const key = u.variantId
-    const stamp = u.year * 1000 + u.day
-    if ((lastUse.get(key) ?? -1) < stamp) lastUse.set(key, stamp)
-  }
+  ledger.forEach((u, i) => lastUse.set(u.variantId, i))
   return [...eligible].sort((a, b) => (lastUse.get(a.id) ?? -1) - (lastUse.get(b.id) ?? -1))[0]
 }
 
 /** Record a use (mutates the ledger array; caller persists it). Bounded. */
 export function markUsed(ledger: ContentUse[], variantId: string, year: number, day: number): void {
   ledger.push({ variantId, year, day })
-  if (ledger.length > 500) ledger.splice(0, ledger.length - 350)
+  // Sized for a full season of inbox beats (every result, injury and coach
+  // line marks a use): too small and the no-repeat window shrinks to weeks.
+  if (ledger.length > 2000) ledger.splice(0, ledger.length - 1500)
 }
 
 /* ─────────────────────────── rendering ─────────────────────────── */

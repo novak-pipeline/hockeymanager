@@ -593,8 +593,28 @@ describe('registerRetirements', () => {
     expect(state.retiredLegends).toHaveLength(1)
     expect(state.retiredLegends[0]!.name).toBe('Legend')
     expect(state.retiredLegends[0]!.hallOfFame).toBe(false)
-    expect(result.newsSeeds).toHaveLength(1)
-    expect(result.newsSeeds[0]!.category).toBe('league')
+    // A good, long career is named in the league's retirement round-up, not
+    // announced on its own as "legendary".
+    expect(result.newsSeeds).toHaveLength(0)
+  })
+
+  it('announces a great career on its own, and keeps "legendary" for the real thing', () => {
+    const state = emptyRecords()
+    const great = registerRetirements({
+      state,
+      retirees: [{ playerId: 'g1', name: 'Great', careerGoals: 300, careerAssists: 450, careerPoints: 750, careerGames: 1000 }],
+      year: 2010,
+    })
+    expect(great.newsSeeds).toHaveLength(1)
+    expect(great.newsSeeds[0]!.category).toBe('league')
+    expect(great.newsSeeds[0]!.headline).not.toMatch(/legend/i)
+    const legend = registerRetirements({
+      state,
+      retirees: [{ playerId: 'l1', name: 'Icon', careerGoals: 700, careerAssists: 800, careerPoints: 1500, careerGames: 1400 }],
+      year: 2010,
+    })
+    expect(legend.newsSeeds).toHaveLength(1)
+    expect(legend.newsSeeds[0]!.headline).toContain('Icon')
   })
 
   it('does NOT add a player below threshold who is not on any career board', () => {

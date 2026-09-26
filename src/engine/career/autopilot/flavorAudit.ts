@@ -82,7 +82,9 @@ export function auditSeason(
   }
 
   // Verbatim repeats are worse than a shared shape: the same sentence twice.
-  for (const [h, n] of countBy(headlines).slice(0, 5)) {
+  // A Feed post that reaches the desk is headed by its author's handle
+  // ("@CarverNotes") — a byline, not prose; its body is what varies.
+  for (const [h, n] of countBy(headlines.filter((x) => !/^@\w+$/.test(x))).slice(0, 5)) {
     if (n >= 4) findings.push({ kind: 'repetition', count: n, detail: `identical headline ${n}x: "${h.slice(0, 90)}"` })
   }
 
@@ -98,6 +100,9 @@ export function auditSeason(
   if (rawNums >= 5) findings.push({ kind: 'raw-number', count: rawNums, detail: `${rawNums} bare multi-decimal numbers in player-facing prose` })
 
   const daysWithNews = new Set(texts.map((t) => t.day))
+  // A bare scoreline ("Day 12: Win 3-2 vs BOS" / "Boston 2 @ Florida 3.") is a
+  // record, not a story — a dramatic night that got only that was not written.
+  const daysWithStory = new Set(texts.filter((t) => !isBareScoreline(t)).map((t) => t.day))
   const span = texts.length ? Math.max(...texts.map((t) => t.day)) : 0
   let quiet = 0
   for (let d = 1; d <= span; d++) if (!daysWithNews.has(d)) quiet++
@@ -109,7 +114,7 @@ export function auditSeason(
   let undramatised = 0
   const examples: string[] = []
   for (const ev of notable) {
-    if (!daysWithNews.has(ev.day)) {
+    if (!daysWithStory.has(ev.day)) {
       undramatised++
       if (examples.length < 3) examples.push(`d${ev.day} ${ev.what}`)
     }
@@ -130,6 +135,11 @@ export function auditSeason(
     quietDays: quiet,
     findings,
   }
+}
+
+/** The nightly result record with nothing written around it. */
+export function isBareScoreline(t: Pick<DayText, 'headline' | 'body'>): boolean {
+  return /^Day \d+: /.test(t.headline) && /^[^.]* \d+ @ [^.]* \d+( \((OT|SO)\))?\.$/.test(t.body.trim())
 }
 
 function countBy(xs: string[]): Array<[string, number]> {

@@ -13,6 +13,9 @@
  * Season structure facts (number of games, qualification thresholds) are
  * passed as arguments.
  */
+import type { ContentVariant } from './contentEngine'
+import { renderTemplate } from './contentEngine'
+import { pickStable } from './prose'
 
 /* ────────────────────────── types ────────────────────────── */
 
@@ -859,6 +862,20 @@ export interface RetirementEntry {
   careerGames: number
 }
 
+/** Retirement headlines by the size of the career. {name} {gp} {goals} {pts} */
+const RETIREMENT_POOL: ContentVariant[] = [
+  { id: 'ret.leg.a', conditions: { tier: 'legend' }, text: `{name} retires after a legendary career` },
+  { id: 'ret.leg.b', conditions: { tier: 'legend' }, text: `End of an era: {name} retires` },
+  { id: 'ret.leg.c', conditions: { tier: 'legend' }, text: `{name} calls it a career: {goals} goals, {pts} points` },
+  { id: 'ret.leg.d', conditions: { tier: 'legend' }, text: `{name} hangs up his skates after {gp} games` },
+  { id: 'ret.leg.e', conditions: { tier: 'legend' }, text: `One of the greats: {name} announces his retirement` },
+  { id: 'ret.gr.a', conditions: { tier: 'great' }, text: `{name} retires after {gp} NHL games` },
+  { id: 'ret.gr.b', conditions: { tier: 'great' }, text: `{name} announces his retirement` },
+  { id: 'ret.gr.c', conditions: { tier: 'great' }, text: `{name} calls it a career` },
+  { id: 'ret.gr.d', conditions: { tier: 'great' }, text: `{name} steps away after {pts} career points` },
+  { id: 'ret.gr.e', conditions: { tier: 'great' }, text: `A fine career ends: {name} retires` },
+]
+
 export interface RegisterRetirementsArgs {
   state: RecordsState
   retirees: RetirementEntry[]
@@ -911,9 +928,28 @@ export function registerRetirements(args: RegisterRetirementsArgs): RegisterReti
         ? ` Career honours: ${awardsForPlayer.map((a) => a.award).join(', ')}.`
         : ''
 
+    // "Legendary" is a word with a bar. Torey Krug (483 points) and Alex
+    // Ovechkin (920 goals) were both announced as retiring "after a legendary
+    // career". Now the register follows the record: a true legend gets his own
+    // story in that language, a great career gets its own story in plainer
+    // words, and a long, good one is named in the league's retirement round-up
+    // (the career layer groups every retiree not announced here).
+    const tier =
+      r.careerPoints >= 1000 || r.careerGoals >= 500 ? 'legend'
+        : r.careerPoints >= 700 || r.careerGames >= 1100 ? 'great'
+          : 'good'
+    // A place on the all-time boards, or a major award, is a story whatever the totals.
+    if (tier === 'good' && !onBoard && awardsForPlayer.length === 0) continue
+    const slots = {
+      name: r.name,
+      gp: r.careerGames.toLocaleString(),
+      goals: r.careerGoals.toLocaleString(),
+      pts: r.careerPoints.toLocaleString(),
+    }
+    const v = pickStable(RETIREMENT_POOL, { tier: tier === 'good' ? 'great' : tier }, `retire|${r.playerId}`)
     newsSeeds.push({
       category: 'league',
-      headline: `${r.name} retires after a legendary career`,
+      headline: v ? renderTemplate(v.text, slots) : `${r.name} retires`,
       body:
         `${r.name} has hung up the skates after ${r.careerGames} games, ${r.careerGoals} goals, ` +
         `${r.careerAssists} assists and ${r.careerPoints} points.${awardSummary}`,

@@ -67,19 +67,7 @@ export function coachQuote(
   const pool = QUOTE_POOL[situation][demeanor]
   const idx = stableIndex(seed, situation, pool.length)
   if (!noRepeat) return fillTemplate(pool[idx]!, facts)
-  // Walk forward from the hash pick to the first line unused this season; if
-  // the coach has said all five, the hash pick repeats (LRU-ish via rotation).
-  const usedThisSeason = new Set(
-    noRepeat.ledger.filter((u) => u.year === noRepeat.year).map((u) => u.variantId)
-  )
-  let chosen = idx
-  for (let step = 0; step < pool.length; step++) {
-    const cand = (idx + step) % pool.length
-    if (!usedThisSeason.has(quoteVariantId(situation, demeanor, cand))) {
-      chosen = cand
-      break
-    }
-  }
+  const chosen = rotate(idx, pool.length, (i) => quoteVariantId(situation, demeanor, i), noRepeat)
   markUsed(noRepeat.ledger, quoteVariantId(situation, demeanor, chosen), noRepeat.year, noRepeat.day)
   return fillTemplate(pool[chosen]!, facts)
 }
@@ -87,6 +75,37 @@ export function coachQuote(
 /** Stable ledger key for one authored line. */
 function quoteVariantId(situation: CoachSituation, demeanor: string, idx: number): string {
   return `coach.${situation}.${demeanor}.${idx}`
+}
+
+/**
+ * Walk forward from the hash pick to the first line unused this season. When
+ * the coach has said them all, repeat the one he said LONGEST ago — the old
+ * fallback repeated the hash pick, which in a heavy season meant the same
+ * line twice in a week while others sat untouched since October.
+ */
+function rotate(
+  idx: number,
+  len: number,
+  idOf: (i: number) => string,
+  noRepeat: { ledger: ContentUse[]; year: number }
+): number {
+  // Recency by ledger POSITION (append-only), not by day stamp — two uses on
+  // one day would otherwise tie.
+  const lastUse = new Map<string, number>()
+  const usedThisSeason = new Set<string>()
+  noRepeat.ledger.forEach((u, i) => {
+    lastUse.set(u.variantId, i)
+    if (u.year === noRepeat.year) usedThisSeason.add(u.variantId)
+  })
+  let oldest = idx
+  let oldestPos = Infinity
+  for (let step = 0; step < len; step++) {
+    const cand = (idx + step) % len
+    if (!usedThisSeason.has(idOf(cand))) return cand
+    const pos = lastUse.get(idOf(cand)) ?? -1
+    if (pos < oldestPos) { oldest = cand; oldestPos = pos }
+  }
+  return oldest
 }
 
 /**
@@ -107,48 +126,68 @@ export function coachHeadline(
   const key = Array.isArray(bySituation) ? 'any' : demeanor
   const idx = stableIndex(seed ^ 0x51ed, situation, pool.length)
   if (!noRepeat) return fillTemplate(pool[idx]!, facts)
-  const usedThisSeason = new Set(
-    noRepeat.ledger.filter((u) => u.year === noRepeat.year).map((u) => u.variantId)
-  )
-  let chosen = idx
-  for (let step = 0; step < pool.length; step++) {
-    const cand = (idx + step) % pool.length
-    if (!usedThisSeason.has(`hl.${situation}.${key}.${cand}`)) {
-      chosen = cand
-      break
-    }
-  }
+  const chosen = rotate(idx, pool.length, (i) => `hl.${situation}.${key}.${i}`, noRepeat)
   markUsed(noRepeat.ledger, `hl.${situation}.${key}.${chosen}`, noRepeat.year, noRepeat.day)
   return fillTemplate(pool[chosen]!, facts)
 }
 
-/** Demeanor-keyed for the podium reactions; situation-flat for streak beats. */
+/** Demeanor-keyed for the podium reactions; situation-flat for streak beats.
+ *  Eight or more per bucket: a big loss happens a dozen times a season, and
+ *  three headlines per coach meant "Breakdowns cost us — Coach postgame" read
+ *  like a form letter by November. Most lines now carry the opponent or the
+ *  score, because a headline that could sit on any game says nothing about
+ *  this one. */
 const HEADLINE_POOL: Record<CoachSituation, DemeanorPool | string[]> = {
   postBigWin: {
     fiery: [
       `{opp} routed: "We were ruthless" — Coach after {diff}-goal win`,
       `Statement made against {opp} — Coach postgame`,
       `"That's the standard" — Coach after {diff}-goal rout`,
+      `Coach wants more after {score} win over {opp}`,
+      `"Don't let up" — Coach after beating {opp} {score}`,
+      `Coach on the {score} win: "That's who we are"`,
+      `"Every shift, every line" — Coach after {opp}`,
+      `Coach after the {opp} rout: "Keep that edge"`,
     ],
     calm: [
       `"A pleasing performance" — Coach on the {opp} win`,
       `Composed and clinical — Coach postgame`,
       `"The plan, executed" — Coach after beating {opp}`,
+      `Coach pleased with structure in {score} win`,
+      `"We stayed patient" — Coach on {opp}`,
+      `Coach keeps it measured after {diff}-goal win`,
+      `"Details done properly" — Coach after {score} win`,
+      `Coach credits depth in win over {opp}`,
     ],
     analytical: [
       `"The underlying numbers were excellent" — Coach postgame`,
       `Process meets result: Coach on the {diff}-goal win`,
       `"All four lines generated" — Coach postgame`,
+      `Coach points to 5v5 play in {score} win`,
+      `"We won the neutral zone" — Coach on {opp}`,
+      `Coach on the {opp} win: "Look at the shot map"`,
+      `Coach breaks down the {score} win`,
+      `"The small battles decided it" — Coach after {opp}`,
     ],
     motivator: [
       `"Proud of the group" — Coach postgame`,
       `"That's what belief looks like" — Coach after the {opp} win`,
       `"Everyone gave me something" — Coach postgame`,
+      `Coach lauds the bench after {score} win`,
+      `"Enjoy it tonight" — Coach after beating {opp}`,
+      `Coach on {diff}-goal win: "That's a team"`,
+      `"Bottle this feeling" — Coach after {opp}`,
+      `Coach salutes the effort in {score} rout`,
     ],
     pragmatic: [
       `"Two points is all that matters" — Coach postgame`,
       `Good night, next game — Coach after {opp}`,
       `"We can't lose our humility" — Coach postgame`,
+      `Coach shrugs off the margin: "Two points"`,
+      `"File it and forget the score" — Coach after {opp}`,
+      `Coach unmoved by {score} win`,
+      `"On to recovery" — Coach after beating {opp}`,
+      `Coach on the rout: "{opp} will be different next time"`,
     ],
   },
   postBadLoss: {
@@ -156,26 +195,51 @@ const HEADLINE_POOL: Record<CoachSituation, DemeanorPool | string[]> = {
       `"Not acceptable" — Coach after {diff}-goal loss`,
       `Hard truths in the room — Coach after {opp} defeat`,
       `"It ends now" — Coach fumes postgame`,
+      `Coach on {score} loss to {opp}: "Embarrassing"`,
+      `Furious coach after {opp} rout`,
+      `"Some guys need a mirror" — Coach after {score} loss`,
+      `Coach doesn't hide it: "We were outworked"`,
+      `"You wear that until you fix it" — Coach on {opp}`,
     ],
     calm: [
       `"We'll fix it" — Coach postgame`,
       `A difficult night, clear heads — Coach on the {opp} loss`,
       `"We didn't match their level" — Coach's honest read`,
+      `Coach stays level after {score} loss to {opp}`,
+      `"No panic" — Coach after {diff}-goal defeat`,
+      `Coach on {opp}: "We'll respond next time"`,
+      `Coach declines to point fingers after {score} loss`,
+      `"The players know" — Coach after {opp}`,
     ],
     analytical: [
       `"Structural issues to address" — Coach postgame`,
       `"The tape will not be kind" — Coach after {opp}`,
       `Breakdowns cost us — Coach postgame`,
+      `Coach traces {score} loss to second-period coverage`,
+      `"They got the middle, we got the perimeter" — Coach`,
+      `Coach on {opp} loss: "One fixable number"`,
+      `Coach blames transition defence for {score} defeat`,
+      `"Shot quality against was too high" — Coach after {opp}`,
     ],
     motivator: [
       `"We'll respond" — Coach postgame`,
       `"Pain is a teacher" — Coach after the {opp} loss`,
       `"This group will answer" — Coach postgame`,
+      `Coach backs his players after {score} loss`,
+      `"Watch what we do with it" — Coach after {opp}`,
+      `Coach takes the blame for {diff}-goal defeat`,
+      `"I didn't see quit" — Coach after {score} loss`,
+      `Coach: one bad night doesn't define this team`,
     ],
     pragmatic: [
       `"We assess and move on" — Coach postgame`,
       `Beaten tonight, back tomorrow — Coach`,
       `"No catastrophe, just corrections" — Coach postgame`,
+      `Coach on {score} loss: "We were second best"`,
+      `"It happens" — Coach after {opp} rout`,
+      `Coach keeps {score} loss in perspective`,
+      `"Video at ten, practice at eleven" — Coach after {opp}`,
+      `Coach: "Don't let one become three"`,
     ],
   },
   postWin: [
@@ -183,44 +247,82 @@ const HEADLINE_POOL: Record<CoachSituation, DemeanorPool | string[]> = {
     `Two points banked — Coach postgame`,
     `Coach's read on the {score} win over {opp}`,
     `"Good teams win these" — Coach postgame`,
+    `Coach on beating {opp}: "We earned it"`,
+    `Coach after {score} win: "Quiet things win games"`,
+    `"We refused to play their game" — Coach on {opp}`,
+    `Coach likes the push in {score} win`,
   ],
   postLoss: [
     `"It got away from us" — Coach on the {opp} loss`,
     `Coach's read on the {score} defeat`,
     `A night to correct — Coach after {opp}`,
     `"Fine margins" — Coach postgame`,
+    `Coach on {score} loss to {opp}: "Correctable"`,
+    `"Not enough for sixty minutes" — Coach after {opp}`,
+    `Coach after {opp}: "Credit to them"`,
+    `"We had our chances" — Coach on {score} loss`,
   ],
   winStreak: [
     `{streak}-game win streak — Coach speaks`,
     `Streak hits {streak}: "Nobody here is satisfied" — Coach`,
     `{streak} straight — Coach credits the process`,
     `Rolling: Coach on the {streak}-game heater`,
+    `Coach on {streak} in a row: "Next game is the only one that counts"`,
+    `"Don't admire it" — Coach as streak reaches {streak}`,
+    `{streak} wins running, and Coach wants more`,
+    `Coach downplays the {streak}-game run`,
+    `"Streaks die from admiring themselves" — Coach at {streak}`,
   ],
   losingStreak: [
     `{streak} in a row — Coach addresses the slump`,
     `Coach faces the slide head-on`,
     `{streak} straight losses: "The answers are on the tape" — Coach`,
     `A team searching: Coach on the skid`,
+    `Coach on {streak}-game skid: "We refine, we don't reinvent"`,
+    `"Changes are coming" — Coach after {streak} straight losses`,
+    `Losing streak reaches {streak}; Coach stays the course`,
+    `Coach after loss No. {streak}: "Not a crisis of talent"`,
+    `"Better now than April" — Coach on the slide`,
   ],
   slumpingStar: [
     `{player} slump ({streak} games) — Coach speaks`,
     `Coach backs {player} through the drought`,
     `{streak} games without: Coach on {player}'s dry spell`,
+    `Coach on {player}: "It will come"`,
+    `"I've spoken to {player}" — Coach on the drought`,
+    `Coach not worried about {player}, {streak} games in`,
+    `Asked about {player}, Coach defends his minutes`,
+    `Coach: {player} is "too good" for this stretch to last`,
   ],
   milestone: [
     `Coach on {player}'s milestone night`,
     `"{player} earned every bit of it" — Coach`,
     `A number worth stopping for: Coach salutes {player}`,
+    `Coach on {player}: "Doing it the right way for a long time"`,
+    `"Proud of him" — Coach on {player}'s milestone`,
+    `Coach reflects on {player}'s career mark`,
+    `"The work nobody sees" — Coach on {player}`,
+    `Coach toasts {player}'s milestone`,
   ],
   signing: [
     `Coach welcomes {player}`,
     `"Exactly what we asked for" — Coach on the {player} signing`,
     `New face, clear role: Coach on adding {player}`,
+    `Coach on {player}: "He fits how we play"`,
+    `"I pushed for him" — Coach on {player}`,
+    `Coach explains where {player} slots in`,
+    `Coach likes the {player} addition`,
+    `"He knows his role" — Coach on {player}`,
   ],
   tradeAdd: [
     `Coach on the {player} acquisition`,
     `"He makes us harder to play against" — Coach on {player}`,
     `The bench boss got his wish: Coach on landing {player}`,
+    `Coach on {player}: "Makes us better immediately"`,
+    `"A problem solved" — Coach on the {player} trade`,
+    `Coach already has plans for {player}`,
+    `Coach welcomes {player} after the trade`,
+    `"We gave fair value" — Coach on {player}`,
   ],
 }
 

@@ -43,7 +43,10 @@ function bucketOf(headline: string): string | null {
   if (/breaks the all-time single-season/i.test(headline)) return 'recordBreak:inSeason'
   if (/on pace|chasing/i.test(headline) && /record/i.test(headline)) return 'recordWatch:pace'
   if (/reaches [\d,]+ career/i.test(headline)) return 'careerMilestone'
-  if (/plays his [\d,]+th NHL game/i.test(headline)) return 'careerMilestone'
+  // Ironman headlines are pooled (inboxBeats.GAMES_MILESTONE_POOL); every
+  // variant names the games count.
+  if (/[\d,]+(th)? (NHL )?games?\b|\bgame [\d,]+|[\d,]+-game club|[\d,]+ and counting/i.test(headline) &&
+    !/straight|streak|slump|without|drought|win|loss/i.test(headline)) return 'careerMilestone'
   return null
 }
 

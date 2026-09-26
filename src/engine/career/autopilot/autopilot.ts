@@ -9,6 +9,8 @@
  * thoughts" are the real decision drivers the policy weighed. Cheap enough to run
  * whole 15-season campaigns; the policy itself is a reusable AI-GM brain.
  */
+import { isBreakingNews } from '@domain'
+import { appendFileSync } from 'node:fs'
 import { Career } from '../career'
 import { auditSeason, type DayText, type FlavourReport } from './flavorAudit'
 import { diagnose, type Diagnosis, type NeedGroup } from './teamDiagnosis'
@@ -232,7 +234,18 @@ function runSanity(ctx: Ctx): void {
  *  can be judged on whether the two line up. See flavorAudit.ts for the why. */
 const flavourTexts: DayText[] = []
 const flavourNotable: Array<{ day: number; what: string }> = []
+/** Every inbox item ever harvested. NOT reset at season end: the inbox still
+ *  holds last season's items when the new one starts, and clearing this set
+ *  re-counted all of them as the new season's prose — a measurement bug that
+ *  inflated every repetition count after season one. */
 const seenNewsIds = new Set<string>()
+/** The box score last judged. getLastBoxScore() keeps returning the previous
+ *  game on off-days, so keying on the day alone re-reported one game as a fresh
+ *  "undramatised" night on every day until the next puck drop. */
+let lastJudgedBox: unknown = null
+/** AP_FLAVOUR_DUMP=<file>: append every harvested inbox line (NDJSON) so a run's
+ *  prose can be read and counted offline, not just summarised. */
+const FLAVOUR_DUMP = typeof process !== 'undefined' ? process.env.AP_FLAVOUR_DUMP : undefined
 
 /** Harvest anything new the world said today, and note whether today's game was
  *  the kind of night that deserves a story. Cheap enough to run every day. */
@@ -243,9 +256,11 @@ function collectFlavour(ctx: Ctx): void {
     if (seenNewsIds.has(it.id)) continue
     seenNewsIds.add(it.id)
     flavourTexts.push({ day, headline: it.headline ?? '', body: it.body ?? '' })
+    if (FLAVOUR_DUMP) appendFileSync(FLAVOUR_DUMP, JSON.stringify({ y: ctx.career.year, day, cat: it.category, h: it.headline ?? '', b: it.body ?? '', brk: isBreakingNews(it) ? 1 : undefined, sal: it.salience, reach: it.reach }) + '\n')
   }
   const box = guarded(ctx, 'getLastBoxScore', () => ctx.career.getLastBoxScore())
-  if (!box) return
+  if (!box || box === lastJudgedBox) return
+  lastJudgedBox = box
   const h = box.homeGoals ?? 0, a = box.awayGoals ?? 0
   const margin = Math.abs(h - a)
   // What a fan would call a night worth talking about.
@@ -255,10 +270,8 @@ function collectFlavour(ctx: Ctx): void {
         : margin === 1 ? 'one-goal game'
           : margin >= 5 ? `${margin}-goal rout`
             : null
-  if (what) {
-    const last = flavourNotable[flavourNotable.length - 1]
-    if (!last || last.day !== day) flavourNotable.push({ day, what })
-  }
+  if (FLAVOUR_DUMP) appendFileSync(FLAVOUR_DUMP, JSON.stringify({ y: ctx.career.year, day, game: `${box.awayAbbr} ${a} @ ${box.homeAbbr} ${h} ${box.decidedBy}`, what }) + '\n')
+  if (what) flavourNotable.push({ day, what })
 }
 
 /* ────────────────────────────── helpers ────────────────────────────── */
@@ -788,7 +801,7 @@ function recordSeasonEnd(ctx: Ctx, s: SeasonRecord): void {
   }
   flavourTexts.length = 0
   flavourNotable.length = 0
-  seenNewsIds.clear()
+  // seenNewsIds deliberately persists — see its declaration.
 
   const dash = guarded(ctx, 'getDashboard', () => ctx.career.getDashboard())
   if (dash) {
