@@ -993,6 +993,12 @@ export function buildTeamList(data: LeagueData): TeamInfo[] {
   })
 }
 
+/** "1 point", "4 points" — the standings gap in words (sign dropped). */
+function ptsWord(gap: number): string {
+  const n = Math.abs(gap)
+  return `${n} point${n === 1 ? '' : 's'}`
+}
+
 function freshStanding(teamId: TeamId): Standing {
   return {
     teamId,
@@ -5735,6 +5741,7 @@ export class Career {
 
   /* ─────────────────────────── fact gathering ─────────────────────────── */
 
+
   private linesFactsOf(team: Team): LinesFacts {
     const nameOf = (id: PlayerId | null | undefined): string | null => (id ? this.data.players.get(id)?.name ?? null : null)
     const names = (ids: ReadonlyArray<PlayerId | null | undefined>): string[] => ids.map(nameOf).filter((n): n is string => n !== null)
@@ -6420,7 +6427,7 @@ export class Career {
       const left = this.userGamesScheduled() - race.gp
       items.push({
         topic: 'playoffs', verdict: race.gap >= 6 ? 'in' : race.gap <= -6 ? 'out' : 'bubble', label: 'the playoff race',
-        slots: { rank: ordinalWord(race.confRank), gap: String(Math.abs(race.gap)), left: String(left), nick: clubNickname(this.castTeam(team.id)!) },
+        slots: { rank: ordinalWord(race.confRank), gap: ptsWord(race.gap), left: String(left), nick: clubNickname(this.castTeam(team.id)!) },
         weight: left <= 25 ? 5 : 3,
       })
       const sorted = sortStandings([...this.standings.values()])
@@ -6536,7 +6543,7 @@ export class Career {
   /* ── the Daily ── */
   private maybeDaily(day: number, userGame: GameOutcome | undefined): void {
     const tier = this.userMarket().tier
-    const every = tier === 3 ? 1 : tier === 2 ? 2 : 3
+    const every = tier === 3 ? 2 : tier === 2 ? 3 : 4
     if (dayKey(this.year, day) - this.mediaLast('daily') < every) return
     const team = this.userTeam
     let yesterday: { text: string; won: boolean } | undefined
@@ -6750,14 +6757,14 @@ export class Career {
       return publish('push', {
         feature: 'push',
         ctx: { race: race.inSpot ? 'in' : 'out' },
-        slots: { gap: String(Math.abs(race.gap)), left: String(left), pts: String(race.pts), rank: `${ordinalWord(race.confRank)} in the conference` },
+        slots: { gap: ptsWord(race.gap), left: String(left), pts: String(race.pts), rank: `${ordinalWord(race.confRank)} in the conference` },
         paragraphs: [
           race.inSpot
-            ? `A team ${race.gap} points clear with ${left} to play controls its own fate. Win the games against the teams chasing and it is over.`
-            : `${Math.abs(race.gap)} points is a lot of ground with ${left} left. It takes a run, and help.`,
+            ? `A team ${ptsWord(race.gap)} clear with ${left} to play controls its own fate. Win the games against the teams chasing and it is over.`
+            : `${ptsWord(race.gap)} is ${Math.abs(race.gap) <= 2 ? 'nothing' : 'a lot of ground'} with ${left} left. ${Math.abs(race.gap) <= 2 ? 'One good week does it.' : 'It takes a run, and help.'}`,
         ],
         sections: upcoming.length > 0 ? [{ title: 'Next five', lines: upcoming }] : [],
-        dek: `${left} games left; ${race.inSpot ? `${race.gap} clear` : `${Math.abs(race.gap)} back`}.`,
+        dek: `${left} games left; ${race.inSpot ? `${ptsWord(race.gap)} clear` : `${ptsWord(race.gap)} back`}.`,
       })
     }
     return false
@@ -6878,7 +6885,7 @@ export class Career {
       const champ = this.playoffs?.championTeamId === this.userTeamId
       // The injuries the club never fully explained: now it can be said.
       const hidden = this.media.disclosures
-        .filter((d) => d.teamId === (this.userTeamId as string) && d.year === this.year && d.specific && d.truthGames >= 4 && (d.stance === 'optimistic' || !d.revealed))
+        .filter((d) => d.teamId === (this.userTeamId as string) && d.year === this.year && d.specific && d.truthGames >= 5 && (d.stance === 'optimistic' || (!d.revealed && d.truthGames >= 8)))
         .slice(0, 3)
       const c = this.deskCtx('feature-exit', key)
       if (c) {
@@ -6889,7 +6896,7 @@ export class Career {
           paragraphs: [
             champ ? `They won it all. Nothing below changes that.` : '',
             this.topScorersLine(team),
-            ...hidden.map((d) => `${d.playerName}'s "${d.region === 'undisclosed' ? 'undisclosed' : d.region}" injury in ${this.monthOf(dayToDateISO(d.year, Math.max(1, d.day)))} was ${d.truth}. He missed ${d.gamesMissed} games; the club called it ${d.band}.`),
+            ...hidden.map((d) => `${possessive(d.playerName)} "${d.region === 'undisclosed' ? 'undisclosed' : d.region}" injury in ${this.monthOf(dayToDateISO(d.year, Math.max(1, d.day)))} was ${d.truth}. He missed ${d.gamesMissed} games; the club called it ${d.band}.`),
           ],
           dek: `${this.recordOf(this.userTeamId)}. Exit day, and what the summer has to fix.`,
         })
@@ -6925,7 +6932,9 @@ export class Career {
       this.markMediaDone('july1')
       const num = (id: string): number => parseInt(id.split('-').pop() ?? '0', 10)
       const since = this.mediaLast('faTx')
-      const signings = this.transactionLedger.items.filter((t) => t.kind === 'signing' && num(t.id) > since && !/fire head coach/.test(t.summary))
+      const signings = this.transactionLedger.items.filter(
+        (t) => t.kind === 'signing' && num(t.id) > since && /sign/i.test(t.summary) && !/fire|dismiss/i.test(t.summary),
+      )
       this.setMediaLast('faTx', Math.max(since, ...this.transactionLedger.items.map((t) => num(t.id))))
       const ours = signings.filter((t) => t.teamIds.includes(this.userTeamId as string))
       const league = signings.filter((t) => !t.teamIds.includes(this.userTeamId as string)).slice(-8)
@@ -7558,6 +7567,7 @@ export class Career {
       scratches: scratches.map((p) => p.name),
       chopping: [],
       coachName: this.getTeamStaff(tid as string).headCoach.name,
+      record: this.recordOf(tid),
     })
     if (nb) out.push({ ...nb, id: `light-nb-${tid as string}` })
     // Form piece: record, streak, the last five, the scorers.

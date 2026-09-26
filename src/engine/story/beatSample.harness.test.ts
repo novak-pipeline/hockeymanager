@@ -64,10 +64,15 @@ describe.skipIf(!process.env.BEAT_RUN)('beat sample — the daily beat on the re
         career.answerPressConference('', opt?.tone ?? 'measured', opt?.id)
       }
       try {
+        // The GM's summer gates, handed to the staff (as the autopilot does).
+        if (career.draftPending()) career.autoDraft()
+        if (career.captainsPending()) career.nameCaptainByCoach()
         if (!career.step()) {
-          // Draft day and other holds: let the staff handle it.
-          const c = career as unknown as { advanceDraft?: () => void; autoDraftForUser?: () => void }
-          if (career.seasonPhase === 'offseason') c.advanceDraft?.()
+          const c = career as unknown as { delegateStaffMeeting: () => unknown; delegateScoutMeeting: () => unknown; resolveScoutDigest: () => unknown }
+          c.delegateStaffMeeting()
+          c.delegateScoutMeeting()
+          c.resolveScoutDigest()
+          if (career.draftPending()) career.autoDraft()
           if (!career.step()) break
         }
       } catch (e) {
@@ -94,7 +99,7 @@ describe.skipIf(!process.env.BEAT_RUN)('beat sample — the daily beat on the re
     lines.push('')
     lines.push(...pressers)
     lines.push('')
-    const show = season ? beat.articles.filter((a) => a.kind === 'feature' || a.kind === 'hotSeat' || a.kind === 'claim' || a.kind === 'mailbag').slice(0, 30) : beat.articles
+    const show = season ? beat.articles.filter((a) => a.kind === 'feature' || a.kind === 'hotSeat' || a.kind === 'claim').slice(0, 30) : beat.articles
     for (const a of [...show].reverse()) lines.push(render(a, beat.outlet, beat.writer.name))
     const other = career.getBeat(data.league.teams.find((t) => t !== tid)!)
     lines.push('')

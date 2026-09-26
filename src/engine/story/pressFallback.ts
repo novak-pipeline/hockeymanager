@@ -514,7 +514,12 @@ const WEEKLY_HOMER: WeeklyTemplateFn[] = [
     const headline = allWins
       ? `WE ARE ROLLING — ${wins} straight for YOUR ${t.name}!`
       : wins >= losses
-        ? `Another week, another step forward for the ${t.name}!`
+        ? alt(sheet, 'h0w', [
+            `Another week, another step forward for the ${t.name}!`,
+            `${wins}–${losses} and I'll take it: the ${t.name} keep climbing`,
+            `A ${wins}–${losses} week and the ${t.name} are ${recordStr(sheet)}. Good times!`,
+            `Say it with me: ${t.name}, ${wins}–${losses} this week!`,
+          ])
         : `Tough week, but we're not throwing in the towel — not even close`
 
     const lede = allWins

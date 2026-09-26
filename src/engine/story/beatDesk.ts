@@ -17,7 +17,7 @@
  * an outcome.
  */
 import { Rng } from '@engine/shared/rng'
-import { markUsed, selectVariant, type ContentCtx, type ContentUse, type ContentVariant } from './contentEngine'
+import { isEligible, markUsed, selectVariant, type ContentCtx, type ContentUse, type ContentVariant } from './contentEngine'
 import { pickStable, stableSeed } from './prose'
 import type { BeatOutlet, MarketProfile } from './mediaCast'
 import {
@@ -144,7 +144,20 @@ export interface DeskCtx {
 export function say(c: DeskCtx, pool: ContentVariant[], ctx: ContentCtx, slots: Record<string, string>, salt: string): string {
   const key = `${c.key}|${salt}`
   if (c.ledger) {
-    const v = selectVariant({ pool, ctx, rng: new Rng(stableSeed(key)), ledger: c.ledger, year: c.year })
+    // Meaning first, freshness second: choose among the MOST SPECIFIC eligible
+    // variants only, fresh ones before used ones. (The shared selectVariant
+    // prefers any fresh line over a used specific one, which let an exhausted
+    // "he moved up" bucket fall through to "lines hold" on a day he moved.)
+    // Pools are authored so every eligible line is TRUE for the ctx; the
+    // cascade only trades specificity for freshness, never meaning.
+    const eligible = pool.filter((v) => isEligible(v, ctx))
+    if (eligible.length === 0) return ''
+    const spec = (v: ContentVariant): number => Object.keys(v.conditions ?? {}).length
+    const used = new Set(c.ledger.filter((u) => u.year === c.year).map((u) => u.variantId))
+    const levels = [...new Set(eligible.map(spec))].sort((a, b) => b - a)
+    const level = levels.find((l) => eligible.some((v) => spec(v) === l && !used.has(v.id))) ?? levels[0]!
+    const best = eligible.filter((v) => spec(v) === level)
+    const v = selectVariant({ pool: best, ctx, rng: new Rng(stableSeed(key)), ledger: c.ledger, year: c.year })
     if (!v) return ''
     markUsed(c.ledger, v.id, c.year, c.day)
     return tidy(fill(v.text, slots))

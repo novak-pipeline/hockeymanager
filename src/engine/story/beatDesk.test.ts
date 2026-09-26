@@ -57,7 +57,7 @@ describe('beat pools — house rules', () => {
   it('the frequent headline pools run 8+ deep at their base', () => {
     const base = (pool: ContentVariant[], cond?: Record<string, unknown>): number =>
       pool.filter((v) => JSON.stringify(v.conditions ?? {}) === JSON.stringify(cond ?? {})).length
-    expect(base(P.NB_HEAD)).toBeGreaterThanOrEqual(8)
+    expect(base(P.NB_HEAD, { change: false })).toBeGreaterThanOrEqual(8)
     expect(base(P.GD_HEAD)).toBeGreaterThanOrEqual(8)
     expect(base(P.GR_HEAD, { won: true })).toBeGreaterThanOrEqual(8)
     expect(base(P.GR_HEAD, { won: false })).toBeGreaterThanOrEqual(8)
