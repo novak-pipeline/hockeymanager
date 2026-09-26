@@ -922,7 +922,7 @@ const clampAttr = (v: number): number => Math.round(v < 1 ? 1 : v > 99 ? 99 : v)
  * per-attribute overrides applied on top. Mirrors the spirit of generate.ts's
  * makeRawAttributes but is self-contained here so generate.ts is never touched.
  */
-function synthesiseAttributes(
+export function synthesiseAttributes(
   rng: Rng,
   caliber: number,
   position: 'C' | 'W' | 'D' | 'G',
