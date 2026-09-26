@@ -43,7 +43,43 @@ export interface DecisionEffects {
    * lapse, exactly as the agent said it would.
    */
   extensionDiscount?: number
+  /**
+   * The concrete thing this option says HAPPENS — the label or the receipt
+   * describes it as done. The career layer performs it through the same API the
+   * screens use; if the engine refuses (roster full, market closed, no-trade
+   * clause…) the receipt is replaced with the refusal, so a blocked action is
+   * never silent and a scene never claims something the game did not do
+   * (E3 audit, docs/PRESSURE-AND-FIRINGS.md). Enforced by the content-integrity
+   * tests in decisionEvents.test.ts.
+   */
+  act?: DecisionAct
 }
+
+/** The actions a scene may perform. Every one has an engine performer. */
+export type DecisionAct =
+  /** Take him off the healthy-scratch list: he dresses next game. */
+  | 'dress'
+  /** Clear a MINOR injury against medical advice: he dresses, hurt. */
+  | 'playThrough'
+  /** Recall him from the farm to the NHL roster. */
+  | 'callUp'
+  /** Grant the release he asked for: contract terminated, he walks. */
+  | 'release'
+  /** Move him now for the best offer the league will table. */
+  | 'sell'
+  /** Take him off the market (trade status: untouchable). */
+  | 'untouchable'
+  /** Name him the starting goaltender. */
+  | 'makeStarter'
+  /** Sit the struggling starter: the backup takes the net. */
+  | 'benchStarter'
+  /** Put him on the first power-play unit. */
+  | 'topPowerPlay'
+
+/** Every act, for exhaustiveness checks in tests. */
+export const DECISION_ACTS: readonly DecisionAct[] = [
+  'dress', 'playThrough', 'callUp', 'release', 'sell', 'untouchable', 'makeStarter', 'benchStarter', 'topPowerPlay',
+]
 
 export interface DecisionOption {
   id: string
@@ -104,6 +140,9 @@ export const DECISION_CTX_KEYS = [
   // action has its own calendar window — extension talks open at the halfway
   // mark, so the scene that sells an extension must not fire before it.
   'seasonPct',
+  // Games the current injury still has to run (0 when healthy). Gates any scene
+  // that lets a player PLAY THROUGH it — only a minor knock can be overruled.
+  'injuryGames',
 ] as const
 
 /* ────────────────────────── the library ────────────────────────── */
@@ -121,7 +160,7 @@ export const DECISION_EVENTS: DecisionEvent[] = [
       {
         id: 'plans',
         label: `"You're in my plans. You dress tomorrow."`,
-        effects: { morale: 10, promise: 'iceTime', roomRespect: 2 },
+        effects: { morale: 10, promise: 'iceTime', roomRespect: 2, act: 'dress' },
         outcome: `He nodded once and left. You just put your word on the line — the room will check whether he dresses.`,
       },
       {
@@ -168,7 +207,9 @@ export const DECISION_EVENTS: DecisionEvent[] = [
   },
   {
     id: 'ev.medical.play-through-it',
-    conditions: { nursingInjury: true, minImportance: 70 },
+    // maxInjuryGames: "manageable" means a knock the GM can overrule. A torn
+    // ligament cannot be played through, so the scene must not offer it.
+    conditions: { nursingInjury: true, minImportance: 70, maxInjuryGames: 4 },
     weight: 3,
     scene:
       `The physio's report is careful; {last} is not. "It's manageable. I want to play." Your medical staff won't ` +
@@ -177,7 +218,7 @@ export const DECISION_EVENTS: DecisionEvent[] = [
       {
         id: 'play',
         label: `Let him play — the standings won't wait`,
-        effects: { morale: 8, roomRespect: 3, promise: 'iceTime' },
+        effects: { morale: 8, roomRespect: 3, promise: 'iceTime', act: 'playThrough' },
         outcome: `He's in. If the thing that was manageable stops being manageable, everyone will remember whose call it was.`,
       },
       {
@@ -251,7 +292,9 @@ export const DECISION_EVENTS: DecisionEvent[] = [
   },
   {
     id: 'ev.goalie.pulled-again',
-    conditions: { position: 'G', maxSavePct: 0.888, minGamesPlayed: 20 },
+    // savePct is a whole-number percent in the runner's ctx; the old 0.888 could
+    // never be met, so this scene had never once fired.
+    conditions: { position: 'G', maxSavePct: 88, minGamesPlayed: 20 },
     weight: 2,
     scene:
       `{last} caught you in the hallway, still in his gear. "Third time this month you've pulled me. ` +
@@ -289,7 +332,7 @@ export const DECISION_EVENTS: DecisionEvent[] = [
       {
         id: 'deny',
         label: `"He's not going anywhere."`,
-        effects: { morale: 8, promise: 'iceTime', roomRespect: -5, leakChance: 0.45 },
+        effects: { morale: 8, promise: 'iceTime', roomRespect: -5, leakChance: 0.45, act: 'untouchable' },
         outcome: `He'll read that tonight and believe it. So will every GM you were negotiating with — and one of them knows better.`,
       },
       {
@@ -308,7 +351,7 @@ export const DECISION_EVENTS: DecisionEvent[] = [
   },
   {
     id: 'ev.injury.play-through-it',
-    conditions: { nursingInjury: true, minImportance: 70 },
+    conditions: { nursingInjury: true, minImportance: 70, maxInjuryGames: 8 },
     weight: 3,
     scene:
       `The physio's report says {last} sits two weeks. {last} says he's playing. "It's a playoff race. ` +
@@ -317,7 +360,7 @@ export const DECISION_EVENTS: DecisionEvent[] = [
       {
         id: 'let-him',
         label: `Let him play — you need the points`,
-        effects: { morale: 8, roomRespect: 5, roomMorale: -2 },
+        effects: { morale: 8, roomRespect: 5, roomMorale: -2, act: 'playThrough' },
         outcome: `He dressed. Your medical staff logged their objection in writing, the way people do when they expect to be asked later.`,
       },
       {
@@ -377,7 +420,7 @@ export const DECISION_EVENTS: DecisionEvent[] = [
       {
         id: 'commit',
         label: `"You finish it here. My word."`,
-        effects: { morale: 14, promise: 'newDeal', roomRespect: 4 },
+        effects: { morale: 14, promise: 'newDeal', roomRespect: 4, act: 'untouchable' },
         outcome: `He believed you completely, which is the problem — you just took your best trade chip off the market with a sentence.`,
       },
       {
@@ -405,13 +448,13 @@ export const DECISION_EVENTS: DecisionEvent[] = [
       {
         id: 'recall',
         label: `Bring him up`,
-        effects: { morale: 12, promise: 'iceTime', roomMorale: -4 },
+        effects: { morale: 12, promise: 'iceTime', roomMorale: -4, act: 'callUp' },
         outcome: `A younger player just lost his spot to a man you'd written off. You'd better be right about the hockey.`,
       },
       {
         id: 'release',
         label: `Let him go, with thanks`,
-        effects: { morale: 5, roomRespect: 7, residue: 'wasDismissed' },
+        effects: { morale: 5, roomRespect: 7, residue: 'wasDismissed', act: 'release' },
         outcome: `You did the decent thing and lost the depth. Every veteran in your system heard this org lets a man leave with his dignity.`,
       },
       {
@@ -467,13 +510,13 @@ DECISION_EVENTS.push(
       {
         id: 'sell',
         label: `Take the picks. He was never signing anyway.`,
-        effects: { roomMorale: -10, roomRespect: -4, residue: 'wasShopped', leakChance: 0.6 },
+        effects: { roomMorale: -10, roomRespect: -4, residue: 'wasShopped', leakChance: 0.6, act: 'sell' },
         outcome: `You banked the futures. The room watched a good teammate get turned into an asset in February, and every man in it did the arithmetic on himself.`,
       },
       {
         id: 'keep-run',
         label: `Keep him. We're going for it.`,
-        effects: { morale: 10, roomMorale: 8, roomRespect: 6, promise: 'newDeal' },
+        effects: { morale: 10, roomMorale: 8, roomRespect: 6, promise: 'newDeal', act: 'untouchable' },
         outcome: `You told the room, in effect, that this year counts. If it ends in the first round with nothing to show, that sentence is the one they'll replay.`,
       },
       {
@@ -496,7 +539,7 @@ DECISION_EVENTS.push(
       {
         id: 'make-a-move',
         label: `Give him a move — trade someone the fans know`,
-        effects: { roomMorale: -8, roomRespect: -6, residue: 'wasShopped', leakChance: 0.5 },
+        effects: { roomMorale: -8, roomRespect: -6, residue: 'wasShopped', leakChance: 0.5, act: 'sell' },
         outcome: `He got his headline. You spent a player to buy three weeks of goodwill, and the room learned what your job security is worth in bodies.`,
       },
       {
@@ -524,7 +567,7 @@ DECISION_EVENTS.push(
       {
         id: 'ride-him',
         label: `He's the starter. He plays through it.`,
-        effects: { morale: 4, roomMorale: -4, promise: 'iceTime' },
+        effects: { morale: 4, roomMorale: -4, promise: 'iceTime', act: 'makeStarter' },
         outcome: `Loyalty declared, publicly and in the lineup card. If the slide continues, you have no move left that doesn't look like panic.`,
       },
       {
@@ -536,7 +579,7 @@ DECISION_EVENTS.push(
       {
         id: 'bench-him',
         label: `Sit him. Let the backup run with it.`,
-        effects: { morale: -14, roomMorale: 2, residue: 'wasScratched', leakChance: 0.45 },
+        effects: { morale: -14, roomMorale: 2, residue: 'wasScratched', leakChance: 0.45, act: 'benchStarter' },
         outcome: `A benched starting goaltender is a story by Tuesday. You may have saved his season or ended his time here; nobody finds out for a month.`,
       },
     ],
@@ -552,7 +595,7 @@ DECISION_EVENTS.push(
       {
         id: 'call-up',
         label: `Bring him up now, top-nine minutes`,
-        effects: { morale: 10, roomMorale: -3, promise: 'iceTime' },
+        effects: { morale: 10, roomMorale: -3, promise: 'iceTime', act: 'callUp' },
         outcome: `He is in the lineup and you have promised the minutes that come with it. Rushed kids who sit are how organisations lose players three years early.`,
       },
       {
@@ -663,7 +706,7 @@ DECISION_EVENTS.push(
       {
         id: 'promote-kid',
         label: `Give the kid the minutes`,
-        effects: { morale: 12, roomMorale: -6, roomRespect: -3, promise: 'iceTime' },
+        effects: { morale: 12, roomMorale: -6, roomRespect: -3, promise: 'iceTime', act: 'topPowerPlay' },
         outcome: `The right hockey call, made at a cost you'll pay in the room rather than on the scoresheet. And you've now promised the kid what you took from someone else.`,
       },
       {

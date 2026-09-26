@@ -7,7 +7,8 @@
 import { describe, expect, it } from 'vitest'
 import { Rng } from '@engine/shared/rng'
 import { isEligible } from './contentEngine'
-import { DECISION_CTX_KEYS, DECISION_EVENTS, decisionSlots, pickDecisionEvent, type DecisionOption } from './decisionEvents'
+import { DECISION_ACTS, DECISION_CTX_KEYS, DECISION_EVENTS, decisionSlots, pickDecisionEvent, type DecisionAct, type DecisionOption } from './decisionEvents'
+import { CLUB_SCENES, DRAFT_CALL_EVENTS } from './clubScenes'
 
 /** Does this option cost the GM anything at all? */
 function hasCost(o: DecisionOption): boolean {
@@ -238,6 +239,76 @@ describe('decisionEvents — promised actions must be real', () => {
     for (const ev of DECISION_EVENTS) {
       if (!ev.options.some((o) => o.effects.extensionDiscount !== undefined)) continue
       expect((ev.conditions as Record<string, unknown> | undefined)?.['contractYearsRemaining']).toBe(1)
+    }
+  })
+})
+
+/* ── E3 audit: an option that says a thing HAPPENS must carry the act ── */
+
+describe('decisionEvents — acts are real (E3 audit)', () => {
+  // The phrases that describe a concrete, engine-performable action, and the act
+  // an option using them must declare. Label OR receipt — both are promises.
+  const ACTION_PHRASES: Array<{ re: RegExp; acts: DecisionAct[] }> = [
+    { re: /\bbring him up\b|\bcall(ed)? (him )?up\b/i, acts: ['callUp'] },
+    { re: /\blet him go\b|\brelease (him|me)\b/i, acts: ['release'] },
+    { re: /\byou dress tomorrow\b|\bhe dressed\b|\blet him play\b/i, acts: ['dress', 'playThrough'] },
+    { re: /\btake the picks\b|\btrade someone\b|\bbanked the futures\b|\bspent a player\b/i, acts: ['sell'] },
+    { re: /\boff the market\b|\bnot going anywhere\b/i, acts: ['untouchable'] },
+    { re: /\blet the backup run\b/i, acts: ['benchStarter'] },
+    { re: /\bhe's the starter\b|\byou're my starter\b/i, acts: ['makeStarter'] },
+    { re: /\bgive the kid the minutes\b/i, acts: ['topPowerPlay'] },
+  ]
+  const pools = [...DECISION_EVENTS, ...CLUB_SCENES]
+
+  it('every option describing a concrete action declares the act that performs it', () => {
+    for (const e of pools) {
+      for (const o of e.options) {
+        const text = `${o.label} ${o.outcome}`
+        for (const { re, acts } of ACTION_PHRASES) {
+          if (!re.test(o.label) && !(re.test(text) && /\b(dressed|banked|spent)\b/i.test(text))) continue
+          // "You're my starter" is a promise about the COACH's in-game pulls, not
+          // a depth-chart change — the one phrase that is a stance, not an act.
+          if (e.id === 'ev.goalie.pulled-again') continue
+          expect(o.effects.act !== undefined && acts.includes(o.effects.act), `${e.id}/${o.id} says "${o.label}" but performs nothing`).toBe(true)
+        }
+      }
+    }
+  })
+
+  it('every act is one the engine performs', () => {
+    for (const e of pools) for (const o of e.options) {
+      if (o.effects.act !== undefined) expect(DECISION_ACTS).toContain(o.effects.act)
+    }
+  })
+
+  it('acts are only offered where they can be legal', () => {
+    for (const e of DECISION_EVENTS) {
+      const c = (e.conditions ?? {}) as Record<string, unknown>
+      for (const o of e.options) {
+        const act = o.effects.act
+        if (act === 'callUp' || act === 'release') expect(c['inMinors'], `${e.id}/${o.id}`).toBe(true)
+        if (act === 'dress') expect(c['scratched'], `${e.id}/${o.id}`).toBe(true)
+        if (act === 'makeStarter' || act === 'benchStarter') expect(c['position'], `${e.id}/${o.id}`).toBe('G')
+        if (act === 'playThrough') {
+          // Only a minor knock can be overruled — never a two-month injury.
+          expect(typeof c['maxInjuryGames'], `${e.id}/${o.id} plays through an ungated injury`).toBe('number')
+          expect(c['maxInjuryGames'] as number).toBeLessThanOrEqual(8)
+        }
+      }
+    }
+  })
+
+  it('percent conditions use the runner\'s whole-number scale (the 0.888 dark-event bug)', () => {
+    for (const e of DECISION_EVENTS) {
+      for (const [k, v] of Object.entries(e.conditions ?? {})) {
+        if (/SavePct|SeasonPct/.test(k)) expect(v as number, `${e.id}.${k}`).toBeGreaterThan(1)
+      }
+    }
+  })
+
+  it('no scene promises a drafted junior NHL ice time he cannot legally get', () => {
+    for (const e of DRAFT_CALL_EVENTS) for (const o of e.options) {
+      expect(o.effects.promise, `${e.id}/${o.id}`).not.toBe('iceTime')
     }
   })
 })

@@ -683,3 +683,17 @@ describe('seasonReview — calibrated verdicts (E3)', () => {
     expect(r.fired).toBe(false)
   })
 })
+
+describe('seasonReview — the rebuild clock and the overachiever (E3)', () => {
+  it('competeRespectably: finishing BETTER than the target is never a miss', () => {
+    const state = makeBoardState({ mandate: 'competeRespectably', targetRank: 23 })
+    expect(seasonReview({ state, finalRank: 16, madePlayoffs: false, wonCup: false, year: 2031, teamsInLeague: 32 }).verdict).toBe('met')
+  })
+
+  it('five years in and still in the basement, a rebuild mandate reads as a miss', () => {
+    const early = seasonReview({ state: makeBoardState({ mandate: 'rebuild', targetRank: 28, confidence: 50, patience: 60 }), finalRank: 31, madePlayoffs: false, wonCup: false, year: 2028, seasonsWithClub: 3, teamsInLeague: 32 })
+    expect(early.verdict).toBe('met')
+    const late = seasonReview({ state: makeBoardState({ mandate: 'rebuild', targetRank: 28, confidence: 50, patience: 60 }), finalRank: 31, madePlayoffs: false, wonCup: false, year: 2030, seasonsWithClub: 5, teamsInLeague: 32 })
+    expect(late.verdict).toBe('missed')
+  })
+})

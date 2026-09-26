@@ -514,7 +514,10 @@ export function seasonReview(args: SeasonReviewArgs): SeasonReviewResult {
     case 'competeRespectably': {
       if (madePlayoffs && finalRank <= Math.max(1, state.targetRank - 3)) {
         verdict = 'exceeded'
-      } else if (Math.abs(finalRank - state.targetRank) <= 4) {
+      } else if (finalRank <= state.targetRank + 4) {
+        // Within reach of the target — or BETTER than it. (It used to read
+        // |rank - target| <= 4, so a club asked for 23rd that finished 16th
+        // without a playoff spot was told it had 'missed' — E3 calibration.)
         verdict = 'met'
       } else if (
         finalRank > state.targetRank + 8 ||
@@ -572,6 +575,19 @@ export function seasonReview(args: SeasonReviewArgs): SeasonReviewResult {
       }
       break
     }
+  }
+
+  // A rebuild is not a licence to lose forever. Five years into the job and
+  // still in the basement, even a rebuild/youth mandate reads as a miss: the
+  // owner has run out of "next year" (E3 — see docs/PRESSURE-AND-FIRINGS.md).
+  if (
+    (state.mandate === 'rebuild' || state.mandate === 'developYouth') &&
+    verdict === 'met' &&
+    (args.seasonsWithClub ?? 0) >= 5 &&
+    args.teamsInLeague !== undefined &&
+    finalRank > args.teamsInLeague - 3
+  ) {
+    verdict = 'missed'
   }
 
   // A board-sanctioned rebuild can't get the GM fired for losing — ownership knew

@@ -55,13 +55,19 @@ describe('dismissalOdds', () => {
   })
 
   it('one bad year is not a case; two opens one; three is usually the end', () => {
-    const base = { teamId: 'a', predictedRank: 8, finalRank: 20, madePlayoffs: false, tenure: 4 }
+    const base = { teamId: 'a', predictedRank: 8, finalRank: 17, madePlayoffs: false, tenure: 4 }
     expect(dismissalOdds(seat({ ...base, missStreak: 1 }), N)).toBe(0)
     const two = dismissalOdds(seat({ ...base, missStreak: 2 }), N)
     const three = dismissalOdds(seat({ ...base, missStreak: 3 }), N)
     expect(two).toBeGreaterThan(0.2)
     expect(three).toBeGreaterThan(two)
     expect(three).toBeGreaterThanOrEqual(0.5)
+  })
+
+  it('a single COLLAPSE (a third of the league below the projection) is a case for an established GM', () => {
+    const collapse = seat({ teamId: 'a', tenure: 3, missStreak: 1, predictedRank: 6, finalRank: 20, madePlayoffs: false })
+    expect(dismissalOdds(collapse, N)).toBeGreaterThan(0)
+    expect(dismissalOdds({ ...collapse, tenure: 2 }, N)).toBe(0)
   })
 
   it('a long-tenured GM in the basement is exposed even on a single miss', () => {

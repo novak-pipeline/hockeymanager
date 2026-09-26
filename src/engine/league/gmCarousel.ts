@@ -82,10 +82,14 @@ export function dismissalOdds(seat: GmSeat, teamsInLeague: number): number {
   const basement = seat.finalRank > Math.ceil(n * 0.75)
   let p = 0
   // Calibrated on the imported 32-team league (docs/PRESSURE-AND-FIRINGS.md):
-  // at 0.5/0.24/0.10 the league changed ~0.6 GMs a summer, under the NHL's 1–3.
-  if (seat.missStreak >= 3) p = 0.6
-  else if (seat.missStreak === 2) p = 0.38
-  else if (seat.missStreak === 1 && seat.tenure >= 5 && basement) p = 0.16
+  // at 0.5/0.24/0.10 the league changed ~0.6 GMs a summer and at 0.6/0.38/0.16
+  // ~0.8 — both under the NHL's 1–3. A single collapse (a third of the league
+  // below the projection) is also a case for a GM with a few years in.
+  const collapse = seat.finalRank - seat.predictedRank >= Math.round(n * 0.34)
+  if (seat.missStreak >= 3) p = 0.65
+  else if (seat.missStreak === 2) p = 0.45
+  else if (seat.missStreak === 1 && seat.tenure >= 5 && basement) p = 0.2
+  else if (seat.missStreak === 1 && seat.tenure >= 3 && collapse) p = 0.12
   if (p === 0) return 0
   // How bad the final season was sharpens the case.
   const slide = Math.max(0, seat.finalRank - seat.predictedRank) / (n - 1)

@@ -35,6 +35,82 @@ export interface OwnerRequest {
   /** Patience change on accept / decline (owner's goodwill). */
   acceptPatience: number
   declinePatience: number
+  /** extendFanFavourite: the man the owner named (the ask is about HIM). */
+  subjectId?: string
+  /**
+   * Set when the GM said yes. Saying yes used to bank the confidence and clear
+   * the request — nobody ever checked whether he delivered (E3 audit). Now the
+   * owner writes it down and judges it on `dueDay`.
+   */
+  commitment?: OwnerCommitment
+}
+
+/** What the GM committed to, with the baselines the owner will judge against. */
+export interface OwnerCommitment {
+  year: number
+  day: number
+  /** Match day the owner checks. */
+  dueDay: number
+  /** NHL roster when he said yes — arrivals are judged against it. */
+  rosterAtAccept: string[]
+  /** Cap used when he said yes. */
+  capAtAccept: number
+  /** Games played by the club's under-24s when he said yes. */
+  youthGpAtAccept: number
+  /** The club's games played when he said yes. */
+  clubGpAtAccept: number
+}
+
+/** The facts the career layer gathers on the due day. */
+export interface CommitmentFacts {
+  /** Players on the NHL roster now who were not there at acceptance. */
+  arrivals: Array<{ overall: number; age: number }>
+  capUsed: number
+  salaryCap: number
+  youthGp: number
+  clubGp: number
+  /** extendFanFavourite: is the named man signed beyond this season? */
+  subjectSigned: boolean
+}
+
+/**
+ * Did the GM deliver what he told the owner? Deliberately achievable: one real
+ * move that answers the ask, not a transformed roster.
+ */
+export function judgeOwnerCommitment(req: OwnerRequest, f: CommitmentFacts): { kept: boolean; why: string } {
+  const c = req.commitment
+  if (!c) return { kept: true, why: '' }
+  switch (req.kind) {
+    case 'signMarketableStar': {
+      const star = f.arrivals.find((a) => a.overall >= 80)
+      return star
+        ? { kept: true, why: 'a marquee name arrived' }
+        : { kept: false, why: 'no marquee name has arrived' }
+    }
+    case 'pushForPlayoffs': {
+      const vet = f.arrivals.find((a) => a.age >= 27 && a.overall >= 74)
+      return vet
+        ? { kept: true, why: 'a proven veteran was added for the stretch' }
+        : { kept: false, why: 'no proven veteran was added before the deadline' }
+    }
+    case 'trimPayroll': {
+      const cut = (c.capAtAccept - f.capUsed) / Math.max(1, f.salaryCap)
+      return cut >= 0.02
+        ? { kept: true, why: 'the wage bill came down' }
+        : { kept: false, why: 'the wage bill is where it was' }
+    }
+    case 'developYouth': {
+      const games = Math.max(1, f.clubGp - c.clubGpAtAccept)
+      const youth = f.youthGp - c.youthGpAtAccept
+      return youth >= games * 2
+        ? { kept: true, why: 'the kids are playing' }
+        : { kept: false, why: 'the kids are still watching from the press box' }
+    }
+    case 'extendFanFavourite':
+      return f.subjectSigned
+        ? { kept: true, why: 'he has signed on' }
+        : { kept: false, why: 'he still has no new deal' }
+  }
 }
 
 interface Template {
