@@ -632,8 +632,10 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'getPresser':
       return { id: req.id, type: 'presser', presser: must().getPressConference() }
     case 'answerPresser':
-      must().answerPressConference(req.answer, req.tone)
+      must().answerPressConference(req.answer, req.tone, req.optionId)
       return { id: req.id, type: 'ok' }
+    case 'getBeat':
+      return { id: req.id, type: 'beat', beat: must().getBeat(req.teamId) }
 
     /* ── EHM plumbing modules (Wave 3) ── */
     case 'getReport':

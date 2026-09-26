@@ -93,6 +93,11 @@ export interface NewsItem {
    * compat (older saves simply have nothing tagged).
    */
   reach?: 'ambient' | 'ownClub'
+  /**
+   * A beat writer's link post: the article in the News reader it points at
+   * (docs/MEDIA-BEAT.md). Additive/optional for save compat.
+   */
+  articleId?: string
 }
 
 /** A prospect card embedded in the weekly scout digest (playtest #10). */

@@ -8,6 +8,7 @@
  * and the Practice tab have new UI built here.
  */
 import { useMemo, useState } from 'react'
+import type { BeatView } from '../../worker/protocol'
 import { overallToStars } from '../../engine/ratings/composites'
 import type {
   AgmReportView,
@@ -1136,6 +1137,34 @@ function TeamInfoTabReadOnly(props: { teamId: string }): JSX.Element {
           </div>
         </Panel>
       )}
+      <FromTheBeat teamId={props.teamId} />
     </section>
+  )
+}
+
+/** Another club's beat outlet, as you browse the club (docs/MEDIA-BEAT.md):
+ *  the lighter, on-demand coverage every club gets, one click from the reader. */
+function FromTheBeat(props: { teamId: string }): JSX.Element | null {
+  const client = useClient()
+  const nav = useNav()
+  const { data } = useScreenData<BeatView>(
+    () => client.getBeat(props.teamId),
+    (r) => (r.type === 'beat' ? r.beat : null)
+  )
+  if (!data || data.articles.length === 0) return null
+  return (
+    <Panel title={`From the beat: ${data.outlet}`}>
+      <div className="list">
+        {data.articles.slice(0, 3).map((a) => (
+          <div key={a.id} className="small">
+            <div style={{ fontWeight: 700 }}>{a.headline}</div>
+            <div className="muted">{a.dek}</div>
+          </div>
+        ))}
+        <button className="btn btn-ghost" onClick={() => nav.navigate('feed', { teamId: props.teamId })}>
+          Read {data.writer.name} in The Beat
+        </button>
+      </div>
+    </Panel>
   )
 }

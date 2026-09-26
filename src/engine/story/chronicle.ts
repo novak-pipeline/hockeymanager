@@ -35,6 +35,24 @@ export type ChronicleEventKind =
   /** B6.3: a persistent match-night moment (first NHL goal handled as
    *  'milestone'; this covers goalie steals, rivalry scraps, …). */
   | 'gameMoment'
+  /* ── People & media events (docs/MEDIA-BEAT.md §Chronicle) — written where
+   *    they happen so biographies and Wrapped can tell "the year he asked out". */
+  /** A player formally asked to be traded. */
+  | 'tradeRequest'
+  /** A quiet shopping of a player became public (the Living Ledger leak). */
+  | 'shopped'
+  /** A player came to the GM's office over how he was treated. */
+  | 'confrontation'
+  /** The captain's letter changed hands. */
+  | 'captaincy'
+  /** A dressing-room feud broke into the open. */
+  | 'feud'
+  /** The media put a coach on the hot seat (details.media = stage). */
+  | 'hotSeat'
+  /** The GM publicly backed — or declined to back — his coach. */
+  | 'voteOfConfidence'
+  /** A claim the GM made on the record proved right or wrong. */
+  | 'claimResolved'
 
 /** One side of a trade / a draft asset — enough to reconstruct the deal later. */
 export interface ChronicleAsset {
@@ -89,6 +107,13 @@ export interface ChronicleEvent {
     window?: 'midseason' | 'offseason'
     /** gmChange: the dismissal and the appointment are separate events. */
     change?: 'dismissed' | 'hired'
+    /** hotSeat: 'radar' | 'recovered' | 'fired'; voteOfConfidence: 'backed' |
+     *  'hedged'; claimResolved: the claim kind; captaincy: 'named' | 'stripped'. */
+    media?: string
+    /** The words on the record (a vote of confidence, a claim). */
+    quote?: string
+    /** claimResolved: how it turned out. */
+    verdict?: 'right' | 'wrong'
   }
   /** True when the user's club was involved (fast filter for "your history"). */
   userInvolved: boolean
@@ -149,6 +174,9 @@ const DURABLE_KINDS: ReadonlySet<ChronicleEventKind> = new Set([
   'trade', 'draftPick', 'championship', 'playoffSeries', 'award',
   'recordBroken', 'retirement', 'gmChange', 'coachHired', 'coachFired',
   'promise', 'milestone',
+  // People stories are what a biography is made of; they never age out.
+  'tradeRequest', 'shopped', 'confrontation', 'captaincy', 'feud',
+  'hotSeat', 'voteOfConfidence', 'claimResolved',
 ])
 const PRUNE_AFTER_YEARS = 5
 /** Amortise pruning: sweep once per this many appended events. */

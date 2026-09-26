@@ -391,7 +391,7 @@ const HOT_STREAK_POOL: ContentVariant[] = [
     text: `{name} on the sheet again — {n} in a row now`,
     text2: `The {team} have needed him and he has turned up: {n} straight games with at least a point for {name}.` },
   { id: 'arc.hot.star.short.e', conditions: { star: true },
-    text: `Another night, another point for {name}`,
+    text: `Another night, another point for {name}: {n} straight`,
     text2: `{n} games in a row. Nobody in this league does that by accident.` },
   { id: 'arc.hot.unlikely', conditions: { star: false, minN: 8 },
     text: `Nobody had {name} on {n} straight`,

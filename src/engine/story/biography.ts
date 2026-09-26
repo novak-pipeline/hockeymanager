@@ -133,6 +133,19 @@ export interface BiographyFacts {
   /** The city half of that club's name ("Pittsburgh"), so prose can say a man
    *  has been somewhere rather than been inside a nickname. */
   clubCity?: string
+  /**
+   * The people story the World Chronicle recorded about him (docs/MEDIA-BEAT.md):
+   * the year he asked out, the season his name leaked in trade talk, the C he
+   * was handed, the feud that broke into the open. OLDEST FIRST. Optional —
+   * absent or empty means the chronicle holds nothing, and the beat is silent.
+   */
+  clubRecord?: Array<{
+    kind: 'tradeRequest' | 'shopped' | 'captaincy' | 'feud' | 'confrontation'
+    year: number
+    clubShort: string
+    /** captaincy: the man he succeeded; feud: the teammate. */
+    other?: string
+  }>
 }
 
 /* ═════════════════════════════ prose out ═════════════════════════════ */
@@ -606,6 +619,30 @@ const INJURY_NOW_POOL: ContentVariant[] = [
 
 /* ── PROSPECT (no season in this league yet). Slots: {juniorClub}
       {juniorLeague} {juniorSeason} {juniorGp} {juniorPts} {age} {leagueShort} ── */
+
+/* ── THE CLUB RECORD (the people story). Slots: {last} {relYear} {relClub}
+      {other}. One beat, the most telling event the chronicle holds. ── */
+
+const CLUB_RECORD_POOL: ContentVariant[] = [
+  { id: 'bio.rel.req.a', conditions: { rel: 'tradeRequest' }, text: `In {relYear} he asked the {relClub} for a trade.` },
+  { id: 'bio.rel.req.b', conditions: { rel: 'tradeRequest' }, text: `{relYear} was the year {last} told the {relClub} he wanted out.` },
+  { id: 'bio.rel.req.c', conditions: { rel: 'tradeRequest' }, text: `The {relClub} have his {relYear} trade request on file. So does everyone who followed the team that year.` },
+  { id: 'bio.rel.cap.a', conditions: { rel: 'captaincy' }, text: `The {relClub} gave him the C in {relYear}.` },
+  { id: 'bio.rel.cap.b', conditions: { rel: 'captaincy' }, text: `He has worn the captain's letter for the {relClub} since {relYear}.` },
+  { id: 'bio.rel.cap.c', conditions: { rel: 'captaincy' }, text: `In {relYear} the {relClub} made {last} their captain.` },
+  { id: 'bio.rel.capo.a', conditions: { rel: 'captaincy', hasOther: true }, text: `In {relYear} the {relClub} made him captain, taking the C from {other}.` },
+  { id: 'bio.rel.capo.b', conditions: { rel: 'captaincy', hasOther: true }, text: `{other} wore the C before him. The {relClub} handed it to {last} in {relYear}.` },
+  { id: 'bio.rel.capo.c', conditions: { rel: 'captaincy', hasOther: true }, text: `He succeeded {other} as captain of the {relClub} in {relYear}.` },
+  { id: 'bio.rel.shop.a', conditions: { rel: 'shopped' }, text: `His name went out in trade talk in {relYear}, and he found out the way players do: he read it.` },
+  { id: 'bio.rel.shop.b', conditions: { rel: 'shopped' }, text: `The {relClub} shopped him in {relYear}. It leaked.` },
+  { id: 'bio.rel.shop.c', conditions: { rel: 'shopped' }, text: `In {relYear} word got out that the {relClub} were listening on him.` },
+  { id: 'bio.rel.feud.a', conditions: { rel: 'feud' }, text: `His {relYear} falling-out with {other} was the dressing-room story of that {relClub} season.` },
+  { id: 'bio.rel.feud.b', conditions: { rel: 'feud' }, text: `He and {other} did not get along in {relYear}, and the {relClub} dressing room knew it.` },
+  { id: 'bio.rel.feud.c', conditions: { rel: 'feud' }, text: `There was a feud with {other} in {relYear}.` },
+  { id: 'bio.rel.conf.a', conditions: { rel: 'confrontation' }, text: `In {relYear} he walked into the GM's office to complain about how the {relClub} were using him.` },
+  { id: 'bio.rel.conf.b', conditions: { rel: 'confrontation' }, text: `He had it out with the {relClub} front office in {relYear}.` },
+  { id: 'bio.rel.conf.c', conditions: { rel: 'confrontation' }, text: `{relYear} brought a closed-door meeting with the GM, at his request.` },
+]
 
 const PROSPECT_POOL: ContentVariant[] = [
   { id: 'bio.prospect.producing', conditions: { hasJunior: true, minJuniorPtsPerGame: 100 },
@@ -1125,6 +1162,21 @@ export function buildBiography(facts: BiographyFacts): BiographyView | null {
     }
   }
 
+  // The people story: the most telling thing the chronicle holds about him and
+  // a club. One sentence, only what was recorded.
+  const record = facts.clubRecord ?? []
+  if (record.length > 0) {
+    const order = ['tradeRequest', 'captaincy', 'shopped', 'feud', 'confrontation'] as const
+    const pick = [...record].sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind) || b.year - a.year)[0]!
+    beats.push({
+      key: 'clubRecord',
+      pool: CLUB_RECORD_POOL,
+      para: 2,
+      ctx: { rel: pick.kind, hasOther: (pick.other ?? '').length > 0 },
+      slots: { last, relYear: String(pick.year), relClub: pick.clubShort, other: pick.other ?? '' },
+    })
+  }
+
   const thin = findThinYear(tops)
   // Calling one season both his best and a hole in the sheet is a contradiction,
   // not two beats. The peak wins.
@@ -1306,6 +1358,7 @@ export const BIOGRAPHY_POOLS: Record<string, ContentVariant[]> = {
   injuryNow: INJURY_NOW_POOL,
   prospect: PROSPECT_POOL,
   intl: INTL_POOL,
+  clubRecord: CLUB_RECORD_POOL,
   retired: RETIRED_POOL,
   totals: TOTALS_POOL,
 }

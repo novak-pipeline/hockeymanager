@@ -12,7 +12,9 @@ import type { PressFactSheet, PressPersonaId, PressSheetKind } from '@engine/sto
  * with PRESS_PERSONA_NAMES in src/engine/story/factSheet.ts.
  */
 const PRESS_PERSONA_NAMES: Record<PressPersonaId, { name: string; outlet: string }> = {
-  beat: { name: 'Sam Carver', outlet: 'The Daily Gazette' },
+  // The club's beat writer is a different person per club (engine mediaCast.ts);
+  // Sam Carver is the Daily Gazette COLUMNIST, never the beat byline.
+  beat: { name: 'The beat writer', outlet: 'the club beat' },
   national: { name: 'Vic Mercer', outlet: 'National Hockey Wire' },
   homer: { name: 'Bobby “Buzz” Doyle', outlet: '990 The Fan' },
 }
@@ -20,7 +22,7 @@ const PRESS_PERSONA_NAMES: Record<PressPersonaId, { name: string; outlet: string
 /* ────────────────────────── personas ────────────────────────── */
 
 const PERSONA_VOICES: Record<PressPersonaId, string> = {
-  beat: `You are Sam Carver, a beat reporter for The Daily Gazette who covers this team every single
+  beat: `You are this club's beat reporter for an independent local outlet that covers the team every single
 day. Your style is grounded, factual and close to the locker room. You know the players by their
 first names, you notice subtle shifts in line-combinations, and you care about the fans who have
 been following this team for decades. Your prose is clean, economical and workmanlike — no

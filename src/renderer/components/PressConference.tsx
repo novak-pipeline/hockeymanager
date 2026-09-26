@@ -97,6 +97,18 @@ export function PressConference(): JSX.Element | null {
     bumpRefresh()
   }
 
+  /** Presser v2: one of the authored answers (docs/MEDIA-BEAT.md). Each
+   *  carries its own consequence; 'delegate' sends the PR director. */
+  async function handleOption(optionId: string, tone: PressTone) {
+    if (!presser) return
+    setPhase('submitting')
+    await client.answerPresser('', tone, optionId)
+    setPresser(null)
+    setPhase('idle')
+    setAnswer('')
+    bumpRefresh()
+  }
+
   async function handleConfirmReaction() {
     if (!presser) return
     setPhase('submitting')
@@ -145,9 +157,11 @@ export function PressConference(): JSX.Element | null {
               Press Conference
             </div>
             <div className="muted small">
-              {presser.personaId
-                ? `${PRESS_PERSONA_NAMES[presser.personaId].name} · ${PRESS_PERSONA_NAMES[presser.personaId].outlet} — ${presser.context}`
-                : presser.context}
+              {presser.askedBy
+                ? `${presser.askedBy.name} · ${presser.askedBy.outlet} — ${presser.context}`
+                : presser.personaId
+                  ? `${PRESS_PERSONA_NAMES[presser.personaId].name} · ${PRESS_PERSONA_NAMES[presser.personaId].outlet} — ${presser.context}`
+                  : presser.context}
             </div>
           </div>
         </div>
@@ -167,8 +181,30 @@ export function PressConference(): JSX.Element | null {
           "{presser.question}"
         </div>
 
+        {/* Presser v2: authored answers about a named player / the coach / the season */}
+        {phase === 'answering' && presser.options && presser.options.length > 0 && (
+          <div className="stack">
+            <div className="muted small">Your answer goes on the record:</div>
+            {presser.options.map((o) => (
+              <button key={o.id} className="btn presser-option" onClick={() => handleOption(o.id, o.tone)}>
+                <span>{o.label}</span>
+                <span className="presser-option-hint">{o.hint}</span>
+              </button>
+            ))}
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                className="btn btn-ghost"
+                onClick={() => handleOption('delegate', 'measured')}
+                title="Your communications director takes the question. Nobody is quoted; nothing changes."
+              >
+                Send the PR director
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Answering phase */}
-        {(phase === 'answering' || phase === 'grading') && (
+        {(phase === 'answering' || phase === 'grading') && !(presser.options && presser.options.length > 0) && (
           <>
             {hasKey ? (
               <div className="stack">

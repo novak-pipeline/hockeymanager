@@ -823,8 +823,13 @@ export class SimClient {
     return this.send({ type: 'getPresser' })
   }
 
-  answerPresser(answer: string, tone: PressTone): Promise<WorkerResponse> {
-    return this.send({ type: 'answerPresser', answer, tone })
+  answerPresser(answer: string, tone: PressTone, optionId?: string): Promise<WorkerResponse> {
+    return this.send({ type: 'answerPresser', answer, tone, ...(optionId ? { optionId } : {}) })
+  }
+
+  /** MEDIA-BEAT: a club's beat outlet (default: yours). */
+  getBeat(teamId?: string): Promise<WorkerResponse> {
+    return this.send({ type: 'getBeat', ...(teamId ? { teamId } : {}) })
   }
 
   /* ── EHM plumbing modules (Wave 3) ── */

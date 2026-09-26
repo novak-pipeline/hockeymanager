@@ -178,22 +178,27 @@ export function punditStanding(rapport: number): PunditStanding {
   return 'Feud'
 }
 
-/** A one-line human read on where the relationship stands. */
-export function punditRead(rel: PunditRelationship): string {
-  const name = PRESS_PERSONA_NAMES[rel.personaId].name
+/**
+ * A one-line human read on where the relationship stands. Every clause here is
+ * a behaviour the engine performs (docs/MEDIA-BEAT.md §Rapport): the standing
+ * sets the FRAMING family of this writer's pieces (tiltOf), and a critic's
+ * columns after losing weeks reach the owner (Career.applyColumnConduct).
+ * `name` overrides the persona's static name (the beat writer is per-club).
+ */
+export function punditRead(rel: PunditRelationship, name = PRESS_PERSONA_NAMES[rel.personaId].name): string {
   switch (punditStanding(rel.rapport)) {
     case 'Ally':
-      return `${name} is firmly in your corner — his columns give you the benefit of the doubt.`
+      return `${name} is firmly in your corner. A loss reads as a bad night in his pieces, not a verdict on you.`
     case 'Friendly':
-      return `${name} has warmed to you; the coverage leans fair.`
+      return `${name} has warmed to you. He gives the front office the benefit of the doubt after a loss.`
     case 'Neutral':
       return rel.interactions === 0
         ? `You haven't given ${name} much to go on yet.`
         : `${name} plays it straight down the middle with you.`
     case 'Critic':
-      return `${name} has soured on you — expect a sceptical read.`
+      return `${name} has soured on you. His pieces frame a loss as a front-office problem, and the owner reads them.`
     case 'Feud':
-      return `${name} is openly hostile; every misstep becomes a headline.`
+      return `${name} is openly hostile. Every losing week becomes a column about you, and the owner reads those too.`
   }
 }
 
@@ -221,6 +226,27 @@ export function toneVerb(tone: PressTone | undefined): string {
 export function coverageTilt(state: PunditState, personaId: PressPersonaId): number {
   const rel = relationOf(state, personaId)
   return clamp(rel.rapport / 100, -1, 1)
+}
+
+/**
+ * The framing family a writer's coverage uses (docs/MEDIA-BEAT.md): friendly
+ * or better → 'ally' (a loss is a bad night), critic or worse → 'critic' (a
+ * loss is a management failure), otherwise neutral. The same thresholds as
+ * the Media Circuit's standings, so what the screen says is what the prose does.
+ */
+export function tiltOf(state: PunditState, personaId: PressPersonaId): 'ally' | 'neutral' | 'critic' {
+  const t = coverageTilt(state, personaId)
+  if (t * 100 >= FRIENDLY_AT) return 'ally'
+  if (t * 100 <= CRITIC_AT) return 'critic'
+  return 'neutral'
+}
+
+/** Shift one pundit's rapport by a delta outside a presser (a claim proved
+ *  right or wrong, a credibility hit). Clamped; counts as no interaction. */
+export function nudgeRapport(state: PunditState, personaId: PressPersonaId, delta: number): void {
+  const rel = state.pundits.find((r) => r.personaId === personaId)
+  if (!rel) return
+  rel.rapport = clamp(Math.round(rel.rapport + delta), RAPPORT_MIN, RAPPORT_MAX)
 }
 
 /** The GM's strongest ally and chief critic (or null when nobody qualifies). */

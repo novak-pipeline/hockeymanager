@@ -23,7 +23,7 @@ import {
   FIRST_CUP_POOL, FIRST_OVERALL_POOL, HS_DRAFT_POOL, HS_SCOUT_POOL, HS_TRADE_POOL, HS_WALKED_POOL,
   LEAGUE_BREAKOUT_POOL, LEAGUE_TRADE_POOL, MILESTONE_POOL, MVP_POOL, OUTRO_POOL, RECORD_POOL,
   RETIREMENT_POOL, RUN_POOL, SIGNING_POOL, SINCE_POOL, STAT_POOL, UPSET_POOL, WORST_CALL_POOL,
-  YOUR_TRADE_POOL,
+  YOUR_TRADE_POOL, OFF_ICE_POOL,
 } from './wrappedCopy'
 
 /* ────────────────────────── persisted card model ────────────────────────── */
@@ -33,6 +33,7 @@ export type WrappedSection = 'cover' | 'you' | 'league' | 'history' | 'hindsight
 export type WrappedCardKind =
   | 'cover'
   | 'yourRun' | 'yourMvp' | 'yourBreakout' | 'yourStat' | 'yourTrade' | 'yourSigning' | 'yourWorstCall'
+  | 'yourOffIce'
   | 'champion' | 'upset' | 'awards' | 'recordBroken' | 'milestones' | 'firstOverall'
   | 'leagueBreakout' | 'leagueTrade' | 'coachingCarousel' | 'retirements'
   | 'dynasty' | 'droughtEnded' | 'franchiseFirst' | 'historySince'
@@ -411,6 +412,12 @@ export interface WrappedFacts {
   /** Prior seasons' best single-season marks per stat. */
   markHistory: Array<{ year: number; stat: 'goals' | 'points' | 'assists'; value: number }>
   coachChanges: WCoachChange[]
+  /**
+   * The season off the ice at YOUR club, from the chronicle's people and media
+   * events (docs/MEDIA-BEAT.md): trade requests, leaks, the C, feuds, the hot
+   * seat, votes of confidence, claims proved right or wrong. Optional/additive.
+   */
+  offIce?: Array<{ kind: string; headline: string; playerId?: string }>
   /** Hindsight subjects told in earlier years (never re-told). */
   told: string[]
   hindsight: {
@@ -542,12 +549,24 @@ export function assetProduction(a: { pts?: number; goalieWins?: number; pos?: st
 const KIND_ORDER: WrappedCardKind[] = [
   'cover',
   'yourRun', 'yourMvp', 'yourBreakout', 'yourStat', 'yourTrade', 'yourSigning', 'yourWorstCall',
+  'yourOffIce',
   'champion', 'upset', 'awards', 'recordBroken', 'milestones', 'firstOverall',
   'leagueBreakout', 'leagueTrade', 'coachingCarousel', 'retirements',
   'dynasty', 'droughtEnded', 'franchiseFirst', 'historySince',
   'hindsightDraft', 'hindsightTrade', 'hindsightScout', 'hindsightWalked',
   'outro',
 ]
+
+const OFF_ICE_LABEL: Record<string, string> = {
+  tradeRequest: 'Trade request',
+  shopped: 'Leak',
+  confrontation: 'Your office',
+  captaincy: 'The C',
+  feud: 'Feud',
+  hotSeat: 'Hot seat',
+  voteOfConfidence: 'On the record',
+  claimResolved: 'Quoted back',
+}
 
 const KICKER: Record<WrappedSection, string> = {
   cover: 'SEASON WRAPPED',
@@ -898,6 +917,26 @@ export function buildWrapped(f: WrappedFacts): WrappedYear {
         stats: [{ value: `$${(flop.salary / 1e6).toFixed(1)}M`, label: 'cap hit' }, { value: String(flop.gp), label: 'games' }],
         players: [chip(flop.player)], team: user,
         weight: 50,
+      })
+    }
+  }
+
+  // yourOffIce — the dressing room and the press, as the chronicle recorded it.
+  {
+    const off = f.offIce ?? []
+    if (off.length >= 2) {
+      const kinds = new Set(off.map((o) => o.kind))
+      const heat = kinds.has('hotSeat') || kinds.has('voteOfConfidence') ? 'coach' : kinds.has('tradeRequest') ? 'request' : 'room'
+      push({
+        kind: 'yourOffIce', section: 'you',
+        ...pickCopy(OFF_ICE_POOL, { heat }, key('office', String(off.length)), {
+          lead: `${off[0]!.headline}.`,
+          countWords: numberWord(off.length),
+        }),
+        hero: { value: String(off.length), label: off.length === 1 ? 'story' : 'stories off the ice' },
+        list: off.slice(0, 5).map((o) => ({ label: OFF_ICE_LABEL[o.kind] ?? o.kind, value: o.headline, ...(o.playerId ? { playerId: o.playerId } : {}) })),
+        team: user,
+        weight: 40 + Math.min(20, off.length * 4),
       })
     }
   }

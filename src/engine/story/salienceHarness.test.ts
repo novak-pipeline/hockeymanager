@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest'
 import { generateLeague } from '@data/generate'
 import { Career } from '@engine/career/career'
 import { DAILY_POST_BUDGET } from '@engine/story/salience'
+import { BEAT_LINK_DAILY_CAP } from '@engine/story/mediaCast'
 import { CLUB_DAILY_CAP, VOICE_DAILY_CAP } from '@engine/story/voices'
 
 describe('salience harness — one full season', () => {
@@ -36,11 +37,19 @@ describe('salience harness — one full season', () => {
     const kindOf = (p: { authorId?: string }): string => feed.authors[p.authorId!]?.kind ?? 'wire'
     const isVoice = (p: { authorId?: string }): boolean => kindOf(p) === 'player' || kindOf(p) === 'gm'
     const isClub = (p: { authorId?: string }): boolean => kindOf(p) === 'club'
+    // MEDIA-BEAT: a beat writer's link posts are their own stream (≤2 a day,
+    // capped in Career.publishBeat), not pundit takes.
+    const isBeat = (p: { authorId?: string }): boolean => kindOf(p) === 'beat'
     const punditPerDay = new Map<number, number>()
     const voicePerDay = new Map<number, number>()
     const clubPerDay = new Map<number, number>()
     const perDay = new Map<number, number>()
+    const beatPerDay = new Map<number, number>()
     for (const p of posts) {
+      if (isBeat(p)) {
+        beatPerDay.set(p.day, (beatPerDay.get(p.day) ?? 0) + 1)
+        continue
+      }
       perDay.set(p.day, (perDay.get(p.day) ?? 0) + 1)
       const bucket = isClub(p) ? clubPerDay : isVoice(p) ? voicePerDay : punditPerDay
       bucket.set(p.day, (bucket.get(p.day) ?? 0) + 1)
@@ -49,6 +58,7 @@ describe('salience harness — one full season', () => {
     for (const n of voicePerDay.values()) expect(n).toBeLessThanOrEqual(VOICE_DAILY_CAP)
     // F5 added a THIRD stream — the official club accounts — with its own cap.
     for (const n of clubPerDay.values()) expect(n).toBeLessThanOrEqual(CLUB_DAILY_CAP)
+    for (const n of beatPerDay.values()) expect(n).toBeLessThanOrEqual(BEAT_LINK_DAILY_CAP)
     for (const n of perDay.values()) {
       expect(n).toBeLessThanOrEqual(DAILY_POST_BUDGET + VOICE_DAILY_CAP + CLUB_DAILY_CAP)
     }

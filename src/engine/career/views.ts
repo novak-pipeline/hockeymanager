@@ -2803,6 +2803,13 @@ export interface CareerSnapshot {
     pundits?: import('@engine/story/pundits').PunditState
   }
   /**
+   * The media layer (docs/MEDIA-BEAT.md): the user club's beat articles, the
+   * injury disclosures the press is working, the GM's public claims, the coach
+   * hot seat. ADDITIVE (added 2026-09, frozen-contract rule): optional, and an
+   * old save loads with an empty state.
+   */
+  media?: import('@engine/story/mediaState').MediaState
+  /**
    * Staff (head coach + AGM) for the user's team.
    * Optional for backward compat; older saves re-generate on load.
    */

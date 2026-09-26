@@ -30,9 +30,18 @@ export type PressSheetKind =
 
 export type PressPersonaId = 'beat' | 'national' | 'homer'
 
-/** Display names shared by the fallback writer and the renderer byline. */
+/**
+ * Display names shared by the fallback writer and the renderer byline.
+ *
+ * `beat` is the CLUB'S beat writer — a different person for every club, named
+ * by mediaCast.beatOutletFor(). The entry here is only the fallback for a
+ * context that does not know the club (an old save's pending presser). Sam
+ * Carver is the Daily Gazette columnist (@CarverNotes) and nothing else: he
+ * used to be this byline too, which made "the beat writer" post as a
+ * columnist (docs/MEDIA-SIMULATION-RESEARCH.md G11).
+ */
 export const PRESS_PERSONA_NAMES: Record<PressPersonaId, { name: string; outlet: string }> = {
-  beat: { name: 'Sam Carver', outlet: 'The Daily Gazette' },
+  beat: { name: 'The beat writer', outlet: 'the club beat' },
   national: { name: 'Vic Mercer', outlet: 'National Hockey Wire' },
   homer: { name: 'Bobby “Buzz” Doyle', outlet: '990 The Fan' },
 }
@@ -50,6 +59,9 @@ export interface PressTeamFacts {
   teamsInLeague: number
   /** Pundits' preseason projection (1 = favourite); absent when unknown. */
   expectedRank?: number
+  /** Club city, for the dateline ("PITTSBURGH —"). Optional; absent = the
+   *  old generic dateline. */
+  city?: string
 }
 
 export interface PressResultFact {
@@ -103,6 +115,13 @@ export interface PressFactArgs {
   leagueLeaders: PressLeaderFact[]
   /** Rolling deterministic career summary maintained by the career layer. */
   sagaSoFar: string
+  /**
+   * How the writing persona frames the GM, from his rapport with the GM
+   * (pundits.coverageTilt). Optional; absent = neutral. An ally gives the
+   * front office the benefit of the doubt after a loss, a critic makes the
+   * loss a verdict on it (docs/MEDIA-BEAT.md §Rapport).
+   */
+  tilt?: 'ally' | 'neutral' | 'critic'
 }
 
 /** The finished, clamped sheet given to the writer (LLM or fallback). */
@@ -130,6 +149,19 @@ export interface PressConferenceState {
   /** Which pundit is asking (drives the persistent relationship). Optional so
    *  old saves with a pending presser load cleanly (default: beat reporter). */
   personaId?: PressPersonaId
+  /** Who is actually asking, by name — the beat persona is a different writer
+   *  for every club. Optional/additive; absent = PRESS_PERSONA_NAMES. */
+  askedBy?: { name: string; outlet: string }
+  /**
+   * Presser v2 (docs/MEDIA-BEAT.md): what the question is about, who it names,
+   * and the answers on offer. Each option carries a tone (the pundit
+   * relationship) and a consequence the career applies. All optional/additive:
+   * a presser without options is the classic tone-button exchange.
+   */
+  topic?: 'blowout' | 'playerPlans' | 'hotSeat' | 'seasonClaim' | 'skid'
+  subjectId?: string
+  subjectName?: string
+  options?: Array<{ id: string; label: string; tone: PressTone; hint: string }>
 }
 
 /* ────────────────────────── saga maintenance ────────────────────────── */
@@ -192,6 +224,7 @@ function clamp(args: PressFactArgs): PressFactArgs {
       args.sagaSoFar.length > SAGA_MAX_CHARS
         ? args.sagaSoFar.slice(args.sagaSoFar.length - SAGA_MAX_CHARS)
         : args.sagaSoFar,
+    ...(args.tilt && args.tilt !== 'neutral' ? { tilt: args.tilt } : {}),
   }
 }
 
