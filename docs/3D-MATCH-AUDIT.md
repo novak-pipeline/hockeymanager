@@ -24,6 +24,23 @@ The current watched-game engine **rolls every outcome on dice first and then ben
 | Renderer + match-screen quick wins (items marked **V** below) | **In progress** on `viewer-fixes` |
 | Stick grip / hands / blade | **In progress** on `stick-grip` |
 
+## Progress (2026-09-27, same day)
+
+| # | Status |
+|---|---|
+| 4 | **Fixed.** The drawn puck tracks the stream (viewer-fixes). The puck is on the DRAWN blade, and sticks are grounded to the ice: puck-to-blade p90 went from 1.7 ft to 0.01 ft. The puck is near regulation size, with a minimum on-screen size. |
+| 10 | **Fixed.** The broadcast camera frames the zone and follows the play's depth fully; carrier in the middle third 87–95%. |
+| 11 | **Fixed** (viewer-fixes): replay score, view-switch restart, 2D DPI, clock frozen in dead time. |
+| 12 | **Fixed.** Screen-space, de-conflicted labels (overlap went from 76% to 0% of frames); hidden during replays and cut-ins. |
+| 13 | **Fixed** for the agent engine: a loose puck rides `puckZ`, and rigs use the engine's `facing` (backward-skating D). |
+| 3 | Renderer done: hit reactions read the engine's force and kind (boards pin, open ice, battle shove). |
+| 18, 20, 21 | **Fixed** (viewer-fixes). |
+| 19 | **Mostly fixed.** 3D takes the director's shots (goal and save replay angles, bench and coach cut-ins, crowd, video board, establishing) and projects players for the on-ice goal tag. Still open: ceremonies (rookie lap, ovation) and the penalty-box set. |
+| 23 | **Fixed.** Faces no longer tinted in team colour. |
+| 29 | **Partly fixed.** Real player rigs stand on the benches (the blocks are gone); the crowd has faces and caps; procedural sound was already in the app. |
+| 28 | Agent engine: 0% overlap. Renderer-side separation for the classic engine was tried and reverted (see memory). |
+| new | Settings → **Match engine**: Classic or New engine (beta), so the owner can play the agent engine now. |
+
 ## Master issue list (ranked by impact on "FM-quality")
 
 Owner: **E** = agent engine, **V** = viewer quick-win agent, **G** = stick/rig agent, **P** = match-day product (not yet started), **A** = animation/assets (M5).
