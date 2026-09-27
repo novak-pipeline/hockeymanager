@@ -316,7 +316,7 @@ function observations(inp: AssistantInput): { pos: Obs[]; neg: Obs[] } {
         id: 'theirG+', weight: 0.8 + gsax * 0.7,
         lines: [
           fill(`{g} is standing on his head — {sv} on {n} shots.`, slots),
-          fill(`Their goalie is the story: {g} has stopped {sv} of what we've thrown at him.`, slots),
+          fill(`Their goalie is the story: {g} is at {sv} on {n} shots, and plenty of them were good looks.`, slots),
         ],
         fix: [
           `Traffic. {g} is seeing every shot — get bodies to the net and go for the rebounds.`,

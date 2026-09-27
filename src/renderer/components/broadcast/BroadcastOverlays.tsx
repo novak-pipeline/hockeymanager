@@ -100,6 +100,8 @@ export function Scorebug(props: {
   ppRemaining: string | null
   /** An instant replay is on screen: tag it (the caller holds the live score/clock). */
   replay?: boolean
+  /** Shots on goal so far (F-24): the TV bug's shot count. */
+  sog?: { home: number; away: number } | null
 }): JSX.Element {
   const { ctx, view } = props
   const per = view ? (view.period > 3 ? 'OT' : `${view.period}${['ST', 'ND', 'RD'][view.period - 1] ?? 'TH'}`) : '1ST'
@@ -121,6 +123,14 @@ export function Scorebug(props: {
         <span className="per">{per}</span>
         <span>{view?.clock ?? '20:00'}</span>
       </div>
+      {props.sog && (
+        <div className="sog" title={`Shots on goal: ${ctx.awayAbbr} ${props.sog.away}, ${ctx.homeAbbr} ${props.sog.home}`}>
+          <span className="lab">SOG</span>
+          <span>{props.sog.away}</span>
+          <span className="sep">·</span>
+          <span>{props.sog.home}</span>
+        </div>
+      )}
       {props.pp && (
         <div className="pp">PP {props.pp.side === 'home' ? ctx.homeAbbr : ctx.awayAbbr} {props.ppRemaining ?? ''}</div>
       )}

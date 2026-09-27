@@ -199,6 +199,8 @@ export interface GoalSummary {
   /** Score after this goal. */
   home: number
   away: number
+  /** The shootout decider (a scoreboard goal, not a player's). */
+  shootout?: boolean
 }
 
 export interface PenaltySummary {
@@ -265,6 +267,8 @@ export interface MatchStats {
   /** Game seconds elapsed at `upTo` (= upTo, clamped to the game). */
   elapsed: number
   ended: boolean
+  /** Who won the shootout, when the game went to one (its goal is in `goals`, flagged). */
+  shootoutWinner: Side | null
 }
 
 function blankTeam(): TeamStats {
@@ -366,6 +370,7 @@ export function computeMatchStats(index: MatchIndex, upTo: number = Infinity): M
   }
 
   let score = { home: 0, away: 0 }
+  let shootoutWinner: Side | null = null
   let period = 1
   let ended = false
 
@@ -430,6 +435,19 @@ export function computeMatchStats(index: MatchIndex, upTo: number = Infinity): M
       case 'goal': {
         const side = sideOf(ev.scorer)
         score = side === 'home' ? { home: score.home + 1, away: score.away } : { home: score.home, away: score.away + 1 }
+        if (isShootoutDecider(ev, absT, shots)) {
+          // The engine records a shootout win as a nominal goal at the end of
+          // OT (fullSim.ts shootout): it counts on the scoreboard, but it is
+          // not a player goal, not a shot, and nobody's goal against.
+          teams[side].goals++
+          shootoutWinner = side
+          goals.push({
+            absT, period: ev.period, clock: periodClock(inPeriod(absT, ev.period)), side,
+            scorerId: ev.scorer as string, scorerName: index.names[ev.scorer as string] ?? (ev.scorer as string),
+            assistIds: [], assistNames: [], strength: ev.strength, home: score.home, away: score.away, shootout: true,
+          })
+          break
+        }
         both(side, ev.period, (t) => {
           t.goals++
           if (ev.strength === 'pp') t.powerPlayGoals++
@@ -575,7 +593,21 @@ export function computeMatchStats(index: MatchIndex, upTo: number = Infinity): M
     penalties,
     elapsed: at,
     ended,
+    shootoutWinner,
   }
+}
+
+/**
+ * The shootout decider as the engine emits it: a goal in overtime with no
+ * shot behind it, at centre ice, unassisted (fullSim.ts `shootout`). A real
+ * overtime goal always follows its own `shot` event.
+ */
+function isShootoutDecider(ev: Extract<GameEvent, { type: 'goal' }>, absT: number, shots: ShotPoint[]): boolean {
+  if (ev.period < 4 || ev.assists.length > 0 || ev.pos.x !== 0 || ev.pos.y !== 0) return false
+  for (let i = shots.length - 1; i >= 0 && absT - shots[i]!.absT <= 4; i--) {
+    if (shots[i]!.shooter === (ev.scorer as string)) return false
+  }
+  return true
 }
 
 /** Current score and whose it is, from the user's chair. */

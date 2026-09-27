@@ -295,6 +295,43 @@ describe('postgame report', () => {
   })
 })
 
+describe('a shootout', () => {
+  // Regulation 1-1, a scoreless OT, then the engine's nominal shootout goal:
+  // period 4, t = 300, centre ice, unassisted, no shot behind it.
+  const base = scripted()
+  const stream: GameStream = [
+    frame(1, 0), lc(1, 0, H), lc(1, 0, A),
+    shot(1, 60, 'h1', 0.8, true), goal(1, 60.4, 'h1', []),
+    { type: 'periodEnd', period: 1, t: 1200 }, frame(2, 0),
+    shot(2, 60, 'a1', 0.8, false), goal(2, 60.4, 'a1', []),
+    { type: 'periodEnd', period: 2, t: 1200 }, frame(3, 0),
+    { type: 'periodEnd', period: 3, t: 1200 }, frame(4, 0),
+    shot(4, 100, 'a2', 0.3, false), save(4, 100.4, HG),
+    { type: 'goal', period: 4, t: 300, scorer: id('a3'), assists: [], strength: 'ev', pos: { x: 0, y: 0 } },
+    { type: 'gameEnd', period: 4, t: 300 },
+  ]
+  const idx = buildMatchIndex({ ...base, stream })
+  const st = computeMatchStats(idx)
+  const pg = buildPostgame(idx)
+
+  it('counts on the scoreboard, not as a player goal, a shot or a goal against', () => {
+    expect(st.shootoutWinner).toBe('away')
+    expect(st.away.goals).toBe(2)
+    expect(st.away.shots).toBe(2)
+    expect(st.players.find((l) => l.id === 'a3')?.goals ?? 0).toBe(0)
+    expect(st.players.find((l) => l.id === HG)!.goalsAgainst).toBe(1)
+    expect(st.goals[st.goals.length - 1]!.shootout).toBe(true)
+  })
+
+  it('the postgame calls it a shootout, with its own column', () => {
+    expect(pg.decidedBy).toBe('shootout')
+    expect(pg.won).toBe(false)
+    expect(pg.shootout).toEqual({ home: 0, away: 1 })
+    expect(pg.goalsByPeriod.away.reduce((a, b) => a + b, 0)).toBe(1)
+    expect(pg.turningPoint?.scorerName).not.toBe('Player A3')
+  })
+})
+
 /* ─────────────────────────── the assistant ─────────────────────────── */
 
 describe('assistant read', () => {

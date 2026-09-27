@@ -42,7 +42,9 @@ export function starsFrom(ratings: PlayerRating[], index: MatchIndex): StarView[
   const byId = new Map(ratings.map((r) => [r.playerId, r]))
   return threeStars(lines).map((s) => {
     const r = byId.get(s.playerId)!
-    return { ...s, side: r.side, drivers: r.drivers.filter((d) => d.delta > 0).map((d) => d.label) }
+    // The stat line already says the goals and assists; the drivers add the rest.
+    const said = /^\d+ (goal|assist)s?$/
+    return { ...s, side: r.side, drivers: r.drivers.filter((d) => d.delta > 0 && !said.test(d.label)).map((d) => d.label) }
   })
 }
 
@@ -153,8 +155,10 @@ export interface PostgameReport {
   userSide: Side
   won: boolean
   decidedBy: 'regulation' | 'overtime' | 'shootout'
-  /** Goals per period, index 0 = 1st; OT periods appended. */
+  /** Goals per period, index 0 = 1st; OT periods appended (the shootout is NOT in here). */
   goalsByPeriod: { home: number[]; away: number[] }
+  /** The shootout column (1 for the winner), when there was one. */
+  shootout: { home: number; away: number } | null
   shotsByPeriod: { home: number[]; away: number[] }
   totals: { home: TeamStats; away: TeamStats }
   goals: GoalSummary[]
@@ -222,15 +226,16 @@ export function buildPostgame(index: MatchIndex): PostgameReport {
   // A level stream at the horn means the shootout decided it (the stream
   // carries no shootout goals); the watched game's result isn't in the stream,
   // so `won` is only claimed when the score says so.
-  const decidedBy: PostgameReport['decidedBy'] = home === away
+  const decidedBy: PostgameReport['decidedBy'] = stats.shootoutWinner || home === away
     ? 'shootout'
     : stats.goals.length > 0 && stats.goals[stats.goals.length - 1]!.period >= 4 ? 'overtime' : 'regulation'
-  const tpGoals: TurningPointGoal[] = stats.goals.map((g) => ({
+  const tpGoals: TurningPointGoal[] = stats.goals.filter((g) => !g.shootout).map((g) => ({
     period: g.period,
     t: g.absT - (index.periodStarts.get(g.period) ?? (g.period - 1) * 1200),
     scorerName: g.scorerName,
     byUser: g.side === userSide,
   }))
+  // Per-period goals exclude the shootout decider; it gets its own SO column.
   const byPeriodGoals = (side: Side): number[] => stats.byPeriod[side].map((t) => t.goals)
   return {
     homeAbbr: index.homeAbbr,
@@ -241,6 +246,9 @@ export function buildPostgame(index: MatchIndex): PostgameReport {
     won: us > them,
     decidedBy,
     goalsByPeriod: { home: byPeriodGoals('home'), away: byPeriodGoals('away') },
+    shootout: stats.shootoutWinner
+      ? { home: stats.shootoutWinner === 'home' ? 1 : 0, away: stats.shootoutWinner === 'away' ? 1 : 0 }
+      : null,
     shotsByPeriod: { home: stats.byPeriod.home.map((t) => t.shots), away: stats.byPeriod.away.map((t) => t.shots) },
     totals: { home: stats.home, away: stats.away },
     goals: stats.goals,
