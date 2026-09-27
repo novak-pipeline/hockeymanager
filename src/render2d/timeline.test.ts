@@ -16,6 +16,45 @@ function buildTimeline(seed: number) {
 }
 
 describe('MatchTimeline', () => {
+  // Regression: the Catmull-Rom cubic term once omitted −p0, so each segment ended at
+  // (p0+2·p2)/2 instead of p2 — skaters sawed backwards inside every 0.25 s frame and
+  // snapped forward at the next one (the 4 Hz jiggle in both renderers).
+  it('interpolated skater paths are continuous across every frame boundary and move forward', () => {
+    const { tl } = buildTimeline(3)
+    const frames = (tl as unknown as { frames: Array<{ absT: number }> }).frames
+    let worstJumpFt = 0
+    let backtracks = 0
+    let checked = 0
+    for (let i = 10; i < frames.length - 10 && checked < 2000; i += 7) {
+      const t = frames[i]!.absT
+      const before = tl.sampleAt(t - 0.001)
+      const after = tl.sampleAt(t + 0.001)
+      const mid = tl.sampleAt(t + 0.125)
+      const next = tl.sampleAt(frames[i + 1]!.absT - 0.001)
+      if (!before || !after || !mid || !next) continue
+      after.homeIds?.forEach((id, k) => {
+        const j = before.homeIds?.indexOf(id) ?? -1
+        if (j < 0 || next.homeIds?.[k] !== id || mid.homeIds?.[k] !== id) return
+        const dx = (after.home[k]!.x - before.home[j]!.x) * 100
+        const dy = (after.home[k]!.y - before.home[j]!.y) * 42.5
+        worstJumpFt = Math.max(worstJumpFt, Math.hypot(dx, dy))
+        // mid-segment must lie between the ends along the direction of travel
+        const sx = (next.home[k]!.x - after.home[k]!.x) * 100
+        const sy = (next.home[k]!.y - after.home[k]!.y) * 42.5
+        const seg = Math.hypot(sx, sy)
+        if (seg > 1.5) {
+          const along = ((mid.home[k]!.x - after.home[k]!.x) * 100 * sx + (mid.home[k]!.y - after.home[k]!.y) * 42.5 * sy) / seg
+          if (along < -0.25) backtracks++
+        }
+        checked++
+      })
+    }
+    expect(checked).toBeGreaterThan(200)
+    // ~0.002 s either side of a knot at ≤ 35 ft/s is well under 0.2 ft
+    expect(worstJumpFt).toBeLessThan(0.5)
+    expect(backtracks / checked).toBeLessThan(0.01)
+  })
+
   it('final score matches the engine outcome', () => {
     const { tl, out } = buildTimeline(3)
     expect(tl.homeFinal).toBe(out.homeGoals)

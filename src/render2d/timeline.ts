@@ -133,7 +133,11 @@ function splineXY(p0: XY, p1: XY, p2: XY, p3: XY, f: number): XY {
   const f2 = f * f
   const f3 = f2 * f
   const c = (a: number, b: number, cc: number, d: number): number =>
-    0.5 * (2 * b + (cc - a) * f + (2 * a - 5 * b + 4 * cc - d) * f2 + (3 * b - 3 * cc + d) * f3)
+    // Uniform Catmull-Rom: passes through b at f=0 and cc at f=1. (The cubic
+    // term used to omit −a, so each segment ended at (a+2cc)/2 instead of cc:
+    // every skater sawed backwards within a frame and snapped forward at the
+    // next one — the 4 Hz "jiggle" in both renderers.)
+    0.5 * (2 * b + (cc - a) * f + (2 * a - 5 * b + 4 * cc - d) * f2 + (-a + 3 * b - 3 * cc + d) * f3)
   return {
     x: clampRink(c(p0.x, p1.x, p2.x, p3.x)),
     y: clampRink(c(p0.y, p1.y, p2.y, p3.y)),
