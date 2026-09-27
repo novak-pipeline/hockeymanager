@@ -24,6 +24,7 @@
 import type { Player } from '@domain'
 
 let currentIndex = 1
+let currentCeiling = 0
 let currentTalentShift = 0
 let askModifier: ((p: Player) => number) | null = null
 
@@ -39,7 +40,7 @@ export function talentShift(): number {
 }
 
 export function setTalentShift(shift: number): void {
-  currentTalentShift = Number.isFinite(shift) ? Math.max(-4, Math.min(10, shift)) : 0
+  currentTalentShift = Number.isFinite(shift) ? Math.max(-4, Math.min(20, shift)) : 0
 }
 
 /** Today's ceiling as a multiple of the ceiling the league opened with. */
@@ -68,4 +69,19 @@ export function askModifierFor(p: Player): number {
 /** A base-year dollar amount in today's money, rounded to $25k. */
 export function indexed(baseDollars: number): number {
   return Math.round((baseDollars * currentIndex) / 25_000) * 25_000
+}
+
+/**
+ * THE MAX CONTRACT. No player may be paid more than 20% of the ceiling (the
+ * NHL's individual maximum). The Career installs today's ceiling; with none
+ * installed there is no clamp (pure-function tests).
+ */
+export const MAX_CONTRACT_SHARE = 0.2
+
+export function setCeiling(ceiling: number): void {
+  currentCeiling = Number.isFinite(ceiling) && ceiling > 0 ? ceiling : 0
+}
+
+export function maxContract(): number {
+  return currentCeiling > 0 ? Math.floor((currentCeiling * MAX_CONTRACT_SHARE) / 25_000) * 25_000 : Infinity
 }

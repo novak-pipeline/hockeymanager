@@ -145,5 +145,10 @@ export interface League {
     /** Mean overall of the league's top 200 NHL players in the base year (the
      *  talent anchor). Optional — set the first time the economy installs. */
     baseTalent?: number
+    /** The talent-points shift that makes the ask curve reproduce the payroll
+     *  the league opened with (the price curve is written for the real NHL; a
+     *  fictional league whose top end sits lower on the same scale is priced by
+     *  standing). Optional — calibrated the first time the economy installs. */
+    priceShift?: number
   }
 }

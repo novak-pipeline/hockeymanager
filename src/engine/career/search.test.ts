@@ -596,7 +596,7 @@ describe('summer takeover (#145) + camps (M3)', () => {
     const before = staged!.getFaHub().rows.some((r) => r.playerId === ptoId)
     const res = staged!.submitTrainingCamp([{ playerId: ptoId, place: 'nhl' }])
     expect(res.ok).toBe(true)
-    expect(res.notes.some((n) => /earns a contract|makes the team/.test(n))).toBe(true)
+    expect(res.notes.join(' | ')).toMatch(/earns a contract|makes the team/)
     if (before) expect(staged!.getFaHub().rows.some((r) => r.playerId === ptoId)).toBe(false)
   })
 

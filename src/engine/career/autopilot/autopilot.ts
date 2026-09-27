@@ -387,7 +387,32 @@ function maintainRoster(ctx: Ctx): void {
   const healthy = squad.rows.filter((p) => !p.injury)
   const skaters = healthy.filter((p) => p.position !== 'G').length
   const goalies = healthy.filter((p) => p.position === 'G').length
-  if (skaters >= 16 && goalies >= 2) return
+  const defence = healthy.filter((p) => p.position === 'D').length
+  // Back under the ceiling once the bodies return: emergency cover (and other
+  // cheap depth) goes down to the farm when the NHL room is over the cap and the
+  // lineup no longer needs him.
+  if (squad.capUsed > squad.salaryCap) {
+    let f = skaters - defence
+    let d = defence
+    let used = squad.capUsed
+    const cheap = healthy
+      .filter((p) => p.position !== 'G' && p.contract.salary <= squad.salaryCap * 0.02)
+      .sort((a, b) => a.overall - b.overall)
+    for (const p of cheap) {
+      if (used <= squad.salaryCap) break
+      const isD = p.position === 'D'
+      if (isD ? d <= 7 : f <= 13) continue
+      const r = ctx.career.sendDown(p.playerId)
+      if (!r.ok) continue
+      used -= p.contract.salary
+      if (isD) d--
+      else f--
+      log(ctx, { kind: 'callup', summary: `Sent ${p.name} (${p.overall} OVR ${p.position}) to the farm`, drivers: ['over the cap with the injured back'], result: 'sent down', ok: true })
+    }
+  }
+  // The lineup needs 12 F / 6 D / 2 G — a skater count alone hid a club with
+  // eight healthy defencemen and eleven forwards.
+  if (skaters >= 16 && goalies >= 2 && skaters - defence >= 12 && defence >= 6) return
   const ahl = guarded(ctx, 'getAhlSquadView', () => ctx.career.getAhlSquadView())
   const pool = ahl?.rows ? [...ahl.rows] : []
   const wantG = goalies < 2
@@ -410,9 +435,11 @@ function maintainRoster(ctx: Ctx): void {
   // Nobody in the system to recall at a position the lineup can't do without
   // (a trade took the backup goalie): do what the GM's AGM button does — sign
   // emergency cover off the market rather than forfeit the next game.
-  if (goalies + recalledG < 2) {
+  // Same for skaters: a capped-out club with an empty farm signs the bodies
+  // it needs to ice twelve forwards and six defence.
+  if (goalies + recalledG < 2 || skaters + recalled - recalledG < 18 || skaters - defence < 12 || defence < 6) {
     const r = guarded(ctx, 'signEmergencyCover', () => ctx.career.signEmergencyCover())
-    if (r?.ok) log(ctx, { kind: 'callup', summary: `Signed emergency cover: ${r.signed.join(', ')}`, drivers: ['no goalie left to recall'], result: r.message, ok: true })
+    if (r?.ok) log(ctx, { kind: 'callup', summary: `Signed emergency cover: ${r.signed.join(', ')}`, drivers: [goalies + recalledG < 2 ? 'no goalie left to recall' : 'not enough healthy skaters in the organisation'], result: r.message, ok: true })
   }
 }
 

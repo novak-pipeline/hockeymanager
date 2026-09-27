@@ -6,14 +6,15 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { asTeamId, type DraftPick, type Player, type PlayerId, type Team, type TeamId } from '@domain'
 import { Rng } from '@engine/shared/rng'
-import { askTerms, aiFloorTopUp, aiFreeAgencyDay, aiResignDay, capFloorFor, capUsedFor, leagueMinSalary } from './contracts'
-import { setAskModifier, setWageIndex, wageIndex } from './economy'
+import { askTerms, aiFloorTopUp, CAP_GROWTH, aiFreeAgencyDay, aiResignDay, capFloorFor, capUsedFor, leagueMinSalary } from './contracts'
+import { MAX_CONTRACT_SHARE, setAskModifier, setCeiling, setWageIndex, wageIndex } from './economy'
 import { buildGmPersona, deriveLivePosture, scoutingDeptFor, type GmPersona, type PostureKind } from './gmPersona'
 import { generateLeagueDeal, type MarketClub } from './aiMarket'
 import { makePick, makePlayer, makeTeam } from './trades.test.fixtures'
 
 afterEach(() => {
   setWageIndex(1)
+  setCeiling(0)
   setAskModifier(null)
 })
 
@@ -59,6 +60,32 @@ describe('the wage index', () => {
     expect(askTerms(p, 2030).salary).toBeGreaterThan(base * 1.15)
     setAskModifier(() => 9) // clamped to 1.35
     expect(askTerms(p, 2030).salary).toBeLessThanOrEqual(base * 1.36)
+  })
+})
+
+describe('the cap binds for twenty seasons', () => {
+  it('a star’s ask holds its share of the ceiling as the cap compounds; the max contract caps the elite', () => {
+    const cap0 = 88e6
+    const star = makePlayer('star', 86, { age: 26 })
+    const elite = makePlayer('elite', 96, { age: 26 })
+    const shares: number[] = []
+    for (let y = 0; y <= 20; y++) {
+      const cap = cap0 * CAP_GROWTH ** y
+      setWageIndex(cap / cap0)
+      setCeiling(cap)
+      const share = askTerms(star, 2030).salary / cap
+      shares.push(share)
+      // A star (a top-line player, not the league's best) asks ~10–13% of the cap.
+      expect(share).toBeGreaterThan(0.10)
+      expect(share).toBeLessThan(0.13)
+      // Nobody asks more than the NHL's individual maximum.
+      expect(askTerms(elite, 2030).salary).toBeLessThanOrEqual(cap * MAX_CONTRACT_SHARE)
+      // The minimum moves with the cap too.
+      expect(leagueMinSalary() / cap).toBeGreaterThan(0.008)
+      expect(leagueMinSalary() / cap).toBeLessThan(0.0095)
+    }
+    // No drift: year twenty prices the star like year one.
+    expect(Math.abs(shares[20]! - shares[0]!)).toBeLessThan(0.004)
   })
 })
 

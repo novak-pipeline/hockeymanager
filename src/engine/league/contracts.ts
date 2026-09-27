@@ -29,7 +29,7 @@
 import type { DraftPick, Player, PlayerId, Team, TeamId } from '@domain'
 import { ratedOverall } from '@engine/ratings/composites'
 import { deriveSeed, Rng } from '@engine/shared/rng'
-import { askModifierFor, indexed, talentShift, wageIndex } from './economy'
+import { askModifierFor, indexed, maxContract, talentShift, wageIndex } from './economy'
 
 /** Cheapest legal contract in BASE-YEAR dollars; asks never fall below the
  *  indexed value ({@link leagueMinSalary}). */
@@ -187,7 +187,7 @@ export function askTerms(player: Player, year: number): { salary: number; years:
   // had (a contract-year breakout, a ring, a slump) — see economy.ts.
   m *= wageIndex() * askModifierFor(player)
 
-  const salary = Math.max(leagueMinSalary(), roundTo25k(m * 1e6))
+  const salary = Math.max(leagueMinSalary(), Math.min(maxContract(), roundTo25k(m * 1e6)))
   const years = askYears(player.age, ovr, rng)
   return { salary, years }
 }

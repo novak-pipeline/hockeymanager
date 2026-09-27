@@ -173,7 +173,7 @@ import {
 } from '@engine/league/gmPersona'
 import { generateLeagueDeal, type LeagueDeal, type MarketClub, type MarketWindow } from '@engine/league/aiMarket'
 import { WorldTelemetry, type AiTradeShape } from '@engine/league/worldTelemetry'
-import { indexed, setAskModifier, setTalentShift, setWageIndex, wageIndex } from '@engine/league/economy'
+import { indexed, setAskModifier, setCeiling, setTalentShift, setWageIndex, wageIndex } from '@engine/league/economy'
 import {
   buildBoardMeeting,
   buildSeasonReviewScene,
@@ -14840,10 +14840,16 @@ export class Career {
    * telemetry; a quiet wire line when a club had to pay a premium to comply.
    */
   private enforceAiCapFloor(): void {
+    // A man in the GM's camp on a tryout is spoken for until cut day.
+    const onTryout = new Set(
+      this.trainingCamp && !this.trainingCamp.resolved
+        ? this.trainingCamp.decisions.filter((d) => d.tryout).map((d) => d.playerId)
+        : [],
+    )
     const res = aiFloorTopUp({
       teams: this.data.teams,
       players: this.data.players,
-      freeAgentIds: this.faPool,
+      freeAgentIds: this.faPool.filter((id) => !onTryout.has(id as string)),
       userTeamId: this.userTeamId,
       year: this.year,
       floorOf: (t) => capFloorFor(t.finances.salaryCap),
@@ -14888,19 +14894,63 @@ export class Career {
     const cap = this.leagueCeiling()
     if (!league.economy || !(league.economy.baseCap > 0)) league.economy = { baseCap: cap }
     setWageIndex(cap / league.economy.baseCap)
+    setCeiling(cap)
     if (this.talentYear !== this.year) {
       this.talentYear = this.year
       this.talentNow = this.leagueTopTalent()
     }
+    if (league.economy.priceShift === undefined || !Number.isFinite(league.economy.priceShift)) {
+      // First install (a new career, or a save from before the calibration):
+      // anchor today's talent and find the shift at which the ask curve pays
+      // today's rosters what they are actually paid. The imported NHL lands
+      // at zero (clamped); the fictional league (whose top end sits ~15 points lower on
+      // the same scale) near +9 — otherwise every re-signing there comes in at
+      // half the money and payrolls sag toward half the ceiling.
+      league.economy.baseTalent = this.talentNow
+      setAskModifier(null)
+      league.economy.priceShift = this.calibratePriceShift()
+    }
     if (!(league.economy.baseTalent && league.economy.baseTalent > 0)) league.economy.baseTalent = this.talentNow
-    setTalentShift(league.economy.baseTalent - this.talentNow)
+    setTalentShift(league.economy.priceShift + league.economy.baseTalent - this.talentNow)
     setAskModifier((p) => this.askPerformanceFactor(p))
+  }
+
+  /** The talent shift at which Σ ask ≈ Σ salary over today's NHL rosters
+   *  (bisection; wage index as installed, neutral ask modifier). */
+  private calibratePriceShift(): number {
+    const roster: Player[] = []
+    let paid = 0
+    for (const tid of this.data.league.teams) {
+      for (const id of this.data.teams.get(tid)?.roster ?? []) {
+        const p = this.data.players.get(id)
+        if (p && p.contract.salary > 0) { roster.push(p); paid += p.contract.salary }
+      }
+    }
+    if (roster.length < 20 || paid <= 0) return 0
+    const asked = (shift: number): number => {
+      setTalentShift(shift)
+      let t = 0
+      for (const p of roster) t += askTerms(p, this.year).salary
+      return t
+    }
+    let lo = -4
+    let hi = 20
+    for (let i = 0; i < 14; i++) {
+      const mid = (lo + hi) / 2
+      if (asked(mid) < paid) lo = mid
+      else hi = mid
+    }
+    setTalentShift(0)
+    // Only a league priced BELOW the curve is lifted; the real NHL (and anything
+    // richer) keeps the curve as written.
+    return Math.max(0, Math.round(((lo + hi) / 2) * 100) / 100)
   }
 
   private talentYear = -1
   private talentNow = 0
 
-  /** Mean rated overall of the 200 best players on NHL rosters (the talent anchor). */
+  /** Mean rated overall of the league's best ~6 players per club (200 in a
+   *  32-club league) on NHL rosters — the talent anchor. */
   leagueTopTalent(): number {
     const ovrs: number[] = []
     for (const tid of this.data.league.teams) {
@@ -14911,7 +14961,7 @@ export class Career {
       }
     }
     ovrs.sort((a, b) => b - a)
-    const top = ovrs.slice(0, 200)
+    const top = ovrs.slice(0, Math.max(40, Math.round(6.25 * this.data.league.teams.length)))
     return top.length ? top.reduce((a, b) => a + b, 0) / top.length : 70
   }
 
