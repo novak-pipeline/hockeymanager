@@ -154,8 +154,8 @@ const GROUNDED_CLIPS = new Set(['hockey_stop', 'skate_start', 'stickhandle'])
 // the stream (faceoff resets, a stoppage) becomes a skate, never a snap.
 const MAX_RENDER_SPEED = 40   // ft/s
 const ARRIVE_SPEED = 30       // skating out from the bench gate
-const DEPART_SPEED = 22       // coasting off to the bench
-const DEPART_TIMEOUT_S = 5    // a departing player steps off the ice after this
+const DEPART_SPEED = 30       // heading off to the bench
+const DEPART_TIMEOUT_S = 2.2  // a departing player is off the ice by this (a change is quick)
 // Rigs per team: up to 6 skaters on the ice + 6 skating off during a full change.
 const SKATER_RIGS_PER_TEAM = 12
 // Body yaw eases toward its target on a critically damped spring (no chasing a
@@ -1689,7 +1689,8 @@ export class Rink3dRenderer implements MatchRenderer {
         const exitX = gate.x + ((pose.departSeq % 5) - 2) * 2.6
         this.updatePose(pose, exitX, gate.z, dt, simDt, puckWx, puckWz, DEPART_SPEED)
         const home = Math.hypot(pose.worldX.pos - exitX, pose.worldZ.pos - gate.z)
-        if (home < 2 || pose.departT > DEPART_TIMEOUT_S) {
+        // he hops the boards once he is close to the bench (not skating up to a point)
+        if (home < 7 || pose.departT > DEPART_TIMEOUT_S) {
           // through the gate: from next frame he stands on the bench (idle)
           pose.mode = 'idle'
           pose.playerId = null
@@ -1722,6 +1723,19 @@ export class Rink3dRenderer implements MatchRenderer {
       }
       this.updatePose(pose, tx, tz, dt, simDt, puckWx, puckWz, MAX_RENDER_SPEED, facing?.[k])
     })
+    // Never too many men: at most one departing skater may still be on the
+    // ice alongside the full unit (the real change rule is within ~5 ft of the
+    // bench). Extras hop off — the ones nearest the bench first.
+    const onIce = poses.filter((p) => p.rig.visible && (p.mode === 'play' || p.mode === 'arriving')).length
+    const leaving = poses
+      .filter((p) => p.rig.visible && p.mode === 'departing')
+      .sort((a, b) => Math.hypot(a.worldX.pos - gate.x, a.worldZ.pos - gate.z) - Math.hypot(b.worldX.pos - gate.x, b.worldZ.pos - gate.z))
+    const allowed = Math.max(0, Math.min(1, 6 - onIce))
+    for (const p of leaving.slice(0, Math.max(0, leaving.length - allowed))) {
+      p.mode = 'idle'
+      p.playerId = null
+      p.labelOn = false
+    }
   }
 
   private updatePose(pose: PlayerPose, wx: number, wz: number, dt: number, simDt: number, puckWx: number, puckWz: number, maxSpeed = MAX_RENDER_SPEED, simFacing?: number): void {
