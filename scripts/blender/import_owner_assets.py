@@ -867,6 +867,77 @@ def key_clip(arm, name, tr, rest_b):
     return act
 
 
+# ── 8: bake the Blender-authored action catalogue onto the owner skeleton ──
+#
+# The owner files bring skating, an idle and one shot. Every other action
+# (wrist / snap / backhand / tip shots, passes, dekes, stickhandling, pokes,
+# checks, hit reactions, faceoffs, celebrations) is authored as key poses in
+# scripts/blender/clips.py. Playing those Blender clips on the owner rig and
+# re-gripping the hands by runtime IK put the top hand at the helmet (the
+# owner's arms are shorter, his stick longer). So they are RE-SOLVED here on
+# the owner's own proportions: posekit runs with this skeleton's rest offsets
+# and segment lengths (auto hip height, arm IK with hinge elbows, grip reach),
+# with the gloves turned onto the shaft the way the owner's own idle holds it,
+# and keyed as finished owner-space clips. The renderer plays them with the
+# clip's own arms (ownArms) and only touches the grips up at runtime.
+
+def measure_grip(tr):
+    """Per hand, from the owner idle's first frame: the shaft direction and the
+    palm point (where the shaft passes the hand) in the hand's own frame,
+    renderer space. A hand that isn't on the stick borrows the other's, mirrored."""
+    if tr is None or not tr['frames'][0]['stick']:
+        return {'L': None, 'R': None}, {}
+    fr = tr['frames'][0]
+    heel, shaft, _ = fr['stick']
+    out, dist = {}, {}
+    for L, i in (('L', 0), ('R', 1)):
+        p = fr['probe'][i]
+        t = (p - heel).dot(shaft)
+        g = heel + shaft * t
+        Dinv = fr['D']['hand_' + L].inverted()
+        palm = rig.b2r(Dinv @ (g - p))
+        axis = rig.b2r(Dinv @ shaft).normalized()
+        dist[L] = round((g - p).length, 3)
+        out[L] = {'palm': palm, 'axis': axis}
+    for L, O in (('L', 'R'), ('R', 'L')):
+        if dist[L] > 0.6 and dist[O] <= 0.6:
+            m = out[O]
+            out[L] = {'palm': Vector((-m['palm'].x, m['palm'].y, m['palm'].z)), 'axis': Vector((-m['axis'].x, m['axis'].y, m['axis'].z))}
+    return out, dist
+
+
+def bake_actions(arm, joints_b, covered, idle_tr, stick_len):
+    import posekit
+    import clips as authored
+    jr = {t: rig.b2r(joints_b[t]) for t in BONE_NAMES}
+    off = {}
+    for t in BONE_NAMES:
+        p = PARENT[t]
+        off[t] = tuple(jr[t] - (jr[p] if p else Vector((0, 0, 0))))
+    ln = lambda b: Vector(off[b]).length  # noqa: E731
+    dims = {'upperArm': ln('forearm_L'), 'forearm': ln('hand_L'), 'thigh': ln('shin_L'), 'shin': ln('foot_L'), 'skate': jr['foot_L'].y}
+    if stick_len:
+        dims['stickLen'] = stick_len
+    grip, dist = measure_grip(idle_tr)
+    rig.set_profile(off, dims)
+    posekit.GRIP.update(grip)
+    posekit.STICK['fullFrame'] = True
+    authored.SKIP = set(covered) | {'skate_glide'}
+    before = {t.name for t in arm.animation_data.nla_tracks} if arm.animation_data else set()
+    try:
+        authored.author_all(arm, False)
+    finally:
+        rig.reset_profile()
+        posekit.GRIP.update({'L': None, 'R': None})
+        posekit.STICK['fullFrame'] = False
+        authored.SKIP = set()
+    baked = sorted(t.name for t in arm.animation_data.nla_tracks if t.name not in before)
+    REPORT['baked'] = {'clips': baked, 'dims': {k: round(v, 3) for k, v in dims.items()}, 'gripDistFt': dist}
+    with open(os.path.join(OUT, f'{ROLE}_grip.json'), 'w', encoding='utf-8') as fh:
+        json.dump({L: ({'palm': [round(c, 4) for c in g['palm']], 'axis': [round(c, 4) for c in g['axis']]} if g else None) for L, g in grip.items()}, fh)
+    print('BAKED', len(baked), 'clips; grip dist', dist)
+
+
 # ── main ───────────────────────────────────────────────────────────────────
 
 def main():
@@ -983,6 +1054,7 @@ def main():
     files = sorted(f for f in os.listdir(anim_dir) if f.lower().endswith(('.fbx', '.glb', '.gltf'))) if os.path.isdir(anim_dir) else []
     clips_rep = {}
     covered = {}
+    idle_tr = None
     for f in files:
         stem = os.path.splitext(f)[0]
         if stem.lower().startswith('sk_'):
@@ -997,6 +1069,8 @@ def main():
             continue
         if slots == ['shot*']:
             slots = shot_kind(tr)
+        if 'skate_idle' in slots:
+            idle_tr = tr
         lift = ground_lock(tr, joints_b['foot_L'].z, sf['grip'] * s if sf else None, sf['bladeLocal'] if sf else None) if not GOALIE else 0.0
         rep = {'slots': slots, 'frames': len(tr['frames']), 'rootTravelStrippedFt': tr['travelFt'], 'netYawStrippedDeg': tr['yawDeg'], 'groundLockFt': lift,
                'stick': tr['frames'][0]['stick'] is not None}
@@ -1016,6 +1090,8 @@ def main():
         clips_rep[stem] = rep
     REPORT['clips'] = clips_rep
     REPORT['covered'] = covered
+    if not GOALIE:
+        bake_actions(arm, joints_b, covered, idle_tr, sf['length'] * s if sf else None)
 
     keep = {tr.strips[0].action for tr in arm.animation_data.nla_tracks} if arm.animation_data else set()
     for a in list(bpy.data.actions):

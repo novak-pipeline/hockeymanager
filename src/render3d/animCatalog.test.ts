@@ -10,6 +10,7 @@ import {
   maskWeight,
   envelope,
   shotClipFor,
+  SHOT_VARIANTS,
   saveClipFor,
   distToBoards,
   hitPlan,
@@ -85,6 +86,20 @@ describe('shot selection', () => {
     expect(shotClipFor(55, null)).toBe('shot_slap')
     expect(shotClipFor(18, null)).toBe('shot_wrist')
     expect(shotClipFor(18, 3)).toBe('shot_wrist') // the pass was long ago
+  })
+  it('every engine shot type has its own clips, variants picked stably per player + shot', () => {
+    for (const [type, clips] of Object.entries(SHOT_VARIANTS)) {
+      const seen = new Set<string>()
+      for (let i = 0; i < 40; i++) {
+        const c = shotClipFor(30, null, 0.8, type, `p${i}@${i * 3.1}`)
+        expect(clips).toContain(c)
+        expect(shotClipFor(30, null, 0.8, type, `p${i}@${i * 3.1}`)).toBe(c)
+        seen.add(c)
+      }
+      expect(seen.size).toBe(clips.length) // every variant actually shows up
+      for (const c of clips) expect(SKATER_CLIPS).toContain(c)
+    }
+    expect(shotClipFor(12, null, 0.8, 'deflection')).toBe('shot_tip')
   })
 })
 
@@ -213,7 +228,7 @@ describe('cue planning (choreographer)', () => {
     const plans = planCues(cues)
     const shots = plans.filter((p) => p.cue.kind === 'shot')
     expect(shots[0]!.clip).toBe('shot_onetimer') // 0.4 s after the pass to him
-    expect(shots[1]!.clip).toBe('shot_slap') // from the point
+    expect(shots[1]!.clip).toMatch(/^shot_slap/) // from the point (either slap variant)
     expect(shots[0]!.lead).toBeCloseTo(CLIPS.shot_onetimer!.contact!)
     const hits = plans.filter((p) => p.cue.kind === 'hit')
     expect(hits[0]!.clip).toBe('check_boards') // y 0.98 → against the boards
