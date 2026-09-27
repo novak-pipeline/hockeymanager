@@ -117,6 +117,26 @@ function crease(ctx: CanvasRenderingContext2D, sign: 1 | -1): void {
   ctx.restore()
 }
 
+/**
+ * The home club's logo at centre ice (a mod logo pack), painted under the ice:
+ * fits a ~26 ft circle, slightly faded, oriented to read from the main
+ * (-Z) broadcast side.
+ */
+function clubCenterLogo(ctx: CanvasRenderingContext2D, img: CanvasImageSource & { width: number; height: number }): void {
+  const cx0 = X(0)
+  const cz0 = Z(0)
+  const box = 26 * PX
+  const k = Math.min(box / img.width, box / img.height)
+  const w = img.width * k
+  const h = img.height * k
+  ctx.save()
+  ctx.globalAlpha = 0.88
+  ctx.translate(cx0, cz0)
+  ctx.rotate(Math.PI)
+  ctx.drawImage(img, -w / 2, -h / 2, w, h)
+  ctx.restore()
+}
+
 /** Fictional center-ice league roundel — shipped DB is fictional by default. */
 function centerLogo(ctx: CanvasRenderingContext2D): void {
   const cx0 = X(0)
@@ -235,7 +255,7 @@ function boardSnow(ctx: CanvasRenderingContext2D, alpha: number): void {
 }
 
 /** Paint the full rink color texture. */
-export function buildIceCanvas(): HTMLCanvasElement {
+export function buildIceCanvas(opts: { centerLogo?: (CanvasImageSource & { width: number; height: number }) | null } = {}): HTMLCanvasElement {
   const canvas = document.createElement('canvas')
   canvas.width = W
   canvas.height = H
@@ -272,7 +292,8 @@ export function buildIceCanvas(): HTMLCanvasElement {
   for (const bx of [-25, 25]) line(ctx, bx, -RINK_HALF_W, bx, RINK_HALF_W, 1, BLUE)
   for (const gx of [-89, 89]) line(ctx, gx, -RINK_HALF_W, gx, RINK_HALF_W, 2 * INCH, RED)
 
-  centerLogo(ctx)
+  if (opts.centerLogo && opts.centerLogo.width > 0) clubCenterLogo(ctx, opts.centerLogo)
+  else centerLogo(ctx)
   circle(ctx, 0, 0, 15, 2 * INCH, BLUE)
   disc(ctx, 0, 0, 0.5, BLUE)
 

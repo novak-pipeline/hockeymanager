@@ -31,6 +31,11 @@ function resolveLogo(name: string): string | null | Promise<string | null> {
   return p
 }
 
+/** The team's logo data URL from the mod logo pack, or null (non-hook; cached). */
+export async function teamLogoUrl(name: string): Promise<string | null> {
+  return await resolveLogo(name)
+}
+
 /** Data URL of the team's real logo, or null (placeholder tile). `name` may be
  *  undefined when the provider has no entry (world teams, tests). */
 function useLogo(name: string | undefined): string | null {
