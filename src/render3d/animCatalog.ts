@@ -85,7 +85,7 @@ export const CLIPS: Record<string, ClipMeta> = {
 
   // owner-import slots (the Blender fallback covers them otherwise)
   skate_idle: { mask: 'lower', hands: 'stick', loop: true, fadeIn: 0.3, fadeOut: 0.3, ownerOnly: true, fallback: 'skate_glide' },
-  skate_start: { mask: 'lower', hands: 'stick', fadeIn: 0.2, fadeOut: 0.3, ownerOnly: true },
+  skate_start: { mask: 'full', hands: 'stick', fadeIn: 0.2, fadeOut: 0.3, ownerOnly: true },
   g_pad_save_L: { mask: 'full', hands: 'clip', contact: f(4), fadeIn: 0.05, fadeOut: 0.3, goalie: true, ownerOnly: true, fallback: 'g_pad_save' },
   g_pad_save_R: { mask: 'full', hands: 'clip', contact: f(4), fadeIn: 0.05, fadeOut: 0.3, goalie: true, ownerOnly: true, fallback: 'g_pad_save' },
   g_skate_fwd: { mask: 'lower', hands: 'clip', loop: true, fadeIn: 0.3, fadeOut: 0.3, goalie: true, ownerOnly: true },

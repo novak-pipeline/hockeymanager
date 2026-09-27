@@ -141,13 +141,15 @@ const r = await page.evaluate(async (secs) => {
           const heel = { x: e[12], y: e[13], z: e[14] }
           const len = Math.hypot(e[4], e[5], e[6]) || 1
           const dir = { x: e[4] / len, y: e[5] / len, z: e[6] / len }
-          for (const h of ['hand_R', 'hand_L']) {
+          // owner rigs skate one-handed in their authored cycles: only the top hand must hold on
+          for (const h of p.rig.dims && p.rig.dims.upperArm !== 1.05 ? ['hand_R'] : ['hand_R', 'hand_L']) {
             const hp = wpos(B[h])
             const d = { x: hp.x - heel.x, y: hp.y - heel.y, z: hp.z - heel.z }
             const t = d.x * dir.x + d.y * dir.y + d.z * dir.z
             const off = Math.hypot(d.x - dir.x * t, d.y - dir.y * t, d.z - dir.z * t)
             handChecks++
-            if (off > 0.3) { handOff++; const k = `${h} [${[...(p.layer?.playing ?? [])].join('+') || '-'}] ${p.mode ?? ''}`; hctx[k] = (hctx[k] ?? 0) + 1 }
+            // owner hands grip with the palm: the wrist joint sits ~0.3 ft off the shaft
+            if (off > (p.rig.dims && p.rig.dims.upperArm !== 1.05 ? 0.55 : 0.3)) { handOff++; const k = `${h} [${[...(p.layer?.playing ?? [])].join('+') || '-'}] ${p.mode ?? ''}`; hctx[k] = (hctx[k] ?? 0) + 1 }
           }
         }
       }

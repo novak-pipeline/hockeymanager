@@ -75,7 +75,7 @@ if (q.get('fly') === '1') {
   r.setSpeed(0.05)
   r.play()
 }
-// ?closeup=home:0,14,35[,h[,lookY]] pins a debug camera `dist` ft from one player at azimuth `az`° (0 = his front)
+// ?closeup=home:0,14,35[,h[,lookY]] (&solo=1 hides everyone else) pins a debug camera `dist` ft from one player at azimuth `az`° (0 = his front)
 if (q.has('closeup')) {
   const [who, dist, az, hgt, lookY] = q.get('closeup')!.split(',')
   const [team, idx] = who!.split(':')
@@ -90,9 +90,15 @@ if (q.has('closeup')) {
   const all = () => [...R.homePoses, ...R.awayPoses, R.homeGoaliePose, R.awayGoaliePose] as unknown as Array<{ playerId: string | null; rig: { visible: boolean }; worldX: { pos: number }; worldZ: { pos: number }; angle: number }>
   const pick = () =>
     who === 'actor' ? all().find((p) => p.playerId === actorId && p.rig.visible)! : idx === 'g' ? (team === 'home' ? R.homeGoaliePose : R.awayGoaliePose) : (team === 'home' ? R.homePoses : R.awayPoses).filter((p) => p.rig.visible)[Number(idx)]!
+  const solo = q.get('solo') === '1'
   const aim = () => {
     const p = pick()
     if (!p) return
+    // ?solo=1: hide every other athlete (and labels) so close-ups aren't blocked
+    if (solo) for (const o of all() as unknown as Array<{ rig: { mesh: { visible: boolean } }; labelSprite?: { visible: boolean } }>) {
+      o.rig.mesh.visible = o === (p as unknown)
+      if (o.labelSprite) o.labelSprite.visible = false
+    }
     const a = p.angle + (Number(az ?? 30) * Math.PI) / 180
     const d = Number(dist ?? 14)
     const h = Number(hgt ?? 4.5)
