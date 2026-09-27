@@ -74,6 +74,7 @@ import { ATLAS_GRID, buildAtlasCanvas, paintJerseySlot } from './textures'
 import { RINK_HALF_W } from './iceCanvas'
 import { assignRigs, capStep, type RigMode } from './lineChange'
 import { layoutLabels, type LabelRequest, type PlacedLabel } from '@render2d/labelLayout'
+import type { MomentCue, ShotCue } from '@render2d/broadcast/types'
 
 // ── Name labels (screen space, E1 / F-18) ──────────────────────────────────
 // Only the carrier and the players near the puck get a name — like FM — at a
@@ -630,7 +631,8 @@ export class Rink3dRenderer implements MatchRenderer {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, W, H)
     this.labelRects = []
-    if (!this.timeline) return
+    // TV shows no name plates on a replay or a cut-in (the overlays carry names)
+    if (!this.timeline || this.shot) return
 
     const carrier = this.carrierMarkPose
     const cands: Array<{ p: PlayerPose; pri: number }> = []
@@ -1004,6 +1006,10 @@ export class Rink3dRenderer implements MatchRenderer {
   }
 
   private currentTarget(): ReturnType<typeof broadcastFraming> {
+    if (this.shot) {
+      const t = this.shotTarget(this.shot.cue)
+      if (t) return t
+    }
     if (this.camPreset === 'broadcast') return broadcastFraming(this.playFocusX, this.playFocusZ, this.leadX, this.camera.aspect)
     const t = cameraTargetFor(this.camPreset, this.playFocusX, {
       endzoneActiveSide: this.endzoneActiveSide,
@@ -1111,6 +1117,85 @@ export class Rink3dRenderer implements MatchRenderer {
     this.playFocusZ = puckWz
     this.celebration = null
     this.snapCameraToTarget()
+  }
+
+  // ── Broadcast hand-off (render2d/broadcast/types: BroadcastShotConsumer + BroadcastProjector) ──
+  // The director's camera requests. Every shot is a CUT in and a cut back out,
+  // then a locked-off (steady) frame — impact comes from the overlays, never shake.
+  private shot: { cue: ShotCue; until: number } | null = null
+  private readonly projTmp = new THREE.Vector3()
+
+  requestShot(cue: ShotCue): boolean {
+    if (cue.shot === 'broadcast') {
+      if (this.shot) {
+        this.shot = null
+        this.snapCameraSprings()
+      }
+      return true
+    }
+    if (!this.shotTarget(cue)) return false
+    this.shot = { cue, until: performance.now() + cue.holdMs }
+    this.snapCameraSprings()
+    return true
+  }
+
+  /** Ceremonies (rookie lap, ovation) need skater choreography — not yet: the overlay caption carries them. */
+  playMoment(_cue: MomentCue): boolean {
+    return false
+  }
+
+  /** A player's head in CSS px on the host (for the on-ice goal / assist tag); null when off the ice or off camera. */
+  projectPlayer(playerId: string): { x: number; y: number } | null {
+    const p = this.allPoses().find((q) => q.playerId === playerId && q.rig.visible && q.mode !== 'idle')
+    if (!p) return null
+    const v = this.projTmp.set(p.worldX.pos, p.labelY || 6.5, p.worldZ.pos).project(this.camera)
+    if (v.z > 1 || Math.abs(v.x) > 1.05 || Math.abs(v.y) > 1.05) return null
+    const el = this.renderer.domElement
+    return { x: ((v.x + 1) / 2) * el.clientWidth, y: ((1 - v.y) / 2) * el.clientHeight }
+  }
+
+  /** Where each director shot stands (world ft; +z = the benches' side, the main camera looks toward +z). */
+  private shotTarget(cue: ShotCue): { px: number; py: number; pz: number; lx: number; ly: number; lz: number; fov: number } | null {
+    const end = this.playFocusX >= 0 ? 1 : -1
+    const side = cue.side ?? 'home'
+    switch (cue.shot) {
+      case 'goalReplay':
+        // high in the corner behind the goal line, looking out at the play
+        return { px: end * 96, py: 12, pz: -16, lx: end * 72, ly: 1, lz: this.playFocusZ * 0.5, fov: 34 }
+      case 'saveReplay': {
+        // the goalie at the end the play is in
+        const gs = [this.homeGoaliePose, this.awayGoaliePose].filter((q): q is PlayerPose => !!q && q.rig.visible)
+        const g = gs.sort((a, b) => Math.abs(a.worldX.pos - this.playFocusX) - Math.abs(b.worldX.pos - this.playFocusX))[0]
+        const gx = g?.worldX.pos ?? end * 86
+        const gz = g?.worldZ.pos ?? 0
+        const ge = gx >= 0 ? 1 : -1
+        return { px: gx - ge * 26, py: 7, pz: gz - 12, lx: gx, ly: 2.2, lz: gz, fov: 26 }
+      }
+      case 'benchReaction':
+      case 'coachCloseup': {
+        const bx = BENCH_GATE[side].x
+        const coach = cue.shot === 'coachCloseup'
+        return { px: bx + (coach ? 4 : 0), py: coach ? 6.5 : 7, pz: RINK_HALF_W - 22, lx: bx, ly: coach ? 5.8 : 4.6, lz: RINK_HALF_W + (coach ? 6.5 : 4.9), fov: coach ? 14 : 24 }
+      }
+      case 'crowd':
+        return { px: this.playFocusX * 0.3, py: 10, pz: -4, lx: this.playFocusX * 0.3 + (side === 'home' ? -18 : 18), ly: 22, lz: RINK_HALF_W + 40, fov: 30 }
+      case 'jumbotron':
+        return { px: 0, py: 42, pz: -78, lx: 0, ly: 60, lz: 0, fov: 20 }
+      case 'faceoffClose':
+        return { px: 0, py: 5.5, pz: -21, lx: 0, ly: 1.4, lz: 0, fov: 22 }
+      case 'lineups':
+      case 'anthem': {
+        const bl = side === 'home' ? -25 : 25
+        return { px: bl, py: 6, pz: -36, lx: bl, ly: 3.2, lz: 6, fov: cue.shot === 'anthem' ? 35 : 28 }
+      }
+      case 'establishing':
+        return { px: 0, py: 78, pz: -150, lx: 0, ly: 4, lz: 0, fov: 55 }
+      case 'penaltyBox':
+        // the arena has no penalty-box set yet: decline, the host keeps the game camera
+        return null
+      default:
+        return null
+    }
   }
 
   /** Dev harness only: pin the camera to a fixed pose (null = normal presets). */
@@ -1782,6 +1867,11 @@ export class Rink3dRenderer implements MatchRenderer {
   // ── Camera ────────────────────────────────────────────────────────────────
 
   private updateCamera(dt: number): void {
+    // a director's shot ran its course: CUT back to the game camera (never fly)
+    if (this.shot && performance.now() >= this.shot.until) {
+      this.shot = null
+      this.snapCameraSprings()
+    }
     // A calm TV follow. Every layer only SMOOTHS; nothing here can add wobble.
     const tune = CAMERA_TUNING[this.camPreset]
 
