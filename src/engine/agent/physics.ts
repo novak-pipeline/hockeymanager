@@ -59,8 +59,8 @@ export function capsFor(p: Player): Caps {
     top,
     topBack: top * 0.68,
     accel: 10 + r100(ph.acceleration) * 0.08,
-    brake: 14 + r100(ph.agility) * 0.08,
-    grip: 18 + r100(ph.agility) * 0.1,
+    brake: 12 + r100(ph.agility) * 0.07,
+    grip: 16 + r100(ph.agility) * 0.08,
     yaw: 6 + r100(ph.agility) * 0.03
   }
 }

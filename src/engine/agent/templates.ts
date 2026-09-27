@@ -52,21 +52,24 @@ const S = (
 // ---------------------------------------------------------------------------
 
 /** Puck in our own zone: breakout support. */
+// Fitted to the scorecard's textbook snapshots (src/engine/analysis/shapes.ts):
+// each spot reproduces the diagram at the snapshot's puck position and moves
+// sensibly with the puck elsewhere.
 export const BREAKOUT: RoleSpot[] = [
-  S('C_LOW', 'F', -58, 8, 0.25, 0.35, 0.6),
-  S('W_STRONG', 'F', -48, 36, 0.2, 0, 0.6),
-  S('D_PARTNER', 'D', -80, -14, 0.1, 0.2, 0.45),
-  S('W_WEAK', 'F', -30, -32, 0.25, 0, 0.55),
+  S('C_LOW', 'F', -70, 6, 0, 0, 0.6),
+  S('W_STRONG', 'F', -56, 37, 0, 0, 0.6),
+  S('D_PARTNER', 'D', -84, -10, 0, 0, 0.5),
+  S('W_WEAK', 'F', -38, -22, 0, 0, 0.55),
   S('D_HIGH', 'D', -60, -24, 0.2, 0, 0.45)
 ]
 
 /** Puck in the neutral zone: fill three lanes, D trail. */
 export const TRANSITION: RoleSpot[] = [
-  S('LANE_STRONG', 'F', 12, 30, 1, 0, 0.75, -60, 23),
-  S('LANE_WEAK', 'F', 14, -30, 1, 0, 0.75, -60, 23),
-  S('LANE_MID', 'F', 4, -6, 1, 0, 0.7, -60, 23),
-  S('D_TRAIL_S', 'D', -26, 16, 1, 0, 0.6, -80, 20),
-  S('D_TRAIL_W', 'D', -28, -18, 1, 0, 0.6, -80, 20)
+  S('LANE_MID', 'F', 10, 2, 0.5, 0, 0.8, -60, 23),
+  S('LANE_WEAK', 'F', 14, -28, 0.2, 0, 0.8, -60, 23),
+  S('LANE_STRONG', 'F', 14, 32, 0.2, 0, 0.8, -60, 23),
+  S('D_TRAIL_S', 'D', -14, 8, 0.35, 0, 0.65, -80, 20),
+  S('D_TRAIL_W', 'D', -26, -16, 0.2, 0, 0.65, -80, 20)
 ]
 
 /** Just entered with speed: drive the net, fill the far lane, trail high. */
@@ -78,13 +81,22 @@ export const RUSH: RoleSpot[] = [
   S('D_POINT_W', 'D', 31, -20, 0, 0, 0.7)
 ]
 
-/** Settled in the zone: low support, net-front, high slot, two points. */
+/** Settled in the zone, puck LOW: low support, net-front, two points. */
 export const CYCLE: RoleSpot[] = [
-  S('LOW_SUPPORT', 'F', 50, 12, 0.4, 0.5, 0.55, 60, 96),
-  S('NET_FRONT', 'F', 81, -2, 0, 0, 0.5),
-  S('POINT_S', 'D', 34, 24, 0.05, 0.2, 0.45, 30, 50),
-  S('HIGH_SLOT', 'F', 60, -12, 0, 0.1, 0.5),
-  S('POINT_W', 'D', 34, -20, 0.05, 0, 0.45, 30, 50)
+  S('LOW_SUPPORT', 'F', 30, -1, 0.5, 0.5, 0.6, 60, 90),
+  S('NET_FRONT', 'F', 82, -2, 0, 0, 0.55),
+  S('POINT_S', 'D', 30, 32, 0, 0, 0.5),
+  S('POINT_W', 'D', 30, -18, 0, 0, 0.5),
+  S('HIGH_SLOT', 'F', 60, -6, 0, 0, 0.5)
+]
+
+/** Settled in the zone, puck at the POINT: net-front screen, wall, weak low, other point. */
+export const CYCLE_POINT: RoleSpot[] = [
+  S('NET_FRONT', 'F', 84, 0, 0, 0, 0.6),
+  S('WALL', 'F', 60, 37, 0, 0, 0.55),
+  S('WEAK_LOW', 'F', 74, -22, 0, 0, 0.55),
+  S('POINT_W', 'D', 32, -12, 0, 0, 0.5),
+  S('HIGH_SLOT', 'F', 60, 0, 0, 0, 0.5)
 ]
 
 /** Power-play set-ups (absolute spots in the attack frame, y′ toward the strong side). */
@@ -146,30 +158,30 @@ export function forecheck(sys: ForecheckSystem): RoleSpot[] {
     default:
       // 1-2-2
       return [
-        S('F2_STRONG', 'F', 60, 26, 0, 0.3, 0.65),
-        S('F3_WEAK', 'F', 54, -20, 0, 0.2, 0.6),
-        S('D_STRONG', 'D', 30, 18, 0, 0.25, 0.5),
-        S('D_WEAK', 'D', 27, -18, 0, 0, 0.5)
+        S('F2_STRONG', 'F', 56, 27, 0, 0, 0.65),
+        S('F3_WEAK', 'F', 44, -10, 0, 0, 0.6),
+        S('D_STRONG', 'D', 28, 26, 0, 0, 0.5),
+        S('D_WEAK', 'D', 24, -14, 0, 0, 0.5)
       ]
   }
 }
 
 /** Opponent carrying through the neutral zone: backcheck lanes + D gap (gap set by agents). */
 export const NZ_DEFENSE: RoleSpot[] = [
-  S('BC_STRONG', 'F', -8, 24, 0.6, 0, 0.8, -70, 60),
-  S('BC_WEAK', 'F', -12, -22, 0.6, 0, 0.8, -70, 60),
-  S('D_GAP_S', 'D', -30, 12, 0.55, 0.3, 0.7, -80, 20),
-  S('D_GAP_W', 'D', -34, -12, 0.55, 0, 0.7, -80, 20),
-  S('BC_MID', 'F', -20, 0, 0.6, 0.2, 0.8, -70, 60)
+  S('D_GAP_S', 'D', -40, 15, 0, 0, 0.8, -80, 20),
+  S('D_GAP_W', 'D', -41, -10, 0, 0, 0.8, -80, 20),
+  S('BC_STRONG', 'F', -16, 25, 0, 0, 0.85, -70, 60),
+  S('BC_WEAK', 'F', -16, -25, 0, 0, 0.85, -70, 60),
+  S('BC_MID', 'F', -14, 6, 0, 0, 0.85, -70, 60)
 ]
 
 /** Defending our zone, zone coverage (box + 1). */
 export const DZ_ZONE: RoleSpot[] = [
-  S('D_NET', 'D', -80, -2, 0, 0.15, 0.6),
-  S('C_LOW', 'F', -70, 8, 0.1, 0.4, 0.6),
-  S('W_STRONG', 'F', -55, 26, 0.05, 0.35, 0.55),
-  S('W_WEAK', 'F', -58, -12, 0.05, 0.1, 0.55),
-  S('D_STRONG', 'D', -76, 18, 0.1, 0.5, 0.6)
+  S('D_NET', 'D', -80, -2, 0, 0.1, 0.65),
+  S('C_LOW', 'F', -70, 0, 0, 0.4, 0.65),
+  S('W_STRONG', 'F', -42, 28, 0, 0, 0.6),
+  S('W_WEAK', 'F', -52, -10, 0, 0, 0.6),
+  S('D_STRONG', 'D', -80, 0, 0, 0.8, 0.65)
 ]
 
 /** Penalty kill shapes (4 men; the 3-man kill takes the first three). */

@@ -17,7 +17,7 @@
  * (from behind into the boards), charging (huge closing speed), interference
  * (the man didn't have the puck), elbowing (rare, undisciplined).
  */
-import { distToBoards } from './rink'
+import { BLUE_X, distToBoards } from './rink'
 import type { Rng } from '@engine/shared/rng'
 import { speedOf, type Body, type Contact } from './physics'
 import { other, type Side, type World } from './world'
@@ -27,7 +27,7 @@ const r01 = (v: number | undefined): number => clamp((v ?? 50) / 100, 0, 1)
 
 export const HIT_TUNING = {
   /** Per-think chance scale that a willing defender commits to a check. */
-  intentK: 0.009,
+  intentK: 0.014,
   /** Contact closing speed (ft/s) needed for a collision to count as a hit when unplanned. */
   incidentalClosing: 19,
   /** Minimum closing speed for a planned hit to land as a hit. */
@@ -117,7 +117,9 @@ export function decideHit(w: World, s: Side, b: Body, intents: Map<Body, HitInte
   // the boards): open-ice hits are rare, pins on the wall are the staple.
   const boards = distToBoards(target.x, target.y) < 10 ? 2.2 : 0.12
   const withPuck = w.carrier === target ? 1 : 0.55
-  const p = HIT_TUNING.intentK * hitAppetite(b, s, intensity) * boards * withPuck
+  // Defencemen finish their man in the corners and along their own wall.
+  const dCorner = b.player.position === 'D' && target.x * s.a < -BLUE_X ? 1.7 : 1
+  const p = HIT_TUNING.intentK * hitAppetite(b, s, intensity) * boards * withPuck * dCorner
   if (!w.rng.chance(clamp(p, 0, 0.8))) return null
   intents.set(b, { target, until: w.t + 1.3 })
   return target
@@ -153,7 +155,7 @@ export function resolveHit(w: World, ct: Contact, intents: Map<Body, HitIntent>,
     const battling = (b: Body): boolean => w.carrier === b || w.t - (w.lastHad.get(b) ?? -99) < 0.6
     if (!battling(ct.a) && !battling(ct.b)) return null
     // A board battle is a hit; bumping in open ice isn't scored as one.
-    if (distToBoards(ct.a.x, ct.a.y) > 12 && distToBoards(ct.b.x, ct.b.y) > 12) return null
+    if (distToBoards(ct.a.x, ct.a.y) > 9 && distToBoards(ct.b.x, ct.b.y) > 9) return null
     // Incidental: the faster-moving body into the other.
     const fa = speedOf(ct.a) * ct.a.mass
     const fb = speedOf(ct.b) * ct.b.mass
@@ -178,6 +180,12 @@ export function resolveHit(w: World, ct: Contact, intents: Map<Body, HitIntent>,
   }
 
   const boards = distToBoards(victim.x, victim.y) < 4.5
+  // A glancing planned check in open ice is just a bump — only a real
+  // open-ice hit (big force) is scored.
+  if (planned && distToBoards(victim.x, victim.y) > 10 && force < 16) {
+    victim.stun = Math.max(victim.stun, 0.15)
+    return null
+  }
   const bal = (r01(victim.player.ratings.physical.balance) + r01(victim.player.ratings.physical.strength)) / 2
   const hard = clamp((force - 6) / 20, 0, 1)
   victim.stun = Math.max(victim.stun, clamp(0.25 + hard * 1.1 - bal * 0.35 + (boards ? 0.25 : 0), 0.15, 1.6))

@@ -54,6 +54,8 @@ export interface World {
   delayedOffside: Side | null
   /** Clock time the side in control won the puck (transition detection). */
   possSince: number
+  /** Where (x in the controlling side's attack frame, ft) that possession began. */
+  possStartAdv: number
 }
 
 export type CarrierAction =

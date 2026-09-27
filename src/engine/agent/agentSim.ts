@@ -87,15 +87,15 @@ const DT = FRAME_DT / SUBSTEPS
 // ---------------------------------------------------------------------------
 export const AGENT_TUNING = {
   /** Reconciles the empirical xG with this engine's shot mix → goals/game. */
-  finishK: 0.5,
+  finishK: 0.44,
   /** Base share of unblocked attempts that miss the net. */
   missBase: 0.3,
   /** Base per-contact shot-block chance for a body square in the lane. */
   blockBase: 1.25,
   /** Poke-check success scale (takeaways). */
-  pokeK: 0.15,
+  pokeK: 0.045,
   /** Unforced fumble rate under pressure (giveaways). */
-  fumbleK: 1.0,
+  fumbleK: 0.6,
   /** Per-think stick-foul chance when beaten (penalties). */
   stickFoulK: 0.6,
   /** Misc stoppages per second of live play ("other": net off, high stick…). */
@@ -104,7 +104,7 @@ export const AGENT_TUNING = {
 
 const PP_SHOT_BOOST = 1.12
 const EN_GOAL_P = 0.85
-const SHIFT_TARGET = 44
+const SHIFT_TARGET = 33
 const PENALTY_SECONDS = 120
 const BENCH = { x: 97, y: -36 }
 const GOAL_CELEBRATION_S = 4
@@ -201,7 +201,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     oneTimerFor: null,
     lastHad: new Map(),
     delayedOffside: null,
-    possSince: 0
+    possSince: 0,
+    possStartAdv: 0
   }
   let flight = null as Flight | null
   let now = 0
@@ -519,6 +520,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     if (prevSide !== s) {
       touches.length = 0
       w.possSince = now
+      w.possStartAdv = puck.x * s.a
     }
     touches.push({ b, side: s, t: now })
     gotAt = now
@@ -628,6 +630,22 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const slap = !oneTimer && dist > 45 && pressure < 0.3 && rng.chance(0.45 * r01(tech.slapShot) + 0.1)
     const acc = slap ? r01(tech.slapShot) : r01(tech.wristShot)
     const speed = (slap ? 118 : 96) + acc * 30 + (oneTimer ? 8 : 0)
+    // In tight with a man on him: the defender lifts his stick / ties him up
+    // before he can release (no attempt — the puck is loose).
+    if (dist < 16 && !oneTimer) {
+      for (const o of opp.skaters) {
+        if (Math.hypot(o.x - c.x, o.y - c.y) > 3.4) continue
+        const sc = r01(o.player.ratings.defensive.stickChecking)
+        const pc = r01(c.player.composites.puckControl)
+        if (rng.chance(clamp(0.3 + (sc - pc) * 0.4, 0.1, 0.6))) {
+          if (tm) tm.stickLifts++
+          loosen(c.vx * 0.5 + rng.float(-6, 6), c.vy * 0.5 + rng.float(-6, 6), null)
+          flight!.tried.set(c, now)
+          return
+        }
+        break
+      }
+    }
     if (tm) {
       tm.shotAttempts++
       let nearest = 99
@@ -857,7 +875,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const rc = r01(g.player.ratings.goalie?.reboundControl ?? g.player.composites.goaltending)
     let traffic = 0
     for (const b of s.skaters) if (Math.hypot(b.x - a * GOAL_X, b.y) < 13) traffic++
-    const pFreeze = clamp(0.14 + rc * 0.16 - traffic * 0.03 + (sp.rebound ? 0.08 : 0), 0.06, 0.5)
+    const pFreeze = clamp(0.17 + rc * 0.16 - traffic * 0.03 + (sp.rebound ? 0.08 : 0), 0.06, 0.5)
     const freeze = rng.chance(pFreeze)
     ev({ t: T(), period, type: 'save', goalie: g.player.id, rebound: !freeze, pos: { x: g.x / HALF_X, y: g.y / HALF_Y } })
     if (tm) tm.saves++
@@ -868,7 +886,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       return
     }
     // Rebound: into the slot (a poor rebound) or steered to a corner.
-    const poor = rng.chance(0.4 - rc * 0.28)
+    const poor = rng.chance(0.47 - rc * 0.28)
     const out = -a
     puck.x = g.x + out * 1.5
     puck.y = g.y
@@ -956,7 +974,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const shift = now - (lastShift.get(s) ?? 0)
         const avgE = s.skaters.reduce((q, b) => q + b.energy, 0) / Math.max(1, s.skaters.length)
         const safe = (w.control === s && puck.x * s.a > -10) || puck.x * s.a > BLUE_X
-        const due = shift > SHIFT_TARGET + 12 || (safe && (shift > SHIFT_TARGET || (shift > 30 && avgE < 0.55)))
+        const due = shift > SHIFT_TARGET + 9 || (safe && (shift > SHIFT_TARGET || (shift > 30 && avgE < 0.55)))
         if (due && flight?.kind !== 'shot' && !(w.carrier && s.skaters.includes(w.carrier))) {
           creditShift(s, now)
           deploySide(s, true)
@@ -1098,7 +1116,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const sc = r01(pk.player.ratings.defensive.stickChecking)
         const pc = r01(c.player.composites.puckControl)
         const protect = (c.hx * (pk.x - c.x) + c.hy * (pk.y - c.y)) < 0 ? 0.6 : 1 // body between
-        const pSucc = clamp((0.05 + (sc - pc) * 0.12 + sc * 0.06) * protect * AGENT_TUNING.pokeK, 0.01, 0.35)
+        const pSucc = clamp((0.05 + (sc - pc) * 0.12 + sc * 0.06) * protect * AGENT_TUNING.pokeK, 0.001, 0.35)
         if (tm) tm.pokeAttempts++
         if (rng.chance(pSucc)) {
           const s = w.control
@@ -1161,6 +1179,23 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           // target glides (≈0.45 s lag) instead of jumping every think — no
           // twitch. Racing/pressing/carrying men react at once.
           let cmd = raw
+          // Personal space: steer around teammates instead of bumping into
+          // them (hard separation in physics made clustered men jitter).
+          {
+            let ox = 0
+            let oy = 0
+            for (const o of s.skaters) {
+              if (o === b) continue
+              const dx = b.x - o.x
+              const dy = b.y - o.y
+              const d = Math.hypot(dx, dy)
+              if (d < 7 && d > 0.01) {
+                ox += (dx / d) * (7 - d) * 1.2
+                oy += (dy / d) * (7 - d) * 1.2
+              }
+            }
+            if (ox !== 0 || oy !== 0) cmd = { ...cmd, tx: cmd.tx + ox, ty: cmd.ty + oy }
+          }
           // Tied up: a defender goal-side and on him slows the carrier down.
           if (b === w.carrier && w.control) {
             const cs = w.control
@@ -1406,7 +1441,10 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       let p: number
       const mine = f.side === s
       const dStick = d < 2.6 ? 1 : 0.45
-      if (f.kind === 'pass' && b === f.to) p = clamp(0.94 - Math.max(0, rel - 55) / 140 + (hands - 0.5) * 0.12, 0.55, 0.99)
+      // A defender draped on the receiver contests the reception.
+      let cover = 0
+      for (const o of (s === H ? A : H).skaters) if (Math.hypot(o.x - b.x, o.y - b.y) < 3.5) cover++
+      if (f.kind === 'pass' && b === f.to) p = clamp(0.94 - Math.max(0, rel - 55) / 140 + (hands - 0.5) * 0.12 - cover * 0.22, 0.3, 0.99)
       else if (f.kind === 'pass' && mine) p = clamp(0.8 - Math.max(0, rel - 45) / 120, 0.4, 0.95)
       else if (f.kind === 'pass') {
         const read = (r01(b.player.ratings.mental.anticipation) + r01(b.player.ratings.defensive.stickChecking)) / 2

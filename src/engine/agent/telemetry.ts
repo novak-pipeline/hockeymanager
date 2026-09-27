@@ -49,6 +49,7 @@ export interface AgentTelemetry {
   takeaways: number
   giveaways: number
   fumbles: number
+  stickLifts: number
   hits: number
   hitsBoards: number
   hitsPlanned: number
@@ -108,6 +109,7 @@ export function emptyAgentTelemetry(): AgentTelemetry {
     takeaways: 0,
     giveaways: 0,
     fumbles: 0,
+    stickLifts: 0,
     hits: 0,
     hitsBoards: 0,
     hitsPlanned: 0,
