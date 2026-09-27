@@ -74,7 +74,7 @@ import { ATLAS_GRID, buildAtlasCanvas, paintJerseySlot } from './textures'
 import { RINK_HALF_W } from './iceCanvas'
 import { assignRigs, capStep, type RigMode } from './lineChange'
 import { layoutLabels, type LabelRequest, type PlacedLabel } from '@render2d/labelLayout'
-import type { MomentCue, ShotCue } from '@render2d/broadcast/types'
+import { MOMENT_CHOREOGRAPHY, type MomentCue, type ShotCue } from '@render2d/broadcast/types'
 
 // ── Name labels (screen space, E1 / F-18) ──────────────────────────────────
 // Only the carrier and the players near the puck get a name — like FM — at a
@@ -1139,9 +1139,21 @@ export class Rink3dRenderer implements MatchRenderer {
     return true
   }
 
-  /** Ceremonies (rookie lap, ovation) need skater choreography — not yet: the overlay caption carries them. */
-  playMoment(_cue: MomentCue): boolean {
-    return false
+  private moment: { until: number; crowd: number } | null = null
+  /**
+   * Ceremonies through the arena: the crowd rises (standing ovation, banner,
+   * tribute) or cheers, and the honoured player raises his stick. The rookie
+   * lap needs a skated path — declined for now (the caption overlay runs).
+   */
+  playMoment(cue: MomentCue): boolean {
+    const ch = MOMENT_CHOREOGRAPHY[cue.moment]
+    if (!ch || cue.moment === 'rookieLap') return false
+    this.moment = { until: performance.now() + cue.holdMs, crowd: ch.crowd === 'standing' ? 0.8 : ch.crowd === 'cheer' ? 0.5 : 0 }
+    if (cue.playerId && ch.poses.includes('stickRaise')) {
+      const p = this.allPoses().find((q) => q.playerId === cue.playerId && q.rig.visible)
+      if (p) p.armsTimer = Math.max(p.armsTimer, Math.min(6, cue.holdMs / 1000))
+    }
+    return true
   }
 
   /** A player's head in CSS px on the host (for the on-ice goal / assist tag); null when off the ice or off camera. */
@@ -1337,7 +1349,7 @@ export class Rink3dRenderer implements MatchRenderer {
       awayScore: score.away,
       period: clock.period,
       clock: clock.text,
-      excite: crowdExcitement(this.sinceGoal),
+      excite: Math.max(crowdExcitement(this.sinceGoal), this.moment && performance.now() < this.moment.until ? this.moment.crowd : 0),
       goalFlash,
     })
   }
