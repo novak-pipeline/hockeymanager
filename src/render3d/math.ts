@@ -264,20 +264,23 @@ export function cameraTargetFor(
     }
 
     case 'endzone': {
-      // Position behind the net the puck is attacking toward.
-      // side +1 = camera behind positive-X net (i.e. the right end), looking toward negative-X.
-      // side -1 = camera behind negative-X net, looking toward positive-X.
+      // High in the end stands behind the net the play is in (side +1 = the
+      // right end, looking toward -X). It used to sit at y 14 just behind the
+      // boards, so the glass cap rail cut across the frame at head height and
+      // the video board's underside hung in the top of the shot (audit D2).
+      // Now: 16 ft back of the end boards and 28 ft up, pitched ~19° down onto
+      // the zone — the near glass passes under the frame, the board (bottom
+      // edge ~53 ft up at centre) stays above it, the net sits at the bottom.
       const side = opts.endzoneActiveSide ?? -1
-      // Place camera ~10ft behind the end boards (boards at ±100ft), centered on Z.
-      const camX = side * 110
-      // Z position: slight offset so we see the crease from just off center
-      const camZ = 0
-      const lookX = 0          // look toward center ice
-      return { px: camX, py: 14, pz: camZ, lx: lookX, ly: 2, lz: 0 }
+      const wz = opts.puckWz ?? 0
+      return { px: side * 116, py: 28, pz: wz * 0.15, lx: side * 35, ly: 0, lz: wz * 0.35 }
     }
 
     case 'follow': {
-      // Behind-and-above the puck carrier along their velocity/heading vector.
+      // Behind-and-above the play along a HEADING. The renderer passes a
+      // smoothed, rate-limited heading of the play (never the carrier's body
+      // facing, which flipped on every turn and change of carrier → 180°
+      // orbits at up to 3,856°/s, audit D1).
       // fallback to puck position if no carrier info.
       const angle = opts.carrierAngle ?? 0
       const wx = opts.carrierWx ?? puckWx
@@ -303,7 +306,7 @@ export function cameraFovFor(preset: CameraPreset): number {
   switch (preset) {
     case 'broadcast': return 30
     case 'overhead': return 45
-    case 'endzone': return 50
+    case 'endzone': return 55
     case 'follow': return 55
   }
 }
@@ -478,4 +481,63 @@ export function puckTrackStep(
   if (Math.abs(cx) < 1e-3) cx = 0
   if (Math.abs(cz) < 1e-3) cz = 0
   return { x: tx + cx, z: tz + cz, cx, cz, key }
+}
+
+// ── camera angular-speed guard ───────────────────────────────────────────────
+
+/**
+ * Cap how fast the camera's look direction may yaw (rad/s). Returns the look
+ * point to use: `look` itself, or `look` swung back around the camera toward
+ * `prevYaw` so the turn this frame is at most `maxRate · dt`. `prevYaw` null
+ * (a cut / first frame) passes through. Pitch and look distance are kept.
+ */
+export function capLookYaw(
+  cam: { x: number; z: number },
+  look: { x: number; z: number },
+  prevYaw: number | null,
+  dt: number,
+  maxRate: number,
+): { x: number; z: number; yaw: number } {
+  const dx = look.x - cam.x
+  const dz = look.z - cam.z
+  const yaw = Math.atan2(dx, dz)
+  if (prevYaw === null || dt <= 0) return { x: look.x, z: look.z, yaw }
+  const d = wrapAngle(yaw - prevYaw)
+  const max = maxRate * dt
+  if (Math.abs(d) <= max) return { x: look.x, z: look.z, yaw }
+  const y2 = prevYaw + Math.sign(d) * max
+  const r = Math.hypot(dx, dz)
+  return { x: cam.x + Math.sin(y2) * r, z: cam.z + Math.cos(y2) * r, yaw: y2 }
+}
+
+/**
+ * The follow camera's heading of play: turns toward the direction the play is
+ * travelling at no more than `maxRate` rad/s (an eased, bounded pan), and
+ * reports a CUT when the play has reversed (> `cutAngle` away) for `cutAfter`
+ * seconds — a reversal is a cut to the other side, like TV, not a whip-orbit.
+ */
+export interface FollowHeading {
+  yaw: number
+  /** Seconds the target has been beyond the cut angle. */
+  reversedFor: number
+}
+export function followHeadingStep(
+  h: FollowHeading,
+  targetYaw: number | null,
+  dt: number,
+  maxRate = (35 * Math.PI) / 180,
+  cutAngle = (120 * Math.PI) / 180,
+  cutAfter = 0.8,
+): FollowHeading & { cut: boolean } {
+  if (targetYaw === null || dt <= 0) return { ...h, reversedFor: 0, cut: false }
+  const d = wrapAngle(targetYaw - h.yaw)
+  if (Math.abs(d) > cutAngle) {
+    const reversedFor = h.reversedFor + dt
+    if (reversedFor >= cutAfter) return { yaw: wrapAngle(targetYaw), reversedFor: 0, cut: true }
+    return { yaw: h.yaw, reversedFor, cut: false }
+  }
+  // ease toward the target (1 s time constant), never faster than maxRate
+  const want = d * (1 - Math.exp(-dt / 1.0))
+  const max = maxRate * dt
+  return { yaw: wrapAngle(h.yaw + Math.max(-max, Math.min(max, want))), reversedFor: 0, cut: false }
 }

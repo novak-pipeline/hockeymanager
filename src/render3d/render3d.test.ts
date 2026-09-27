@@ -309,19 +309,29 @@ describe('cameraTargetFor', () => {
     // Camera should be behind negative-X end (boards at -100), so camX < -95
     expect(t.px).toBeLessThan(-95)
     expect(t.py).toBeGreaterThan(0)
-    // Look-at toward center ice (lx should be 0 or positive relative to camera)
-    expect(t.lx).toBeGreaterThanOrEqual(0)
+    // Looking toward +X (into the zone, toward centre ice)
+    expect(t.lx).toBeGreaterThan(t.px)
   })
 
   it('endzone side=+1: camera behind positive-X net, looking negative-X', () => {
     const t = cameraTargetFor('endzone', 0, { endzoneActiveSide: 1 })
     expect(t.px).toBeGreaterThan(95)
-    expect(t.lx).toBeLessThanOrEqual(0)
+    expect(t.lx).toBeLessThan(t.px)
   })
 
-  it('endzone: low y (≤20)', () => {
+  it('endzone: high in the end stands, pitched down onto the zone — clear of the glass and the video board (D2)', () => {
     const t = cameraTargetFor('endzone', 0, { endzoneActiveSide: -1 })
-    expect(t.py).toBeLessThanOrEqual(20)
+    const fov = 55
+    const pitch = Math.atan2(t.py - t.ly, Math.abs(t.lx - t.px)) // down, radians
+    const half = ((fov / 2) * Math.PI) / 180
+    // the near glass (top edge 9.6 ft, at the end boards x = -100) is below the frame's bottom edge
+    const glassAngle = Math.atan2(t.py - 9.6, Math.abs(-100 - t.px))
+    expect(glassAngle).toBeGreaterThan(pitch + half)
+    // the video board's bottom (~53 ft up, |x| ≤ 15.5) is above the frame's top edge
+    for (const bx of [-15.5, 0, 15.5]) {
+      const up = Math.atan2(53 - t.py, Math.abs(bx - t.px))
+      expect(up).toBeGreaterThan(half - pitch)
+    }
   })
 
   it('follow: camera behind and above carrier', () => {

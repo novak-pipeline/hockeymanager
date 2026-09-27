@@ -34,6 +34,9 @@ import {
   endzoneChooseEnd,
   puckCarriedOffset,
   puckTrackStep,
+  capLookYaw,
+  followHeadingStep,
+  type FollowHeading,
   type PuckTrack,
   softDeadzone,
   emaStep,
@@ -108,6 +111,15 @@ const CAMERA_TUNING: Record<CameraPreset, { tauX: number; tauZ: number; maxFocus
   overhead: { tauX: 1.2, tauZ: 1.2, maxFocusSpeed: 30, springHL: 1.5 },
   endzone: { tauX: 0.6, tauZ: 0.6, maxFocusSpeed: 80, springHL: 0.5 },
   follow: { tauX: 0.45, tauZ: 0.45, maxFocusSpeed: 90, springHL: 0.45 },
+}
+
+// Hard cap on how fast each preset's view may yaw (rad/s). The follow cam
+// peaked at 3,856°/s before (audit D1); a TV operator pans ≲ 30–60°/s.
+const MAX_CAM_YAW_RATE: Record<CameraPreset, number> = {
+  broadcast: (30 * Math.PI) / 180,
+  overhead: Infinity,
+  endzone: (60 * Math.PI) / 180,
+  follow: (60 * Math.PI) / 180,
 }
 
 // Soft dead-band around the focus: puck motion inside it never moves the shot.
@@ -265,6 +277,14 @@ export class Rink3dRenderer implements MatchRenderer {
   private fov: Spring1D = { pos: 30, vel: 0 }
   private camPreset: CameraPreset = 'broadcast'
   private endzoneActiveSide: 1 | -1 = -1
+  /** Follow cam: the smoothed, rate-limited heading of play (never body facing). */
+  private followHead: FollowHeading = { yaw: Math.PI / 2, reversedFor: 0 }
+  private puckVelSmX = 0
+  private puckVelSmZ = 0
+  private prevPuckX: number | null = null
+  private prevPuckZ = 0
+  /** Last rendered look yaw (null after a cut) — for the angular-speed cap. */
+  private lastCamYaw: number | null = null
 
   // ── Wall clock for animation ───────────────────────────────────────────────
   private lastFrameTime = 0
@@ -863,7 +883,7 @@ export class Rink3dRenderer implements MatchRenderer {
   private currentTarget() {
     return cameraTargetFor(this.camPreset, this.playFocusX, {
       endzoneActiveSide: this.endzoneActiveSide,
-      carrierAngle: this.carrierAngle,
+      carrierAngle: this.followHead.yaw,
       carrierWx: this.carrierWx,
       carrierWz: this.carrierWz,
       puckWz: this.playFocusZ,
@@ -876,6 +896,17 @@ export class Rink3dRenderer implements MatchRenderer {
    */
   private snapCameraToTarget(): void {
     this.endzoneActiveSide = endzoneChooseEnd(this.endzoneActiveSide, this.playFocusX)
+    // follow: start behind the play, looking toward the end it is in
+    this.followHead = { yaw: this.playFocusX >= 0 ? Math.PI / 2 : -Math.PI / 2, reversedFor: 0 }
+    this.puckVelSmX = this.puckVelSmZ = 0
+    this.prevPuckX = null
+    this.lastCamYaw = null
+    this.snapCameraSprings()
+  }
+
+  /** Hard-cut the camera to the current preset's target (a cut, never a fly-through). */
+  private snapCameraSprings(): void {
+    this.lastCamYaw = null
     const target = this.currentTarget()
     this.camX = snapSpring(target.px)
     this.camY = snapSpring(target.py)
@@ -1540,7 +1571,34 @@ export class Rink3dRenderer implements MatchRenderer {
     this.playFocusX = Number.isFinite(newFocusX) ? newFocusX : this.playFocusX
     this.playFocusZ = Number.isFinite(newFocusZ) ? newFocusZ : this.playFocusZ
 
+    // Heading of play for the follow cam: the puck's smoothed direction of
+    // travel, turned toward at ≤ 35°/s; a sustained reversal is a CUT.
+    let cut = false
+    if (dt > 0) {
+      if (this.prevPuckX !== null) {
+        const vx = (rawX - this.prevPuckX) / dt
+        const vz = (rawZ - this.prevPuckZ) / dt
+        // a teleport (stoppage reset) is not travel
+        if (Math.hypot(vx, vz) < 200) {
+          this.puckVelSmX = emaStep(this.puckVelSmX, vx, dt, 0.5)
+          this.puckVelSmZ = emaStep(this.puckVelSmZ, vz, dt, 0.5)
+        }
+      }
+      this.prevPuckX = rawX
+      this.prevPuckZ = rawZ
+    }
+    if (this.camPreset === 'follow') {
+      const sp = Math.hypot(this.puckVelSmX, this.puckVelSmZ)
+      const h = followHeadingStep(this.followHead, sp > 10 ? Math.atan2(this.puckVelSmX, this.puckVelSmZ) : null, dt)
+      this.followHead = { yaw: h.yaw, reversedFor: h.reversedFor }
+      cut ||= h.cut
+    }
+    const prevSide = this.endzoneActiveSide
     this.endzoneActiveSide = endzoneChooseEnd(this.endzoneActiveSide, this.playFocusX)
+    // endzone: the play changed ends → CUT to the other end (it used to fly
+    // ~220 ft through the rink at head height, audit D2)
+    if (this.camPreset === 'endzone' && this.endzoneActiveSide !== prevSide) cut = true
+    if (cut) this.snapCameraSprings()
     const target = this.currentTarget()
     let fovTarget = cameraFovFor(this.camPreset)
 
@@ -1582,7 +1640,16 @@ export class Rink3dRenderer implements MatchRenderer {
 
     this.applyFov(this.fov.pos)
     this.camera.position.set(this.camX.pos, this.camY.pos, this.camZ.pos)
-    this.camera.lookAt(this.lookX.pos, this.lookY.pos, this.lookZ.pos)
+    // Angular-speed guard: no preset may swing its view faster than this.
+    let lx = this.lookX.pos
+    let lz = this.lookZ.pos
+    if (this.camPreset !== 'overhead') {
+      const cap = capLookYaw({ x: this.camX.pos, z: this.camZ.pos }, { x: lx, z: lz }, this.lastCamYaw, dt, MAX_CAM_YAW_RATE[this.camPreset])
+      lx = cap.x
+      lz = cap.z
+      this.lastCamYaw = cap.yaw
+    }
+    this.camera.lookAt(lx, this.lookY.pos, lz)
     if (this.debugCam) {
       const d = this.debugCam
       this.applyFov(d.fov ?? 35)
