@@ -74,7 +74,7 @@ import { BLUE_X, DOT_EZ_X, DOT_NZ_X, DOT_Y, GOAL_X, HALF_X, HALF_Y, NET_HALF_W, 
 import { REACH, blockChance, decideCarrier, pressureOn, realPressure, thinkSide, xgAt, type ThinkOut } from './brain'
 import { decideHit, resolveHit, type HitIntent } from './physical'
 import { emptyAgentTelemetry, type AgentTelemetry } from './telemetry'
-import { LEVEL, levelOffset, rLevel, type Side, type World } from './world'
+import { LEVEL, levelDefOffset, levelOffset, rDef, rLevel, type Side, type World } from './world'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
 const r01 = rLevel
@@ -89,13 +89,13 @@ const DT = FRAME_DT / SUBSTEPS
 // ---------------------------------------------------------------------------
 export const AGENT_TUNING = {
   /** Reconciles the empirical xG with this engine's shot mix → goals/game. */
-  finishK: 0.84,
+  finishK: 0.85,
   /** Base share of unblocked attempts that miss the net. */
   missBase: 0.3,
   /** Poke-check success scale (takeaways). */
   pokeK: 0.08,
   /** Unforced fumble rate under pressure (giveaways). */
-  fumbleK: 5.2,
+  fumbleK: 4.3,
   /** Per-think stick-foul chance when beaten (penalties). */
   stickFoulK: 2.5,
   /** Misc stoppages per second of live play ("other": net off, high stick…). */
@@ -163,6 +163,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   {
     const dressed = [home, away].flatMap((t) => [...t.team.lines.forwards.flat(), ...t.team.lines.defensePairs.flat()].map((id) => t.resolve(id)))
     LEVEL.offset = levelOffset(dressed)
+    LEVEL.def = levelDefOffset(dressed)
   }
 
   const bodies = new Map<PlayerId, Body>()
@@ -908,7 +909,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     if (dist < 16 && !oneTimer) {
       for (const o of opp.skaters) {
         if (Math.hypot(o.x - c.x, o.y - c.y) > 3.4) continue
-        const sc = r01(o.player.ratings.defensive.stickChecking)
+        const sc = rDef(o.player.ratings.defensive.stickChecking)
         const pc = r01(c.player.composites.puckControl)
         if (rng.chance(clamp(0.3 + (sc - pc) * 0.4, 0.1, 0.6))) {
           if (tm) tm.stickLifts++
@@ -1403,7 +1404,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         if (!c || !w.control) break
         const dp = Math.hypot(pk.x - puck.x, pk.y - puck.y)
         if (dp > REACH) continue
-        const sc = (r01(pk.player.ratings.defensive.stickChecking) + r01(pk.player.composites.takeaway)) / 2
+        const sc = (rDef(pk.player.ratings.defensive.stickChecking) + r01(pk.player.composites.takeaway)) / 2
         const pc = r01(c.player.composites.puckControl)
         const protect = (c.hx * (pk.x - c.x) + c.hy * (pk.y - c.y)) < 0 ? 0.6 : 1 // body between
         const pSucc = clamp((0.004 + sc * sc * sc * 0.45 + (sc - pc) * 0.1) * protect * AGENT_TUNING.pokeK, 0.001, 0.35)
@@ -1443,7 +1444,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const c = w.carrier
         const pr = pressureOn(c, oppOf(w.control).skaters)
         const pc = r01(c.player.composites.puckControl)
-        if (pr > 0.35 && rng.chance(0.006 * AGENT_TUNING.fumbleK * pr * 2.5 * Math.pow(1.2 - pc, 3))) {
+        if (pr > 0.35 && rng.chance(0.006 * AGENT_TUNING.fumbleK * pr * 6.8 * Math.pow(Math.max(0, 1.15 - pc), 4))) {
           fumble = { by: c, side: w.control, t: now }
           const ang = rng.float(0, Math.PI * 2)
           loosen(c.vx + Math.cos(ang) * 6, c.vy + Math.sin(ang) * 6, w.control)
@@ -1937,7 +1938,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       if (f.kind === 'pass' && b === f.to) p = clamp(0.94 - Math.max(0, rel - 55) / 140 + (hands - 0.5) * 0.12 + (r01(f.from?.player.ratings.technical.passing) - 0.55) * 0.3 - cover * 0.22, 0.3, 0.99)
       else if (f.kind === 'pass' && mine) p = clamp(0.8 - Math.max(0, rel - 45) / 120, 0.4, 0.95)
       else if (f.kind === 'pass') {
-        const read = (r01(b.player.ratings.mental.anticipation) + r01(b.player.ratings.defensive.stickChecking)) / 2
+        const read = (r01(b.player.ratings.mental.anticipation) + rDef(b.player.ratings.defensive.stickChecking)) / 2
         p = clamp((0.08 + read * 0.3) * dStick - Math.max(0, rel - 40) / 200, 0.02, 0.5)
       } else {
         // Loose or dumped puck: speed makes it hard, hands make it easy; a

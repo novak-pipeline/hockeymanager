@@ -81,14 +81,35 @@ export function other(w: World, s: Side): Side {
  * of fumbles and missed passes. Set once per period by the sim; `REF` is the
  * NHL (imported real-roster) level.
  */
-export const LEVEL = { offset: 0 }
+export const LEVEL = { offset: 0, def: 0 }
 const LEVEL_REF = 66.5
+/** NHL level of the checking family (stick checking, blocking, body checking, positioning). */
+const LEVEL_DEF_REF = 59
 
 export function levelOffset(players: readonly { composites: { scoring: number; puckControl: number; skating: number } }[]): number {
   if (players.length === 0) return 0
   let s = 0
   for (const p of players) s += (p.composites.scoring + p.composites.puckControl + p.composites.skating) / 3
   return s / players.length - LEVEL_REF
+}
+
+/**
+ * Checking-family level: in the imported NHL data the defensive ratings sit
+ * ~10 points under the offensive ones, in the generated league they do not,
+ * so the two families get their own level (one offset would make the
+ * generated league's checkers ten points too good).
+ */
+export function levelDefOffset(players: readonly { ratings: { defensive: { stickChecking: number; shotBlocking: number; checking: number }; mental: { positioning: number } } }[]): number {
+  if (players.length === 0) return 0
+  let s = 0
+  for (const p of players) s += (p.ratings.defensive.stickChecking + p.ratings.defensive.shotBlocking + p.ratings.defensive.checking + p.ratings.mental.positioning) / 4
+  return s / players.length - LEVEL_DEF_REF
+}
+
+/** A checking-family rating as 0..1, relative to the game's checking level. */
+export function rDef(v: number | undefined): number {
+  const x = ((v ?? 50) - LEVEL.def) / 100
+  return x < 0 ? 0 : x > 1 ? 1 : x
 }
 
 /** A 0–100 rating as 0..1, relative to the game's level. */

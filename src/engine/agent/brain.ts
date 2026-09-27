@@ -45,7 +45,7 @@ import {
   spotTarget,
   type RoleSpot
 } from './templates'
-import { other, rLevel, type CarrierAction, type Side, type World } from './world'
+import { other, rDef, rLevel, type CarrierAction, type Side, type World } from './world'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
 const r01 = rLevel
@@ -282,7 +282,7 @@ export const SHOT_BLOCK = { base: 2.0 }
 export function blockChance(o: Body, d: number, slap: boolean): number {
   const w = d < 2 ? 1 : d < 4 ? 0.5 : d < 6 ? 0.18 : 0
   if (w === 0) return 0
-  return clamp(SHOT_BLOCK.base * w * (0.55 + r01(o.player.ratings.defensive.shotBlocking) * 0.8) * (slap ? 1.1 : 1), 0, 0.9)
+  return clamp(SHOT_BLOCK.base * w * (0.55 + rDef(o.player.ratings.defensive.shotBlocking) * 0.8) * (slap ? 1.1 : 1), 0, 0.9)
 }
 
 // ---------------------------------------------------------------------------
@@ -601,7 +601,7 @@ function assignRoles(me: Side, pool: Body[], table: RoleSpot[], targets: Map<str
  * his spot less precisely (and wanders more). Deterministic from the clock.
  */
 function drift(b: Body, t: number, withPuck: boolean): XY {
-  const pos = r01(b.player.ratings.mental.positioning)
+  const pos = rDef(b.player.ratings.mental.positioning)
   const ph = b.mass * 0.37
   // Hockey players never stand still: support skaters keep their feet moving
   // in loops around their spot (getting open, timing their route), defenders
