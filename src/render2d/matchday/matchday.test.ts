@@ -307,6 +307,8 @@ describe('a shootout', () => {
     { type: 'periodEnd', period: 2, t: 1200 }, frame(3, 0),
     { type: 'periodEnd', period: 3, t: 1200 }, frame(4, 0),
     shot(4, 100, 'a2', 0.3, false), save(4, 100.4, HG),
+    // the nominal scorer (their best forward) may have just shot in OT
+    shot(4, 298, 'a3', 0.3, false), save(4, 298.4, HG),
     { type: 'goal', period: 4, t: 300, scorer: id('a3'), assists: [], strength: 'ev', pos: { x: 0, y: 0 } },
     { type: 'gameEnd', period: 4, t: 300 },
   ]
@@ -317,9 +319,10 @@ describe('a shootout', () => {
   it('counts on the scoreboard, not as a player goal, a shot or a goal against', () => {
     expect(st.shootoutWinner).toBe('away')
     expect(st.away.goals).toBe(2)
-    expect(st.away.shots).toBe(2)
-    expect(st.players.find((l) => l.id === 'a3')?.goals ?? 0).toBe(0)
+    expect(st.away.shots).toBe(3)
+    expect(st.players.find((l) => l.id === 'a3')!.goals).toBe(0)
     expect(st.players.find((l) => l.id === HG)!.goalsAgainst).toBe(1)
+    expect(st.players.find((l) => l.id === HG)!.saves).toBe(2)
     expect(st.goals[st.goals.length - 1]!.shootout).toBe(true)
   })
 

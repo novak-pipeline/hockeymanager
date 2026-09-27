@@ -31,7 +31,9 @@ export type Side = 'home' | 'away'
  * generated league, seed 11) the stream scores 0.61 goals per 0.25-scaled xG.
  * The match-day layer wants "what an average goalie concedes on these
  * chances" — the yardstick for goalie ratings and the xG shown to the GM — so
- * it uses the measured scale. Re-measure if the engine's finishing changes.
+ * it uses the measured scale. Checked on both engines with it applied (24
+ * games each, seed 99): Classic scores 1.07 goals per xG, the agent engine
+ * 1.14 — close enough for one constant. Re-measure if finishing changes.
  */
 export const XG_PER_DANGER = 0.25 * 0.61
 
@@ -435,7 +437,7 @@ export function computeMatchStats(index: MatchIndex, upTo: number = Infinity): M
       case 'goal': {
         const side = sideOf(ev.scorer)
         score = side === 'home' ? { home: score.home + 1, away: score.away } : { home: score.home, away: score.away + 1 }
-        if (isShootoutDecider(ev, absT, shots)) {
+        if (isShootoutDecider(ev)) {
           // The engine records a shootout win as a nominal goal at the end of
           // OT (fullSim.ts shootout): it counts on the scoreboard, but it is
           // not a player goal, not a shot, and nobody's goal against.
@@ -598,16 +600,14 @@ export function computeMatchStats(index: MatchIndex, upTo: number = Infinity): M
 }
 
 /**
- * The shootout decider as the engine emits it: a goal in overtime with no
- * shot behind it, at centre ice, unassisted (fullSim.ts `shootout`). A real
- * overtime goal always follows its own `shot` event.
+ * The shootout decider as the engine emits it (fullSim.ts `shootout`): a goal
+ * in overtime, unassisted, placed exactly at centre ice. A real goal carries
+ * the position it was scored from, never the exact origin. (The nominal
+ * scorer is the winner's best forward, who may well have just had a shot in
+ * OT, so "no shot behind it" is not a usable test.)
  */
-function isShootoutDecider(ev: Extract<GameEvent, { type: 'goal' }>, absT: number, shots: ShotPoint[]): boolean {
-  if (ev.period < 4 || ev.assists.length > 0 || ev.pos.x !== 0 || ev.pos.y !== 0) return false
-  for (let i = shots.length - 1; i >= 0 && absT - shots[i]!.absT <= 4; i--) {
-    if (shots[i]!.shooter === (ev.scorer as string)) return false
-  }
-  return true
+function isShootoutDecider(ev: Extract<GameEvent, { type: 'goal' }>): boolean {
+  return ev.period >= 4 && ev.assists.length === 0 && ev.pos.x === 0 && ev.pos.y === 0
 }
 
 /** Current score and whose it is, from the user's chair. */
