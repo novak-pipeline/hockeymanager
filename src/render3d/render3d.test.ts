@@ -291,13 +291,25 @@ describe('cameraTargetFor', () => {
     }
   })
 
+  it('broadcast: the frame bottom stays on the ice, never down in the near crowd', () => {
+    for (const aspect of [16 / 9, 2.35]) {
+      for (const fz of [-40, -20, 0, 30]) {
+        const f = broadcastFraming(20, fz, 0, aspect)
+        const pitch = Math.atan2(f.py - f.ly, Math.hypot(f.lz - f.pz))
+        const bottom = pitch + (f.fov * Math.PI) / 360
+        const groundZ = f.pz + f.py / Math.tan(bottom)
+        expect(groundZ).toBeGreaterThanOrEqual(-38.01)
+      }
+    }
+  })
+
   it('broadcast: keeps the frame inside the rink and pans more than it trucks', () => {
     const deep = cameraTargetFor('broadcast', 99)
     expect(deep.lx).toBeLessThanOrEqual(76) // never centred deeper than the net: the frame shows the end glass, not the stands
     const t1 = cameraTargetFor('broadcast', 0)
     const t2 = cameraTargetFor('broadcast', 60)
     expect(t2.lx - t1.lx).toBeGreaterThan(t2.px - t1.px)
-    expect(t1.pz).toBe(t2.pz)
+    expect(Math.abs(t1.pz - t2.pz)).toBeLessThan(10) // at most a gentle dolly
   })
 
   it('broadcast: look-at tilts only gently toward the play across the ice', () => {

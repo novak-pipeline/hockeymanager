@@ -263,12 +263,13 @@ export function cameraTargetFor(
       // right end, looking toward -X). It used to sit at y 14 just behind the
       // boards, so the glass cap rail cut across the frame at head height and
       // the video board's underside hung in the top of the shot (audit D2).
-      // Now: 16 ft back of the end boards and 28 ft up, pitched ~19° down onto
-      // the zone — the near glass passes under the frame, the board (bottom
-      // edge ~53 ft up at centre) stays above it, the net sits at the bottom.
+      // Now: 12 ft back of the end boards and 30 ft up, pitched 30° down onto
+      // the zone — the near glass passes just under the frame, every ray looks
+      // down so the board (bottom edge ~53 ft up) never enters it, and the
+      // crease is in shot.
       const side = opts.endzoneActiveSide ?? -1
       const wz = opts.puckWz ?? 0
-      return { px: side * 116, py: 28, pz: wz * 0.15, lx: side * 35, ly: 0, lz: wz * 0.35 }
+      return { px: side * 112, py: 30, pz: wz * 0.15, lx: side * 60, ly: 0, lz: wz * 0.4 }
     }
 
     case 'follow': {
@@ -311,16 +312,22 @@ export function cameraFovFor(preset: CameraPreset): number {
  * scorer. Blended in by celebrationWeight (pose.ts) — never a hard cut.
  */
 export function celebrationTarget(spotWx: number, spotWz: number): CameraTarget & { fov: number } {
-  // A modest push-in from the same side as the game camera: a little lower,
-  // a little tighter. Nothing here moves while the cue plays.
+  // A modest push-in along the SAME high side angle as the game camera
+  // (broadcastFraming's pitch), a little closer and on a longer lens.
+  // (It used to drop to y 34 at z −92 — down in the lower bowl, with fans
+  // filling the bottom of the frame once the game shot was zone-framed.)
+  // Nothing here moves while the cue plays.
+  const pitch = (BROADCAST_FRAME.pitchDeg * Math.PI) / 180
+  const dist = 80
+  const lz = spotWz
   return {
-    px: spotWx * 0.5,
-    py: 34,
-    pz: -92,
+    px: spotWx * 0.6,
+    py: dist * Math.sin(pitch),
+    pz: lz - dist * Math.cos(pitch),
     lx: spotWx,
     ly: 2,
-    lz: spotWz,
-    fov: 22,
+    lz,
+    fov: 16,
   }
 }
 
@@ -541,7 +548,7 @@ export function followHeadingStep(
 
 /**
  * The main game camera, framed the way the TV "high home" camera frames hockey
- * (FILM-STUDY B1): a high side angle ~24° down, ONE ZONE of ice across the
+ * (FILM-STUDY B1): a high side angle ~28° down, ONE ZONE of ice across the
  * frame (~80 ft in a zone, ~92 ft through the neutral zone) rather than the
  * whole rink, the play kept in the middle of the frame and the frame kept
  * inside the rink (it never looks past the end boards at the crowd).
@@ -556,33 +563,46 @@ export function followHeadingStep(
  * of ice, then widened if needed so the near boards stay in frame.
  */
 export const BROADCAST_FRAME = {
-  pitchDeg: 24,
-  dist: 100,
+  pitchDeg: 28,
+  dist: 108,
   widthZoneFt: 80,
   widthNeutralFt: 92,
-  minVfovDeg: 23.5,
+  minVfovDeg: 20,
   /** |look x| limit: the frame's far edge stops just past the end boards. */
   lookClampX: 76,
   /** How much the camera body trucks with the play (the rest is pan). */
   truck: 0.6,
+  /**
+   * The frame's bottom edge never lands nearer the camera than this (ft; the
+   * near boards are at −42.5). Just INSIDE the boards: a ray to the ice at the
+   * boards passes through the first rows of the near crowd, which then filled
+   * the bottom of the frame.
+   */
+  nearEdgeZ: -38,
 } as const
 
 export function broadcastFraming(focusX: number, focusZ: number, leadX: number, aspect: number): CameraTarget & { fov: number } {
   const B = BROADCAST_FRAME
   const lx = Math.max(-B.lookClampX, Math.min(B.lookClampX, focusX + leadX))
-  // across the ice: lean toward the near boards so skaters on the near wall
-  // stay in frame (the far boards have the stands behind them to spare)
-  const lz = -5 + 0.5 * Math.max(-38, Math.min(38, focusZ))
   const pitch = (B.pitchDeg * Math.PI) / 180
   const px = lx * B.truck
   const py = B.dist * Math.sin(pitch)
-  const pz = lz - B.dist * Math.cos(pitch)
-  const D = Math.hypot(lx - px, py, lz - pz)
+  const back = B.dist * Math.cos(pitch)
+  // (the look distance doesn't depend on lz: the rig moves with it)
+  const D = Math.hypot(lx - px, py, back)
   // zone play frames tighter than neutral-zone play (smooth in between)
   const k = Math.max(0, Math.min(1, (Math.abs(lx) - 25) / 20))
   const kk = k * k * (3 - 2 * k)
   const width = B.widthNeutralFt + (B.widthZoneFt - B.widthNeutralFt) * kk
   const halfH = Math.atan(width / 2 / D)
   const vfov = Math.max(B.minVfovDeg, (2 * Math.atan(Math.tan(halfH) / Math.max(0.5, aspect)) * 180) / Math.PI)
+  // Across the ice: follow the play half-way, but never so far toward the
+  // near boards that the bottom of the frame fills with the near crowd — the
+  // frame's bottom edge stays at or inside z = NEAR_EDGE_Z (just past the
+  // near boards, so skaters on the near wall are still in).
+  const bottomRay = pitch + (vfov * Math.PI) / 360
+  const lzMin = B.nearEdgeZ + back - py / Math.tan(bottomRay)
+  const lz = Math.max(lzMin, -5 + 0.5 * Math.max(-38, Math.min(38, focusZ)))
+  const pz = lz - back
   return { px, py, pz, lx, ly: 0, lz, fov: vfov }
 }

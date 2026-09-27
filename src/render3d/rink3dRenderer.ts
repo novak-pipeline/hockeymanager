@@ -73,6 +73,14 @@ import { kitFor, type Kit } from './palette'
 import { ATLAS_GRID, buildAtlasCanvas, paintJerseySlot } from './textures'
 import { RINK_HALF_W } from './iceCanvas'
 import { assignRigs, capStep, type RigMode } from './lineChange'
+import { layoutLabels, type LabelRequest, type PlacedLabel } from '@render2d/labelLayout'
+
+// ── Name labels (screen space, E1 / F-18) ──────────────────────────────────
+// Only the carrier and the players near the puck get a name — like FM — at a
+// constant readable pixel size, de-conflicted so they never overlap.
+const LABEL_NEAR_FT = 24
+const LABEL_GOALIE_NEAR_FT = 28
+const LABEL_MAX = 5
 
 /** Bench gates on the far boards (home bench at x = -26, away at +26, matching arena.ts). */
 const BENCH_GATE = { home: { x: -26, z: RINK_HALF_W - 1.5 }, away: { x: 26, z: RINK_HALF_W - 1.5 } } as const
@@ -185,7 +193,12 @@ interface PlayerPose {
   angVel: number           // body-yaw spring velocity (rad/s)
   rig: AthleteRig
   team: 'home' | 'away'
-  labelSprite: THREE.Sprite
+  /** Name label ("59 Garrity"), drawn in SCREEN space by drawLabels(); null = none. */
+  labelText: string | null
+  /** False while he skates off to the bench (no label for a departing player). */
+  labelOn: boolean
+  /** Label anchor height (ft) above the ice — just over the helmet. */
+  labelY: number
   // authored-clip state (Blender athletes; see choreo.ts)
   vx: number
   vz: number
@@ -255,6 +268,9 @@ export class Rink3dRenderer implements MatchRenderer {
   /** Ring on the ice under the puck carrier's skates (FM-style ball-carrier mark). */
   private carrierRing!: THREE.Mesh
   private carrierMarkPose: PlayerPose | null = null
+  private labelCanvas!: HTMLCanvasElement
+  /** The labels placed last frame (CSS px) — read by the dev probes. */
+  labelRects: PlacedLabel[] = []
   private puck: PuckTrack = { x: 0, z: 0, cx: 0, cz: 0, key: '' }
 
   // ── Goal lights ────────────────────────────────────────────────────────────
@@ -342,6 +358,12 @@ export class Rink3dRenderer implements MatchRenderer {
     parent.appendChild(renderer.domElement)
 
     const inst = new Rink3dRenderer(renderer)
+    // name labels: a 2D canvas over the GL canvas (never in the 3D scene)
+    const lc = document.createElement('canvas')
+    lc.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none'
+    if (getComputedStyle(parent).position === 'static') parent.style.position = 'relative'
+    parent.appendChild(lc)
+    inst.labelCanvas = lc
     if (colors) inst.setKits(colors)
     if (o.athletes === 'owner' || o.athletes === 'auto') await inst.loadOwner()
     inst.assets = o.athletes !== 'procedural' ? await loadAthleteAssets() : null
@@ -582,6 +604,89 @@ export class Rink3dRenderer implements MatchRenderer {
   }
 
   /**
+   * Name labels in SCREEN space: a constant, readable pixel size at every
+   * camera (they were 4.4 ft world sprites with no depth test — huge up close,
+   * ~7 px at broadcast distance, overlapping in 77% of frames). The carrier
+   * always, plus the few players nearest the puck; de-conflicted (a label
+   * that can't find a free spot is dropped, never stacked).
+   */
+  private drawLabels(): void {
+    const c = this.labelCanvas
+    const W = c.clientWidth
+    const H = c.clientHeight
+    if (W === 0 || H === 0) return
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    if (c.width !== Math.round(W * dpr) || c.height !== Math.round(H * dpr)) {
+      c.width = Math.round(W * dpr)
+      c.height = Math.round(H * dpr)
+    }
+    const ctx = c.getContext('2d')
+    if (!ctx) return
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, W, H)
+    this.labelRects = []
+    if (!this.timeline) return
+
+    const carrier = this.carrierMarkPose
+    const cands: Array<{ p: PlayerPose; pri: number }> = []
+    for (const p of this.allPoses()) {
+      if (!p.labelOn || !p.labelText || !p.rig.visible) continue
+      const d = Math.hypot(p.worldX.pos - this.puck.x, p.worldZ.pos - this.puck.z)
+      if (p === carrier) cands.push({ p, pri: 100 })
+      else if (!p.rig.goalie && d < LABEL_NEAR_FT) cands.push({ p, pri: 50 - d })
+      else if (p.rig.goalie && d < LABEL_GOALIE_NEAR_FT) cands.push({ p, pri: 40 - d })
+    }
+    cands.sort((a, b) => b.pri - a.pri)
+    const v = new THREE.Vector3()
+    const reqs: LabelRequest[] = []
+    const info = new Map<string, { p: PlayerPose; ax: number; ay: number; carrier: boolean }>()
+    for (const { p, pri } of cands.slice(0, LABEL_MAX)) {
+      v.set(p.worldX.pos, p.labelY, p.worldZ.pos).project(this.camera)
+      if (v.z > 1 || Math.abs(v.x) > 1.02 || Math.abs(v.y) > 1.02) continue // behind the camera / off screen
+      const ax = ((v.x + 1) / 2) * W
+      const ay = ((1 - v.y) / 2) * H
+      const isC = p === carrier
+      ctx.font = isC ? '700 13px Arial, sans-serif' : '600 12px Arial, sans-serif'
+      const w = Math.ceil(ctx.measureText(p.labelText!).width) + 16
+      const h = isC ? 20 : 18
+      const key = `${p.team}:${p.rig.slot}`
+      reqs.push({ key, x: ax, y: ay - 3, w, h, priority: pri })
+      info.set(key, { p, ax, ay, carrier: isC })
+    }
+    const placed = layoutLabels(reqs, { w: W, h: H })
+    this.labelRects = placed
+    ctx.textBaseline = 'middle'
+    ctx.textAlign = 'left'
+    for (const r of placed) {
+      const it = info.get(r.key)!
+      const kit = it.p.team === 'home' ? this.homeKit : this.awayKit
+      // nudged off its default spot: a hairline back to the player
+      if (Math.abs(r.dx) > 1 || Math.abs(r.dy) > 1) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.55)'
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(it.ax, it.ay)
+        ctx.lineTo(Math.max(r.left, Math.min(r.left + r.w, it.ax)), r.top + r.h)
+        ctx.stroke()
+      }
+      ctx.fillStyle = it.carrier ? 'rgba(10,12,16,0.86)' : 'rgba(10,12,16,0.7)'
+      ctx.beginPath()
+      ctx.roundRect(r.left, r.top, r.w, r.h, 4)
+      ctx.fill()
+      if (it.carrier) {
+        ctx.strokeStyle = '#ffbf1f'
+        ctx.lineWidth = 1.5
+        ctx.stroke()
+      }
+      ctx.fillStyle = `#${(it.p.team === 'home' ? kit.jersey : kit.trim).toString(16).padStart(6, '0')}`
+      ctx.fillRect(r.left + 2, r.top + 3, 4, r.h - 6)
+      ctx.fillStyle = '#ffffff'
+      ctx.font = it.carrier ? '700 13px Arial, sans-serif' : '600 12px Arial, sans-serif'
+      ctx.fillText(it.p.labelText!, r.left + 10, r.top + r.h / 2 + 0.5)
+    }
+  }
+
+  /**
    * Size the puck halo / carrier ring for the CURRENT camera: never smaller
    * on screen than a readable minimum (px), never smaller than real scale.
    * Runs after the camera moved this frame.
@@ -684,7 +789,9 @@ export class Rink3dRenderer implements MatchRenderer {
         velSmZ: 0,
         rig,
         team,
-        labelSprite: this.makeLabelSprite(),
+        labelText: null,
+        labelOn: false,
+        labelY: 6.6,
         vx: 0,
         vz: 0,
         layer: clips ? new ActionLayer(clips) : null,
@@ -707,10 +814,7 @@ export class Rink3dRenderer implements MatchRenderer {
     }
     this.homeGoaliePose = mk('home', true, HOME_G_SLOT, -NET_X + 4, 0)
     this.awayGoaliePose = mk('away', true, AWAY_G_SLOT, NET_X - 4, 0)
-    for (const p of this.allPoses()) {
-      this.paintSlot(p)
-      this.scene.add(p.labelSprite)
-    }
+    for (const p of this.allPoses()) this.paintSlot(p)
 
     if (this.assets) {
       const all = () => this.allPoses()
@@ -769,41 +873,6 @@ export class Rink3dRenderer implements MatchRenderer {
     this.atlasDirty = true
   }
 
-  private makeLabelSprite(): THREE.Sprite {
-    const c = document.createElement('canvas')
-    c.width = 256
-    c.height = 64
-    const tex = new THREE.CanvasTexture(c)
-    tex.colorSpace = THREE.SRGBColorSpace
-    const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true, toneMapped: false })
-    const sprite = new THREE.Sprite(mat)
-    sprite.scale.set(4.4, 1.1, 1)
-    sprite.visible = false
-    sprite.renderOrder = 10
-    return sprite
-  }
-
-  private drawLabel(sprite: THREE.Sprite, text: string, team: 'home' | 'away'): void {
-    const mat = sprite.material as THREE.SpriteMaterial
-    const tex = mat.map as THREE.CanvasTexture
-    const c = tex.image as HTMLCanvasElement
-    const ctx = c.getContext('2d')!
-    ctx.clearRect(0, 0, 256, 64)
-    ctx.fillStyle = 'rgba(8,10,14,0.62)'
-    ctx.beginPath()
-    ctx.roundRect(4, 10, 248, 44, 7)
-    ctx.fill()
-    const kit = team === 'home' ? this.homeKit : this.awayKit
-    ctx.fillStyle = `#${(team === 'home' ? kit.jersey : kit.trim).toString(16).padStart(6, '0')}`
-    ctx.fillRect(4, 10, 8, 44)
-    ctx.fillStyle = '#ffffff'
-    ctx.font = 'bold 28px Arial, sans-serif'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(text, 132, 33, 232)
-    tex.needsUpdate = true
-  }
-
   /**
    * Update the label + jersey slot whenever the player in this slot changes
    * (or on first population). Reuses the existing sprite — no allocation.
@@ -815,14 +884,11 @@ export class Rink3dRenderer implements MatchRenderer {
     if (id) this.paintSlot(pose)
     const info = id ? this.labels[id] : undefined
     if (!id || !info) {
-      pose.labelSprite.visible = false
-      pose.labelSprite.userData.hasLabel = false
+      pose.labelText = null
       return
     }
-    const labelText = info.number !== undefined ? `${info.number} ${info.lastName}` : info.lastName
-    this.drawLabel(pose.labelSprite, labelText, pose.team)
-    pose.labelSprite.userData.hasLabel = true
-    pose.labelSprite.visible = true
+    pose.labelText = info.number !== undefined ? `${info.number} ${info.lastName}` : info.lastName
+    pose.labelOn = true
   }
 
   // ── MatchRenderer interface ───────────────────────────────────────────────
@@ -848,7 +914,8 @@ export class Rink3dRenderer implements MatchRenderer {
     // Reset per-slot state so jerseys/labels repaint for the new game
     for (const p of this.allPoses()) {
       p.playerId = null
-      p.labelSprite.visible = false
+      p.labelText = null
+      p.labelOn = false
       p.butterflyTimer = p.armsTimer = p.staggerTimer = 0
       p.butterfly = 0
       p.shotTimer = -1
@@ -1000,10 +1067,7 @@ export class Rink3dRenderer implements MatchRenderer {
     this.atlasTex.dispose()
     this.ownerAtlasTex?.dispose()
     for (const t of [this.ownerTex?.skater, this.ownerTex?.goalie]) if (t) for (const x of Object.values(t)) x.dispose()
-    for (const p of this.allPoses()) {
-      ;(p.labelSprite.material as THREE.SpriteMaterial).map?.dispose()
-      p.labelSprite.material.dispose()
-    }
+    this.labelCanvas.remove()
     this.scene.traverse((obj) => {
       if (obj instanceof THREE.Mesh) {
         obj.geometry.dispose()
@@ -1097,6 +1161,7 @@ export class Rink3dRenderer implements MatchRenderer {
     this.updateCues(this.clockPos, dt)
     this.updateCamera(dt)
     this.updateMarkers()
+    this.drawLabels()
     this.updateArena(dt)
     this.emit()
     // repainted jersey slots go up as sub-images (a full re-upload of the
@@ -1284,7 +1349,7 @@ export class Rink3dRenderer implements MatchRenderer {
     for (const r of left) {
       poses[r]!.departT = 0
       poses[r]!.departSeq = ++this.departSeq
-      poses[r]!.labelSprite.visible = false
+      poses[r]!.labelOn = false
     }
     poses.forEach((pose, r) => {
       const slot = slots[r]!
@@ -1296,7 +1361,7 @@ export class Rink3dRenderer implements MatchRenderer {
         pose.mode = 'idle'
         pose.playerId = null
         pose.rig.visible = false
-        pose.labelSprite.visible = false
+        pose.labelOn = false
         return
       }
       pose.rig.visible = true
@@ -1440,8 +1505,8 @@ export class Rink3dRenderer implements MatchRenderer {
     }
     pose.rig.apply(pose.worldX.pos, pose.worldZ.pos, pose.angle, body, stick, pose.overlay)
 
-    pose.labelSprite.position.set(pose.worldX.pos, body.hipHeight + 4.4, pose.worldZ.pos)
-    pose.labelSprite.visible = pose.rig.visible && pose.labelSprite.userData.hasLabel === true
+    pose.labelY = body.hipHeight + 3.4
+    if (pose.mode === 'play' || pose.mode === 'arriving') pose.labelOn = true
   }
 
   private updateGoaliePose(
@@ -1491,8 +1556,8 @@ export class Rink3dRenderer implements MatchRenderer {
     pose.layer?.update(simDt)
     pose.rig.apply(pose.worldX.pos, pose.worldZ.pos, pose.angle, body, { mode: 'carry' }, pose.overlay)
 
-    pose.labelSprite.position.set(pose.worldX.pos, body.hipHeight + 4.6, pose.worldZ.pos)
-    pose.labelSprite.visible = pose.rig.visible && pose.labelSprite.userData.hasLabel === true
+    pose.labelY = body.hipHeight + 3.6
+    pose.labelOn = true
   }
 
   // ── Event cues ────────────────────────────────────────────────────────────
