@@ -550,6 +550,62 @@ const DOWN = new THREE.Vector3(0, -1, 0)
 const UP = new THREE.Vector3(0, 1, 0)
 const toV3 = (v: THREE.Vector3): V3 => ({ x: v.x, y: v.y, z: v.z })
 
+const bladeCache = new WeakMap<THREE.BufferGeometry, { boneIndex: number; local: THREE.Vector3 } | null>()
+
+/**
+ * The blade's centre in the local frame of the bone that skins it, from the
+ * bind pose: the stick's verts (weighted > 0.6 to `stick` / `stick_blade`)
+ * within 0.3 ft of the stick's lowest point. Cached per geometry.
+ */
+export function bladeAnchor(mesh: THREE.SkinnedMesh): { bone: THREE.Bone; local: THREE.Vector3 } | null {
+  const geo = mesh.geometry
+  let hit = bladeCache.get(geo)
+  if (hit === undefined) {
+    hit = null
+    const bones = mesh.skeleton.bones
+    const stickIdx = new Set(bones.map((b, i) => (b.name === 'stick' || b.name === 'stick_blade' ? i : -1)).filter((i) => i >= 0))
+    const P = geo.getAttribute('position')
+    const J = geo.getAttribute('skinIndex')
+    const W = geo.getAttribute('skinWeight')
+    if (stickIdx.size && P && J && W) {
+      const verts: Array<{ i: number; bone: number }> = []
+      let minY = Infinity
+      for (let i = 0; i < P.count; i++) {
+        for (let c = 0; c < 4; c++) {
+          const b = J.getComponent(i, c)
+          if (stickIdx.has(b) && W.getComponent(i, c) > 0.6) {
+            verts.push({ i, bone: b })
+            // bind space = mesh space at bind; the blade is the stick's low end
+            const y = new THREE.Vector3().fromBufferAttribute(P, i).applyMatrix4(mesh.bindMatrix).y
+            if (y < minY) minY = y
+            break
+          }
+        }
+      }
+      const v = new THREE.Vector3()
+      const sum = new Map<number, { x: number; y: number; z: number; n: number }>()
+      for (const { i, bone } of verts) {
+        v.fromBufferAttribute(P, i).applyMatrix4(mesh.bindMatrix)
+        if (v.y > minY + 0.3) continue
+        const s = sum.get(bone) ?? { x: 0, y: 0, z: 0, n: 0 }
+        s.x += v.x; s.y += v.y; s.z += v.z; s.n++
+        sum.set(bone, s)
+      }
+      // the bone carrying most of the blade
+      let best: [number, { x: number; y: number; z: number; n: number }] | null = null
+      for (const e of sum) if (!best || e[1].n > best[1].n) best = e
+      if (best && best[1].n > 0) {
+        const [bi, s] = best
+        // skinned world = bone.matrixWorld · boneInverse · bindMatrix · v  →  bone-local = boneInverse · (bindMatrix · v)
+        const local = new THREE.Vector3(s.x / s.n, minY, s.z / s.n).applyMatrix4(mesh.skeleton.boneInverses[bi]!)
+        hit = { boneIndex: bi, local }
+      }
+    }
+    bladeCache.set(geo, hit)
+  }
+  return hit ? { bone: mesh.skeleton.bones[hit.boneIndex]!, local: hit.local } : null
+}
+
 export class AthleteRig {
   /** World placement (position, heading, bank). The skeleton hangs below. */
   readonly root = new THREE.Group()
@@ -609,6 +665,23 @@ export class AthleteRig {
     this.root.updateMatrixWorld(true)
     this.mesh.bind(new THREE.Skeleton(BONE_NAMES.map((n) => this.bones[n])))
     this.root.rotation.order = 'YXZ'
+    this.blade = bladeAnchor(this.mesh)
+  }
+
+  /**
+   * Where the blade's middle really is, in the local frame of the bone that
+   * skins it — measured once from the stick geometry (its lowest verts at bind),
+   * so a carried puck can sit on the DRAWN blade whatever the rig's bone layout
+   * (owner sticks skin the blade to `stick`, not `stick_blade`).
+   */
+  readonly blade: { bone: THREE.Bone; local: THREE.Vector3 } | null
+
+  private readonly bladeTmp = new THREE.Vector3()
+  /** The drawn blade's centre in world space (null if the rig has no stick). */
+  bladeWorld(): THREE.Vector3 | null {
+    if (!this.blade) return null
+    this.blade.bone.updateWorldMatrix(true, false)
+    return this.bladeTmp.copy(this.blade.local).applyMatrix4(this.blade.bone.matrixWorld)
   }
 
   get visible(): boolean {

@@ -204,14 +204,16 @@ export function gearMaterial(map: THREE.Texture, normal: THREE.Texture, accent: 
   {
     vec3 c = diffuseColor.rgb;
     float r = max(c.r, 1e-4);
-    // yellow / gold: red-led, green 30-85% of red, almost no blue
-    float k = smoothstep(0.08, 0.16, c.r) * smoothstep(0.25, 0.35, c.g / r) * (1.0 - smoothstep(0.8, 0.92, c.g / r)) * (1.0 - smoothstep(0.12, 0.25, c.b / r));
+    // yellow / gold: red-led, green 30-85% of red, almost no blue. Skin is
+    // red-led too, so the key is tight on brightness and blue (it used to
+    // tint faces in the team colour).
+    float k = smoothstep(0.18, 0.3, c.r) * smoothstep(0.3, 0.4, c.g / r) * (1.0 - smoothstep(0.8, 0.92, c.g / r)) * (1.0 - smoothstep(0.06, 0.14, c.b / r));
     vec3 tint = uAccent * clamp(c.r / 0.9, 0.0, 1.2);
     diffuseColor.rgb = mix(c, tint, k);
   }`
       )
   }
-  m.customProgramCacheKey = () => 'owner-gear-v1'
+  m.customProgramCacheKey = () => 'owner-gear-v2'
   return m
 }
 

@@ -105,8 +105,9 @@ export interface Render3dOptions {
 // backward skating, authored actions ride on top. Procedural is the fallback.
 export const RENDER3D_DEFAULTS: Required<Render3dOptions> = { athletes: 'auto', locomotion: 'hybrid' }
 
-const PUCK_R = 0.36
-const PUCK_H = 0.1
+// Near regulation (3" across, 1" thick) — a touch big so it reads; the halo does the rest at distance.
+const PUCK_R = 0.14
+const PUCK_H = 0.09
 
 // ── Spring half-lives ───────────────────────────────────────────────────────
 const PLAYER_FOLLOW_HL = 0.08
@@ -1277,6 +1278,11 @@ export class Rink3dRenderer implements MatchRenderer {
       this.updateGoaliePose(this.awayGoaliePose, snap.awayGoalie.x, snap.awayGoalie.y, snap.puck, dt, simDt)
     }
 
+    // Sticks on the ice: skating poses float the blade (up to ~0.6 ft on the
+    // owner clips), which puts a carried puck visibly off the blade
+    for (const p of this.homePoses) this.groundStick(p, dt)
+    for (const p of this.awayPoses) this.groundStick(p, dt)
+
     // Carrier pose (resolved AFTER the slots updated their ids this frame)
     let carrierPose: PlayerPose | null = null
     if (snap.carrier !== null) {
@@ -1317,6 +1323,58 @@ export class Rink3dRenderer implements MatchRenderer {
     this.syncBlobs()
   }
 
+  private readonly gPivot = new THREE.Vector3()
+  private readonly gV = new THREE.Vector3()
+  private readonly gAxis = new THREE.Vector3()
+  private readonly gQ = new THREE.Quaternion()
+  private readonly gM = new THREE.Matrix4()
+  private readonly gM2 = new THREE.Matrix4()
+  private readonly gM3 = new THREE.Matrix4()
+  /**
+   * Swing a skater's stick about his top hand until the blade's low edge sits on
+   * the ice. Only for a blade hovering a little (≤ 0.8 ft, full correction up to
+   * 0.6) and no action clip playing — a shot, pass or hit lifts it on purpose.
+   */
+  private readonly groundW = new WeakMap<PlayerPose, number>()
+  private groundStick(pose: PlayerPose, dt: number): void {
+    const rig = pose.rig
+    if (!rig.visible || rig.goalie) { this.groundW.delete(pose); return }
+    const w = rig.bladeWorld()
+    if (!w) return
+    const lift = w.y - 0.02
+    const playing = pose.layer?.playing
+    const eligible = !(playing && playing.some((n) => n !== 'hockey_stop')) && lift <= 0.8
+    // eased in / out (~0.1 s half-life) so a clip starting or ending doesn't pop the stick
+    const prev = this.groundW.get(pose) ?? (eligible ? 1 : 0)
+    const k = dt > 0 ? 1 - Math.pow(0.5, dt / 0.1) : 0
+    const gw = prev + ((eligible ? (lift <= 0.6 ? 1 : 1 - (lift - 0.6) / 0.2) : 0) - prev) * k
+    this.groundW.set(pose, gw)
+    if (gw < 0.01 || lift < 0.02) return
+    const weight = gw
+    const hand = rig.bones.hand_R
+    hand.updateWorldMatrix(true, false)
+    this.gPivot.setFromMatrixPosition(hand.matrixWorld)
+    const v = this.gV.copy(w).sub(this.gPivot)
+    const r = v.length()
+    const hLen = Math.hypot(v.x, v.z)
+    if (r < 1 || hLen < 0.2) return
+    const want = (0.02 - this.gPivot.y) / r
+    if (want < -1 || want > 1) return
+    // elevation change (negative = down); positive rotation about (h × up) raises h
+    const delta = (Math.asin(want) - Math.asin(v.y / r)) * weight
+    this.gAxis.set(-v.z / hLen, 0, v.x / hLen) // h × up
+    this.gQ.setFromAxisAngle(this.gAxis, delta)
+    // world' = T(pivot) · R · T(−pivot) · world
+    this.gM.makeTranslation(this.gPivot.x, this.gPivot.y, this.gPivot.z).multiply(this.gM2.makeRotationFromQuaternion(this.gQ)).multiply(this.gM2.makeTranslation(-this.gPivot.x, -this.gPivot.y, -this.gPivot.z))
+    for (const b of [rig.bones.stick, rig.bones.stick_blade]) {
+      b.updateWorldMatrix(true, false)
+      const world = this.gM2.multiplyMatrices(this.gM, b.matrixWorld)
+      const local = world.premultiply(this.gM3.copy(b.parent!.matrixWorld).invert())
+      local.decompose(b.position, b.quaternion, b.scale)
+      b.updateMatrixWorld(true)
+    }
+  }
+
   private readonly bladeTmp = new THREE.Vector3()
   private readonly bladeDir = new THREE.Vector3()
   /**
@@ -1328,6 +1386,14 @@ export class Rink3dRenderer implements MatchRenderer {
    * far from the body (a clip mid-swing, a missing bone binding).
    */
   private bladePoint(pose: PlayerPose): { x: number; z: number } | null {
+    // the drawn blade's centre, measured from the stick geometry (athlete.ts bladeAnchor)
+    const w = pose.rig.bladeWorld?.()
+    if (w) {
+      const d = Math.hypot(w.x - pose.worldX.pos, w.z - pose.worldZ.pos)
+      // blade lifted (a shot follow-through) or implausibly far: fall through
+      if (Number.isFinite(d) && d <= 7 && w.y < 0.6) return { x: w.x, z: w.z }
+      if (Number.isFinite(d) && d <= 7) return null
+    }
     const b = pose.rig.bones?.stick_blade
     if (!b) return null
     b.updateWorldMatrix(true, false)

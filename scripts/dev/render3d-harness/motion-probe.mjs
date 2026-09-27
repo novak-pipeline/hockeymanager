@@ -77,6 +77,7 @@ const r = await page.evaluate(async (secs) => {
     }
     h.x = x; h.z = z; h.vx = vx; h.vz = vz
   }
+  const blade = [], bladeY = [], bctx = {}
   const orig = R.renderAt.bind(R)
   const angle = (a, b) => 2 * Math.acos(Math.min(1, Math.abs(a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w)))
   const wpos = (bone) => { bone.updateWorldMatrix(true, false); const e = bone.matrixWorld.elements; return { x: e[12], y: e[13], z: e[14] } }
@@ -96,6 +97,16 @@ const r = await page.evaluate(async (secs) => {
         }
       }
       for (const p of skaters()) if (p.rig?.visible && p.playerId && p.mode === 'play') feedPath('rend', p.playerId, p.worldX.pos, p.worldZ.pos, gdt)
+    }
+    // ── puck on the blade: the carried puck vs the SKINNED blade geometry
+    // (what the eye sees: stick vertices on the ice), not a bone origin ──
+    const cp = R.carrierMarkPose
+    const bw = cp && !cp.rig?.goalie && cp.rig?.visible ? cp.rig.bladeWorld?.() : null
+    if (bw) {
+      // the drawn blade's centre (athlete.ts bladeAnchor, from the stick geometry) vs the puck, + blade height
+      const d = Math.hypot(bw.x - R.puckMesh.position.x, bw.z - R.puckMesh.position.z)
+      blade.push(d); bladeY.push(bw.y)
+      if (d > 1) { const k = `[${[...(cp.layer?.playing ?? [])].join('+') || '-'}] ${cp.mode ?? ''}`; bctx[k] = (bctx[k] ?? 0) + 1 }
     }
     frameMs.push(dt * 1000)
     if (dt > 0.05 && longFrames.length < 8) longFrames.push({ atSec: +((performance.now() - t0) / 1000).toFixed(2), ms: Math.round(dt * 1000), clock: +absT.toFixed(2) })
@@ -166,6 +177,7 @@ const r = await page.evaluate(async (secs) => {
     path30Hz: path30('path'), render30Hz: path30('rend'),
     maxSpeed: +maxSpeed.toFixed(1), framesOver40: over40, samples, yawTwitchPerRigSec: +(flips / Math.max(1e-9, rigSec)).toFixed(3), spikes,
     boneSamples, bonePopSamples: pops, popsPerRigSec: +(pops / Math.max(1e-9, boneRigSec)).toFixed(3), handStickPopsPerRigSec: +(limbPops / Math.max(1e-9, boneRigSec)).toFixed(3), boneP99: +pct(speeds, 0.99).toFixed(2),
+    puckBlade: { frames: blade.length, p50: +pct(blade, 0.5).toFixed(2), p90: +pct(blade, 0.9).toFixed(2), over1ft: +(blade.filter((x) => x > 1).length / Math.max(1, blade.length)).toFixed(3), bladeYp50: +pct(bladeY, 0.5).toFixed(2), bladeYp90: +pct(bladeY, 0.9).toFixed(2), contexts: Object.entries(bctx).sort((a, b) => b[1] - a[1]).slice(0, 6) },
     handOffStick: handOff, handChecks, handOffContexts: Object.entries(hctx).sort((a, b) => b[1] - a[1]).slice(0, 8),
     frameP95ms: +pct(frameMs, 0.95).toFixed(1), frameMaxMs: +Math.max(0, ...frameMs).toFixed(1), framesOver50ms: frameMs.filter((x) => x > 50).length, longFrames, frames: frameMs.length,
     popContexts: top, worstPops: [...worst].sort((a, b) => b.v - a.v).slice(0, 5),
