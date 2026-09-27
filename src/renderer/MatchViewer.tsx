@@ -137,6 +137,9 @@ export function MatchViewer(props: {
   onClose: () => void
   /** Pregame context supplied directly (dev harness). Normally fetched. */
   broadcast?: BroadcastContext
+  /** Pick the game up at this absolute game second (the Sim view's hand-over);
+   *  0 / absent = the normal "drop the puck" start. */
+  startAtAbsT?: number
 }): JSX.Element {
   const { game } = props
 
@@ -179,6 +182,13 @@ export function MatchViewer(props: {
   // HOLD it while the replay rewinds the picture (TV never un-scores a goal).
   const heldViewRef        = useRef<MatchView | null>(null)
 
+  // Where the NEXT renderer build picks the game up. A 2D↔3D switch or the Sim
+  // view's "Watch on the ice" keeps the same moment of the same game — the view
+  // is a camera choice, not a new match (F-12).
+  const resumeRef = useRef<{ absT: number; playing: boolean; mode: PlaybackMode } | null>(
+    props.startAtAbsT && props.startAtAbsT > 0 ? { absT: props.startAtAbsT, playing: true, mode: 'full' } : null,
+  )
+
   // Stoppage overlay
   const stoppageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -193,7 +203,7 @@ export function MatchViewer(props: {
   const lastGoalEventRef = useRef<GoalEvent | null>(null)
 
   // ── React state ──────────────────────────────────────────────────────────────
-  const [phase, setPhase]               = useState<Phase>('hero')
+  const [phase, setPhase]               = useState<Phase>(() => (resumeRef.current ? 'playing' : 'hero'))
   const [view, setView]                 = useState<MatchView | null>(null)
   const [rendererMode, setRendererMode] = useState<'2d' | '3d'>(readRendererPref)
   const [camPreset, setCamPreset]       = useState<CameraPreset>('broadcast')
@@ -436,6 +446,29 @@ export function MatchViewer(props: {
         // Start paused at speed=2; will play when user picks a mode
         r.load(timeline, colors, playerLabels)
         r.setSpeed(2)
+
+        // Resume where the previous view left off (renderer switch / Sim view).
+        const resume = resumeRef.current
+        resumeRef.current = null
+        if (resume && timeline.duration > 0) {
+          const dur = timeline.duration
+          const at = Math.max(0, Math.min(resume.absT, dur))
+          pendingModeRef.current = resume.mode
+          planRef.current = planFor(game.stream, resume.mode)
+          setPlaybackMode(resume.mode)
+          r.seekFraction(at / dur)
+          // Everything up to here has already happened: no goal banner for the
+          // goals already on the board, no cues re-fired, the ticker backfilled.
+          prevScoreRef.current = timeline.scoreAt(at)
+          for (const c of planRefB.current.game) if (c.at <= at) firedCuesRef.current.add(c.id)
+          lastCommentaryAbsT.current = at
+          lastAbsTRef.current = at
+          cursorRef.current?.seek(at)
+          setVisibleLines(lines.filter((l) => l.absT <= at).slice(-50))
+          r.setSpeed(currentSpeed(planRef.current, at) * nudgeRef.current)
+          if (resume.playing) r.play()
+          setPhase('playing')
+        }
 
         requestAnimationFrame(() => {
           if (!disposed) r.resize()
@@ -772,11 +805,34 @@ export function MatchViewer(props: {
   // ── Controls ──────────────────────────────────────────────────────────────────
   function handleToggleRenderer(): void {
     const next = rendererMode === '3d' ? '2d' : '3d'
+    // Keep the game where it is: the new renderer picks up the same moment.
+    const v = viewRef.current
+    const dur = gameDurationRef.current
+    if (phase === 'playing' && v && dur > 0) {
+      // mid-replay: resume at the LIVE moment the replay cut away from
+      const live = replayActiveRef.current ? (heldViewRef.current ?? v) : v
+      resumeRef.current = {
+        absT: live.progress * dur,
+        playing: replayActiveRef.current || v.playing,
+        mode: pendingModeRef.current,
+      }
+    } else if (phase === 'pregame') {
+      resumeRef.current = { absT: 0, playing: true, mode: pendingModeRef.current }
+    }
+    if (replayActiveRef.current || replaySkipRef.current) {
+      replaySkipRef.current = false
+      heldViewRef.current = null
+      replayActiveRef.current = false
+      setReplayActive(false)
+      setGoalBanner(null)
+    }
+    ffActiveRef.current = false
+    setFfClock(null)
     writeRendererPref(next)
     setRendererMode(next)
     setView(null)
     setErr(null)
-    setPhase('hero')
+    setPhase(resumeRef.current ? 'playing' : 'hero')
     clearBroadcast()
   }
 
