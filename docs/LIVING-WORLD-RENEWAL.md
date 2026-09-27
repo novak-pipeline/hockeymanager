@@ -235,6 +235,48 @@ Canada runs about 4 points hot, and Slovakia and Belarus a little cold. The only
 
 Every simulated league crowned a champion every season: 22 records a year, including the Memorial Cup. Over the run the world played 10 World Juniors, 3 Olympics (2026, 2030, 2034) and 2 Nations Cups.
 
+A second, independent 10-season run on the final code (`WR_TAG=final`) reproduced the draft figures above exactly: the same nation mix to one decimal, 197–207 distinct surnames per class, and #1 / #10 / #32 / median ceilings of 83–97 / 70–82 / 61–69 / 51–56.
+
+### Daily-advance cost
+
+Machine note: the box was shared with other sessions' sims throughout, so absolute ms/day swing 3–5× between runs. Only numbers taken **concurrently, under the same load**, are compared.
+
+- **Same world, same season (2025, imported snapshot).**
+  - Concurrent 10-season harness runs: World Renewal 1,831 ms/day vs baseline 1,993 (−8%).
+  - Concurrent profile runs (`advanceProfile`, 80 days): 853 vs 758 (+13%). The difference sits in methods this branch does not touch (`teamOf`, `practiceAttributeBias`), so it is load noise.
+  - An earlier quiet pair: 214 vs 233 (−8%).
+  - **Parity, within about ±10%.**
+- **Steady state (2026–2029).**
+  - Concurrent harness: World Renewal is +14%, +33%, +30% and +25% per season.
+  - Concurrent profile at 2028: 515 vs 375 ms/day (+38%).
+  - Nearly all of the gap is `finishDay`'s own body, which is the world quick-sim. The baseline's junior leagues are emptying by then: the OHL is at 0 by 2030, and a club with no roster plays no games. So the baseline gets cheaper by losing its world.
+  - The scouting methods shift but net out. `surfaceScoutFinds` is −83 ms/day, while `emitScoutDigest` and `getScouting` are about +40.
+- **Against its own first season, World Renewal does not grow.** Within one run, the ms/day of seasons 2–10 stays at or below season 1 (for example 841 → 520 in the `renewAB` run), because pruning keeps the world at about 12–16k players.
+- **Special days.** The World Juniors day and the Olympic day each simulate one tournament of 28–30 quick-sim games plus squad selection over the whole world. That is a one-day spike, on at most two days a season.
+
+Verdict: against the same world, the per-day cost is within the ~10% budget. Against a baseline whose junior leagues have died, it is +25–38%. That extra is the cost of those leagues still playing hockey. The cheapest further cut is in pre-existing code, not the renewal: `teamOf` is a linear scan over about 700 teams and costs 17–71 ms/day, and `emitScoutDigest` builds the whole `getScouting()` view just to read `.scouts`. Both are left for a perf pass because they are shared with other branches.
+
+### Save size (gzip, `exportSnapshot`)
+
+| Season end | Baseline | World Renewal |
+|---|---:|---:|
+| 2025 | 6,894 KB | 7,437 KB |
+| 2027 | 7,521 KB | 7,154 KB |
+| 2029 | 8,103 KB | 7,729 KB |
+| 2034 | — (the harness GM can't field a goalie after 2029 on the baseline) | 9,885 KB |
+
+- **Growth.** About +270 KB a season over ten seasons (+33% total). The baseline grew about +300 KB a season over its five.
+- **Why.** The growth is careers and history: 116,886 archived `careerHistory` rows by 2034, plus world champions, awards and tournament box lines. It does not come from population. `pruneWorldWashouts` holds the world at 12.3k–16.0k players; without it the intake would add about 1,100 a year.
+
+### Autopilot gate
+
+`AP_RUN=1 AP_SEASONS=10` on the modded 32-team league (seed 2029). Before the fix below the run finished 0 critical / **2 major**: "NHL roster size 27/31 outside 18–26" at the 2034 and 2035 openers.
+- **Cause.** `assignRosters`, the rollover roster sort, trimmed without regard to position. The autopilot GM had signed a lopsided roster: five goalies, ten D and eight F, from a deeper renewed free-agent market. The trim sent the worst forwards down, and the minimum-fill pulled four forwards straight back up, which left the club at 27.
+- **Fix.** The trim now never takes a group below its legal minimum, and it runs again after the pull-ups.
+- **Result.** After the fix: 10/10 seasons, **0 critical / 0 major** (151 minor, all flavour or repetition notes).
+
+The full suite is green apart from the known heavy-sim timeouts under parallel load (`rules`, `goaliePull`, `scoreEffects`). Those pass in isolation.
+
 ## 7. Contracts and compatibility
 
 - **Frozen contracts untouched.** `views.ts`, `events.ts`, `rendererContract.ts` and `protocol.ts` changed only additively: a new `getWorldHistory` request and `worldHistory` response, backed by the new `WorldHistoryView` in its own file.
@@ -251,3 +293,5 @@ Every simulated league crowned a champion every season: 22 records a year, inclu
 - No mid-career moves to Europe or the KHL for money (audit §2).
 - Swiss, Austrian and Danish youth have no domestic junior loop in the DB. They enter via DNL/J20 imports, so Switzerland is under-represented in drafts.
 - The user cannot yet loan an NHL teenager to his World Juniors team.
+- The 2034 census shows 3 players flagged retired but still on a roster (out of 16k). This is harmless, because they simply keep playing. The cause has not been traced.
+- Performance: `teamOf` (a linear scan over every team) and `emitScoutDigest` (builds the full scouting view) are the cheapest daily wins. Both are pre-existing, see §6.
