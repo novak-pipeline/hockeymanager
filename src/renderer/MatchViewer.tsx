@@ -175,6 +175,9 @@ export function MatchViewer(props: {
   const goalBannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const replayActiveRef    = useRef<boolean>(false)
   const replaySkipRef      = useRef<boolean>(false)
+  // The live score/clock at the cut to a replay: the scorebug and scoreboard
+  // HOLD it while the replay rewinds the picture (TV never un-scores a goal).
+  const heldViewRef        = useRef<MatchView | null>(null)
 
   // Stoppage overlay
   const stoppageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -569,6 +572,8 @@ export function MatchViewer(props: {
           const CELEBRATION_WALL_MS = 4500
           setTimeout(() => {
             if (!replaySkipRef.current) return // superseded / left
+            heldViewRef.current = viewRef.current
+            renderer3dRef.current?.setBoardHold(true)
             setReplayActive(true)
             replayActiveRef.current = true
             // The booth keeps talking over the replay (the analyst's line is
@@ -670,6 +675,8 @@ export function MatchViewer(props: {
 
   function _endReplay(): void {
     replaySkipRef.current = false
+    heldViewRef.current = null
+    renderer3dRef.current?.setBoardHold(false)
     setReplayActive(false)
     replayActiveRef.current = false
     setGoalBanner(null)
@@ -842,6 +849,8 @@ export function MatchViewer(props: {
     if (!banner || !gameDurationRef.current) return
     const replayStart = Math.max(0, (banner.goalAbsT - 8) / gameDurationRef.current)
     replaySkipRef.current = true
+    heldViewRef.current = viewRef.current
+    renderer3dRef.current?.setBoardHold(true)
     setReplayActive(true)
     replayActiveRef.current = true
     rendererRef.current?.seekFraction(replayStart)
@@ -859,6 +868,13 @@ export function MatchViewer(props: {
 
   const userSide = game.userIsHome ? 'home' : 'away'
 
+  // What the score graphics show: the live view, except during a replay, when
+  // they hold the score/clock from the moment we cut to it.
+  const held = replayActive ? heldViewRef.current : null
+  const shownView: MatchView | null = view && held
+    ? { ...view, homeScore: held.homeScore, awayScore: held.awayScore, clock: held.clock, period: held.period }
+    : view
+
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <section style={{ position: 'relative' }}>
@@ -867,7 +883,7 @@ export function MatchViewer(props: {
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         marginBottom: 12, gap: 10, flexWrap: 'wrap',
       }}>
-        <Scoreboard game={game} view={view} userSide={userSide} />
+        <Scoreboard game={game} view={shownView} userSide={userSide} replay={replayActive} />
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {/* 2D / 3D toggle */}
@@ -915,8 +931,8 @@ export function MatchViewer(props: {
           {showBroadcast && phase !== 'hero' && (
             <div className="bc-layer">
               {phase === 'playing' && (
-                <Scorebug ctx={bctx} view={view} pp={ppNow}
-                  ppRemaining={ppNow ? ppRemaining(ppNow.toAbsT, absNow) : null} />
+                <Scorebug ctx={bctx} view={shownView} pp={replayActive ? null : ppNow}
+                  ppRemaining={ppNow ? ppRemaining(ppNow.toAbsT, absNow) : null} replay={replayActive} />
               )}
               {phase === 'pregame' && <div className="bc-live"><i /> LIVE</div>}
               <BroadcastOverlayLayer ctx={bctx} live={liveOverlays}
@@ -986,8 +1002,8 @@ export function MatchViewer(props: {
             </div>
           )}
 
-          {/* REPLAY watermark */}
-          {replayActive && (
+          {/* REPLAY watermark (the scorebug carries the tag when the broadcast package is on) */}
+          {replayActive && !(showBroadcast && phase === 'playing') && (
             <div style={{ ...replayBadgeStyle, ...(showBroadcast ? { top: 48 } : {}) }}>REPLAY</div>
           )}
 
@@ -1154,6 +1170,7 @@ function Scoreboard(props: {
   game: WatchedGame
   view: MatchView | null
   userSide: 'home' | 'away'
+  replay?: boolean
 }): JSX.Element {
   const { game, view } = props
   const periodLabel = view ? (view.period > 3 ? 'OT' : `P${view.period}`) : 'P1'
@@ -1168,7 +1185,9 @@ function Scoreboard(props: {
         <div style={{ fontSize: 20, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
           {view?.clock ?? '20:00'}
         </div>
-        <div style={{ color: 'var(--muted)', fontSize: 11 }}>{periodLabel}</div>
+        <div style={{ color: props.replay ? '#ffd700' : 'var(--muted)', fontSize: 11, fontWeight: props.replay ? 800 : 400, letterSpacing: props.replay ? 1 : 0 }}>
+          {props.replay ? 'REPLAY' : periodLabel}
+        </div>
       </div>
       <TeamScore abbr={game.homeAbbr} score={view?.homeScore ?? 0}
         color={game.homeColors.primary} mine={props.userSide === 'home'} />

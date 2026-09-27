@@ -1070,10 +1070,25 @@ export class Rink3dRenderer implements MatchRenderer {
   private frameEma = 1 / 60
   private slowFor = 0
 
+  /**
+   * Hold the in-arena video board on its current score/clock (an instant
+   * replay rewinds the picture; the board keeps the live score). Not part of
+   * the MatchRenderer contract — MatchViewer calls it on the 3D renderer.
+   */
+  setBoardHold(on: boolean): void {
+    if (!on || !this.timeline) {
+      this.boardHold = null
+      return
+    }
+    const s = this.timeline.scoreAt(this.clockPos)
+    this.boardHold = { score: { home: s.home, away: s.away }, clock: this.timeline.clockAt(this.clockPos) }
+  }
+  private boardHold: { score: { home: number; away: number }; clock: { period: number; text: string } } | null = null
+
   private updateArena(dt: number): void {
     if (!this.timeline) return
-    const score = this.timeline.scoreAt(this.clockPos)
-    const clock = this.timeline.clockAt(this.clockPos)
+    const score = this.boardHold?.score ?? this.timeline.scoreAt(this.clockPos)
+    const clock = this.boardHold?.clock ?? this.timeline.clockAt(this.clockPos)
     if (this.playing) this.sinceGoal += dt
     const goalFlash = this.sinceGoal < 3.5 ? 3.5 - this.sinceGoal : 0
     this.arena.update(this.wallTime, {
