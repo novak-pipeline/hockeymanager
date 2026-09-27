@@ -300,7 +300,7 @@ function makePlayer(
   return player
 }
 
-const DEFAULT_TACTICS: TeamTactics = {
+export const DEFAULT_TACTICS: TeamTactics = {
   forecheck: '1-2-2',
   dZoneCoverage: 'zone',
   tempo: { pace: 0.5, passRisk: 0.5, shotEagerness: 0.5, defensivePinch: 0.4 },

@@ -160,3 +160,18 @@ const PRO_LEAGUE_ABBREVS = new Set(['NHL', 'AHL'])
 export function isProLeagueAbbrev(abbrev: string): boolean {
   return PRO_LEAGUE_ABBREVS.has((abbrev || '').trim().toUpperCase())
 }
+
+/** Canonical league key (the NHLe table's abbrev) for a competition, resolving
+ *  aliases (LHJMQ → QMJHL, USNTDP → NTDP) and name-only matches. Falls back to
+ *  the upper-cased abbrev. Used by the world-renewal systems (youth intake,
+ *  junior pathways, league formats) to key per-league behaviour. */
+export function canonicalLeagueKey(abbrev: string, name?: string): string {
+  const key = (abbrev || '').trim().toUpperCase()
+  if (key === 'LHJMQ') return 'QMJHL'
+  if (key === 'USNTDP') return 'NTDP'
+  if (key in NHLE_BY_ABBREV) return key
+  if (name) {
+    for (const [re, k] of NAME_KEYWORDS) if (re.test(name)) return k
+  }
+  return key
+}

@@ -45,7 +45,34 @@ import { FIRST_NAMES, LAST_NAMES } from '@data'
 import { computeComposites, invalidatePotentialRating, overall } from '@engine/ratings/composites'
 import { analystEdge } from '@engine/league/draftRankings'
 import { UNTARGETED_FOCUS_DRAG } from '@engine/league/practice'
+import { Rng as SeededRng, deriveSeed } from '@engine/shared/rng'
 import type { Rng } from '@engine/shared/rng'
+import { generateNationName } from '@data/nationNames'
+
+/** Nation mix for a fallback (no-feeder-league) draft class — the 2023–25 NHL
+ *  draft shares (Wikipedia "Draftees based on nationality"). */
+const FALLBACK_DRAFT_NATIONS: ReadonlyArray<readonly [string, number]> = [
+  ['Canada', 30], ['Canada-QC', 8.6], ['United States', 20.8], ['Sweden', 11.4], ['Russia', 10.1],
+  ['Finland', 6.1], ['Czechia', 4.6], ['Slovakia', 1.8], ['Belarus', 1.5], ['Germany', 1.0],
+  ['Switzerland', 1.0], ['Norway', 0.9], ['Latvia', 0.5], ['Denmark', 0.3], ['Austria', 0.3],
+]
+
+/** Give a fallback prospect a nation, a fictional nation-true name and a
+ *  hometown. Uses its OWN id-derived Rng so the class's main stream (and so
+ *  every attribute roll) is unchanged. */
+function dressProspect(p: Player, year: number): void {
+  const r = new SeededRng(deriveSeed(0xb105, year, Number((p.id as string).replace(/\D/g, '')) || 0))
+  let total = 0
+  for (const [, w] of FALLBACK_DRAFT_NATIONS) total += w
+  let x = r.next() * total
+  let key = 'Canada'
+  for (const [k, w] of FALLBACK_DRAFT_NATIONS) { x -= w; if (x < 0) { key = k; break } }
+  const bio = generateNationName(r, key)
+  p.name = bio.name
+  p.nationality = bio.nationality
+  p.birthplace = bio.birthplace
+  p.heightCm = Math.round(r.normal(184, 5.5))
+}
 
 /* ────────────────────────── shared helpers ────────────────────────── */
 
@@ -829,7 +856,9 @@ export function generateDraftClass(args: {
 
   const players: Player[] = []
   for (let i = 0; i < count; i++) {
-    players.push(makeProspect(rng, asPlayerId('p' + nextPlayerNumber()), year))
+    const p = makeProspect(rng, asPlayerId('p' + nextPlayerNumber()), year)
+    dressProspect(p, year)
+    players.push(p)
   }
 
   const consensus = players.map((p, i) => ({

@@ -45,7 +45,8 @@ describe('playoff odds — the forecast answers to results', () => {
     const byPoints = [...after.rows].sort((a, b) => b.points - a.points)
     const leader = byPoints[0]!
     // The leader is winning; the forecast has to notice.
-    expect(leader.playoffPct).toBeGreaterThan(before.get(leader.teamId)!.pct + 5)
+    // (A leader who opened near-certain can't gain five points; he must stay near the top.)
+    expect(leader.playoffPct).toBeGreaterThan(Math.min(before.get(leader.teamId)!.pct + 5, 96))
 
     // The club that has over-performed its opening projection by the widest
     // margin must have gained ground, and the worst under-performer must have

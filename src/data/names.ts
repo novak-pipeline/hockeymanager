@@ -13,11 +13,11 @@ export const FIRST_NAMES: readonly string[] = [
 ]
 
 export const LAST_NAMES: readonly string[] = [
-  'Anderson', 'Berg', 'Carlsson', 'Dahl', 'Eriksson', 'Forsberg', 'Granlund', 'Holm', 'Ingram', 'Johansson',
-  'Koivu', 'Lindqvist', 'Mattson', 'Nyberg', 'Olsen', 'Petrov', 'Quist', 'Rinne', 'Sundstrom', 'Tikkanen',
-  'Ueda', 'Virtanen', 'Wallin', 'Yablonski', 'Zubov', 'Bergeron', 'Crosby', 'Doyle', 'Ellis', 'Fontaine',
-  'Gallagher', 'Hughes', 'Iverson', 'Jokinen', 'Kane', 'Larsson', 'Murphy', 'Novak', 'Orlov', 'Persson',
-  'Reilly', 'Stastny', 'Tavares', 'Ulmer', 'Voronov', 'Whitaker', 'Xiong', 'Yermolov', 'Zetterberg', 'Aalto'
+  'Anderson', 'Berg', 'Carlsson', 'Dahl', 'Eriksson', 'Fogelqvist', 'Grönvall', 'Holm', 'Ingram', 'Johansson',
+  'Kaukola', 'Lindqvist', 'Mattson', 'Nyberg', 'Olsen', 'Petrov', 'Quist', 'Rautio', 'Sunnegård', 'Toivanen',
+  'Ueda', 'Virtanen', 'Wallin', 'Yablonski', 'Zorin', 'Brisebois', 'Carrow', 'Doyle', 'Ellis', 'Fontaine',
+  'Garrity', 'Hollis', 'Iverson', 'Jaatinen', 'Kilbride', 'Larsson', 'Murphy', 'Novak', 'Oborin', 'Persson',
+  'Reilly', 'Strnad', 'Tennant', 'Ulmer', 'Voronov', 'Whitaker', 'Xiong', 'Yermolov', 'Zakrisson', 'Aalto'
 ]
 
 export interface CityName {

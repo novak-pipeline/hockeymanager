@@ -52,6 +52,10 @@ export interface AwardRecord {
   teamAbbr: string
   /** Human-readable value, e.g. "52 G" or ".931". */
   value: string
+  /** World Renewal: 'world' = another league's trophy/award, 'intl' = an
+   *  international medal/award. Absent = an NHL honour (the History awards tab
+   *  lists only those). Optional/additive. */
+  scope?: 'world' | 'intl'
 }
 
 export interface LegendRecord {
@@ -62,6 +66,11 @@ export interface LegendRecord {
   careerGoals: number
   careerGames: number
   hallOfFame: boolean
+  /** Position at retirement ('G' makes the Hall judge wins, not points). Optional/additive. */
+  position?: string
+  /** Goalie career wins (NHL). Optional/additive. */
+  careerWins?: number
+  careerShutouts?: number
 }
 
 export interface RecordsState {
@@ -422,6 +431,44 @@ const LEGEND_POINTS_THRESHOLD = 400
  *  the notable retirees get a plaque; record-holders qualify regardless. */
 const HOF_POINTS_THRESHOLD = 900
 const HOF_WAIT_SEASONS = 3
+/** Goaltenders are judged on wins: ~200 NHL wins is a long, notable career;
+ *  350 is Hall territory (modern HOF goalies sit at roughly 350–550). */
+const GOALIE_LEGEND_WINS = 200
+const GOALIE_LEGEND_GAMES = 450
+const GOALIE_HOF_WINS = 350
+/** Defencemen score less: a notable career is ~300 points, the Hall ~600
+ *  (or ~450 with Norris-calibre recognition). */
+const DEFENCE_LEGEND_POINTS = 300
+const DEFENCE_HOF_POINTS = 600
+
+/**
+ * Position-aware Hall of Fame bar. The old bar was 900 points for everyone, so
+ * no goalie and no defensive defenceman could ever be enshrined. Major awards
+ * and Cups lower the numbers bar, as they do for the real selection committee.
+ */
+export function hallOfFameWorthy(
+  legend: Pick<LegendRecord, 'position' | 'careerPoints' | 'careerWins'>,
+  awards: string[],
+): boolean {
+  const count = (name: string): number => awards.filter((a) => a === name).length
+  const cups = count('Stanley Cup')
+  const mvps = count('Most Valuable Player')
+  if (mvps >= 2) return true
+  if (legend.position === 'G') {
+    const wins = legend.careerWins ?? 0
+    const vezinas = count('Best Goaltender')
+    return wins >= GOALIE_HOF_WINS ||
+      (wins >= 250 && (vezinas >= 1 || cups >= 2 || mvps >= 1)) ||
+      (wins >= 200 && vezinas >= 2)
+  }
+  if (legend.position === 'D') {
+    const norris = count('Best Defenseman')
+    return legend.careerPoints >= DEFENCE_HOF_POINTS ||
+      (legend.careerPoints >= 450 && (norris >= 1 || cups >= 2)) ||
+      norris >= 2
+  }
+  return legend.careerPoints >= HOF_POINTS_THRESHOLD || (legend.careerPoints >= 700 && (mvps >= 1 || cups >= 3))
+}
 
 function insertSorted(
   board: RecordEntry[],
@@ -860,6 +907,11 @@ export interface RetirementEntry {
   careerAssists: number
   careerPoints: number
   careerGames: number
+  /** Optional: position + goalie line, so a goaltender can be a legend (and a
+   *  Hall of Famer) on wins rather than the points he never scores. */
+  position?: string
+  careerWins?: number
+  careerShutouts?: number
 }
 
 /** Retirement headlines by the size of the career. {name} {gp} {goals} {pts} */
@@ -905,7 +957,10 @@ export function registerRetirements(args: RegisterRetirementsArgs): RegisterReti
       state.career.assists.some((e) => e.playerId === r.playerId) ||
       state.career.gamesPlayed.some((e) => e.playerId === r.playerId)
 
-    const isLegend = r.careerPoints > LEGEND_POINTS_THRESHOLD || onBoard
+    const isGoalie = r.position === 'G'
+    const isLegend = isGoalie
+      ? (r.careerWins ?? 0) >= GOALIE_LEGEND_WINS || r.careerGames >= GOALIE_LEGEND_GAMES
+      : r.careerPoints > (r.position === 'D' ? DEFENCE_LEGEND_POINTS : LEGEND_POINTS_THRESHOLD) || onBoard
     if (!isLegend) continue
 
     // Avoid duplicate entries (player might retire twice via data oddity)
@@ -919,6 +974,8 @@ export function registerRetirements(args: RegisterRetirementsArgs): RegisterReti
       careerGoals: r.careerGoals,
       careerGames: r.careerGames,
       hallOfFame: false,
+      ...(r.position !== undefined ? { position: r.position } : {}),
+      ...(isGoalie ? { careerWins: r.careerWins ?? 0, careerShutouts: r.careerShutouts ?? 0 } : {}),
     }
     state.retiredLegends.push(legend)
 
@@ -951,8 +1008,10 @@ export function registerRetirements(args: RegisterRetirementsArgs): RegisterReti
       category: 'league',
       headline: v ? renderTemplate(v.text, slots) : `${r.name} retires`,
       body:
-        `${r.name} has hung up the skates after ${r.careerGames} games, ${r.careerGoals} goals, ` +
-        `${r.careerAssists} assists and ${r.careerPoints} points.${awardSummary}`,
+        isGoalie
+          ? `${r.name} has hung up the pads after ${r.careerGames} games, ${r.careerWins ?? 0} wins and ${r.careerShutouts ?? 0} shutouts.${awardSummary}`
+          : `${r.name} has hung up the skates after ${r.careerGames} games, ${r.careerGoals} goals, ` +
+            `${r.careerAssists} assists and ${r.careerPoints} points.${awardSummary}`,
       playerId: r.playerId,
     })
   }
@@ -991,7 +1050,7 @@ export function inductHallOfFame(state: RecordsState, year: number): NewsSeed[] 
 
     // Only the ELITE get a plaque — a notable career alone (400+ pts) makes the
     // Legends screen, but the Hall needs a truly great résumé or a record.
-    const hofWorthy = legend.careerPoints >= HOF_POINTS_THRESHOLD || recordsHeld.length > 0
+    const hofWorthy = hallOfFameWorthy(legend, awardsForPlayer.map((a) => a.award)) || recordsHeld.length > 0
     if (!hofWorthy) continue
 
     legend.hallOfFame = true
@@ -1010,7 +1069,10 @@ export function inductHallOfFame(state: RecordsState, year: number): NewsSeed[] 
       body:
         `${legend.name} is inducted into the Hall of Fame, ${HOF_WAIT_SEASONS} seasons after ` +
         `retiring in ${legend.retiredYear}. Career: ${legend.careerGames} GP, ` +
-        `${legend.careerGoals} G, ${legend.careerPoints} PTS.${awardPart}${recordPart}`,
+        (legend.position === 'G'
+          ? `${legend.careerWins ?? 0} W, ${legend.careerShutouts ?? 0} SO.`
+          : `${legend.careerGoals} G, ${legend.careerPoints} PTS.`) +
+        `${awardPart}${recordPart}`,
       playerId: legend.playerId,
     })
   }

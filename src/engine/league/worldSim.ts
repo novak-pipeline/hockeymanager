@@ -21,6 +21,14 @@ import { rollInjuries } from '@engine/league/condition'
 import { applyGameResult, gameSeed, mergePlayerStats } from '@engine/quick/season'
 import type { GamePlayerStat } from '@engine/shared/outcome'
 
+/**
+ * A world season line: the shared counting stats plus goalie decisions, which
+ * the world quick-sim credits to each side's busiest netminder. The extra
+ * fields ride the same totals object (mergePlayerStats mutates in place), so
+ * they persist through the existing worldTotals snapshot field for free.
+ */
+export type WorldStatLine = GamePlayerStat & { w?: number; l?: number; otl?: number; so?: number }
+
 export interface WorldSimState {
   /** competitionId → (teamId → live Standing, shared with the Competition). */
   standings: Map<string, Map<TeamId, Standing>>
@@ -148,6 +156,7 @@ export function simWorldDay(args: SimWorldDayArgs): { gamesPlayed: number } {
       for (const [pid, s] of res.playerStats) {
         if (s.toi > 0) args.state.gp.set(pid, (args.state.gp.get(pid) ?? 0) + 1)
       }
+      creditGoalieDecisions(args.state.totals, res.playerStats, home, away, res.homeGoals, res.awayGoals, res.decidedBy)
       if (args.rng) {
         const participants = [...res.playerStats]
           .filter(([, s]) => s.toi > 0)
@@ -158,6 +167,36 @@ export function simWorldDay(args: SimWorldDayArgs): { gamesPlayed: number } {
     }
   }
   return { gamesPlayed }
+}
+
+/** The netminder who faced the most shots for a side gets the decision. */
+function creditGoalieDecisions(
+  totals: Map<PlayerId, GamePlayerStat>,
+  stats: Map<PlayerId, GamePlayerStat>,
+  home: Team,
+  away: Team,
+  homeGoals: number,
+  awayGoals: number,
+  decidedBy: string,
+): void {
+  let hg: PlayerId | null = null, ag: PlayerId | null = null
+  let hs = -1, as = -1
+  for (const [pid, s] of stats) {
+    if (s.shotsAgainst <= 0 && s.saves <= 0) continue
+    if (home.roster.includes(pid)) { if (s.toi > hs) { hs = s.toi; hg = pid } }
+    else if (away.roster.includes(pid)) { if (s.toi > as) { as = s.toi; ag = pid } }
+  }
+  const credit = (pid: PlayerId | null, won: boolean, conceded: number): void => {
+    if (!pid) return
+    const t = totals.get(pid) as WorldStatLine | undefined
+    if (!t) return
+    if (won) t.w = (t.w ?? 0) + 1
+    else if (decidedBy !== 'regulation') t.otl = (t.otl ?? 0) + 1
+    else t.l = (t.l ?? 0) + 1
+    if (conceded === 0) t.so = (t.so ?? 0) + 1
+  }
+  credit(hg, homeGoals > awayGoals, awayGoals)
+  credit(ag, awayGoals > homeGoals, homeGoals)
 }
 
 /**
