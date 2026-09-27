@@ -56,7 +56,6 @@ import {
   type PeriodSpec,
   type TeamSim
 } from '@engine/full/fullSim'
-import { faceoffSpot } from '@engine/full/formations'
 import type { Ctx, RSkater } from '@engine/full/types'
 import {
   bladePoint,
@@ -71,7 +70,7 @@ import {
   type MoveCmd,
   type Puck
 } from './physics'
-import { BLUE_X, DOT_EZ_X, DOT_NZ_X, DOT_Y, GOAL_X, HALF_X, HALF_Y, NET_HALF_W, distToBoards } from './rink'
+import { BLUE_X, DOT_EZ_X, DOT_NZ_X, DOT_Y, GOAL_X, HALF_X, HALF_Y, NET_HALF_W, boardsClamp, distToBoards } from './rink'
 import { REACH, decideCarrier, pressureOn, realPressure, thinkSide, xgAt, type ThinkOut } from './brain'
 import { decideHit, resolveHit, type HitIntent } from './physical'
 import { emptyAgentTelemetry, type AgentTelemetry } from './telemetry'
@@ -96,11 +95,11 @@ export const AGENT_TUNING = {
   /** Base per-contact shot-block chance for a body square in the lane. */
   blockBase: 1.7,
   /** Poke-check success scale (takeaways). */
-  pokeK: 0.045,
+  pokeK: 0.06,
   /** Unforced fumble rate under pressure (giveaways). */
   fumbleK: 0.6,
   /** Per-think stick-foul chance when beaten (penalties). */
-  stickFoulK: 0.38,
+  stickFoulK: 0.32,
   /** Misc stoppages per second of live play ("other": net off, high stick…). */
   miscStopPerSec: 0.0028
 }
@@ -225,7 +224,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   const smooth = new Map<Body, { x: number; y: number }>()
   const shaping = new Map<Body, { ox: number; oy: number; sf: number }>()
   let prevAdv = 0 // puck x in the controlling side's frame, last substep
-  let lastCarrierAdvSide: Side | null = null
+  let lastCarrierAdvSide = null as Side | null
   const hitIntent = new Map<Body, HitIntent>()
   let codeDue: { answerer: Body; hitter: Body; side: Side } | null = null
   let battle: { start: number; x: number; y: number; kind: 'boards' | 'netFront' | 'loosePuck'; players: Set<Body>; last: number } | null = null
@@ -436,15 +435,51 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   const zoneOf = (dot: XY, s: Side): 'offensive' | 'defensive' | 'neutral' =>
     Math.abs(dot.x) <= 25 ? 'neutral' : dot.x * s.a > 0 ? 'offensive' : 'defensive'
 
+  /**
+   * Legal faceoff alignment (NHL rule 76): the two centres at the dot, every
+   * other skater OUTSIDE the circle — wingers on the hash marks, D back (at
+   * the points in the offensive zone, covering the slot and the far side in
+   * their own). Spots are in each team's attack frame and mirrored to the
+   * dot's side; extra men (PP/6th attacker) stack behind.
+   */
+  const faceoffSpots = (s: Side, dot: XY): Map<Body, XY> => {
+    const out = new Map<Body, XY>()
+    const a = s.a
+    const tk = s.skaters[takerIdxOf(s.sim.unit)]
+    const dx = dot.x * a // dot in this team's attack frame
+    const sy = dot.y >= 0 ? 1 : -1 // boards side of the dot
+    const inOz = dx > 30
+    const inDz = dx < -30
+    const fwd = s.skaters.filter((b) => b !== tk && b.player.position !== 'D')
+    const dmen = s.skaters.filter((b) => b !== tk && b.player.position === 'D')
+    const put = (b: Body, x: number, y: number): void => {
+      const h = boardsClamp(a * x, y, 2.5)
+      out.set(b, { x: h.x, y: h.y })
+    }
+    if (tk) put(tk, dx - 1.3, dot.y)
+    // Wingers: on the hash marks, boards side and slot side.
+    const hashY = [dot.y + sy * 16.5, dot.y - sy * 16.5]
+    fwd.forEach((b, i) => {
+      if (i < 2) put(b, dx - 3, hashY[i])
+      else put(b, dx - 16, dot.y - sy * 8)
+    })
+    // Defence.
+    dmen.forEach((b, i) => {
+      if (inOz) put(b, 32, i === 0 ? sy * 20 : -sy * 12)
+      else if (inDz) put(b, i === 0 ? dx - 18 : -84, i === 0 ? dot.y - sy * 4 : -sy * 4)
+      else put(b, dx - 28, i === 0 ? sy * 12 : -sy * 16)
+    })
+    return out
+  }
+
   const faceoffTargets = (): void => {
     const p = pending!
-    const dotN = { x: p.dot.x / HALF_X, y: p.dot.y / HALF_Y }
     for (const s of sides) {
-      const tk = takerIdxOf(s.sim.unit)
-      s.skaters.forEach((b, i) => {
-        const spot = faceoffSpot(s.sim.unit, i, s.a, dotN, tk)
-        const tx = spot.x * HALF_X
-        const ty = spot.y * HALF_Y
+      const spots = faceoffSpots(s, p.dot)
+      s.skaters.forEach((b) => {
+        const spot = spots.get(b) ?? { x: b.x, y: b.y }
+        const tx = spot.x
+        const ty = spot.y
         const d = Math.hypot(tx - b.x, ty - b.y)
         cmds.set(b, {
           tx,
@@ -464,18 +499,24 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const waited = now - p.since
     const hC = H.skaters[takerIdxOf(H.sim.unit)]
     const aC = A.skaters[takerIdxOf(A.sim.unit)]
-    const ready =
-      waited >= FACEOFF_MIN_WAIT &&
-      !!hC &&
-      !!aC &&
-      Math.hypot(hC.x - p.dot.x, hC.y - p.dot.y) < 4 &&
-      Math.hypot(aC.x - p.dot.x, aC.y - p.dot.y) < 4
-    if (!ready && waited < FACEOFF_MAX_WAIT) return false
+    // Everybody set before the drop (the linesman waits for them).
+    let set = waited >= FACEOFF_MIN_WAIT && !!hC && !!aC
+    if (set) {
+      for (const s of sides) {
+        const spots = faceoffSpots(s, p.dot)
+        for (const b of s.skaters) {
+          const q = spots.get(b)
+          if (q && Math.hypot(q.x - b.x, q.y - b.y) > 3.5) set = false
+        }
+      }
+    }
+    if (!set && waited < FACEOFF_MAX_WAIT) return false
     if (!hC || !aC) return false
     const hw = hC.player.composites.faceoffWin
     const aw = aC.player.composites.faceoffWin
     const homeWins = rng.chance(hw / Math.max(1, hw + aw))
     const win = homeWins ? H : A
+    const lose = homeWins ? A : H
     const winner = homeWins ? hC : aC
     deadAt = null
     pending = null
@@ -483,16 +524,38 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     puck.y = p.dot.y
     puck.z = 0
     puck.vz = 0
-    // The draw: pulled back toward a teammate on the winner's side.
-    const back = -win.a
-    const ang = rng.float(-0.7, 0.7)
-    const sp = rng.float(11, 17)
-    puck.vx = Math.cos(ang) * back * sp
-    puck.vy = Math.sin(ang) * sp
+    // The draw goes somewhere on purpose: back to a D (standard), to the
+    // winger on the wall (wheel), straight at the net (quick-strike, offensive
+    // zone), or it's a tie-up scrum. The zone play comes from the coach.
+    const dx = p.dot.x * win.a
+    const play = (dx > 30 ? win.tactics.offensiveFaceoff : dx < -30 ? win.tactics.defensiveFaceoff : undefined) ?? 'standard'
+    const clean = rng.chance(0.72 + (Math.abs((homeWins ? hw : aw) - (homeWins ? aw : hw)) / 100) * 0.4)
+    let target: Body | null = null
+    let at: XY
+    const spots = faceoffSpots(win, p.dot)
+    const dList = win.skaters.filter((b) => b.player.position === 'D')
+    const wList = win.skaters.filter((b) => b !== winner && b.player.position !== 'D')
+    if (!clean || play === 'tie-up') {
+      at = { x: p.dot.x + rng.float(-4, 4), y: p.dot.y + rng.float(-4, 4) }
+    } else if (play === 'quick-strike' && dx > 30) {
+      at = { x: win.a * (GOAL_X - 12), y: p.dot.y * 0.4 }
+    } else if (play === 'wheel' && wList.length > 0) {
+      target = wList[0]
+      at = spots.get(target) ?? { x: target.x, y: target.y }
+    } else {
+      target = dList.sort((q, r) => Math.hypot(q.x - p.dot.x, q.y - p.dot.y) - Math.hypot(r.x - p.dot.x, r.y - p.dot.y))[0] ?? wList[0] ?? null
+      at = target ? (spots.get(target) ?? { x: target.x, y: target.y }) : { x: p.dot.x - win.a * 10, y: p.dot.y }
+    }
+    const L = Math.max(Math.hypot(at.x - puck.x, at.y - puck.y), 1)
+    const sp = clean ? clamp(Math.sqrt(2 * 4.5 * L) * 1.15 + 4, 10, 45) : rng.float(4, 9)
+    puck.vx = ((at.x - puck.x) / L) * sp
+    puck.vy = ((at.y - puck.y) / L) * sp
     w.carrier = null
     puck.carrier = null
-    w.lastTouch = win
-    flight = { kind: 'loose', side: win, from: winner, releaseAdv: -99, untouched: false, tried: tries(hC, aC) }
+    w.lastTouch = clean ? win : null
+    w.passTo = target
+    flight = { kind: 'loose', side: clean ? win : null, from: winner, releaseAdv: -99, untouched: false, tried: tries(hC, aC) }
+    void lose
     touches.length = 0
     if (tm) tm.faceoffs++
     ev({
@@ -680,7 +743,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const dx = x - gx
     const dy = y
     const d = Math.max(Math.hypot(dx, dy), 0.1)
-    const depth = d < 12 ? 1.4 : clamp(1.6 + (d - 12) * 0.09, 1.6, 4.2)
+    // Top of the crease for shots from distance, deeper in tight.
+    const depth = d < 12 ? 1.6 : clamp(2.2 + (d - 12) * 0.08, 2.2, 4.6)
     return { x: gx + (dx / d) * depth, y: (dy / d) * depth }
   }
 
@@ -1050,11 +1114,11 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   for (const s of sides) {
     s.shorthanded = s.sim.shorthanded()
     s.powerPlay = !s.shorthanded && oppOf(s).sim.shorthanded()
-    const tk = takerIdxOf(s.sim.unit)
-    s.skaters.forEach((b, i) => {
-      const sp = faceoffSpot(s.sim.unit, i, s.a, { x: 0, y: 0 }, tk)
-      b.x = sp.x * HALF_X
-      b.y = sp.y * HALF_Y
+    const spots = faceoffSpots(s, { x: 0, y: 0 })
+    s.skaters.forEach((b) => {
+      const sp = spots.get(b) ?? { x: -s.a * 20, y: 0 }
+      b.x = sp.x
+      b.y = sp.y
       b.hx = s.a
       b.hy = 0
     })
@@ -1307,6 +1371,21 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
             }
           }
         }
+        // No camping in the crease: a target inside it is moved to its edge.
+        const raw = cmds.get(b)
+        if (raw && b !== w.carrier) {
+          for (const sg of [1, -1]) {
+            const cx = sg * GOAL_X
+            const ddx = raw.tx - cx
+            if (ddx * sg > 0.5) continue // behind the goal line
+            const dd = Math.hypot(ddx, raw.ty)
+            if (dd < 7.2) {
+              const f = (7.4 - dd) / Math.max(dd, 0.5)
+              ox += (ddx === 0 && raw.ty === 0 ? -sg : ddx) * f
+              oy += raw.ty * f
+            }
+          }
+        }
         shaping.set(b, { ox, oy, sf })
       }
     }
@@ -1404,7 +1483,6 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
             tm.entriesCarry++
             // Entry numbers (scorecard definition): attackers level/ahead vs defenders goal-side.
             const adv0 = puck.x * s.a
-            const c0x = puck.x
             let atk = 0
             let def = 0
             let caught = 0
@@ -1415,7 +1493,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
             }
             const key = `${atk}v${def}${now - w.possSince <= 8 ? 'T' : ''} c${caught}`
             tm.entryNumbers[key] = (tm.entryNumbers[key] ?? 0) + 1
-            if (def === 0 && tm.entryLog.length < 40) tm.entryLog.push(`P${period} ${now.toFixed(1)} ${key} got=${gotHow}@${(now - gotAt).toFixed(1)}s from x'=${(gotPos.x * s.a).toFixed(0)} c=(${(c0x * s.a).toFixed(0)},${puck.y.toFixed(0)}) v=${speedOf(w.carrier!).toFixed(0)} opp=[${oppOf(s).skaters.map((o) => `${(o.x * s.a).toFixed(0)},${o.y.toFixed(0)}`).join(' ')}]`)
+            if (def === 0 && tm.entryLog.length < 40) tm.entryLog.push(`P${period} ${now.toFixed(1)} ${key}`)
           }
         }
         prevAdv = adv

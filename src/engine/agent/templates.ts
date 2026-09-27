@@ -84,7 +84,7 @@ export const RUSH: RoleSpot[] = [
 /** Settled in the zone, puck LOW: low support, net-front, two points. */
 export const CYCLE: RoleSpot[] = [
   S('LOW_SUPPORT', 'F', 30, -1, 0.5, 0.5, 0.6, 60, 90),
-  S('NET_FRONT', 'F', 82, -2, 0, 0, 0.55),
+  S('NET_FRONT', 'F', 80, -2, 0, 0, 0.55),
   S('POINT_S', 'D', 30, 32, 0, 0, 0.5),
   S('POINT_W', 'D', 30, -18, 0, 0, 0.5),
   S('HIGH_SLOT', 'F', 60, -6, 0, 0, 0.5)
@@ -92,7 +92,7 @@ export const CYCLE: RoleSpot[] = [
 
 /** Settled in the zone, puck at the POINT: net-front screen, wall, weak low, other point. */
 export const CYCLE_POINT: RoleSpot[] = [
-  S('NET_FRONT', 'F', 84, 0, 0, 0, 0.6),
+  S('NET_FRONT', 'F', 80, 0, 0, 0, 0.6),
   S('WALL', 'F', 60, 37, 0, 0, 0.55),
   S('WEAK_LOW', 'F', 74, -22, 0, 0, 0.55),
   S('POINT_W', 'D', 32, -12, 0, 0, 0.5),
