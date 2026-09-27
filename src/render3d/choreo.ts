@@ -58,6 +58,8 @@ export interface ActionCue {
   /** hit (agent engine): impact 0..1 and where it happened */
   force?: number
   hitKind?: 'boards' | 'openIce' | 'finish' | 'battle'
+  /** shot (agent engine): the release type */
+  shotType?: string
 }
 
 /** Every cue the choreographer can act on (a superset of math.extractCues). */
@@ -67,7 +69,7 @@ export function extractActionCues(stream: GameStream): ActionCue[] {
   for (const ev of stream) {
     if (isEvent(ev, 'shot')) {
       lastShot = { x: ev.from.x, y: ev.from.y, tx: ev.target.x, ty: ev.target.y }
-      out.push({ kind: 'shot', absT: absTime(ev.period, ev.t), nx: ev.from.x, ny: ev.from.y, actorId: ev.shooter })
+      out.push({ kind: 'shot', absT: absTime(ev.period, ev.t), nx: ev.from.x, ny: ev.from.y, actorId: ev.shooter, ...(ev.shotType ? { shotType: ev.shotType } : {}) })
     } else if (isEvent(ev, 'save')) {
       out.push({
         kind: 'save', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.goalie, rebound: ev.rebound,
@@ -117,7 +119,7 @@ export function planCues(cues: ActionCue[], contactOf: (clip: string) => number 
       const wz = normYtoWorld(cue.ny)
       const dist = Math.hypot(wx - Math.sign(wx || 1) * NET_X, wz)
       const pt = lastPassTo.get(cue.actorId)
-      clip = shotClipFor(dist, pt === undefined ? null : cue.absT - pt)
+      clip = shotClipFor(dist, pt === undefined ? null : cue.absT - pt, undefined, cue.shotType)
     } else if (cue.kind === 'hit') {
       clip = hitPlan(12, distToBoards(normXtoWorld(cue.nx), normYtoWorld(cue.ny)), cue.force, cue.hitKind).hitter
     } else if (cue.kind === 'faceoff') {

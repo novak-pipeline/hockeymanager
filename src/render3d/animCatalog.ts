@@ -152,7 +152,11 @@ export function hash01(id: string): number {
  * seconds before the shot is a one-timer; from the point (>= 45 ft out) a
  * slapshot; everything else a wrist shot.
  */
-export function shotClipFor(distToNetFt: number, sincePassS: number | null, oneTimerWindow = 0.8): 'shot_onetimer' | 'shot_slap' | 'shot_wrist' {
+export function shotClipFor(distToNetFt: number, sincePassS: number | null, oneTimerWindow = 0.8, shotType?: string): 'shot_onetimer' | 'shot_slap' | 'shot_wrist' {
+  // the engine's own release type when it has one (agent engine)
+  if (shotType === 'slap') return 'shot_slap'
+  if (shotType === 'oneTimer') return 'shot_onetimer'
+  if (shotType) return 'shot_wrist'
   if (sincePassS !== null && sincePassS >= 0 && sincePassS <= oneTimerWindow) return 'shot_onetimer'
   if (distToNetFt >= 45) return 'shot_slap'
   return 'shot_wrist'
