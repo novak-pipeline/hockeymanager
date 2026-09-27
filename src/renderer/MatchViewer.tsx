@@ -19,7 +19,7 @@ import { Icons } from './components/icons'
 import { Icon } from './components/primitives'
 import { SimContext } from './hooks/useSim'
 import type { BroadcastContext } from '@engine/story/broadcastStorylines'
-import { directBroadcast, powerPlayWindows } from '../render2d/broadcast/director'
+import { directBroadcast, openForWatchMode, powerPlayWindows } from '../render2d/broadcast/director'
 import type {
   BroadcastPlan, BroadcastProjector, BroadcastShotConsumer, CommentaryCue, OverlayCue, PresentationCue,
 } from '../render2d/broadcast/types'
@@ -38,6 +38,27 @@ const PANEL = 'var(--bg1)'
 
 const CAMERA_PRESETS: CameraPreset[] = ['broadcast', 'overhead', 'endzone', 'follow']
 const LS_RENDERER = 'hockeyMatchRenderer'
+const LS_REPLAYS = 'hockeyMatchReplays'
+
+/**
+ * Goal replays are a SETTING, never a "Watch replay" button (the owner's rule:
+ * no click-here-for-the-event buttons; play always just advances). 'auto' =
+ * replays in Full / Extended, none in Key Moments (which is the short reel).
+ */
+type ReplayPref = 'auto' | 'on' | 'off'
+function readReplayPref(): ReplayPref {
+  try {
+    const v = localStorage.getItem(LS_REPLAYS)
+    if (v === 'auto' || v === 'on' || v === 'off') return v
+  } catch { /* ignore */ }
+  return 'auto'
+}
+function writeReplayPref(v: ReplayPref): void {
+  try { localStorage.setItem(LS_REPLAYS, v) } catch { /* ignore */ }
+}
+function replaysOn(pref: ReplayPref, mode: PlaybackMode): boolean {
+  return pref === 'on' || (pref === 'auto' && mode !== 'key')
+}
 
 // Plan-relative nudge multipliers (relative to current plan speed)
 const NUDGE_MULTIPLIERS = [0.5, 1, 2] as const
@@ -137,6 +158,9 @@ export function MatchViewer(props: {
   onClose: () => void
   /** Pregame context supplied directly (dev harness). Normally fetched. */
   broadcast?: BroadcastContext
+  /** Pick the game up at this absolute game second (the Sim view's hand-over);
+   *  0 / absent = the normal "drop the puck" start. */
+  startAtAbsT?: number
 }): JSX.Element {
   const { game } = props
 
@@ -175,6 +199,18 @@ export function MatchViewer(props: {
   const goalBannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const replayActiveRef    = useRef<boolean>(false)
   const replaySkipRef      = useRef<boolean>(false)
+  // The live score/clock at the cut to a replay: the scorebug and scoreboard
+  // HOLD it while the replay rewinds the picture (TV never un-scores a goal).
+  const heldViewRef        = useRef<MatchView | null>(null)
+  // Bumped per replay so a stale timer never ends (or starts) a later one.
+  const replaySeqRef       = useRef<number>(0)
+
+  // Where the NEXT renderer build picks the game up. A 2D↔3D switch or the Sim
+  // view's "Watch on the ice" keeps the same moment of the same game — the view
+  // is a camera choice, not a new match (F-12).
+  const resumeRef = useRef<{ absT: number; playing: boolean; mode: PlaybackMode } | null>(
+    props.startAtAbsT && props.startAtAbsT > 0 ? { absT: props.startAtAbsT, playing: true, mode: 'full' } : null,
+  )
 
   // Stoppage overlay
   const stoppageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -190,13 +226,16 @@ export function MatchViewer(props: {
   const lastGoalEventRef = useRef<GoalEvent | null>(null)
 
   // ── React state ──────────────────────────────────────────────────────────────
-  const [phase, setPhase]               = useState<Phase>('hero')
+  const [phase, setPhase]               = useState<Phase>(() => (resumeRef.current ? 'playing' : 'hero'))
   const [view, setView]                 = useState<MatchView | null>(null)
   const [rendererMode, setRendererMode] = useState<'2d' | '3d'>(readRendererPref)
   const [camPreset, setCamPreset]       = useState<CameraPreset>('broadcast')
   const [err, setErr]                   = useState<string | null>(null)
 
-  const [, setPlaybackMode] = useState<PlaybackMode>('full')
+  const [playbackMode, setPlaybackMode] = useState<PlaybackMode>('full')
+  const [replayPref, setReplayPref] = useState<ReplayPref>(readReplayPref)
+  const replayPrefRef = useRef<ReplayPref>(replayPref)
+  replayPrefRef.current = replayPref
   const [nudge, setNudge]               = useState<number>(1)
 
   // Goal banner: { text, absT } so we can match the exact event
@@ -231,6 +270,14 @@ export function MatchViewer(props: {
   )
   const planRefB = useRef<BroadcastPlan>(plan)
   planRefB.current = plan
+  // The same night directed compact — only its (shorter) OPEN is used, for the
+  // Extended / Key Moments modes (openForWatchMode).
+  const compactPlan: BroadcastPlan = useMemo(
+    () => (presentation === 'full' ? directBroadcast(game.stream, bctx, { presentation: 'compact' }) : plan),
+    [game, bctx, presentation, plan],
+  )
+  const compactPlanRef = useRef<BroadcastPlan>(compactPlan)
+  compactPlanRef.current = compactPlan
   const firedCuesRef = useRef<Set<string>>(new Set())
   const cueTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([])
   const pregameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -434,6 +481,29 @@ export function MatchViewer(props: {
         r.load(timeline, colors, playerLabels)
         r.setSpeed(2)
 
+        // Resume where the previous view left off (renderer switch / Sim view).
+        const resume = resumeRef.current
+        resumeRef.current = null
+        if (resume && timeline.duration > 0) {
+          const dur = timeline.duration
+          const at = Math.max(0, Math.min(resume.absT, dur))
+          pendingModeRef.current = resume.mode
+          planRef.current = planFor(game.stream, resume.mode)
+          setPlaybackMode(resume.mode)
+          r.seekFraction(at / dur)
+          // Everything up to here has already happened: no goal banner for the
+          // goals already on the board, no cues re-fired, the ticker backfilled.
+          prevScoreRef.current = timeline.scoreAt(at)
+          for (const c of planRefB.current.game) if (c.at <= at) firedCuesRef.current.add(c.id)
+          lastCommentaryAbsT.current = at
+          lastAbsTRef.current = at
+          cursorRef.current?.seek(at)
+          setVisibleLines(lines.filter((l) => l.absT <= at).slice(-50))
+          r.setSpeed(currentSpeed(planRef.current, at) * nudgeRef.current)
+          if (resume.playing) r.play()
+          setPhase('playing')
+        }
+
         requestAnimationFrame(() => {
           if (!disposed) r.resize()
           // Stay paused until user picks a mode in the hero overlay
@@ -553,22 +623,29 @@ export function MatchViewer(props: {
         // The spoken goal call is the booth's (a priority-3 director cue at the
         // goal's absT, fired above) — it barges in so "GOAL" lands on the goal.
 
-        // Banner stays up through the celebration + the replay. With the
-        // broadcast package on, the on-ice tag + lower third ARE the goal
-        // graphics, so the old centre banner only carries the replay controls.
+        // Banner stays up through the celebration (+ the replay, when replays
+        // are on). With the broadcast package on, the on-ice tag + lower third
+        // ARE the goal graphics and this banner isn't drawn.
         setGoalBanner({ text: bannerText, goalAbsT: currentAbsT })
         if (goalBannerTimerRef.current) clearTimeout(goalBannerTimerRef.current)
+        const wantReplay = !replaySkipRef.current && replaysOn(replayPrefRef.current, pendingModeRef.current)
+        if (!wantReplay && !replaySkipRef.current) {
+          goalBannerTimerRef.current = setTimeout(() => setGoalBanner(null), 4500)
+        }
 
         // Watch the on-ice celebration FIRST, then cut to the instant replay.
         // We don't flag replayActive until the replay actually starts, so the
         // celebration plays at normal speed and the REPLAY watermark / skip
         // button only appear once we've cut to the replay.
-        if (!replaySkipRef.current) {
+        if (wantReplay) {
           replaySkipRef.current = true
+          const seq = ++replaySeqRef.current
           const replayStart = Math.max(0, (currentAbsT - 8) / dur)
           const CELEBRATION_WALL_MS = 4500
           setTimeout(() => {
-            if (!replaySkipRef.current) return // superseded / left
+            if (!replaySkipRef.current || seq !== replaySeqRef.current) return // superseded / left
+            heldViewRef.current = viewRef.current
+            renderer3dRef.current?.setBoardHold(true)
             setReplayActive(true)
             replayActiveRef.current = true
             // The booth keeps talking over the replay (the analyst's line is
@@ -580,7 +657,7 @@ export function MatchViewer(props: {
             r.play()
             // End the replay after ~8s wall time.
             setTimeout(() => {
-              if (replaySkipRef.current) _endReplay()
+              if (replaySkipRef.current && seq === replaySeqRef.current) _endReplay()
             }, 8000)
           }, CELEBRATION_WALL_MS)
         }
@@ -669,17 +746,25 @@ export function MatchViewer(props: {
   }
 
   function _endReplay(): void {
+    replaySeqRef.current++
     replaySkipRef.current = false
+    // Back to the LIVE moment the replay cut away from. (It used to resume
+    // wherever the replay had got to — a few seconds before the goal — so the
+    // goal played a third time, under a score that had dropped back a goal.)
+    const live = replayActiveRef.current ? heldViewRef.current : null
+    heldViewRef.current = null
+    renderer3dRef.current?.setBoardHold(false)
     setReplayActive(false)
     replayActiveRef.current = false
     setGoalBanner(null)
     if (goalBannerTimerRef.current) clearTimeout(goalBannerTimerRef.current)
+    if (live) rendererRef.current?.seekFraction(live.progress)
     // Resume normal plan speed and re-sync the commentary/SFX cursors to the
     // resume point so normal play doesn't replay a burst of crossed events.
     const dur = gameDurationRef.current
     const v = viewRef.current
     if (dur > 0 && v) {
-      const at = v.progress * dur
+      const at = (live ?? v).progress * dur
       lastCommentaryAbsT.current = at
       cursorRef.current?.seek(at)
       lastAbsTRef.current        = at
@@ -704,7 +789,7 @@ export function MatchViewer(props: {
     boothRef.current?.resume()
     pendingModeRef.current = mode
 
-    const open = planRefB.current
+    const open = openForWatchMode(planRefB.current, compactPlanRef.current, mode)
     if (open.pregameMs <= 0 || open.pregame.length === 0) {
       startPlay(mode)
       return
@@ -765,11 +850,34 @@ export function MatchViewer(props: {
   // ── Controls ──────────────────────────────────────────────────────────────────
   function handleToggleRenderer(): void {
     const next = rendererMode === '3d' ? '2d' : '3d'
+    // Keep the game where it is: the new renderer picks up the same moment.
+    const v = viewRef.current
+    const dur = gameDurationRef.current
+    if (phase === 'playing' && v && dur > 0) {
+      // mid-replay: resume at the LIVE moment the replay cut away from
+      const live = replayActiveRef.current ? (heldViewRef.current ?? v) : v
+      resumeRef.current = {
+        absT: live.progress * dur,
+        playing: replayActiveRef.current || v.playing,
+        mode: pendingModeRef.current,
+      }
+    } else if (phase === 'pregame') {
+      resumeRef.current = { absT: 0, playing: true, mode: pendingModeRef.current }
+    }
+    if (replayActiveRef.current || replaySkipRef.current) {
+      replaySkipRef.current = false
+      heldViewRef.current = null
+      replayActiveRef.current = false
+      setReplayActive(false)
+      setGoalBanner(null)
+    }
+    ffActiveRef.current = false
+    setFfClock(null)
     writeRendererPref(next)
     setRendererMode(next)
     setView(null)
     setErr(null)
-    setPhase('hero')
+    setPhase(resumeRef.current ? 'playing' : 'hero')
     clearBroadcast()
   }
 
@@ -833,24 +941,24 @@ export function MatchViewer(props: {
     }
   }
 
-  function handleSkipReplay(): void {
-    _endReplay()
+  function handleReplayPref(p: ReplayPref): void {
+    writeReplayPref(p)
+    setReplayPref(p)
+    // turned off mid-replay: back to the live game now
+    if (!replaysOn(p, pendingModeRef.current) && replaySkipRef.current) _endReplay()
   }
 
-  function handleWatchReplay(): void {
-    const banner = goalBanner
-    if (!banner || !gameDurationRef.current) return
-    const replayStart = Math.max(0, (banner.goalAbsT - 8) / gameDurationRef.current)
-    replaySkipRef.current = true
-    setReplayActive(true)
-    replayActiveRef.current = true
-    rendererRef.current?.seekFraction(replayStart)
-    rendererRef.current?.setSpeed(0.6)
-    rendererRef.current?.play()
-    setTimeout(() => {
-      if (replaySkipRef.current) _endReplay()
-    }, 8000)
-  }
+  // A replay can be cut short from the keyboard (Space / Enter / Esc) — no
+  // on-screen "skip" button, and it always ends by itself.
+  useEffect(() => {
+    if (!replayActive) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.code === 'Space' || e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); _endReplay() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replayActive])
 
   // Scorebug power-play strip, from the stream's own penalties.
   const absNow = view ? view.progress * gameDurationRef.current : 0
@@ -858,6 +966,13 @@ export function MatchViewer(props: {
   const showBroadcast = presentation !== 'off'
 
   const userSide = game.userIsHome ? 'home' : 'away'
+
+  // What the score graphics show: the live view, except during a replay, when
+  // they hold the score/clock from the moment we cut to it.
+  const held = replayActive ? heldViewRef.current : null
+  const shownView: MatchView | null = view && held
+    ? { ...view, homeScore: held.homeScore, awayScore: held.awayScore, clock: held.clock, period: held.period }
+    : view
 
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
@@ -867,7 +982,7 @@ export function MatchViewer(props: {
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         marginBottom: 12, gap: 10, flexWrap: 'wrap',
       }}>
-        <Scoreboard game={game} view={view} userSide={userSide} />
+        <Scoreboard game={game} view={shownView} userSide={userSide} replay={replayActive} />
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {/* 2D / 3D toggle */}
@@ -915,8 +1030,8 @@ export function MatchViewer(props: {
           {showBroadcast && phase !== 'hero' && (
             <div className="bc-layer">
               {phase === 'playing' && (
-                <Scorebug ctx={bctx} view={view} pp={ppNow}
-                  ppRemaining={ppNow ? ppRemaining(ppNow.toAbsT, absNow) : null} />
+                <Scorebug ctx={bctx} view={shownView} pp={replayActive ? null : ppNow}
+                  ppRemaining={ppNow ? ppRemaining(ppNow.toAbsT, absNow) : null} replay={replayActive} />
               )}
               {phase === 'pregame' && <div className="bc-live"><i /> LIVE</div>}
               <BroadcastOverlayLayer ctx={bctx} live={liveOverlays}
@@ -966,28 +1081,17 @@ export function MatchViewer(props: {
             </div>
           )}
 
-          {/* GOAL banner */}
-          {goalBanner && (
-            <div style={showBroadcast ? replayChipStyle : goalBannerStyle}>
-              {!showBroadcast && <div style={{ fontSize: 26, fontWeight: 800 }}>{goalBanner.text}</div>}
-              <div style={{ display: 'flex', gap: 8, marginTop: showBroadcast ? 0 : 10, justifyContent: 'center' }}>
-                {replayActive ? (
-                  <button className="btn" style={{ fontSize: 12, padding: '4px 12px', background: 'rgba(0,0,0,0.5)' }}
-                    onClick={handleSkipReplay}>
-                    Skip replay ›
-                  </button>
-                ) : (
-                  <button className="btn" style={{ fontSize: 12, padding: '4px 12px', background: 'rgba(0,0,0,0.5)' }}
-                    onClick={handleWatchReplay}>
-                    <Icon size={14}><Icons.Play /></Icon> Watch replay
-                  </button>
-                )}
-              </div>
+          {/* GOAL banner (without the broadcast package; with it, the on-ice tag
+              and lower third are the goal graphics). No replay buttons: replays
+              are a setting and run by themselves. */}
+          {goalBanner && !showBroadcast && (
+            <div style={goalBannerStyle}>
+              <div style={{ fontSize: 26, fontWeight: 800 }}>{goalBanner.text}</div>
             </div>
           )}
 
-          {/* REPLAY watermark */}
-          {replayActive && (
+          {/* REPLAY watermark (the scorebug carries the tag when the broadcast package is on) */}
+          {replayActive && !(showBroadcast && phase === 'playing') && (
             <div style={{ ...replayBadgeStyle, ...(showBroadcast ? { top: 48 } : {}) }}>REPLAY</div>
           )}
 
@@ -1005,7 +1109,7 @@ export function MatchViewer(props: {
               <div style={{ fontSize: 44, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
                 {ffClock}
               </div>
-              <div style={{ fontSize: 12, color: MUTED, marginTop: 6 }}>to the next goal…</div>
+              <div style={{ fontSize: 12, color: MUTED, marginTop: 6 }}>{playbackMode === 'key' ? 'to the next goal…' : 'to the next highlight…'}</div>
             </div>
           )}
         </div>
@@ -1110,6 +1214,15 @@ export function MatchViewer(props: {
                 {p.charAt(0).toUpperCase() + p.slice(1)}
               </button>
             ))}
+            <span style={{ color: MUTED, fontSize: 12, marginLeft: 8 }}>Replays:</span>
+            {(['auto', 'on', 'off'] as const).map((p) => (
+              <button key={p} className="btn"
+                title={p === 'auto' ? 'Goal replays in Full and Extended, none in Key Moments' : p === 'on' ? 'Replay every goal' : 'No replays'}
+                style={{ fontSize: 12, padding: '4px 10px', ...(replayPref === p ? speedActiveStyle : {}) }}
+                onClick={() => handleReplayPref(p)}>
+                {p === 'auto' ? 'Auto' : p === 'on' ? 'On' : 'Off'}
+              </button>
+            ))}
             {commentaryOn && namesPending > 0 && (
               <span style={{ color: MUTED, fontSize: 11 }}>Booth: preparing {namesPending} name clips…</span>
             )}
@@ -1154,6 +1267,7 @@ function Scoreboard(props: {
   game: WatchedGame
   view: MatchView | null
   userSide: 'home' | 'away'
+  replay?: boolean
 }): JSX.Element {
   const { game, view } = props
   const periodLabel = view ? (view.period > 3 ? 'OT' : `P${view.period}`) : 'P1'
@@ -1168,7 +1282,9 @@ function Scoreboard(props: {
         <div style={{ fontSize: 20, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
           {view?.clock ?? '20:00'}
         </div>
-        <div style={{ color: 'var(--muted)', fontSize: 11 }}>{periodLabel}</div>
+        <div style={{ color: props.replay ? '#ffd700' : 'var(--muted)', fontSize: 11, fontWeight: props.replay ? 800 : 400, letterSpacing: props.replay ? 1 : 0 }}>
+          {props.replay ? 'REPLAY' : periodLabel}
+        </div>
       </div>
       <TeamScore abbr={game.homeAbbr} score={view?.homeScore ?? 0}
         color={game.homeColors.primary} mine={props.userSide === 'home'} />
@@ -1217,18 +1333,11 @@ const goalBannerStyle: CSSProperties = {
   background: 'linear-gradient(135deg, rgba(211,59,59,0.95), rgba(180,30,30,0.98))',
   color: '#fff', textAlign: 'center',
   padding: '14px 28px', borderRadius: 12,
-  pointerEvents: 'auto', zIndex: 15,
+  pointerEvents: 'none', zIndex: 15,
   boxShadow: '0 4px 32px rgba(0,0,0,0.7)',
   textShadow: '0 2px 6px rgba(0,0,0,0.5)',
   animation: 'fadeIn 0.18s ease',
   minWidth: 240,
-}
-
-/** With the broadcast package on, the goal graphics are the tag + lower third;
- *  the replay controls sit in a small chip out of the lower third's way. */
-const replayChipStyle: CSSProperties = {
-  position: 'absolute', top: 12, right: 14,
-  pointerEvents: 'auto', zIndex: 18,
 }
 
 const replayBadgeStyle: CSSProperties = {

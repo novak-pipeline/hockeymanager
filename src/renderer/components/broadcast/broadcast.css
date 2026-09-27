@@ -88,6 +88,17 @@
   letter-spacing: 0.08em;
 }
 
+/* REPLAY tag: the bug holds the live score while a replay rewinds the picture */
+.bc-scorebug .replay {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  background: #d33b3b;
+  color: #fff;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+}
+
 /* ── lower third (goal) ── */
 .bc-lt {
   position: absolute;

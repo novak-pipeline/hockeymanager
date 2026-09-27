@@ -53,10 +53,15 @@ function strHash(s: string): number {
 
 const PERIOD_LEN = 1200
 
-function clockStr(_period: number, t: number): string {
-  const remaining = Math.max(0, PERIOD_LEN - t)
-  const mm = Math.floor(remaining / 60)
-  const ss = remaining % 60
+/**
+ * "M:SS" countdown. The engine's `t` is fractional; it used to be padded as-is
+ * ("0:9.5", "18:56.75"). Whole seconds, rounded UP like the scorebug
+ * (MatchTimeline.clockAt), so the ticker and the bug read the same second.
+ */
+export function clockStr(_period: number, t: number): string {
+  const r = Math.max(0, Math.ceil(PERIOD_LEN - t - 1e-9))
+  const mm = Math.floor(r / 60)
+  const ss = r % 60
   return `${mm}:${ss.toString().padStart(2, '0')}`
 }
 
@@ -183,29 +188,80 @@ const STOPPAGE_OTHER = [
   'Referee halts play.',
 ]
 
+/**
+ * What became of a shot — read AHEAD in the stream, so the shot line never
+ * calls a puck "wide" or an "easy save" that goes in (F-27). The shot line is
+ * written before the save/goal line in the ticker, so it may only describe
+ * the release, or foreshadow the outcome that actually follows.
+ */
+export type ShotOutcome = 'goal' | 'save' | 'block' | 'miss'
+
+/** Lines that fit ANY outcome (they describe only the release). */
 const SHOT_LOW_DANGER = [
-  '{shooter} fires from the perimeter — not much danger there.',
-  '{shooter} lets one go from the outside — right to the goalie.',
-  '{shooter} shoots — drifts wide.',
-  '{shooter} tries from distance — no real threat.',
-  '{shooter} gets a shot away — easy work for the netminder.',
+  '{shooter} fires from the perimeter.',
+  '{shooter} lets one go from the outside.',
+  '{shooter} tries from distance.',
+  '{shooter} gets a shot away from the point.',
 ]
+const SHOT_LOW_BY_OUTCOME: Record<ShotOutcome, readonly string[]> = {
+  goal: [],
+  save: [
+    '{shooter} lets one go from the outside — right to the goalie.',
+    '{shooter} gets a shot away — easy work for the netminder.',
+    '{shooter} fires from the perimeter — not much danger there.',
+  ],
+  block: ['{shooter} tries to get one through from distance…'],
+  miss: [
+    '{shooter} shoots — drifts wide.',
+    '{shooter} tries from distance — no real threat.',
+  ],
+}
 
 const SHOT_MED_DANGER = [
-  '{shooter} steps up and fires — goalie tracks it.',
   '{shooter} gets a shot from a good position!',
-  '{shooter} threatens — the goalie has to work!',
   '{shooter} lets it go from the top of the circle!',
-  '{shooter} shoots — that needed watching!',
+  '{shooter} steps up and fires!',
 ]
+const SHOT_MED_BY_OUTCOME: Record<ShotOutcome, readonly string[]> = {
+  goal: [],
+  save: [
+    '{shooter} steps up and fires — goalie tracks it.',
+    '{shooter} threatens — the goalie has to work!',
+  ],
+  block: [],
+  miss: ['{shooter} shoots — that needed watching!'],
+}
 
 const SHOT_HIGH_DANGER = [
   'DANGEROUS chance — {shooter} from the slot!',
   '{shooter} in TIGHT — the goalie must be sharp!',
   'DANGEROUS! {shooter} from prime ice!',
-  '{shooter} with a quality chance — goalie stays big!',
   'Excellent opportunity for {shooter} from the danger area!',
 ]
+const SHOT_HIGH_BY_OUTCOME: Record<ShotOutcome, readonly string[]> = {
+  goal: [],
+  save: ['{shooter} with a quality chance — goalie stays big!'],
+  block: [],
+  miss: [],
+}
+
+/** Stream events that settle a shot; anything else after this long means it missed. */
+const SHOT_OUTCOME_WINDOW_S = 3
+
+/** Look ahead from a shot at `i` for what it became. */
+export function shotOutcome(stream: GameStream, i: number): ShotOutcome {
+  const shot = stream[i]!
+  for (let j = i + 1; j < stream.length; j++) {
+    const e = stream[j]!
+    if (e.type === 'frame' || e.type === 'lineChange') continue
+    if (e.period !== shot.period || e.t - shot.t > SHOT_OUTCOME_WINDOW_S) return 'miss'
+    if (e.type === 'goal') return 'goal'
+    if (e.type === 'save') return 'save'
+    if (e.type === 'blockedShot') return 'block'
+    if (e.type === 'shot' || e.type === 'faceoff' || e.type === 'whistle' || e.type === 'periodEnd' || e.type === 'gameEnd') return 'miss'
+  }
+  return 'miss'
+}
 
 const SAVE_PLAIN = [
   '{goalie} turns it aside.',
@@ -303,7 +359,8 @@ export function generateCommentary(
   let lastPeriod = 0
   // (no inter-event state needed beyond score/tracker)
 
-  for (const ev of stream) {
+  for (let evIdx = 0; evIdx < stream.length; evIdx++) {
+    const ev = stream[evIdx]!
     // Reset surname introductions at each period boundary so players get
     // re-introduced at the start of each period.
     if (ev.period !== lastPeriod) {
@@ -338,16 +395,17 @@ export function generateCommentary(
         const shooterName = resolveName(ev.shooter, names, tracker, ev.period)
         const seed = mixSeed(at * 100 | 0, strHash(ev.shooter))
 
+        const outcome = shotOutcome(stream, evIdx)
         let bank: readonly string[]
         let imp: 1 | 2
         if (ev.danger >= 0.65) {
-          bank = SHOT_HIGH_DANGER
+          bank = [...SHOT_HIGH_DANGER, ...SHOT_HIGH_BY_OUTCOME[outcome]]
           imp = 2
         } else if (ev.danger >= 0.35) {
-          bank = SHOT_MED_DANGER
+          bank = [...SHOT_MED_DANGER, ...SHOT_MED_BY_OUTCOME[outcome]]
           imp = 1
         } else {
-          bank = SHOT_LOW_DANGER
+          bank = [...SHOT_LOW_DANGER, ...SHOT_LOW_BY_OUTCOME[outcome]]
           imp = 1
         }
 

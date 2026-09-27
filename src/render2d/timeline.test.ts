@@ -218,3 +218,29 @@ describe('puck stoppage snap (sampleAt)', () => {
     expect(snap!.puck.x).toBeCloseTo(0, 3)
   })
 })
+
+describe('displayClockAt (F-22: the shown clock stops at the whistle)', () => {
+  it('freezes from every whistle / goal until the next faceoff, and runs in live play', () => {
+    const { tl, out } = buildTimeline(3)
+    const at = (e: { period: number; t: number }): number => absTime(e.period, e.t)
+    const events = out.stream.filter((e) => e.type === 'whistle' || e.type === 'goal' || e.type === 'faceoff')
+    let checkedDead = 0
+    for (let i = 0; i < events.length - 1 && checkedDead < 40; i++) {
+      const w = events[i]!
+      const f = events.slice(i + 1).find((e) => e.type === 'faceoff')
+      if (w.type === 'faceoff' || !f || f.period !== w.period || f.period > 3) continue
+      const a = at(w)
+      const b = at(f)
+      if (b - a < 2) continue
+      const frozen = tl.displayClockAt(a).text
+      expect(tl.displayClockAt(a + (b - a) * 0.5).text).toBe(frozen)
+      expect(tl.displayClockAt(b - 0.01).text).toBe(frozen)
+      checkedDead++
+    }
+    expect(checkedDead).toBeGreaterThan(10)
+    // live play (just after a faceoff) shows the engine clock
+    const fo = out.stream.find((e) => e.type === 'faceoff' && e.period === 2)!
+    const live = at(fo) + 0.5
+    expect(tl.displayClockAt(live)).toEqual(tl.clockAt(live))
+  })
+})

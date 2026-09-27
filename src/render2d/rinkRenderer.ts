@@ -16,6 +16,7 @@ import type { MatchTimeline } from './timeline'
 import type { MatchRenderer, MatchView, RinkColors, PlayerLabels } from './rendererContract'
 
 export type { MatchRenderer, MatchView, RinkColors, PlayerLabels } from './rendererContract'
+import { layoutLabels, type LabelRequest } from './labelLayout'
 
 const ICE = 0xf2f6fb
 const LINE_RED = 0xd33b3b
@@ -81,8 +82,11 @@ export class RinkRenderer implements MatchRenderer {
 
   private computeMetrics(): void {
     const pad = 14
-    const W = this.app.renderer.width / (window.devicePixelRatio || 1)
-    const H = this.app.renderer.height / (window.devicePixelRatio || 1)
+    // app.screen is already in CSS px (autoDensity). Dividing renderer.width by
+    // devicePixelRatio AGAIN drew the rink at 1/DPR size — 67% of the viewport,
+    // left-aligned, on a 150%-scaled Windows display (F-20).
+    const W = this.app.screen.width
+    const H = this.app.screen.height
     let w = W - pad * 2
     let h = w / RINK_ASPECT
     if (h > H - pad * 2) {
@@ -278,6 +282,52 @@ export class RinkRenderer implements MatchRenderer {
       this.setLabelText(this.awayGalLabel, snap.awayGoalieId ?? null)
       if (this.awayGalLabel.visible) this.placeLabel(this.awayGalLabel, this.awayGoalie, GOALIE_R + 2)
     }
+    this.deconflictLabels(snap)
+  }
+
+  /**
+   * Names used to overprint at faceoffs and scrums ("PcCrosby",
+   * "GoncalvesRobertson", F-21). Every visible label asks for its spot above
+   * the disc; the shared layout pass (labelLayout.ts) gives the carrier first
+   * pick, moves a clashing label up, below its disc or sideways, and hides it
+   * when there's no free spot this frame.
+   */
+  private deconflictLabels(snap: { carrier: string | null; homeIds?: ReadonlyArray<string | undefined>; awayIds?: ReadonlyArray<string | undefined> }): void {
+    const entries: Array<{ label: Text; key: string; below: number; pri: number }> = []
+    const px = this.puck.position.x
+    const py = this.puck.position.y
+    const add = (label: Text | null | undefined, key: string, id: string | undefined | null, discR: number, goalie: boolean): void => {
+      if (!label || !label.visible) return
+      const d = Math.hypot(label.position.x - px, label.position.y - py)
+      const pri = id && id === snap.carrier ? 100 : goalie ? 20 : 10 - d / 1000
+      entries.push({ label, key, below: 2 * (discR + 2), pri })
+    }
+    this.homeLabels.forEach((l, i) => add(l, `h${i}`, snap.homeIds?.[i], SKATER_R, false))
+    this.awayLabels.forEach((l, i) => add(l, `a${i}`, snap.awayIds?.[i], SKATER_R, false))
+    add(this.homeGalLabel, 'hg', null, GOALIE_R, true)
+    add(this.awayGalLabel, 'ag', null, GOALIE_R, true)
+    const reqs: LabelRequest[] = entries.map((e) => {
+      const w = e.label.width
+      const h = e.label.height
+      return {
+        key: e.key, x: e.label.position.x, y: e.label.position.y, w, h, priority: e.pri,
+        alternatives: [
+          { dx: 0, dy: e.below + h }, // below the disc
+          { dx: 0, dy: -(h + 1) },
+          { dx: -(w / 2 + e.below / 2 + 1), dy: e.below / 2 + h / 2 }, // beside it
+          { dx: w / 2 + e.below / 2 + 1, dy: e.below / 2 + h / 2 },
+        ],
+      }
+    })
+    const placed = new Map(layoutLabels(reqs, { w: this.app.screen.width, h: this.app.screen.height }).map((p) => [p.key, p]))
+    for (const e of entries) {
+      const p = placed.get(e.key)
+      if (!p) {
+        e.label.visible = false
+        continue
+      }
+      e.label.position.set(p.left + p.w / 2, p.top + p.h)
+    }
   }
 
   private tick = (): void => {
@@ -295,7 +345,7 @@ export class RinkRenderer implements MatchRenderer {
   private emit(): void {
     if (!this.listener || !this.timeline) return
     const score = this.timeline.scoreAt(this.clockPos)
-    const clock = this.timeline.clockAt(this.clockPos)
+    const clock = this.timeline.displayClockAt(this.clockPos)
     const ended = this.clockPos >= this.timeline.duration
     this.listener({
       period: clock.period,

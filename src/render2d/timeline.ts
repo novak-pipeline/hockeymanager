@@ -166,6 +166,14 @@ export class MatchTimeline {
    * Falls back to REGULATION_PERIOD_SECONDS for periods with no frames.
    */
   private readonly periodLength: Map<number, number> = new Map()
+  /**
+   * Dead-puck windows [from, to): a whistle or a goal until the next faceoff
+   * (clipped to the period's end). The engine keeps its clock running through
+   * celebrations and faceoff staging; the DISPLAYED clock stops, like the
+   * real one does at every whistle (F-22). Display-only — nothing here moves
+   * an event or a position.
+   */
+  private readonly deadWindows: Array<{ from: number; to: number }> = []
   readonly duration: number
   readonly homeFinal: number
   readonly awayFinal: number
@@ -207,6 +215,29 @@ export class MatchTimeline {
       }
     }
     // stoppages are already in stream order (ascending absT)
+
+    // Dead windows: every whistle / goal opens one; the next faceoff closes it.
+    const marks: Array<{ absT: number; open: boolean; period: number }> = []
+    for (const ev of stream) {
+      const open = isEvent(ev, 'whistle') || isEvent(ev, 'goal')
+      if (!open && !isEvent(ev, 'faceoff')) continue
+      const pBase = this.periodBase.get(ev.period) ?? (ev.period - 1) * REGULATION_PERIOD_SECONDS
+      marks.push({ absT: pBase + ev.t, open, period: ev.period })
+    }
+    marks.sort((x, y) => x.absT - y.absT || (x.open === y.open ? 0 : x.open ? -1 : 1))
+    let openAt: { absT: number; period: number } | null = null
+    for (const m of marks) {
+      if (m.open) {
+        if (!openAt) openAt = m
+        continue
+      }
+      if (openAt) {
+        const pEnd = (this.periodBase.get(openAt.period) ?? 0) + (this.periodLength.get(openAt.period) ?? REGULATION_PERIOD_SECONDS)
+        const to = Math.min(m.absT, pEnd)
+        if (to > openAt.absT) this.deadWindows.push({ from: openAt.absT, to })
+        openAt = null
+      }
+    }
     this.duration = this.frames.length ? this.frames[this.frames.length - 1].absT : 0
     let h = 0
     let a = 0
@@ -313,6 +344,24 @@ export class MatchTimeline {
       g.home ? home++ : away++
     }
     return { home, away }
+  }
+
+  /**
+   * The clock a viewer should SEE at `absT`: the game clock, frozen from a
+   * whistle (or goal) until the next faceoff. At the drop it resumes on the
+   * engine's clock.
+   */
+  displayClockAt(absT: number): ClockLabel {
+    const w = this.deadWindows
+    let lo = 0
+    let hi = w.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (w[mid]!.from <= absT) lo = mid + 1
+      else hi = mid
+    }
+    const win = w[lo - 1]
+    return win && absT < win.to ? this.clockAt(win.from) : this.clockAt(absT)
   }
 
   clockAt(absT: number): ClockLabel {

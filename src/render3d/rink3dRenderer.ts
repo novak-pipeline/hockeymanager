@@ -33,6 +33,12 @@ import {
   cameraTargetFor,
   endzoneChooseEnd,
   puckCarriedOffset,
+  puckTrackStep,
+  capLookYaw,
+  broadcastFraming,
+  followHeadingStep,
+  type FollowHeading,
+  type PuckTrack,
   softDeadzone,
   emaStep,
   clampSpeed,
@@ -67,6 +73,14 @@ import { kitFor, type Kit } from './palette'
 import { ATLAS_GRID, buildAtlasCanvas, paintJerseySlot } from './textures'
 import { RINK_HALF_W } from './iceCanvas'
 import { assignRigs, capStep, type RigMode } from './lineChange'
+import { layoutLabels, type LabelRequest, type PlacedLabel } from '@render2d/labelLayout'
+
+// ── Name labels (screen space, E1 / F-18) ──────────────────────────────────
+// Only the carrier and the players near the puck get a name — like FM — at a
+// constant readable pixel size, de-conflicted so they never overlap.
+const LABEL_NEAR_FT = 24
+const LABEL_GOALIE_NEAR_FT = 28
+const LABEL_MAX = 5
 
 /** Bench gates on the far boards (home bench at x = -26, away at +26, matching arena.ts). */
 const BENCH_GATE = { home: { x: -26, z: RINK_HALF_W - 1.5 }, away: { x: 26, z: RINK_HALF_W - 1.5 } } as const
@@ -102,10 +116,20 @@ const PLAYER_FOLLOW_HL = 0.08
 // damped spring. The broadcast shot is deliberately slow and heavy, like a
 // real operator on a fluid head; the tighter presets stay more responsive.
 const CAMERA_TUNING: Record<CameraPreset, { tauX: number; tauZ: number; maxFocusSpeed: number; springHL: number }> = {
-  broadcast: { tauX: 0.9, tauZ: 1.2, maxFocusSpeed: 40, springHL: 0.6 },
+  // tighter zone framing (D3) needs a little less lag than the old wide shot
+  broadcast: { tauX: 0.4, tauZ: 1.0, maxFocusSpeed: 60, springHL: 0.45 },
   overhead: { tauX: 1.2, tauZ: 1.2, maxFocusSpeed: 30, springHL: 1.5 },
   endzone: { tauX: 0.6, tauZ: 0.6, maxFocusSpeed: 80, springHL: 0.5 },
   follow: { tauX: 0.45, tauZ: 0.45, maxFocusSpeed: 90, springHL: 0.45 },
+}
+
+// Hard cap on how fast each preset's view may yaw (rad/s). The follow cam
+// peaked at 3,856°/s before (audit D1); a TV operator pans ≲ 30–60°/s.
+const MAX_CAM_YAW_RATE: Record<CameraPreset, number> = {
+  broadcast: (30 * Math.PI) / 180,
+  overhead: Infinity,
+  endzone: (60 * Math.PI) / 180,
+  follow: (60 * Math.PI) / 180,
 }
 
 // Soft dead-band around the focus: puck motion inside it never moves the shot.
@@ -169,7 +193,12 @@ interface PlayerPose {
   angVel: number           // body-yaw spring velocity (rad/s)
   rig: AthleteRig
   team: 'home' | 'away'
-  labelSprite: THREE.Sprite
+  /** Name label ("59 Garrity"), drawn in SCREEN space by drawLabels(); null = none. */
+  labelText: string | null
+  /** False while he skates off to the bench (no label for a departing player). */
+  labelOn: boolean
+  /** Label anchor height (ft) above the ice — just over the helmet. */
+  labelY: number
   // authored-clip state (Blender athletes; see choreo.ts)
   vx: number
   vz: number
@@ -236,8 +265,13 @@ export class Rink3dRenderer implements MatchRenderer {
   // ── Puck ───────────────────────────────────────────────────────────────────
   private puckMesh!: THREE.Mesh
   private puckGlowRing!: THREE.Mesh
-  private puckRenderX: Spring1D = { pos: 0, vel: 0 }
-  private puckRenderZ: Spring1D = { pos: 0, vel: 0 }
+  /** Ring on the ice under the puck carrier's skates (FM-style ball-carrier mark). */
+  private carrierRing!: THREE.Mesh
+  private carrierMarkPose: PlayerPose | null = null
+  private labelCanvas!: HTMLCanvasElement
+  /** The labels placed last frame (CSS px) — read by the dev probes. */
+  labelRects: PlacedLabel[] = []
+  private puck: PuckTrack = { x: 0, z: 0, cx: 0, cz: 0, key: '' }
 
   // ── Goal lights ────────────────────────────────────────────────────────────
   private goalLights: GoalLight[] = []
@@ -264,6 +298,16 @@ export class Rink3dRenderer implements MatchRenderer {
   private fov: Spring1D = { pos: 30, vel: 0 }
   private camPreset: CameraPreset = 'broadcast'
   private endzoneActiveSide: 1 | -1 = -1
+  /** Follow cam: the smoothed, rate-limited heading of play (never body facing). */
+  private followHead: FollowHeading = { yaw: Math.PI / 2, reversedFor: 0 }
+  private puckVelSmX = 0
+  private puckVelSmZ = 0
+  private prevPuckX: number | null = null
+  /** Broadcast: a small, slow lead in the direction of play (ft). */
+  private leadX = 0
+  private prevPuckZ = 0
+  /** Last rendered look yaw (null after a cut) — for the angular-speed cap. */
+  private lastCamYaw: number | null = null
 
   // ── Wall clock for animation ───────────────────────────────────────────────
   private lastFrameTime = 0
@@ -271,7 +315,6 @@ export class Rink3dRenderer implements MatchRenderer {
   private cpuMsAvg = 0
 
   // ── Carrier tracking for follow camera ────────────────────────────────────
-  private carrierAngle = 0
   private carrierWx = 0
   private carrierWz = 0
   private lastCarrier: PlayerId | null = null
@@ -315,6 +358,12 @@ export class Rink3dRenderer implements MatchRenderer {
     parent.appendChild(renderer.domElement)
 
     const inst = new Rink3dRenderer(renderer)
+    // name labels: a 2D canvas over the GL canvas (never in the 3D scene)
+    const lc = document.createElement('canvas')
+    lc.style.cssText = 'position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none'
+    if (getComputedStyle(parent).position === 'static') parent.style.position = 'relative'
+    parent.appendChild(lc)
+    inst.labelCanvas = lc
     if (colors) inst.setKits(colors)
     if (o.athletes === 'owner' || o.athletes === 'auto') await inst.loadOwner()
     inst.assets = o.athletes !== 'procedural' ? await loadAthleteAssets() : null
@@ -531,13 +580,137 @@ export class Rink3dRenderer implements MatchRenderer {
     this.puckMesh.castShadow = true
     this.scene.add(this.puckMesh)
 
-    // Carrier ring: a thin broadcast-style halo so the puck stays readable
-    const ringGeo = new THREE.TorusGeometry(PUCK_R + 0.75, 0.07, 6, 40)
-    const ringMat = new THREE.MeshBasicMaterial({ color: 0xffd24a, transparent: true, opacity: 0.7, depthWrite: false })
-    this.puckGlowRing = new THREE.Mesh(ringGeo, ringMat)
-    this.puckGlowRing.rotation.x = Math.PI / 2
-    this.puckGlowRing.visible = false
+    // Readability at broadcast distance (F-17): the real puck is ~3 px there.
+    // A subtle gold halo on the ice around the puck, kept at a minimum SCREEN
+    // size (updateMarkers), plus a clearer ring under the carrier's skates.
+    const flat = (inner: number): THREE.RingGeometry => {
+      const g = new THREE.RingGeometry(inner, 1, 48)
+      g.rotateX(-Math.PI / 2)
+      return g
+    }
+    const markMat = (opacity: number): THREE.MeshBasicMaterial =>
+      new THREE.MeshBasicMaterial({
+        color: 0xffd24a, transparent: true, opacity, depthWrite: false, toneMapped: false,
+        polygonOffset: true, polygonOffsetFactor: -3,
+      })
+    this.puckGlowRing = new THREE.Mesh(flat(0.68), markMat(0.6))
+    this.puckGlowRing.renderOrder = 2
     this.scene.add(this.puckGlowRing)
+    this.carrierRing = new THREE.Mesh(flat(0.8), markMat(0.85))
+    ;(this.carrierRing.material as THREE.MeshBasicMaterial).color.setHex(0xffbf1f)
+    this.carrierRing.renderOrder = 2
+    this.carrierRing.visible = false
+    this.scene.add(this.carrierRing)
+  }
+
+  /**
+   * Name labels in SCREEN space: a constant, readable pixel size at every
+   * camera (they were 4.4 ft world sprites with no depth test — huge up close,
+   * ~7 px at broadcast distance, overlapping in 77% of frames). The carrier
+   * always, plus the few players nearest the puck; de-conflicted (a label
+   * that can't find a free spot is dropped, never stacked).
+   */
+  private drawLabels(): void {
+    const c = this.labelCanvas
+    const W = c.clientWidth
+    const H = c.clientHeight
+    if (W === 0 || H === 0) return
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    if (c.width !== Math.round(W * dpr) || c.height !== Math.round(H * dpr)) {
+      c.width = Math.round(W * dpr)
+      c.height = Math.round(H * dpr)
+    }
+    const ctx = c.getContext('2d')
+    if (!ctx) return
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+    ctx.clearRect(0, 0, W, H)
+    this.labelRects = []
+    if (!this.timeline) return
+
+    const carrier = this.carrierMarkPose
+    const cands: Array<{ p: PlayerPose; pri: number }> = []
+    for (const p of this.allPoses()) {
+      if (!p.labelOn || !p.labelText || !p.rig.visible) continue
+      const d = Math.hypot(p.worldX.pos - this.puck.x, p.worldZ.pos - this.puck.z)
+      if (p === carrier) cands.push({ p, pri: 100 })
+      else if (!p.rig.goalie && d < LABEL_NEAR_FT) cands.push({ p, pri: 50 - d })
+      else if (p.rig.goalie && d < LABEL_GOALIE_NEAR_FT) cands.push({ p, pri: 40 - d })
+    }
+    cands.sort((a, b) => b.pri - a.pri)
+    const v = new THREE.Vector3()
+    const reqs: LabelRequest[] = []
+    const info = new Map<string, { p: PlayerPose; ax: number; ay: number; carrier: boolean }>()
+    for (const { p, pri } of cands.slice(0, LABEL_MAX)) {
+      v.set(p.worldX.pos, p.labelY, p.worldZ.pos).project(this.camera)
+      if (v.z > 1 || Math.abs(v.x) > 1.02 || Math.abs(v.y) > 1.02) continue // behind the camera / off screen
+      const ax = ((v.x + 1) / 2) * W
+      const ay = ((1 - v.y) / 2) * H
+      const isC = p === carrier
+      ctx.font = isC ? '700 13px Arial, sans-serif' : '600 12px Arial, sans-serif'
+      const w = Math.ceil(ctx.measureText(p.labelText!).width) + 16
+      const h = isC ? 20 : 18
+      const key = `${p.team}:${p.rig.slot}`
+      reqs.push({ key, x: ax, y: ay - 3, w, h, priority: pri })
+      info.set(key, { p, ax, ay, carrier: isC })
+    }
+    const placed = layoutLabels(reqs, { w: W, h: H })
+    this.labelRects = placed
+    ctx.textBaseline = 'middle'
+    ctx.textAlign = 'left'
+    for (const r of placed) {
+      const it = info.get(r.key)!
+      const kit = it.p.team === 'home' ? this.homeKit : this.awayKit
+      // nudged off its default spot: a hairline back to the player
+      if (Math.abs(r.dx) > 1 || Math.abs(r.dy) > 1) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.55)'
+        ctx.lineWidth = 1
+        ctx.beginPath()
+        ctx.moveTo(it.ax, it.ay)
+        ctx.lineTo(Math.max(r.left, Math.min(r.left + r.w, it.ax)), r.top + r.h)
+        ctx.stroke()
+      }
+      ctx.fillStyle = it.carrier ? 'rgba(10,12,16,0.86)' : 'rgba(10,12,16,0.7)'
+      ctx.beginPath()
+      ctx.roundRect(r.left, r.top, r.w, r.h, 4)
+      ctx.fill()
+      if (it.carrier) {
+        ctx.strokeStyle = '#ffbf1f'
+        ctx.lineWidth = 1.5
+        ctx.stroke()
+      }
+      ctx.fillStyle = `#${(it.p.team === 'home' ? kit.jersey : kit.trim).toString(16).padStart(6, '0')}`
+      ctx.fillRect(r.left + 2, r.top + 3, 4, r.h - 6)
+      ctx.fillStyle = '#ffffff'
+      ctx.font = it.carrier ? '700 13px Arial, sans-serif' : '600 12px Arial, sans-serif'
+      ctx.fillText(it.p.labelText!, r.left + 10, r.top + r.h / 2 + 0.5)
+    }
+  }
+
+  /**
+   * Size the puck halo / carrier ring for the CURRENT camera: never smaller
+   * on screen than a readable minimum (px), never smaller than real scale.
+   * Runs after the camera moved this frame.
+   */
+  private updateMarkers(): void {
+    const H = this.renderer.domElement.clientHeight || 400
+    const tanHalf = Math.tan((this.camera.fov * Math.PI) / 360)
+    const wpp = (x: number, z: number): number => (2 * this.camera.position.distanceTo(new THREE.Vector3(x, 0, z)) * tanHalf) / H
+    const px = this.puck.x
+    const pz = this.puck.z
+    const carried = this.carrierMarkPose !== null
+    // halo: ≥ 7 px radius; quieter while the carrier ring already marks the play
+    const haloR = Math.max(PUCK_R + 0.45, 7 * wpp(px, pz))
+    this.puckGlowRing.position.set(px, 0.05, pz)
+    this.puckGlowRing.scale.setScalar(haloR)
+    ;(this.puckGlowRing.material as THREE.MeshBasicMaterial).opacity = carried ? 0.35 : 0.6
+    const c = this.carrierMarkPose
+    this.carrierRing.visible = c !== null && c.rig.visible
+    if (c) {
+      const cx = c.worldX.pos
+      const cz = c.worldZ.pos
+      this.carrierRing.position.set(cx, 0.045, cz)
+      this.carrierRing.scale.setScalar(Math.max(2.4, 15 * wpp(cx, cz)))
+    }
   }
 
   private buildAthletes(): void {
@@ -616,7 +789,9 @@ export class Rink3dRenderer implements MatchRenderer {
         velSmZ: 0,
         rig,
         team,
-        labelSprite: this.makeLabelSprite(),
+        labelText: null,
+        labelOn: false,
+        labelY: 6.6,
         vx: 0,
         vz: 0,
         layer: clips ? new ActionLayer(clips) : null,
@@ -639,10 +814,7 @@ export class Rink3dRenderer implements MatchRenderer {
     }
     this.homeGoaliePose = mk('home', true, HOME_G_SLOT, -NET_X + 4, 0)
     this.awayGoaliePose = mk('away', true, AWAY_G_SLOT, NET_X - 4, 0)
-    for (const p of this.allPoses()) {
-      this.paintSlot(p)
-      this.scene.add(p.labelSprite)
-    }
+    for (const p of this.allPoses()) this.paintSlot(p)
 
     if (this.assets) {
       const all = () => this.allPoses()
@@ -701,41 +873,6 @@ export class Rink3dRenderer implements MatchRenderer {
     this.atlasDirty = true
   }
 
-  private makeLabelSprite(): THREE.Sprite {
-    const c = document.createElement('canvas')
-    c.width = 256
-    c.height = 64
-    const tex = new THREE.CanvasTexture(c)
-    tex.colorSpace = THREE.SRGBColorSpace
-    const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true, toneMapped: false })
-    const sprite = new THREE.Sprite(mat)
-    sprite.scale.set(4.4, 1.1, 1)
-    sprite.visible = false
-    sprite.renderOrder = 10
-    return sprite
-  }
-
-  private drawLabel(sprite: THREE.Sprite, text: string, team: 'home' | 'away'): void {
-    const mat = sprite.material as THREE.SpriteMaterial
-    const tex = mat.map as THREE.CanvasTexture
-    const c = tex.image as HTMLCanvasElement
-    const ctx = c.getContext('2d')!
-    ctx.clearRect(0, 0, 256, 64)
-    ctx.fillStyle = 'rgba(8,10,14,0.62)'
-    ctx.beginPath()
-    ctx.roundRect(4, 10, 248, 44, 7)
-    ctx.fill()
-    const kit = team === 'home' ? this.homeKit : this.awayKit
-    ctx.fillStyle = `#${(team === 'home' ? kit.jersey : kit.trim).toString(16).padStart(6, '0')}`
-    ctx.fillRect(4, 10, 8, 44)
-    ctx.fillStyle = '#ffffff'
-    ctx.font = 'bold 28px Arial, sans-serif'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(text, 132, 33, 232)
-    tex.needsUpdate = true
-  }
-
   /**
    * Update the label + jersey slot whenever the player in this slot changes
    * (or on first population). Reuses the existing sprite — no allocation.
@@ -747,14 +884,11 @@ export class Rink3dRenderer implements MatchRenderer {
     if (id) this.paintSlot(pose)
     const info = id ? this.labels[id] : undefined
     if (!id || !info) {
-      pose.labelSprite.visible = false
-      pose.labelSprite.userData.hasLabel = false
+      pose.labelText = null
       return
     }
-    const labelText = info.number !== undefined ? `${info.number} ${info.lastName}` : info.lastName
-    this.drawLabel(pose.labelSprite, labelText, pose.team)
-    pose.labelSprite.userData.hasLabel = true
-    pose.labelSprite.visible = true
+    pose.labelText = info.number !== undefined ? `${info.number} ${info.lastName}` : info.lastName
+    pose.labelOn = true
   }
 
   // ── MatchRenderer interface ───────────────────────────────────────────────
@@ -780,7 +914,8 @@ export class Rink3dRenderer implements MatchRenderer {
     // Reset per-slot state so jerseys/labels repaint for the new game
     for (const p of this.allPoses()) {
       p.playerId = null
-      p.labelSprite.visible = false
+      p.labelText = null
+      p.labelOn = false
       p.butterflyTimer = p.armsTimer = p.staggerTimer = 0
       p.butterfly = 0
       p.shotTimer = -1
@@ -856,18 +991,19 @@ export class Rink3dRenderer implements MatchRenderer {
       p.worldX = snapSpring(p.worldX.pos)
       p.worldZ = snapSpring(p.worldZ.pos)
     }
-    this.puckRenderX = snapSpring(this.puckMesh.position.x)
-    this.puckRenderZ = snapSpring(this.puckMesh.position.z)
+    this.puck = { x: this.puckMesh.position.x, z: this.puckMesh.position.z, cx: 0, cz: 0, key: this.puck.key }
   }
 
-  private currentTarget() {
-    return cameraTargetFor(this.camPreset, this.playFocusX, {
+  private currentTarget(): ReturnType<typeof broadcastFraming> {
+    if (this.camPreset === 'broadcast') return broadcastFraming(this.playFocusX, this.playFocusZ, this.leadX, this.camera.aspect)
+    const t = cameraTargetFor(this.camPreset, this.playFocusX, {
       endzoneActiveSide: this.endzoneActiveSide,
-      carrierAngle: this.carrierAngle,
+      carrierAngle: this.followHead.yaw,
       carrierWx: this.carrierWx,
       carrierWz: this.carrierWz,
       puckWz: this.playFocusZ,
     })
+    return { ...t, fov: cameraFovFor(this.camPreset) }
   }
 
   /**
@@ -876,6 +1012,18 @@ export class Rink3dRenderer implements MatchRenderer {
    */
   private snapCameraToTarget(): void {
     this.endzoneActiveSide = endzoneChooseEnd(this.endzoneActiveSide, this.playFocusX)
+    // follow: start behind the play, looking toward the end it is in
+    this.followHead = { yaw: this.playFocusX >= 0 ? Math.PI / 2 : -Math.PI / 2, reversedFor: 0 }
+    this.puckVelSmX = this.puckVelSmZ = 0
+    this.prevPuckX = null
+    this.leadX = 0
+    this.lastCamYaw = null
+    this.snapCameraSprings()
+  }
+
+  /** Hard-cut the camera to the current preset's target (a cut, never a fly-through). */
+  private snapCameraSprings(): void {
+    this.lastCamYaw = null
     const target = this.currentTarget()
     this.camX = snapSpring(target.px)
     this.camY = snapSpring(target.py)
@@ -883,7 +1031,7 @@ export class Rink3dRenderer implements MatchRenderer {
     this.lookX = snapSpring(target.lx)
     this.lookY = snapSpring(target.ly)
     this.lookZ = snapSpring(target.lz)
-    this.fov = snapSpring(cameraFovFor(this.camPreset))
+    this.fov = snapSpring(target.fov)
     this.arena.setCeilingVisible(this.camPreset !== 'overhead')
     this.applyFov(this.fov.pos)
     this.camera.position.set(target.px, target.py, target.pz)
@@ -919,10 +1067,7 @@ export class Rink3dRenderer implements MatchRenderer {
     this.atlasTex.dispose()
     this.ownerAtlasTex?.dispose()
     for (const t of [this.ownerTex?.skater, this.ownerTex?.goalie]) if (t) for (const x of Object.values(t)) x.dispose()
-    for (const p of this.allPoses()) {
-      ;(p.labelSprite.material as THREE.SpriteMaterial).map?.dispose()
-      p.labelSprite.material.dispose()
-    }
+    this.labelCanvas.remove()
     this.scene.traverse((obj) => {
       if (obj instanceof THREE.Mesh) {
         obj.geometry.dispose()
@@ -1015,6 +1160,8 @@ export class Rink3dRenderer implements MatchRenderer {
     this.renderAt(this.clockPos, dt, simDt)
     this.updateCues(this.clockPos, dt)
     this.updateCamera(dt)
+    this.updateMarkers()
+    this.drawLabels()
     this.updateArena(dt)
     this.emit()
     // repainted jersey slots go up as sub-images (a full re-upload of the
@@ -1070,10 +1217,25 @@ export class Rink3dRenderer implements MatchRenderer {
   private frameEma = 1 / 60
   private slowFor = 0
 
+  /**
+   * Hold the in-arena video board on its current score/clock (an instant
+   * replay rewinds the picture; the board keeps the live score). Not part of
+   * the MatchRenderer contract — MatchViewer calls it on the 3D renderer.
+   */
+  setBoardHold(on: boolean): void {
+    if (!on || !this.timeline) {
+      this.boardHold = null
+      return
+    }
+    const s = this.timeline.scoreAt(this.clockPos)
+    this.boardHold = { score: { home: s.home, away: s.away }, clock: this.timeline.displayClockAt(this.clockPos) }
+  }
+  private boardHold: { score: { home: number; away: number }; clock: { period: number; text: string } } | null = null
+
   private updateArena(dt: number): void {
     if (!this.timeline) return
-    const score = this.timeline.scoreAt(this.clockPos)
-    const clock = this.timeline.clockAt(this.clockPos)
+    const score = this.boardHold?.score ?? this.timeline.scoreAt(this.clockPos)
+    const clock = this.boardHold?.clock ?? this.timeline.displayClockAt(this.clockPos)
     if (this.playing) this.sinceGoal += dt
     const goalFlash = this.sinceGoal < 3.5 ? 3.5 - this.sinceGoal : 0
     this.arena.update(this.wallTime, {
@@ -1124,11 +1286,17 @@ export class Rink3dRenderer implements MatchRenderer {
     // Puck position: if carried, sits on the carrier's blade
     let pTargetX: number
     let pTargetZ: number
-    if (carrierPose !== null) {
+    const blade = carrierPose !== null ? this.bladePoint(carrierPose) : null
+    if (carrierPose !== null && blade) {
+      // on the posed blade (C3): wherever the clip / IK actually put the stick
+      pTargetX = blade.x
+      pTargetZ = blade.z
+      this.carrierWx = carrierPose.worldX.pos
+      this.carrierWz = carrierPose.worldZ.pos
+    } else if (carrierPose !== null) {
       const offset = puckCarriedOffset(carrierPose.angle)
       pTargetX = carrierPose.worldX.pos + offset.dx
       pTargetZ = carrierPose.worldZ.pos + offset.dz
-      this.carrierAngle = carrierPose.angle
       this.carrierWx = carrierPose.worldX.pos
       this.carrierWz = carrierPose.worldZ.pos
     } else {
@@ -1138,21 +1306,39 @@ export class Rink3dRenderer implements MatchRenderer {
       this.carrierWz = pTargetZ
     }
 
-    // Smooth puck position with a tight spring (not teleport-snappy but responsive)
-    if (dt > 0) {
-      this.puckRenderX = springStep(this.puckRenderX, pTargetX, dt, PLAYER_FOLLOW_HL)
-      this.puckRenderZ = springStep(this.puckRenderZ, pTargetZ, dt, PLAYER_FOLLOW_HL)
-    } else {
-      this.puckRenderX = snapSpring(pTargetX)
-      this.puckRenderZ = snapSpring(pTargetZ)
-    }
+    // The drawn puck TRACKS the stream (loose) or the blade (carried); only a
+    // carried↔loose handoff blends, over a few frames (math.ts puckTrackStep).
+    this.puck = puckTrackStep(this.puck, pTargetX, pTargetZ, carrierPose?.playerId ?? '', dt)
 
-    this.puckMesh.position.set(this.puckRenderX.pos, PUCK_H / 2, this.puckRenderZ.pos)
-    this.puckGlowRing.position.set(this.puckRenderX.pos, 0.06, this.puckRenderZ.pos)
-    this.puckGlowRing.visible = snap.carrier !== null
+    this.puckMesh.position.set(this.puck.x, PUCK_H / 2, this.puck.z)
+    this.carrierMarkPose = carrierPose
 
     this.batch.sync()
     this.syncBlobs()
+  }
+
+  private readonly bladeTmp = new THREE.Vector3()
+  private readonly bladeDir = new THREE.Vector3()
+  /**
+   * Where a carried puck sits: on the carrier's POSED blade (audit C3 — a
+   * fixed body offset left the drawn puck > 1.5 ft off the blade in 32% of
+   * carried frames with the owner athletes, whose clips/IK move the stick
+   * elsewhere). The blade bone's origin, a few inches along the blade, on the
+   * ice. Null (→ the body offset) if the rig has no blade or it's implausibly
+   * far from the body (a clip mid-swing, a missing bone binding).
+   */
+  private bladePoint(pose: PlayerPose): { x: number; z: number } | null {
+    const b = pose.rig.bones?.stick_blade
+    if (!b) return null
+    b.updateWorldMatrix(true, false)
+    const e = b.matrixWorld.elements
+    this.bladeDir.setFromMatrixColumn(b.matrixWorld, 0)
+    const len = Math.hypot(this.bladeDir.x, this.bladeDir.z)
+    const along = len > 1e-6 ? 0.35 / len : 0
+    this.bladeTmp.set(e[12]! + this.bladeDir.x * along, 0, e[14]! + this.bladeDir.z * along)
+    const d = Math.hypot(this.bladeTmp.x - pose.worldX.pos, this.bladeTmp.z - pose.worldZ.pos)
+    if (!Number.isFinite(d) || d > 6.5) return null
+    return { x: this.bladeTmp.x, z: this.bladeTmp.z }
   }
 
   private syncBlobs(): void {
@@ -1167,7 +1353,7 @@ export class Rink3dRenderer implements MatchRenderer {
       }
       this.blobs.setMatrixAt(i, m)
     })
-    m.makeScale(1.1, 1, 1.1).setPosition(this.puckRenderX.pos, 0.035, this.puckRenderZ.pos)
+    m.makeScale(1.1, 1, 1.1).setPosition(this.puck.x, 0.035, this.puck.z)
     this.blobs.setMatrixAt(poses.length, m)
     this.blobs.instanceMatrix.needsUpdate = true
   }
@@ -1194,7 +1380,7 @@ export class Rink3dRenderer implements MatchRenderer {
     for (const r of left) {
       poses[r]!.departT = 0
       poses[r]!.departSeq = ++this.departSeq
-      poses[r]!.labelSprite.visible = false
+      poses[r]!.labelOn = false
     }
     poses.forEach((pose, r) => {
       const slot = slots[r]!
@@ -1206,7 +1392,7 @@ export class Rink3dRenderer implements MatchRenderer {
         pose.mode = 'idle'
         pose.playerId = null
         pose.rig.visible = false
-        pose.labelSprite.visible = false
+        pose.labelOn = false
         return
       }
       pose.rig.visible = true
@@ -1350,8 +1536,8 @@ export class Rink3dRenderer implements MatchRenderer {
     }
     pose.rig.apply(pose.worldX.pos, pose.worldZ.pos, pose.angle, body, stick, pose.overlay)
 
-    pose.labelSprite.position.set(pose.worldX.pos, body.hipHeight + 4.4, pose.worldZ.pos)
-    pose.labelSprite.visible = pose.rig.visible && pose.labelSprite.userData.hasLabel === true
+    pose.labelY = body.hipHeight + 3.4
+    if (pose.mode === 'play' || pose.mode === 'arriving') pose.labelOn = true
   }
 
   private updateGoaliePose(
@@ -1401,8 +1587,8 @@ export class Rink3dRenderer implements MatchRenderer {
     pose.layer?.update(simDt)
     pose.rig.apply(pose.worldX.pos, pose.worldZ.pos, pose.angle, body, { mode: 'carry' }, pose.overlay)
 
-    pose.labelSprite.position.set(pose.worldX.pos, body.hipHeight + 4.6, pose.worldZ.pos)
-    pose.labelSprite.visible = pose.rig.visible && pose.labelSprite.userData.hasLabel === true
+    pose.labelY = body.hipHeight + 3.6
+    pose.labelOn = true
   }
 
   // ── Event cues ────────────────────────────────────────────────────────────
@@ -1511,9 +1697,10 @@ export class Rink3dRenderer implements MatchRenderer {
     // The focus trails the puck by up to a few feet, so stick-handling and
     // rebounds don't move the shot, and a real rush eases the pan in from zero
     // (the old hard deadzone stepped the target → stop/start pans).
-    const rawX = this.puckRenderX.pos
-    const rawZ = this.puckRenderZ.pos
-    const committedX = softDeadzone(rawX, this.playFocusX, PLAY_FOCUS_DEADZONE_X)
+    const rawX = this.puck.x
+    const rawZ = this.puck.z
+    // the zone-framed broadcast shot keeps a tighter band (its frame is ~80 ft)
+    const committedX = softDeadzone(rawX, this.playFocusX, this.camPreset === 'broadcast' ? 4 : PLAY_FOCUS_DEADZONE_X)
     const committedZ = softDeadzone(rawZ, this.playFocusZ, PLAY_FOCUS_DEADZONE_Z)
 
     // ── Layer 2: slow EMA toward the committed point ─────────────────────────
@@ -1530,9 +1717,48 @@ export class Rink3dRenderer implements MatchRenderer {
     this.playFocusX = Number.isFinite(newFocusX) ? newFocusX : this.playFocusX
     this.playFocusZ = Number.isFinite(newFocusZ) ? newFocusZ : this.playFocusZ
 
+    // Heading of play for the follow cam: the puck's smoothed direction of
+    // travel, turned toward at ≤ 35°/s; a sustained reversal is a CUT.
+    let cut = false
+    if (dt > 0) {
+      if (this.prevPuckX !== null) {
+        const vx = (rawX - this.prevPuckX) / dt
+        const vz = (rawZ - this.prevPuckZ) / dt
+        // A puck teleport (the stoppage reset to the next faceoff dot) is a CUT
+        // to the new faceoff, like TV — not a long pan across empty ice.
+        if (Math.hypot(rawX - this.prevPuckX, rawZ - this.prevPuckZ) > 25 && this.camPreset !== 'overhead') {
+          this.playFocusX = rawX
+          this.playFocusZ = rawZ
+          this.puckVelSmX = this.puckVelSmZ = 0
+          this.leadX = 0
+          cut = true
+        } else if (Math.hypot(vx, vz) < 200) {
+          this.puckVelSmX = emaStep(this.puckVelSmX, vx, dt, 0.5)
+          this.puckVelSmZ = emaStep(this.puckVelSmZ, vz, dt, 0.5)
+        }
+      }
+      this.prevPuckX = rawX
+      this.prevPuckZ = rawZ
+    }
+    // Broadcast lead: the focus → spring chain trails steady play by ~0.9 s,
+    // so aim that far ahead along the play's SMOOTHED velocity (≤ 24 ft). In
+    // steady play this cancels the lag (the carrier stays mid-frame); when play
+    // stops the lead bleeds off over ~1 s — an easy settle, never a snap.
+    this.leadX = emaStep(this.leadX, Math.max(-24, Math.min(24, this.puckVelSmX * 0.9)), dt, 0.6)
+    if (this.camPreset === 'follow') {
+      const sp = Math.hypot(this.puckVelSmX, this.puckVelSmZ)
+      const h = followHeadingStep(this.followHead, sp > 10 ? Math.atan2(this.puckVelSmX, this.puckVelSmZ) : null, dt)
+      this.followHead = { yaw: h.yaw, reversedFor: h.reversedFor }
+      cut ||= h.cut
+    }
+    const prevSide = this.endzoneActiveSide
     this.endzoneActiveSide = endzoneChooseEnd(this.endzoneActiveSide, this.playFocusX)
+    // endzone: the play changed ends → CUT to the other end (it used to fly
+    // ~220 ft through the rink at head height, audit D2)
+    if (this.camPreset === 'endzone' && this.endzoneActiveSide !== prevSide) cut = true
+    if (cut) this.snapCameraSprings()
     const target = this.currentTarget()
-    let fovTarget = cameraFovFor(this.camPreset)
+    let fovTarget = target.fov
 
     // Goal: a slow push-in toward where the goal was scored, held, then eased
     // back. The framing point is FIXED at the moment of the goal (it does not
@@ -1572,7 +1798,16 @@ export class Rink3dRenderer implements MatchRenderer {
 
     this.applyFov(this.fov.pos)
     this.camera.position.set(this.camX.pos, this.camY.pos, this.camZ.pos)
-    this.camera.lookAt(this.lookX.pos, this.lookY.pos, this.lookZ.pos)
+    // Angular-speed guard: no preset may swing its view faster than this.
+    let lx = this.lookX.pos
+    let lz = this.lookZ.pos
+    if (this.camPreset !== 'overhead') {
+      const cap = capLookYaw({ x: this.camX.pos, z: this.camZ.pos }, { x: lx, z: lz }, this.lastCamYaw, dt, MAX_CAM_YAW_RATE[this.camPreset])
+      lx = cap.x
+      lz = cap.z
+      this.lastCamYaw = cap.yaw
+    }
+    this.camera.lookAt(lx, this.lookY.pos, lz)
     if (this.debugCam) {
       const d = this.debugCam
       this.applyFov(d.fov ?? 35)
@@ -1587,7 +1822,7 @@ export class Rink3dRenderer implements MatchRenderer {
   private emit(): void {
     if (!this.listener || !this.timeline) return
     const score = this.timeline.scoreAt(this.clockPos)
-    const clock = this.timeline.clockAt(this.clockPos)
+    const clock = this.timeline.displayClockAt(this.clockPos)
     const ended = this.clockPos >= this.timeline.duration
     this.listener({
       period: clock.period,

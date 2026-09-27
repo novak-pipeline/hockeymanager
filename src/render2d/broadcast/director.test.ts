@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { GameEvent, GameStream } from '@domain'
 import type { BroadcastContext, BroadcastStoryline } from '@engine/story/broadcastStorylines'
-import { directBroadcast, powerPlayWindows, BoothPicker, elapsedLabel } from './director'
+import { directBroadcast, powerPlayWindows, BoothPicker, elapsedLabel, openForWatchMode, KEY_OPEN_MS } from './director'
 import { linesFor } from './commentaryLibrary'
 import type { CommentaryCue, MomentCue, OverlayCue, PresentationCue } from './types'
 
@@ -172,6 +172,19 @@ describe('presentation director', () => {
     expect(compact.pregameMs).toBeLessThan(full.pregameMs)
     expect(overlays(compact.pregame).some((o) => o.data.kind === 'startingLineup')).toBe(false)
     expect(moments(compact.pregame).some((m) => m.moment === 'rookieLap')).toBe(true)
+  })
+
+  it('the open scales to the watch mode (F-9): key is a cold open, extended at most compact', () => {
+    const full = directBroadcast(stream(), ctx([debut, milestone, homecoming]), { presentation: 'full' })
+    const compact = directBroadcast(stream(), ctx([debut, milestone, homecoming]), { presentation: 'compact' })
+    expect(openForWatchMode(full, compact, 'full').pregameMs).toBe(full.pregameMs)
+    expect(openForWatchMode(full, compact, 'extended').pregameMs).toBe(compact.pregameMs)
+    const key = openForWatchMode(full, compact, 'key')
+    expect(key.pregameMs).toBeLessThanOrEqual(KEY_OPEN_MS)
+    expect(key.pregame.every((c) => c.at < key.pregameMs)).toBe(true)
+    expect(overlays(key.pregame).some((o) => o.data.kind === 'arenaTitle')).toBe(true)
+    const off = directBroadcast(stream(), ctx([debut]), { presentation: 'off' })
+    expect(openForWatchMode(off, compact, 'key').pregameMs).toBe(0)
   })
 
   it('cue lists are sorted by time', () => {

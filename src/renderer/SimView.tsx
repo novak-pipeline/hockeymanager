@@ -123,8 +123,9 @@ function appearanceOrder(game: WatchedGame): Map<string, number> {
 export function SimView(props: {
   game: WatchedGame
   onClose: () => void
-  /** Hand the same game over to the on-ice viewer without re-simming it. */
-  onWatchOnIce?: () => void
+  /** Hand the same game over to the on-ice viewer without re-simming it,
+   *  at the moment the feed had reached (absolute game seconds; 0 = not started). */
+  onWatchOnIce?: (atAbsT: number) => void
 }): JSX.Element {
   const { game } = props
 
@@ -328,7 +329,7 @@ export function SimView(props: {
 
         <div className="sim-controls-right">
           {props.onWatchOnIce && (
-            <button className="btn btn-ghost" onClick={props.onWatchOnIce} title="Watch this same game on the ice">
+            <button className="btn btn-ghost" onClick={() => props.onWatchOnIce?.(done ? 0 : (latest?.absT ?? 0))} title="Watch this same game on the ice, from this moment">
               Watch on the ice
             </button>
           )}

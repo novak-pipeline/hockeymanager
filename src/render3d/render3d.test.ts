@@ -17,6 +17,7 @@ import {
   cameraTargetFor,
   endzoneChooseEnd,
   puckCarriedOffset,
+  broadcastFraming,
   skaterBob,
   legSwingAngle,
   applyDeadzone,
@@ -265,29 +266,57 @@ describe('extractCues', () => {
 // ── camera target helpers ─────────────────────────────────────────────────
 
 describe('cameraTargetFor', () => {
-  it('broadcast: high in the near stands, behind the near boards', () => {
-    const t = cameraTargetFor('broadcast', 50)
-    expect(t.pz).toBeLessThan(-42.5 - 40) // well back from the near glass
-    expect(t.py).toBeGreaterThan(30) // high "home" camera position
-    expect(t.px).toBeCloseTo(50 * 0.3, 2)
+  it('broadcast: high in the near stands, behind the near boards, 20–30° down (D3)', () => {
+    for (const x of [-80, -30, 0, 30, 80]) {
+      const t = cameraTargetFor('broadcast', x)
+      expect(t.pz).toBeLessThan(-42.5 - 30) // well back from the near glass
+      const pitch = (Math.atan2(t.py - t.ly, Math.hypot(t.lx - t.px, t.lz - t.pz)) * 180) / Math.PI
+      expect(pitch).toBeGreaterThanOrEqual(20)
+      expect(pitch).toBeLessThanOrEqual(30)
+    }
   })
 
-  it('broadcast: mostly PANS — look-at follows the puck far more than the body trucks', () => {
+  it('broadcast: frames ONE ZONE (70–100 ft of ice across) at any viewport aspect (D3)', () => {
+    for (const aspect of [16 / 9, 2.35]) {
+      for (const x of [0, 40, 75]) {
+        const f = broadcastFraming(x, 0, 0, aspect)
+        const D = Math.hypot(f.lx - f.px, f.ly - f.py, f.lz - f.pz)
+        const hHalf = Math.atan(Math.tan((f.fov * Math.PI) / 360) * aspect)
+        const width = 2 * D * Math.tan(hHalf)
+        expect(width).toBeGreaterThanOrEqual(70)
+        // 100 ft target (+5% on a 2.35:1 viewport, where the lens stays wide
+        // enough vertically to keep the near boards in frame)
+        expect(width).toBeLessThanOrEqual(105)
+      }
+    }
+  })
+
+  it('broadcast: the frame bottom stays on the ice, never down in the near crowd', () => {
+    for (const aspect of [16 / 9, 2.35]) {
+      for (const fz of [-40, -20, 0, 30]) {
+        const f = broadcastFraming(20, fz, 0, aspect)
+        const pitch = Math.atan2(f.py - f.ly, Math.hypot(f.lz - f.pz))
+        const bottom = pitch + (f.fov * Math.PI) / 360
+        const groundZ = f.pz + f.py / Math.tan(bottom)
+        expect(groundZ).toBeGreaterThanOrEqual(-38.01)
+      }
+    }
+  })
+
+  it('broadcast: keeps the frame inside the rink and pans more than it trucks', () => {
+    const deep = cameraTargetFor('broadcast', 99)
+    expect(deep.lx).toBeLessThanOrEqual(76) // never centred deeper than the net: the frame shows the end glass, not the stands
     const t1 = cameraTargetFor('broadcast', 0)
-    const t2 = cameraTargetFor('broadcast', 80)
-    expect(t1.px).toBeCloseTo(0, 4)
-    expect(t2.px).toBeCloseTo(80 * 0.3, 4)
-    expect(t2.lx).toBeCloseTo(80 * 0.8, 4)
-    expect(t2.lx - t1.lx).toBeGreaterThan(2 * (t2.px - t1.px))
-    // pz constant regardless of puck position
-    expect(t1.pz).toBe(t2.pz)
+    const t2 = cameraTargetFor('broadcast', 60)
+    expect(t2.lx - t1.lx).toBeGreaterThan(t2.px - t1.px)
+    expect(Math.abs(t1.pz - t2.pz)).toBeLessThan(10) // at most a gentle dolly
   })
 
   it('broadcast: look-at tilts only gently toward the play across the ice', () => {
     const a = cameraTargetFor('broadcast', 0, { puckWz: -40 })
     const b = cameraTargetFor('broadcast', 0, { puckWz: 40 })
     expect(b.lz - a.lz).toBeGreaterThan(0)
-    expect(b.lz - a.lz).toBeLessThan(25) // never whips across the rink
+    expect(b.lz - a.lz).toBeLessThan(40)
   })
 
   it('overhead: very high y (≥110), centered, pz = 0', () => {
@@ -309,19 +338,29 @@ describe('cameraTargetFor', () => {
     // Camera should be behind negative-X end (boards at -100), so camX < -95
     expect(t.px).toBeLessThan(-95)
     expect(t.py).toBeGreaterThan(0)
-    // Look-at toward center ice (lx should be 0 or positive relative to camera)
-    expect(t.lx).toBeGreaterThanOrEqual(0)
+    // Looking toward +X (into the zone, toward centre ice)
+    expect(t.lx).toBeGreaterThan(t.px)
   })
 
   it('endzone side=+1: camera behind positive-X net, looking negative-X', () => {
     const t = cameraTargetFor('endzone', 0, { endzoneActiveSide: 1 })
     expect(t.px).toBeGreaterThan(95)
-    expect(t.lx).toBeLessThanOrEqual(0)
+    expect(t.lx).toBeLessThan(t.px)
   })
 
-  it('endzone: low y (≤20)', () => {
+  it('endzone: high in the end stands, pitched down onto the zone — clear of the glass and the video board (D2)', () => {
     const t = cameraTargetFor('endzone', 0, { endzoneActiveSide: -1 })
-    expect(t.py).toBeLessThanOrEqual(20)
+    const fov = 55
+    const pitch = Math.atan2(t.py - t.ly, Math.abs(t.lx - t.px)) // down, radians
+    const half = ((fov / 2) * Math.PI) / 180
+    // the near glass (top edge 9.6 ft, at the end boards x = -100) is below the frame's bottom edge
+    const glassAngle = Math.atan2(t.py - 9.6, Math.abs(-100 - t.px))
+    expect(glassAngle).toBeGreaterThan(pitch + half)
+    // the video board's bottom (~53 ft up, |x| ≤ 15.5) is above the frame's top edge
+    for (const bx of [-15.5, 0, 15.5]) {
+      const up = Math.atan2(53 - t.py, Math.abs(bx - t.px))
+      expect(up).toBeGreaterThan(half - pitch)
+    }
   })
 
   it('follow: camera behind and above carrier', () => {

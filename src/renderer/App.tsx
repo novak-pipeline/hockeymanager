@@ -338,6 +338,9 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
   // GameEvent stream: 'rink' = the 2D/3D viewer, 'sim' = the live gamecast
   // (play-by-play + a box score filling in). The choice sticks between games.
   const [watchMode, setWatchMode] = useState<WatchMode>(readWatchMode)
+  // Where the Sim view had got to when the GM switched to the ice: the ice
+  // picks the SAME game up at that moment instead of restarting at 20:00.
+  const [iceStart, setIceStart] = useState<{ game: WatchedGame; absT: number } | null>(null)
   const [busy, setBusy] = useState(false)
   const busyRef = useRef(false)
   // FM-style processing overlay: non-null while a normal day-advance is showing
@@ -746,10 +749,11 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
               <SimView
                 game={watched}
                 onClose={closeViewer}
-                onWatchOnIce={() => { setWatchMode('rink'); writeWatchMode('rink') }}
+                onWatchOnIce={(absT) => { setIceStart({ game: watched, absT }); setWatchMode('rink'); writeWatchMode('rink') }}
               />
             ) : (
-              <MatchViewer game={watched} onClose={closeViewer} />
+              <MatchViewer game={watched} onClose={closeViewer}
+                startAtAbsT={iceStart?.game === watched ? iceStart.absT : 0} />
             )}
           </div>
         ) : (

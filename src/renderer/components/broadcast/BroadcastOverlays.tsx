@@ -98,6 +98,8 @@ export function Scorebug(props: {
   view: MatchView | null
   pp: PowerPlayWindow | null
   ppRemaining: string | null
+  /** An instant replay is on screen: tag it (the caller holds the live score/clock). */
+  replay?: boolean
 }): JSX.Element {
   const { ctx, view } = props
   const per = view ? (view.period > 3 ? 'OT' : `${view.period}${['ST', 'ND', 'RD'][view.period - 1] ?? 'TH'}`) : '1ST'
@@ -122,6 +124,7 @@ export function Scorebug(props: {
       {props.pp && (
         <div className="pp">PP {props.pp.side === 'home' ? ctx.homeAbbr : ctx.awayAbbr} {props.ppRemaining ?? ''}</div>
       )}
+      {props.replay && <div className="replay">REPLAY</div>}
     </div>
   )
 }

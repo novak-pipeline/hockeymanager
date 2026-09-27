@@ -245,15 +245,10 @@ export function cameraTargetFor(
 ): CameraTarget {
   switch (preset) {
     case 'broadcast': {
-      // The real "high home" game camera: mounted high in the stands at
-      // centre ice, well back from the glass, and it mostly PANS (the look-at
-      // tracks the play at 80%) while the body only trucks a little (30%).
-      // Paired with a long lens (cameraFovFor → 30°) this keeps the players
-      // big and the perspective honest instead of a wide, distorted shot.
-      // Geometry: near boards sit just above the bottom edge (no near-side
-      // crowd in frame), far boards ~quarter-height from the top.
-      const lz = 2 + (opts.puckWz ?? 0) * 0.25
-      return { px: puckWx * 0.3, py: 50, pz: -100, lx: puckWx * 0.8, ly: 0, lz }
+      // Zone framing (audit D3, FILM-STUDY B1) — see broadcastFraming. The
+      // lens is aspect-dependent; this returns the pose only.
+      const { fov: _fov, ...pose } = broadcastFraming(puckWx, opts.puckWz ?? 0, 0, 16 / 9)
+      return pose
     }
 
     case 'overhead': {
@@ -264,20 +259,24 @@ export function cameraTargetFor(
     }
 
     case 'endzone': {
-      // Position behind the net the puck is attacking toward.
-      // side +1 = camera behind positive-X net (i.e. the right end), looking toward negative-X.
-      // side -1 = camera behind negative-X net, looking toward positive-X.
+      // High in the end stands behind the net the play is in (side +1 = the
+      // right end, looking toward -X). It used to sit at y 14 just behind the
+      // boards, so the glass cap rail cut across the frame at head height and
+      // the video board's underside hung in the top of the shot (audit D2).
+      // Now: 12 ft back of the end boards and 30 ft up, pitched 30° down onto
+      // the zone — the near glass passes just under the frame, every ray looks
+      // down so the board (bottom edge ~53 ft up) never enters it, and the
+      // crease is in shot.
       const side = opts.endzoneActiveSide ?? -1
-      // Place camera ~10ft behind the end boards (boards at ±100ft), centered on Z.
-      const camX = side * 110
-      // Z position: slight offset so we see the crease from just off center
-      const camZ = 0
-      const lookX = 0          // look toward center ice
-      return { px: camX, py: 14, pz: camZ, lx: lookX, ly: 2, lz: 0 }
+      const wz = opts.puckWz ?? 0
+      return { px: side * 112, py: 30, pz: wz * 0.15, lx: side * 60, ly: 0, lz: wz * 0.4 }
     }
 
     case 'follow': {
-      // Behind-and-above the puck carrier along their velocity/heading vector.
+      // Behind-and-above the play along a HEADING. The renderer passes a
+      // smoothed, rate-limited heading of the play (never the carrier's body
+      // facing, which flipped on every turn and change of carrier → 180°
+      // orbits at up to 3,856°/s, audit D1).
       // fallback to puck position if no carrier info.
       const angle = opts.carrierAngle ?? 0
       const wx = opts.carrierWx ?? puckWx
@@ -301,9 +300,9 @@ export function cameraTargetFor(
 /** Vertical field of view (degrees) per camera preset — broadcast is a long lens. */
 export function cameraFovFor(preset: CameraPreset): number {
   switch (preset) {
-    case 'broadcast': return 30
+    case 'broadcast': return 25 // nominal (16:9); the live lens comes from broadcastFraming
     case 'overhead': return 45
-    case 'endzone': return 50
+    case 'endzone': return 55
     case 'follow': return 55
   }
 }
@@ -313,16 +312,22 @@ export function cameraFovFor(preset: CameraPreset): number {
  * scorer. Blended in by celebrationWeight (pose.ts) — never a hard cut.
  */
 export function celebrationTarget(spotWx: number, spotWz: number): CameraTarget & { fov: number } {
-  // A modest push-in from the same side as the game camera: a little lower,
-  // a little tighter. Nothing here moves while the cue plays.
+  // A modest push-in along the SAME high side angle as the game camera
+  // (broadcastFraming's pitch), a little closer and on a longer lens.
+  // (It used to drop to y 34 at z −92 — down in the lower bowl, with fans
+  // filling the bottom of the frame once the game shot was zone-framed.)
+  // Nothing here moves while the cue plays.
+  const pitch = (BROADCAST_FRAME.pitchDeg * Math.PI) / 180
+  const dist = 80
+  const lz = spotWz
   return {
-    px: spotWx * 0.5,
-    py: 34,
-    pz: -92,
+    px: spotWx * 0.6,
+    py: dist * Math.sin(pitch),
+    pz: lz - dist * Math.cos(pitch),
     lx: spotWx,
     ly: 2,
-    lz: spotWz,
-    fov: 22,
+    lz,
+    fov: 16,
   }
 }
 
@@ -425,4 +430,180 @@ export function puckCarriedOffset(angle: number): { dx: number; dz: number } {
     dx: localX * cos + localZ * sin,
     dz: -localX * sin + localZ * cos,
   }
+}
+
+// ── rendered puck tracking ───────────────────────────────────────────────────
+
+/**
+ * The drawn puck TRACKS its target (the stream puck when loose, the carrier's
+ * blade when carried). It used to ride a 0.08 s critically damped spring, and a
+ * spring's steady-state lag is speed × ~0.095 s — a 130 ft/s shot was drawn
+ * 12+ ft behind the real one (up to 27 ft), so saves and receptions happened
+ * before the puck arrived (audit C2).
+ *
+ * Now: position = target + a correction that only exists across a HANDOFF
+ * (the target switching between carried and loose, or to a new carrier). The
+ * correction decays with a short half-life, so a pass leaving the blade blends
+ * over a few frames but never trails. A handoff bigger than `snapFt` (a
+ * stoppage reset, a seek) just snaps.
+ */
+export interface PuckTrack {
+  x: number
+  z: number
+  /** Handoff correction still to bleed off (rendered − target). */
+  cx: number
+  cz: number
+  /** Identity of the current target: carrier id, or '' when loose. */
+  key: string
+}
+
+export const PUCK_HANDOFF_HL = 0.05
+export const PUCK_HANDOFF_SNAP_FT = 12
+
+export function puckTrackStep(
+  s: PuckTrack,
+  tx: number,
+  tz: number,
+  key: string,
+  dt: number,
+  hl = PUCK_HANDOFF_HL,
+  snapFt = PUCK_HANDOFF_SNAP_FT,
+): PuckTrack {
+  if (dt <= 0) return { x: tx, z: tz, cx: 0, cz: 0, key }
+  let cx = s.cx
+  let cz = s.cz
+  if (key !== s.key) {
+    // re-base the correction so the drawn puck is continuous across the switch
+    cx = s.x - tx
+    cz = s.z - tz
+    if (Math.hypot(cx, cz) > snapFt) cx = cz = 0
+  }
+  const k = Math.pow(0.5, dt / hl)
+  cx *= k
+  cz *= k
+  if (Math.abs(cx) < 1e-3) cx = 0
+  if (Math.abs(cz) < 1e-3) cz = 0
+  return { x: tx + cx, z: tz + cz, cx, cz, key }
+}
+
+// ── camera angular-speed guard ───────────────────────────────────────────────
+
+/**
+ * Cap how fast the camera's look direction may yaw (rad/s). Returns the look
+ * point to use: `look` itself, or `look` swung back around the camera toward
+ * `prevYaw` so the turn this frame is at most `maxRate · dt`. `prevYaw` null
+ * (a cut / first frame) passes through. Pitch and look distance are kept.
+ */
+export function capLookYaw(
+  cam: { x: number; z: number },
+  look: { x: number; z: number },
+  prevYaw: number | null,
+  dt: number,
+  maxRate: number,
+): { x: number; z: number; yaw: number } {
+  const dx = look.x - cam.x
+  const dz = look.z - cam.z
+  const yaw = Math.atan2(dx, dz)
+  if (prevYaw === null || dt <= 0) return { x: look.x, z: look.z, yaw }
+  const d = wrapAngle(yaw - prevYaw)
+  const max = maxRate * dt
+  if (Math.abs(d) <= max) return { x: look.x, z: look.z, yaw }
+  const y2 = prevYaw + Math.sign(d) * max
+  const r = Math.hypot(dx, dz)
+  return { x: cam.x + Math.sin(y2) * r, z: cam.z + Math.cos(y2) * r, yaw: y2 }
+}
+
+/**
+ * The follow camera's heading of play: turns toward the direction the play is
+ * travelling at no more than `maxRate` rad/s (an eased, bounded pan), and
+ * reports a CUT when the play has reversed (> `cutAngle` away) for `cutAfter`
+ * seconds — a reversal is a cut to the other side, like TV, not a whip-orbit.
+ */
+export interface FollowHeading {
+  yaw: number
+  /** Seconds the target has been beyond the cut angle. */
+  reversedFor: number
+}
+export function followHeadingStep(
+  h: FollowHeading,
+  targetYaw: number | null,
+  dt: number,
+  maxRate = (35 * Math.PI) / 180,
+  cutAngle = (120 * Math.PI) / 180,
+  cutAfter = 0.8,
+): FollowHeading & { cut: boolean } {
+  if (targetYaw === null || dt <= 0) return { ...h, reversedFor: 0, cut: false }
+  const d = wrapAngle(targetYaw - h.yaw)
+  if (Math.abs(d) > cutAngle) {
+    const reversedFor = h.reversedFor + dt
+    if (reversedFor >= cutAfter) return { yaw: wrapAngle(targetYaw), reversedFor: 0, cut: true }
+    return { yaw: h.yaw, reversedFor, cut: false }
+  }
+  // ease toward the target (1 s time constant), never faster than maxRate
+  const want = d * (1 - Math.exp(-dt / 1.0))
+  const max = maxRate * dt
+  return { yaw: wrapAngle(h.yaw + Math.max(-max, Math.min(max, want))), reversedFor: 0, cut: false }
+}
+
+// ── broadcast zone framing ───────────────────────────────────────────────────
+
+/**
+ * The main game camera, framed the way the TV "high home" camera frames hockey
+ * (FILM-STUDY B1): a high side angle ~28° down, ONE ZONE of ice across the
+ * frame (~80 ft in a zone, ~92 ft through the neutral zone) rather than the
+ * whole rink, the play kept in the middle of the frame and the frame kept
+ * inside the rink (it never looks past the end boards at the crowd).
+ *
+ * It used to be a fixed 30° lens from (0.3x, 50, −100) panning to 0.8x: the
+ * action sat small in a corner, 30–45% of the frame was crowd, skaters were
+ * ~50–60 px tall and the puck left the frame 6–7% of the time (audit D3,
+ * F-16).
+ *
+ * `leadX` is a small, pre-smoothed lead in the direction of play (ft).
+ * `aspect` is the viewport's width/height: the lens is chosen for the WIDTH
+ * of ice, then widened if needed so the near boards stay in frame.
+ */
+export const BROADCAST_FRAME = {
+  pitchDeg: 28,
+  dist: 108,
+  widthZoneFt: 80,
+  widthNeutralFt: 92,
+  minVfovDeg: 20,
+  /** |look x| limit: the frame's far edge stops just past the end boards. */
+  lookClampX: 76,
+  /** How much the camera body trucks with the play (the rest is pan). */
+  truck: 0.6,
+  /**
+   * The frame's bottom edge never lands nearer the camera than this (ft; the
+   * near boards are at −42.5). Just INSIDE the boards: a ray to the ice at the
+   * boards passes through the first rows of the near crowd, which then filled
+   * the bottom of the frame.
+   */
+  nearEdgeZ: -38,
+} as const
+
+export function broadcastFraming(focusX: number, focusZ: number, leadX: number, aspect: number): CameraTarget & { fov: number } {
+  const B = BROADCAST_FRAME
+  const lx = Math.max(-B.lookClampX, Math.min(B.lookClampX, focusX + leadX))
+  const pitch = (B.pitchDeg * Math.PI) / 180
+  const px = lx * B.truck
+  const py = B.dist * Math.sin(pitch)
+  const back = B.dist * Math.cos(pitch)
+  // (the look distance doesn't depend on lz: the rig moves with it)
+  const D = Math.hypot(lx - px, py, back)
+  // zone play frames tighter than neutral-zone play (smooth in between)
+  const k = Math.max(0, Math.min(1, (Math.abs(lx) - 25) / 20))
+  const kk = k * k * (3 - 2 * k)
+  const width = B.widthNeutralFt + (B.widthZoneFt - B.widthNeutralFt) * kk
+  const halfH = Math.atan(width / 2 / D)
+  const vfov = Math.max(B.minVfovDeg, (2 * Math.atan(Math.tan(halfH) / Math.max(0.5, aspect)) * 180) / Math.PI)
+  // Across the ice: follow the play half-way, but never so far toward the
+  // near boards that the bottom of the frame fills with the near crowd — the
+  // frame's bottom edge stays at or inside z = NEAR_EDGE_Z (just past the
+  // near boards, so skaters on the near wall are still in).
+  const bottomRay = pitch + (vfov * Math.PI) / 360
+  const lzMin = B.nearEdgeZ + back - py / Math.tan(bottomRay)
+  const lz = Math.max(lzMin, -5 + 0.5 * Math.max(-38, Math.min(38, focusZ)))
+  const pz = lz - back
+  return { px, py, pz, lx, ly: 0, lz, fov: vfov }
 }
