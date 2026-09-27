@@ -95,7 +95,7 @@ export const AGENT_TUNING = {
   /** Base per-contact shot-block chance for a body square in the lane. */
   blockBase: 1.7,
   /** Poke-check success scale (takeaways). */
-  pokeK: 0.06,
+  pokeK: 0.07,
   /** Unforced fumble rate under pressure (giveaways). */
   fumbleK: 0.6,
   /** Per-think stick-foul chance when beaten (penalties). */
@@ -105,9 +105,13 @@ export const AGENT_TUNING = {
 }
 
 const PP_SHOT_BOOST = 1.12
-const SHIFT_TARGET = 33
+const SHIFT_TARGET = 22
 const PENALTY_SECONDS = 120
-/** Bench door (ft): on the bench-side boards, on the team's defending half. */
+/**
+ * Bench doors (ft) on the bench-side boards. Benches don't move between
+ * periods: the home bench is on the home team's first-period defending half,
+ * so the second period is the LONG change for both teams.
+ */
 const BENCH_GATE = { x: 22, y: -41 }
 const GOAL_CELEBRATION_S = 4
 const FACEOFF_MIN_WAIT = 1.5
@@ -170,6 +174,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     return b
   }
 
+  const gateOf = (s: Side): XY => ({ x: (s.sim === home ? -1 : 1) * BENCH_GATE.x, y: BENCH_GATE.y })
   const mkSide = (sim: TeamSim): Side => ({
     sim,
     a: sim.attackSign(),
@@ -290,7 +295,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       if (src) free.splice(free.indexOf(src), 1)
       // Nobody leaving to take the place of (the extra attacker, a man back
       // from the box): he comes over the boards at the bench door.
-      const gate = { x: -s.a * BENCH_GATE.x, y: BENCH_GATE.y + 1.5 }
+      const gate = { x: gateOf(s).x, y: BENCH_GATE.y + 1.5 }
       const b = makeBody(r.player, src ? src.x : gate.x, src ? src.y : gate.y, s.a)
       if (src) {
         b.vx = src.vx
@@ -307,7 +312,83 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     s.goalie = bodyFor(unit.goalie)
   }
 
+  // --- On-the-fly changes through the bench door. ------------------------
+  // The tired men skate to the gate; each fresh man comes over the boards
+  // there only when the man he replaces arrives (no too-many-men, no
+  // teleports), so a change takes a few real seconds.
+  interface Change {
+    swaps: { out: Body; inId: PlayerId }[]
+    key: string
+  }
+  const changing = new Map<Side, Change>()
+  const beginChange = (s: Side): void => {
+    const opp = oppOf(s)
+    const d = desiredFor(s.sim, opp.sim)
+    const tilt = benchTilt(s.sim.goals - opp.sim.goals, (period - 1 + now / lengthSeconds) / 3)
+    const ids = (s.sim as unknown as { deployIds(r: Rng, k: DeployKind, c: number, o?: TeamSim, t?: number): PlayerId[] }).deployIds(rng, d.kind, d.count, opp.sim, tilt)
+    const cur = new Set(s.skaters.map((b) => b.player.id))
+    const incoming = ids.filter((id) => !cur.has(id))
+    const outgoing = s.skaters.filter((b) => !ids.includes(b.player.id))
+    if (incoming.length === 0 || incoming.length !== outgoing.length) {
+      // Same men (a double shift) — or a shape change: reset the shift clock.
+      creditShift(s, now)
+      if (incoming.length !== outgoing.length) deploySide(s, true, true)
+      return
+    }
+    const swaps: Change['swaps'] = []
+    const left = [...incoming]
+    for (const b of outgoing) {
+      const isD = b.player.position === 'D'
+      let k = left.findIndex((id) => (s.sim.resolve(id).position === 'D') === isD)
+      if (k < 0) k = 0
+      swaps.push({ out: b, inId: left[k] })
+      left.splice(k, 1)
+    }
+    changing.set(s, { swaps, key: `${d.kind}:${d.count}` })
+  }
+  const stepChanges = (): void => {
+    for (const [s, ch] of changing) {
+      const gate = gateOf(s)
+      for (let i = ch.swaps.length - 1; i >= 0; i--) {
+        const sw = ch.swaps[i]
+        const b = sw.out
+        if (b === w.carrier) continue // he gets rid of it first
+        const dg = Math.hypot(b.x - gate.x, b.y - gate.y)
+        if (dg > 8) {
+          cmds.set(b, { tx: gate.x, ty: gate.y, speed: b.caps.top * 0.88, arrive: false, urgency: 0.9 })
+          continue
+        }
+        creditShift(s, now)
+        const idx = s.skaters.indexOf(b)
+        if (idx < 0) {
+          ch.swaps.splice(i, 1)
+          continue
+        }
+        const p = s.sim.resolve(sw.inId)
+        const nb = makeBody(p, gate.x, gate.y + 2, s.a)
+        nb.vy = 8
+        const rest = benchEnergy.get(p.id)
+        if (rest) nb.energy = clamp(rest.e + (now - rest.at) * BENCH_RECOVER_PER_S, 0, 1)
+        benchEnergy.set(b.player.id, { e: b.energy, at: now })
+        bodies.delete(b.player.id)
+        bodies.set(p.id, nb)
+        s.skaters[idx] = nb
+        s.sim.unit.skaters[idx] = { player: p, pos: { x: nb.x / HALF_X, y: nb.y / HALF_Y }, vel: { x: 0, y: 0 } }
+        hitIntent.delete(b)
+        if (w.passTo === b) w.passTo = null
+        ch.swaps.splice(i, 1)
+      }
+      if (ch.swaps.length === 0) {
+        changing.delete(s)
+        s.sim.deployKey = ch.key
+        if (tm) tm.lineChanges++
+        ev({ t: T(), period, type: 'lineChange', team: s.sim.team.id, onIce: s.skaters.map((q) => q.player.id), onTheFly: true })
+      }
+    }
+  }
+
   const deploySide = (s: Side, announce: boolean, onTheFly = false): void => {
+    changing.delete(s)
     const opp = oppOf(s)
     const d = desiredFor(s.sim, opp.sim)
     const tilt = benchTilt(s.sim.goals - opp.sim.goals, (period - 1 + now / lengthSeconds) / 3)
@@ -338,7 +419,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       w.carrier = null
       puck.carrier = null
     }
-    if (announce) {
+    const sameMen = old.length === s.skaters.length && old.every((b) => s.skaters.includes(b))
+    if (announce && !sameMen) {
       if (tm) tm.lineChanges++
       ev({ t: T(), period, type: 'lineChange', team: s.sim.team.id, onIce: s.skaters.map((b) => b.player.id), onTheFly })
     }
@@ -404,8 +486,10 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const answered = settleTheCode()
     // Tired lines change at the whistle.
     for (const s of sides) {
+      // The team that iced it stays out there (NHL rule 81.1).
+      if (reason === 'icing' && s === zoneFor && !answered) continue
       const shift = now - (lastShift.get(s) ?? 0)
-      if (shift > 28 || answered) {
+      if (shift > 20 || answered) {
         creditShift(s, now)
         deploySide(s, true)
       }
@@ -1145,11 +1229,10 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const shift = now - (lastShift.get(s) ?? 0)
         const avgE = s.skaters.reduce((q, b) => q + b.energy, 0) / Math.max(1, s.skaters.length)
         const safe = (w.control === s && puck.x * s.a > -10) || puck.x * s.a > BLUE_X
-        const due = shift > SHIFT_TARGET + 9 || (safe && (shift > SHIFT_TARGET || (shift > 30 && avgE < 0.55)))
-        if (due && flight?.kind !== 'shot' && !(w.carrier && s.skaters.includes(w.carrier))) {
-          creditShift(s, now)
-          deploySide(s, true, true)
-        }
+        const due = shift > SHIFT_TARGET + 8 || (safe && (shift > SHIFT_TARGET || (shift > 30 && avgE < 0.55)))
+        // Never start a change with the puck in your own zone.
+        const ownZone = puck.x * s.a < -BLUE_X
+        if (due && !ownZone && !changing.has(s) && flight?.kind !== 'shot') beginChange(s)
       }
     }
 
@@ -1340,6 +1423,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         if (p) p.zone = Math.abs(p.dot.x) <= 25 ? 'neutral' : 'defensive'
       }
     }
+
+    if (!pending && !celebration) stepChanges()
 
     // ---- Command shaping (once per frame). ----
     // Personal space: steer around teammates instead of bumping into them
@@ -1657,7 +1742,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       }
     }
     if (!ans) return
-    const p = clamp((best / 160) * (dirty ? 0.55 : 0.25) * (1 + (ctx.intensity ?? 0) * 0.8), 0, 0.7)
+    const p = clamp((best / 160) * (dirty ? 0.3 : 0.1) * (1 + (ctx.intensity ?? 0) * 0.8), 0, 0.6)
     if (rng.chance(p)) codeDue = { answerer: ans, hitter: r.hitter, side: vs }
   }
   function settleTheCode(): boolean {
@@ -1806,10 +1891,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
 
   function stepGoalie(s: Side): void {
     const g = s.goalie
-    const own = -s.a
     if (s.sim.pulled) {
       // Skates hard for his bench door (never through the play: along the boards).
-      const tx = own * BENCH_GATE.x
+      const tx = gateOf(s).x
       const ty = BENCH_GATE.y
       const d = Math.hypot(tx - g.x, ty - g.y)
       if (d < 5) goalieAtBench.add(s.sim)
