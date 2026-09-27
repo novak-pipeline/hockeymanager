@@ -146,6 +146,7 @@ import { buildScoutSummary } from '@engine/career/scoutSummary'
 import { buildProspectGrade, type NeedLevel } from '@engine/career/prospectGrade'
 import { buildScoutDraftRead, scoutBoardNote, scoutSignalParts } from '@engine/career/scoutDraftRead'
 import { farmSplit } from '@engine/career/farmReassign'
+import { detectBattles, rankBattle, battleRead, type CampCandidate, type CampGroup } from '@engine/career/campBattles'
 import { buildOppositionReport } from '@engine/career/oppositionReport'
 import { buildDraftClassArticle } from '@engine/career/draftClassArticle'
 import { projectProspect, hashSigned, type ProspectProjection } from '@engine/career/prospectModel'
@@ -819,6 +820,7 @@ import {
   type TrainingCampState,
   type TrainingCampView,
   type CampReport,
+  type CampGameLine,
   type MedicalView,
   type MedicalRow,
   type LeagueStatTableView,
@@ -14648,90 +14650,26 @@ export class Career {
       ...(c.schedule ? { schedule: c.schedule.map((s) => ({ ...s })) } : {}),
       ...(c.scrimmage ? { scrimmage: structuredClone(c.scrimmage) } : {}),
       ...(c.reports ? { reports: c.reports.map((r) => ({ ...r })) } : {}),
+      ...(c.battles ? { battles: structuredClone(c.battles) } : {}),
+      ...(c.look ? { look: [...c.look] } : {}),
+      ...(c.games ? { games: c.games.map((g) => ({ ...g })) } : {}),
+      ...(c.battles
+        ? { reads: Object.fromEntries(c.battles.map((b) => [b.id, battleRead(b, staff.headCoach?.name ?? 'The coach')])) }
+        : {}),
+      nhlNow: (() => {
+        const n = { F: 0, D: 0, G: 0 }
+        for (const id of this.userTeam.roster) {
+          const p = this.data.players.get(id)
+          if (p) n[this.posGroup(p.position)]++
+        }
+        return n
+      })(),
     }
   }
 
-  /** Open the EHM-style camp week: the camp roster split Blue/Red and the
-   *  day-by-day schedule. The scrimmage box score and coach reports start
-   *  EMPTY — the week plays out beat by beat via {@link advanceTrainingCampDay}
-   *  (each Continue on the camp screen walks one day forward), so camp READS
-   *  like a week rather than resolving as one button. */
-  private buildTrainingCampWeek(decisions: TrainingCampState['decisions']): void {
-    const camp = this.trainingCamp
-    if (!camp) return
-    const year = this.year
-    camp.startISO = `${year}-09-15`
-    camp.endISO = `${year}-09-23`
-    camp.campDay = 1
-
-    // Camp roster = the NHL group + the AHL bodies fighting for a spot.
-    const nhlIds = [...this.userTeam.roster]
-    const ahlBattleIds = decisions.filter((d) => d.current === 'ahl').map((d) => d.playerId)
-    const seen = new Set<string>()
-    const bodies: Player[] = []
-    for (const id of [...nhlIds.map((x) => x as string), ...ahlBattleIds]) {
-      if (seen.has(id)) continue
-      seen.add(id)
-      const p = this.data.players.get(asPlayerId(id))
-      if (p) bodies.push(p)
-    }
-    // Split into balanced Blue/Red teams within each position group.
-    const teamOf = new Map<string, 'Blue' | 'Red'>()
-    for (const grp of ['G', 'D', 'F'] as const) {
-      const inGrp = bodies.filter((p) => (p.position === 'G' ? 'G' : p.position === 'D' ? 'D' : 'F') === grp)
-      inGrp.forEach((p, i) => teamOf.set(p.id as string, i % 2 === 0 ? 'Blue' : 'Red'))
-    }
-    const ahlSet = new Set(ahlBattleIds)
-    const ptoSet = new Set(decisions.filter((d) => d.tryout).map((d) => d.playerId))
-    camp.roster = bodies.map((p) => ({
-      playerId: p.id as string,
-      name: p.name,
-      position: p.position,
-      age: p.age,
-      team: teamOf.get(p.id as string) ?? 'Blue',
-      status: ptoSet.has(p.id as string) ? 'PTO' : ahlSet.has(p.id as string) ? 'AHL invite' : 'On Roster',
-      ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
-    }))
-
-    // The box score starts empty and fills scrimmage by scrimmage; reports are
-    // filed on the final practice day, not before.
-    camp.scrimmage = { skaters: [], goalies: [], results: [] }
-    delete camp.reports
-
-    // Day-by-day schedule; scrimmage results fill in as each is played.
-    camp.schedule = [
-      { label: 'Day 1', activity: 'Fitness Tests & Camp Meeting', info: 'Physical evaluations of all players' },
-      { label: 'Day 2', activity: 'Intra-squad Scrimmage', info: 'Blue vs Red — first look' },
-      { label: 'Day 3', activity: 'Skating Drills · Staff Meeting' },
-      { label: 'Day 4', activity: 'Intra-squad Scrimmage', info: 'Blue vs Red — second look' },
-      { label: 'Day 5', activity: 'Video Sessions · Dryland' },
-      { label: 'Day 6', activity: 'Morning Skate · General Practice' },
-      { label: 'Day 7', activity: 'Final Practice — coaches file reports' },
-      { label: 'Day 8', activity: 'Final Cuts — the roster is set' },
-    ]
-
-    // ── Day 1: camp opens. Headcount + who arrived sharp in fitness testing. ──
-    const fitRng = this.rngFor(9603, year)
-    const fitness = bodies
-      .filter((p) => p.position !== 'G')
-      .map((p) => [p.name, ratedOverall(p) + fitRng.range(-8, 8)] as const)
-      .sort((a, b) => b[1] - a[1])
-    const sharp = fitness.slice(0, 2).map(([name]) => name)
-    const question = fitness.length > 0 ? fitness[fitness.length - 1][0] : undefined
-    this.pushNews(
-      'scouting',
-      'Training camp opens',
-      `${bodies.length} players reported for camp today — the NHL group plus the AHL bodies fighting for a spot. ` +
-      `Day one was physical testing and a camp meeting.` +
-      `${sharp.length > 0 ? ` ${sharp.join(' and ')} ${sharp.length > 1 ? 'were' : 'was'} sharpest in the fitness drills.` : ''}` +
-      `${question ? ` ${question} has some questions to answer this week.` : ''} ` +
-      `Two intra-squad scrimmages and the coaches' final reads come before cut day.`,
-      { teamId: this.userTeamId as string }
-    )
-  }
-
-  /** Play ONE intra-squad scrimmage and ACCUMULATE it into the camp box score
-   *  (deterministic from talent). Merges each player's line with any prior
+  /** LEGACY (pre-Battles saves caught mid-camp): play ONE intra-squad
+   *  scrimmage and ACCUMULATE it into the camp box score (deterministic from
+   *  talent). New camps play real games — see playCampScrimmages. Merges each player's line with any prior
    *  scrimmage so the totals grow across the week. */
   private playCampScrimmage(scrimNo: number): void {
     const camp = this.trainingCamp
@@ -14844,6 +14782,8 @@ export class Career {
   advanceTrainingCampDay(): void {
     const camp = this.trainingCamp
     if (!camp || camp.resolved) return
+    // Camp Battles: a battles camp plays its games in three beats.
+    if (camp.battles) { this.advanceBattleCamp(); return }
     const CUT_DAY = 8
     const day = Math.min(CUT_DAY, (camp.campDay ?? 1) + 1)
     camp.campDay = day
@@ -14930,46 +14870,115 @@ export class Career {
       const wb = placements.find((pl) => pl.playerId === b.playerId)?.place ?? b.coachPlan
       return (wa === 'nhl' ? 0 : 1) - (wb === 'nhl' ? 0 : 1)
     })
+    // Where each man ACTUALLY is at cut day (the season rollover can move a
+    // body between camp open and cut day), so a stale "current" never turns a
+    // no-op into a refused move.
+    const farm = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
+    const whereNow = (pid: string): 'nhl' | 'ahl' | 'gone' =>
+      this.userTeam.roster.some((id) => (id as string) === pid) ? 'nhl'
+        : farm?.roster.some((id) => (id as string) === pid) ? 'ahl' : 'gone'
+    type Move = { d: TrainingCampState['decisions'][number]; want: 'nhl' | 'ahl'; reason?: string }
+    let queue: Move[] = []
     for (const d of ordered) {
       const want = placements.find((pl) => pl.playerId === d.playerId)?.place ?? d.coachPlan
       // PTO invitees: 'nhl' signs him to a league-minimum deal, anything else
       // ends the tryout and returns him to the open market.
       if (d.tryout) {
-        if (want === 'nhl') {
-          const res = this.signTryout(d.playerId)
-          notes.push(res.ok
-            ? `${d.name} earns a contract out of his tryout — he makes the team on a league-minimum deal.`
-            : `${d.name}'s tryout ends without a deal: ${res.message ?? 'no room'}.`)
-        } else {
-          notes.push(`${d.name}'s tryout ends without a contract — he returns to the open market.`)
-        }
+        if (want === 'nhl') queue.push({ d, want })
+        else notes.push(`${d.name}'s tryout ends without a contract — he returns to the open market.`)
         continue
       }
-      if (want === d.current) {
+      const now = whereNow(d.playerId)
+      if (now === 'gone') {
+        notes.push(`${d.name} is no longer with the organisation.`)
+        continue
+      }
+      if (want === now) {
         if (want === 'nhl' && d.coachPlan === 'ahl') notes.push(`${d.name} stays on the NHL roster — you overruled the coach.`)
         continue
       }
-      if (want === 'nhl') {
-        const res = this.callUp(d.playerId)
-        // The failure branch carries `reason`, not `message` — reading the wrong
-        // field meant every camp assignment that bounced told the GM only
-        // "roster rules" instead of which rule stopped it.
-        // Roster-rule reasons are authored as whole sentences, so appending our
-        // own full stop printed "…after this call-up..". One terminator only.
-        notes.push(res.ok
-          ? `${d.name} makes the team out of camp.`
-          : `${d.name} stays with the farm club — ${oneSentence(res.reason || 'roster rules')}`)
-      } else {
-        const res = this.sendDown(d.playerId)
-        if (!res.ok) notes.push(`${d.name} could not be sent down — ${oneSentence(res.reason || 'roster rules')}`)
-        else if (res.note) notes.push(res.note)
-        else notes.push(`${d.name} is assigned to the farm.`)
+      queue.push({ d, want })
+    }
+    // Apply in passes: a call-up the cap refuses goes through once a send-down
+    // has cleared the money, and a send-down the roster minimum refuses goes
+    // through once a call-up has filled the spot. Stop when a pass moves nobody.
+    for (let pass = 0; pass < 4 && queue.length > 0; pass++) {
+      const next: Move[] = []
+      for (const m of queue) {
+        const { d, want } = m
+        if (d.tryout) {
+          const res = this.signTryout(d.playerId)
+          if (res.ok) notes.push(`${d.name} earns a contract out of his tryout — he makes the team on a league-minimum deal.`)
+          else next.push({ ...m, reason: res.message ?? 'no room' })
+        } else if (whereNow(d.playerId) === want) {
+          // An earlier move already carried him there (a call-up that had to
+          // make room, an emergency recall after a claim).
+          notes.push(want === 'nhl' ? `${d.name} makes the team out of camp.` : `${d.name} is assigned to the farm.`)
+        } else if (whereNow(d.playerId) === 'gone') {
+          notes.push(`${d.name} is no longer with the organisation.`)
+        } else if (want === 'nhl') {
+          const res = this.callUp(d.playerId)
+          // Roster-rule reasons are authored as whole sentences — one terminator.
+          if (res.ok) notes.push(`${d.name} makes the team out of camp.`)
+          else next.push({ ...m, reason: res.reason || 'roster rules' })
+        } else {
+          const res = this.sendDown(d.playerId)
+          if (!res.ok) next.push({ ...m, reason: res.reason || 'roster rules' })
+          else if (res.note) notes.push(res.note)
+          else notes.push(`${d.name} is assigned to the farm.`)
+        }
+      }
+      const stuck = next.length === queue.length
+      queue = next
+      if (stuck) break
+    }
+    for (const { d, want, reason } of queue) {
+      notes.push(d.tryout
+        ? `${d.name}'s tryout ends without a deal: ${reason ?? 'no room'}.`
+        : want === 'nhl'
+          ? `${d.name} stays with the farm club — ${oneSentence(reason || 'roster rules')}`
+          : `${d.name} could not be sent down — ${oneSentence(reason || 'roster rules')}`)
+    }
+    // The opening-night roster must be legal: if overrules or refused moves
+    // left the club over 23 or short at a position, the league's own roster
+    // rule sets it (worst-first down, best affordable up).
+    {
+      const counts = this.rosterCounts(this.userTeam)
+      if (this.userTeam.roster.length > ROSTER_HARD_CAP || counts.f < Career.ROSTER_MIN_F || counts.d < Career.ROSTER_MIN_D || counts.g < Career.ROSTER_MIN_G) {
+        const before = new Set(this.userTeam.roster.map((id) => id as string))
+        this.assignRosters(true)
+        const after = new Set(this.userTeam.roster.map((id) => id as string))
+        const down = [...before].filter((id) => !after.has(id)).map((id) => this.resolve(asPlayerId(id)).name)
+        const up = [...after].filter((id) => !before.has(id)).map((id) => this.resolve(asPlayerId(id)).name)
+        if (down.length > 0 || up.length > 0) {
+          notes.push(`The league's roster rule set the last places: ${[...up.map((n) => `${n} up`), ...down.map((n) => `${n} down`)].join(', ')}.`)
+        }
       }
     }
     const team = this.data.teams.get(this.userTeamId)
     const ahl = team?.affiliateId ? this.data.teams.get(team.affiliateId) : undefined
     if (team) repairLines(team, this.data.players)
     if (ahl) repairLines(ahl, this.data.players)
+    // Camp Battles: the verdicts land on the men. Winning a job from the
+    // outside is a lift; losing one you held is a sting (a claim is its own
+    // story and is already told by the waiver mail).
+    if (camp.battles && team) {
+      const onNhl = new Set(team.roster.map((id) => id as string))
+      const inOrg = new Set([...onNhl, ...(ahl?.roster ?? []).map((id) => id as string)])
+      for (const b of camp.battles) {
+        for (const c of b.contenders) {
+          const p = this.data.players.get(asPlayerId(c.playerId))
+          if (!p || !inOrg.has(c.playerId)) continue
+          const made = onNhl.has(c.playerId)
+          if (made && c.current === 'ahl') {
+            p.morale = Math.min(100, p.morale + 6)
+            notes.push(`${c.name} won “${b.label}” — he ${c.cite ?? 'earned it'}.`)
+          } else if (!made && c.current === 'nhl') {
+            p.morale = Math.max(0, p.morale - 5)
+          }
+        }
+      }
+    }
     // Push the mail BEFORE marking the camp resolved so it is stamped with cut
     // day (Sep 22) on the fiction clock, not the board meeting's morning after.
     this.pushNews(
@@ -15005,14 +15014,645 @@ export class Career {
     return { ok: true }
   }
 
+  /* ─────────────── Camp Battles (depth audit §5) ─────────────── */
+
+  /** The clubs that WOULD claim a waiver-bound player if he were sent down
+   *  today, in claim priority. A side-effect-free dry run of processWaivers'
+   *  own rules (cap fit, the NHL bar, room to conform), so the waiver risk the
+   *  GM sees at cut day is the risk the wire will actually apply. */
+  private waiverClaimantsFor(p: Player, fromTeamId: TeamId): Team[] {
+    const grp = this.posGroup(p.position)
+    const ovr = ratedOverall(p)
+    const out: Team[] = []
+    const order = sortStandings([...this.standings.values()]).map((s) => s.teamId).reverse()
+    for (const tid of order) {
+      if (tid === fromTeamId) continue
+      const team = this.data.teams.get(tid)
+      if (!team || team.tier === 'ahl' || team.tier === 'world') continue
+      if (capUsedFor(team, this.data.players) + p.contract.salary > team.finances.salaryCap) continue
+      if (ovr < this.orgNhlBar(team, grp) - 2) continue
+      if (team.roster.length >= ROSTER_HARD_CAP && !team.affiliateId) continue
+      out.push(team)
+    }
+    return out
+  }
+
+  /** How one body in camp looks to the battle logic: his ability, the coach's
+   *  eye on top of it (form, morale, specialty, practice habits, and a lean
+   *  toward keeping a pro he would otherwise lose on waivers), and whether
+   *  sending him down exposes him to a claim. */
+  private campCandidate(p: Player, current: 'nhl' | 'ahl', tryout: boolean): CampCandidate {
+    const coach = this.getTeamStaff(this.userTeamId as string).headCoach
+    const ability = ratedOverall(p)
+    const eye = coach ? coachAdjustedScore(p, coach) - ability : 0
+    const habits = (((p.personality?.professionalism ?? 10.5) - 10.5) / 19) * 1.5
+    const waiver = !tryout && this.requiresWaivers(p)
+    const claimants = current === 'nhl' && waiver ? this.waiverClaimantsFor(p, this.userTeamId) : []
+    const waiverLean = claimants.length > 0 ? 2 : 0
+    const coachEye = Math.round((eye + habits + waiverLean) * 10) / 10
+    // A proven one-way pro gets a modest lean on the opening chart — no longer
+    // the old wall that kept any veteran up regardless of camp.
+    const protection = tryout ? 0 : Math.min(4, this.waiverProtection(p) / 6)
+    return {
+      playerId: p.id as string,
+      name: p.name,
+      position: p.position,
+      age: p.age,
+      ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+      group: this.posGroup(p.position) as CampGroup,
+      ability,
+      keep: ability + coachEye + protection,
+      coachEye,
+      current,
+      ...(tryout ? { tryout: true } : {}),
+      waiverRequired: waiver,
+      ...(claimants[0] ? { claimedBy: claimants[0].abbreviation } : {}),
+      ...(waiver && current === 'nhl' ? { claimants: claimants.length } : {}),
+    }
+  }
+
+  /** Open the user's camp: the coach's opening depth chart, the contested
+   *  spots named as battles, and every roster call staged for cut day. Camp
+   *  opens every September — even a settled roster has a backup-goalie or a
+   *  last-forward battle worth playing out. */
+  private openTrainingCamp(team: Team, ahl: Team): void {
+    // PTOs (professional tryouts): unsigned veterans in on tryout deals. The GM
+    // may curate the list (#182); absent a curated list the AGM auto-picks.
+    this.stockFreeAgentMarket()
+    const faStill = new Set(this.faPool.map((id) => id as string))
+    const inviteIds = (this.campPtoInvites ?? this.defaultCampPtoInvites()).filter((id) => faStill.has(id))
+    this.campPtoInvites = undefined // consumed — next offseason starts fresh
+
+    const cands: CampCandidate[] = []
+    const seen = new Set<string>()
+    const add = (id: string, current: 'nhl' | 'ahl', tryout: boolean): void => {
+      if (seen.has(id)) return
+      const p = this.data.players.get(asPlayerId(id))
+      if (!p) return
+      seen.add(id)
+      cands.push(this.campCandidate(p, current, tryout))
+    }
+    for (const id of team.roster) add(id as string, 'nhl', false)
+    for (const id of ahl.roster) add(id as string, 'ahl', false)
+    for (const id of inviteIds) add(id, 'ahl', true)
+
+    // The coach's chart has to fit the cap. If signing tryouts would break it,
+    // the tryouts stay camp bodies and the chart is drawn without them.
+    const salaryOf = (c: CampCandidate): number =>
+      c.tryout ? indexed(750_000) : (this.data.players.get(asPlayerId(c.playerId))?.contract.salary ?? 0)
+    const room = team.finances.salaryCap - this.userDeadCap
+    let depth = detectBattles(cands)
+    const payroll = (d: typeof depth): number => {
+      const ids = new Set([...d.opening.F, ...d.opening.D, ...d.opening.G])
+      return cands.filter((c) => ids.has(c.playerId)).reduce((s, c) => s + salaryOf(c), 0)
+    }
+    let ptoBlocked = false
+    if (cands.some((c) => c.tryout) && payroll(depth) > room) {
+      const without = detectBattles(cands.filter((c) => !c.tryout))
+      if (payroll(without) < payroll(depth)) { depth = without; ptoBlocked = true }
+    }
+    const inNhl = new Set([...depth.opening.F, ...depth.opening.D, ...depth.opening.G])
+    const battleOf = new Map<string, string>()
+    for (const b of depth.battles) for (const c of b.contenders) battleOf.set(c.playerId, b.id)
+
+    const decisions: TrainingCampState['decisions'] = []
+    for (const c of cands) {
+      const plan: 'nhl' | 'ahl' = inNhl.has(c.playerId) ? 'nhl' : 'ahl'
+      const bid = battleOf.get(c.playerId)
+      if (!bid && !c.tryout && plan === c.current) continue
+      const line = c.tryout
+        ? plan === 'nhl'
+          ? 'In on a tryout and good enough to make it outright. Worth a contract.'
+          : ptoBlocked
+            ? 'In on a tryout, but there is no cap room to sign him without moving money first.'
+            : 'In on a tryout as a camp body. Not pushing for a roster spot.'
+        : plan === 'nhl'
+          ? 'A clear call: he has outgrown the farm and walks onto the roster.'
+          : c.waiverRequired
+            ? `Well below the cut line — but he NEEDS WAIVERS to go down${c.claimedBy ? `, and ${c.claimedBy} would claim him` : ''}.`
+            : 'Below the cut line. Waiver-exempt — he can play big minutes in the AHL and be recalled any time.'
+      decisions.push({
+        playerId: c.playerId,
+        name: c.name,
+        position: c.position,
+        age: c.age,
+        ...(c.faceId !== undefined ? { faceId: c.faceId } : {}),
+        current: c.current,
+        coachPlan: plan,
+        waiverRequired: c.waiverRequired,
+        line,
+        ...(c.tryout ? { tryout: true } : {}),
+        ...(bid ? { battleId: bid } : {}),
+        ...(c.claimedBy ? { claimedBy: c.claimedBy } : {}),
+      })
+    }
+
+    this.trainingCamp = { decisions, resolved: false, battles: depth.battles, look: [], games: [] }
+    this.buildBattleCampWeek()
+    this.rerankCamp()
+
+    const coachName = this.getTeamStaff(this.userTeamId as string).headCoach?.name ?? 'The head coach'
+    const bodies = this.trainingCamp.roster?.length ?? cands.length
+    const named = depth.battles.map((b) => `• ${b.label}: ${b.contenders.map((c) => c.name).join(', ')}${b.waiverTrap ? ' (a waiver trap)' : ''}`)
+    const [o1, o2] = this.campOpponents()
+    this.pushNews(
+      'contract',
+      'Training camp opens',
+      `${bodies} players reported for camp — the NHL group, the farm club and ${inviteIds.length > 0 ? `${inviteIds.length} tryout${inviteIds.length === 1 ? '' : 's'}` : 'no tryouts'}. ` +
+      (named.length > 0
+        ? `${coachName} has ${named.length} real battle${named.length === 1 ? '' : 's'} on his board:\n\n${named.join('\n')}\n\n`
+        : `${coachName}'s depth chart is settled; camp is about sharpness, not jobs.\n\n`) +
+      `Two Blue-Red scrimmages come first, then preseason games${o1 ? ` against ${o1.abbreviation}${o2 ? ` and ${o2.abbreviation}` : ''}` : ''}. ` +
+      `Every game is played for real and the verdicts follow what happens. Cut day is Sep 22.`,
+      { teamId: this.userTeamId as string }
+    )
+  }
+
+  /** The two preseason opponents: division rivals first (the real exhibition
+   *  circuit), deterministic per season. */
+  private campOpponents(): Team[] {
+    const me = this.userTeam
+    const nhl = this.data.league.teams
+      .filter((tid) => tid !== this.userTeamId)
+      .map((tid) => this.data.teams.get(tid))
+      .filter((t): t is Team => !!t && t.roster.length >= 18)
+    const rng = this.rngFor(9610, this.year)
+    const div = nhl.filter((t) => t.divisionId === me.divisionId)
+    const others = nhl.filter((t) => t.divisionId !== me.divisionId)
+    const first = div.length > 0 ? div : others
+    const a = first[Math.min(first.length - 1, Math.floor(rng.float(0, 1) * first.length))]
+    const rest = [...div, ...others].filter((t) => t !== a)
+    const secondBand = rest.filter((t) => t.divisionId === me.divisionId)
+    const band = secondBand.length > 0 ? secondBand : rest
+    const b = band[Math.min(band.length - 1, Math.floor(rng.float(0, 1) * band.length))]
+    return [a, b].filter((t): t is Team => !!t)
+  }
+
+  /** The camp week for a battles camp: the Blue/Red split and the dated
+   *  schedule. The box score starts empty; the sim fills it. */
+  private buildBattleCampWeek(): void {
+    const camp = this.trainingCamp
+    if (!camp) return
+    camp.startISO = `${this.year}-09-15`
+    camp.endISO = `${this.year}-09-22`
+    camp.campDay = 1
+    const { blue, red } = this.campSquads()
+    const ptoSet = new Set(camp.decisions.filter((d) => d.tryout).map((d) => d.playerId))
+    const nhlSet = new Set(this.userTeam.roster.map((id) => id as string))
+    camp.roster = [...blue.map((id) => [id, 'Blue'] as const), ...red.map((id) => [id, 'Red'] as const)]
+      .map(([id, side]) => {
+        const p = this.resolve(asPlayerId(id))
+        return {
+          playerId: id,
+          name: p.name,
+          position: p.position,
+          age: p.age,
+          team: side,
+          status: ptoSet.has(id) ? 'PTO' : nhlSet.has(id) ? 'On Roster' : 'AHL invite',
+          ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+        }
+      })
+    camp.scrimmage = { skaters: [], goalies: [], results: [] }
+    delete camp.reports
+    const [o1, o2] = this.campOpponents()
+    camp.schedule = [
+      { label: 'Day 1', activity: 'Camp opens — the battles are named', info: `${camp.battles?.length ?? 0} contested spot${(camp.battles?.length ?? 0) === 1 ? '' : 's'}` },
+      { label: 'Day 2', activity: 'Blue-Red scrimmage' },
+      { label: 'Day 3', activity: 'The Blue-Red game' },
+      { label: 'Day 4', activity: 'Practice · the coach sets his preseason lineup' },
+      { label: 'Day 5', activity: o1 ? `Preseason: vs ${o1.abbreviation}` : 'Preseason game' },
+      { label: 'Day 6', activity: 'Practice · video' },
+      { label: 'Day 7', activity: o2 ? `Preseason: at ${o2.abbreviation}` : 'Preseason game' },
+      { label: 'Day 8', activity: 'Cut day — the roster is set' },
+    ]
+  }
+
+  /** Split the camp into Blue and Red. Every battle's contenders are spread
+   *  across the two sides so they play against each other; the rest are dealt
+   *  by ability so the sides are even. Injured men watch. */
+  private campSquads(): { blue: string[]; red: string[] } {
+    const camp = this.trainingCamp
+    const ahl = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
+    const ids: string[] = []
+    const seen = new Set<string>()
+    const push = (id: string): void => { if (!seen.has(id)) { seen.add(id); ids.push(id) } }
+    for (const id of this.userTeam.roster) push(id as string)
+    for (const id of ahl?.roster ?? []) push(id as string)
+    for (const d of camp?.decisions ?? []) push(d.playerId)
+    const healthy = ids
+      .map((id) => this.data.players.get(asPlayerId(id)))
+      .filter((p): p is Player => !!p && p.injuryStatus === null)
+    const side = new Map<string, 'Blue' | 'Red'>()
+    for (const b of camp?.battles ?? []) {
+      b.contenders.forEach((c, i) => side.set(c.playerId, i % 2 === 0 ? 'Blue' : 'Red'))
+    }
+    for (const grp of ['G', 'D', 'F'] as const) {
+      const all = healthy.filter((p) => this.posGroup(p.position) === grp)
+      let blueN = all.filter((p) => side.get(p.id as string) === 'Blue').length
+      let redN = all.filter((p) => side.get(p.id as string) === 'Red').length
+      const inGrp = all
+        .filter((p) => !side.has(p.id as string))
+        .sort((a, b) => ratedOverall(b) - ratedOverall(a) || ((a.id as string) < (b.id as string) ? -1 : 1))
+      inGrp.forEach((p, i) => {
+        const snake: 'Blue' | 'Red' = i % 4 === 0 || i % 4 === 3 ? 'Blue' : 'Red'
+        const pick: 'Blue' | 'Red' = blueN < redN ? 'Blue' : redN < blueN ? 'Red' : snake
+        side.set(p.id as string, pick)
+        if (pick === 'Blue') blueN++
+        else redN++
+      })
+    }
+    // Each side needs a goalie: lend one across if a side has none.
+    const gs = healthy.filter((p) => p.position === 'G')
+    for (const [need, has] of [['Blue', 'Red'], ['Red', 'Blue']] as const) {
+      const mine = gs.filter((g) => side.get(g.id as string) === need)
+      const theirs = gs.filter((g) => side.get(g.id as string) === has)
+      if (mine.length === 0 && theirs.length >= 2) side.set(theirs[theirs.length - 1]!.id as string, need)
+    }
+    const blue = healthy.filter((p) => side.get(p.id as string) === 'Blue').map((p) => p.id as string)
+    const red = healthy.filter((p) => side.get(p.id as string) === 'Red').map((p) => p.id as string)
+    return { blue, red }
+  }
+
+  /** A camp side can take the ice: a goalie and at least a skeleton of skaters. */
+  private campSideReady(ids: string[]): boolean {
+    let g = 0
+    let f = 0
+    let d = 0
+    for (const id of ids) {
+      const p = this.data.players.get(asPlayerId(id))
+      if (!p || p.injuryStatus !== null) continue
+      const grp = this.posGroup(p.position)
+      if (grp === 'G') g++
+      else if (grp === 'D') d++
+      else f++
+    }
+    return g >= 1 && f >= 6 && d >= 4
+  }
+
+  /** Build a dressed camp lineup as a sim-ready Team. Battle contenders play
+   *  the bottom six and third pair (where bubble players live) unless the GM
+   *  gave them the look, which puts them in the top six / top four. */
+  private campSquadTeam(id: string, abbr: string, name: string, ids: string[], starter?: string): Team {
+    const camp = this.trainingCamp
+    const look = new Set(camp?.look ?? [])
+    const contenders = new Set<string>()
+    for (const b of camp?.battles ?? []) for (const c of b.contenders) contenders.add(c.playerId)
+    const players = ids
+      .map((x) => this.data.players.get(asPlayerId(x)))
+      .filter((p): p is Player => !!p && p.injuryStatus === null)
+    const byOvr = (a: Player, b: Player): number => ratedOverall(b) - ratedOverall(a) || ((a.id as string) < (b.id as string) ? -1 : 1)
+    const arrange = (grp: 'F' | 'D', topN: number, total: number): Player[] => {
+      const all = players.filter((p) => this.posGroup(p.position) === grp).sort(byOvr)
+      const lookers = all.filter((p) => look.has(p.id as string))
+      const cont = all.filter((p) => contenders.has(p.id as string) && !look.has(p.id as string))
+      const rest = all.filter((p) => !contenders.has(p.id as string) && !look.has(p.id as string))
+      const top = [...lookers, ...rest]
+      const dressedTop = top.slice(0, topN)
+      const bottom = [...cont, ...top.slice(topN)].slice(0, Math.max(0, total - dressedTop.length))
+      return [...dressedTop, ...bottom].slice(0, total)
+    }
+    const F = arrange('F', 6, 12)
+    const D = arrange('D', 4, 6)
+    const goalies = players.filter((p) => p.position === 'G').sort(byOvr)
+    const g0 = (starter ? goalies.find((g) => (g.id as string) === starter) : undefined) ?? goalies[0]
+    // Short lines stay short (never padded with empty ids): the sims guard a
+    // short or empty line, but an empty id is a player that does not exist.
+    const forwards = [0, 1, 2, 3]
+      .map((i) => F.slice(i * 3, i * 3 + 3).map((p) => p.id))
+      .filter((l) => l.length > 0) as unknown as Team['lines']['forwards']
+    const defensePairs = [0, 1, 2]
+      .map((i) => D.slice(i * 2, i * 2 + 2).map((p) => p.id))
+      .filter((l) => l.length > 0) as unknown as Team['lines']['defensePairs']
+    const E = asPlayerId('')
+    const topF = [...F].sort(byOvr)
+    const topD = [...D].sort(byOvr)
+    const lines: Team['lines'] = {
+      forwards,
+      defensePairs,
+      goalies: [g0 ? g0.id : E, g0 ? g0.id : E],
+      powerPlayUnits: [
+        [...topF.slice(0, 3), ...topD.slice(0, 2)].map((p) => p.id),
+        [...topF.slice(3, 6), ...topD.slice(2, 4)].map((p) => p.id),
+      ].filter((u) => u.length >= 4),
+      penaltyKillUnits: [
+        [...topF.slice(6, 8), ...topD.slice(0, 2)].map((p) => p.id),
+        [...topF.slice(8, 10), ...topD.slice(2, 4)].map((p) => p.id),
+      ].filter((u) => u.length >= 3),
+    }
+    const roster = [...F, ...D, ...(g0 ? [g0] : [])].map((p) => p.id)
+    return { ...this.userTeam, id: asTeamId(id), abbreviation: abbr, name, roster, lines }
+  }
+
+  /** Put one camp game's box score into the camp: the per-player camp log
+   *  that the battles read, and the camp stats tables. */
+  private recordCampGame(res: ReturnType<typeof quickSimGame>, ours: Set<string>, kind: 'scrimmage' | 'preseason', gameName: string, sideOf: (id: string) => 'Blue' | 'Red'): void {
+    const camp = this.trainingCamp
+    if (!camp?.scrimmage) return
+    const lineOf = new Map<string, CampGameLine>()
+    const bySk = new Map(camp.scrimmage.skaters.map((s) => [s.playerId, s] as const))
+    const byG = new Map(camp.scrimmage.goalies.map((g) => [g.playerId, g] as const))
+    for (const [pidRaw, st] of res.playerStats) {
+      const pid = pidRaw as string
+      if (!ours.has(pid)) continue
+      const p = this.data.players.get(pidRaw)
+      if (!p) continue
+      if (p.position === 'G') {
+        if (st.shotsAgainst <= 0 && st.toi <= 0) continue
+        lineOf.set(pid, { game: gameName, kind, g: 0, a: 0, pm: 0, sog: 0, toiSec: st.toi, sa: st.shotsAgainst, ga: st.goalsAgainst })
+        const prev = byG.get(pid)
+        const gp = (prev?.gp ?? 0) + 1
+        const mins = (prev?.mins ?? 0) + Math.max(1, Math.round(st.toi / 60))
+        const ga = (prev?.ga ?? 0) + st.goalsAgainst
+        const saves = (prev?.saves ?? 0) + st.saves
+        const shots = saves + ga
+        byG.set(pid, {
+          playerId: pid, name: p.name, team: sideOf(pid), gp, mins, ga, saves,
+          gaa: Math.round((ga * 60 / Math.max(1, mins)) * 100) / 100,
+          svPct: shots > 0 ? Math.round((saves / shots) * 1000) / 1000 : 0,
+          rating: Math.round((5.5 + (shots > 0 ? (saves / shots - 0.86) * 40 : 0)) * 10) / 10,
+          ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+        })
+        continue
+      }
+      if (st.toi <= 0) continue
+      lineOf.set(pid, { game: gameName, kind, g: st.goals, a: st.assists, pm: st.plusMinus, sog: st.shots, toiSec: st.toi })
+      const prev = bySk.get(pid)
+      const gp = (prev?.gp ?? 0) + 1
+      const g = (prev?.g ?? 0) + st.goals
+      const a = (prev?.a ?? 0) + st.assists
+      const gameRating = 6 + st.goals + st.assists * 0.5 + st.plusMinus * 0.3 + Math.min(1, st.shots * 0.15)
+      const rating = Math.round((prev ? (prev.rating * (gp - 1) + gameRating) / gp : gameRating) * 10) / 10
+      bySk.set(pid, {
+        playerId: pid, name: p.name, position: p.position, team: sideOf(pid),
+        gp, g, a, p: g + a,
+        plusMinus: (prev?.plusMinus ?? 0) + st.plusMinus,
+        pim: (prev?.pim ?? 0) + st.penaltyMinutes,
+        sog: (prev?.sog ?? 0) + st.shots,
+        rating,
+        ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+      })
+    }
+    camp.scrimmage.skaters = [...bySk.values()].sort((x, y) => y.p - x.p || y.rating - x.rating || y.sog - x.sog)
+    camp.scrimmage.goalies = [...byG.values()]
+    for (const b of camp.battles ?? []) {
+      for (const c of b.contenders) {
+        const l = lineOf.get(c.playerId)
+        if (l) c.lines = [...c.lines, l]
+      }
+    }
+  }
+
+  /** The goalies who should start camp games, in order: any goalie given the
+   *  look, then the crease battle's contenders, so the battle is decided by
+   *  games, not by the depth chart. */
+  private campStarters(): string[] {
+    const camp = this.trainingCamp
+    const g = camp?.battles?.find((b) => b.group === 'G')
+    const look = (camp?.look ?? []).filter((id) => this.data.players.get(asPlayerId(id))?.position === 'G')
+    return [...new Set([...look, ...(g?.contenders.map((c) => c.playerId) ?? [])])]
+  }
+
+  /** Days 2–3: the two Blue-Red scrimmages, played by the quick sim. */
+  private playCampScrimmages(): void {
+    const camp = this.trainingCamp
+    if (!camp) return
+    const { blue, red } = this.campSquads()
+    const side = new Map<string, 'Blue' | 'Red'>([...blue.map((id) => [id, 'Blue'] as const), ...red.map((id) => [id, 'Red'] as const)])
+    const sideOf = (id: string): 'Blue' | 'Red' => side.get(id) ?? 'Blue'
+    const starters = this.campStarters()
+    const rank = (id: string): number => { const i = starters.indexOf(id); return i < 0 ? 99 : i }
+    const goaliesOf = (ids: string[]): string[] =>
+      ids.filter((id) => this.data.players.get(asPlayerId(id))?.position === 'G')
+        .sort((a, b) => rank(a) - rank(b) || ratedOverall(this.resolve(asPlayerId(b))) - ratedOverall(this.resolve(asPlayerId(a))))
+    const blueG = goaliesOf(blue)
+    const redG = goaliesOf(red)
+    const ours = new Set([...blue, ...red])
+    // A camp too thin to split (an injury-ravaged or skeleton org) skips the
+    // scrimmages; the battles are then decided in the preseason games.
+    if (!this.campSideReady(blue) || !this.campSideReady(red)) return
+    for (const n of [1, 2] as const) {
+      // Each side's goalies split the two games so every contender gets a start.
+      const bStart = blueG[(n - 1) % Math.max(1, blueG.length)]
+      const rStart = redG[(n - 1) % Math.max(1, redG.length)]
+      const home = this.campSquadTeam('camp-blue', 'BLU', 'Team Blue', blue, bStart)
+      const away = this.campSquadTeam('camp-red', 'RED', 'Team Red', red, rStart)
+      const res = quickSimGame(home, away, this.resolve, { seed: gameSeed(this.seed ^ 0x0ca3b1e5, this.year, `camp-scrim-${n}`) })
+      const name = n === 1 ? 'in the first Blue-Red scrimmage' : 'in the Blue-Red game'
+      this.recordCampGame(res, ours, 'scrimmage', name, sideOf)
+      const result = `Team Blue ${res.homeGoals}, Team Red ${res.awayGoals}${res.decidedBy !== 'regulation' ? ` (${res.decidedBy === 'overtime' ? 'OT' : 'SO'})` : ''}`
+      camp.scrimmage?.results.push(result)
+      camp.games = [...(camp.games ?? []), { label: n === 1 ? 'Blue-Red scrimmage' : 'The Blue-Red game', kind: 'scrimmage', day: n + 1, result }]
+      if (camp.schedule?.[n]) camp.schedule[n].info = result
+    }
+  }
+
+  /** Days 5 and 7: two preseason games against real clubs, played by the
+   *  quick sim. Results never touch the standings. Every contender dresses. */
+  private playCampPreseason(): void {
+    const camp = this.trainingCamp
+    if (!camp) return
+    const opps = this.campOpponents()
+    const contenders = new Set<string>()
+    for (const b of camp.battles ?? []) for (const c of b.contenders) contenders.add(c.playerId)
+    const { blue, red } = this.campSquads()
+    const side = new Map<string, 'Blue' | 'Red'>([...blue.map((id) => [id, 'Blue'] as const), ...red.map((id) => [id, 'Red'] as const)])
+    const pool = [...blue, ...red]
+    // The preseason group: every contender and anyone given the look, then the
+    // best of the rest — the real lineup the coach wants to see.
+    const ovrOf = (id: string): number => ratedOverall(this.resolve(asPlayerId(id)))
+    const posOf = (id: string): 'F' | 'D' | 'G' => this.posGroup(this.resolve(asPlayerId(id)).position)
+    const look = new Set(camp.look ?? [])
+    const pick = (grp: 'F' | 'D' | 'G', n: number): string[] => {
+      const inGrp = pool.filter((id) => posOf(id) === grp)
+      const must = inGrp.filter((id) => contenders.has(id) || look.has(id))
+      const rest = inGrp.filter((id) => !must.includes(id)).sort((a, b) => ovrOf(b) - ovrOf(a))
+      return [...must, ...rest].slice(0, Math.max(n, must.length))
+    }
+    const group = [...pick('F', 12), ...pick('D', 6), ...pick('G', 2)]
+    const ours = new Set(group)
+    const starters = [...new Set([...this.campStarters(), ...pick('G', 2)])]
+    const me = this.userTeam
+    if (!this.campSideReady(group)) return
+    opps.forEach((opp, i) => {
+      const day = i === 0 ? 5 : 7
+      const us = this.campSquadTeam(`${me.id as string}-camp`, me.abbreviation, me.name, group, starters[i % Math.max(1, starters.length)])
+      const home = i === 0 ? us : opp
+      const away = i === 0 ? opp : us
+      const res = quickSimGame(home, away, this.resolve, { seed: gameSeed(this.seed ^ 0x0ca3b1e5, this.year, `camp-pre-${i}-${opp.id as string}`) })
+      this.recordCampGame(res, ours, 'preseason', i === 0 ? `against ${opp.abbreviation}` : `at ${opp.abbreviation}`, (id) => side.get(id) ?? 'Blue')
+      const ourGoals = i === 0 ? res.homeGoals : res.awayGoals
+      const theirGoals = i === 0 ? res.awayGoals : res.homeGoals
+      const tag = res.decidedBy !== 'regulation' ? ` (${res.decidedBy === 'overtime' ? 'OT' : 'SO'})` : ''
+      const result = i === 0
+        ? `${opp.abbreviation} ${theirGoals} at ${me.abbreviation} ${ourGoals}${tag}`
+        : `${me.abbreviation} ${ourGoals} at ${opp.abbreviation} ${theirGoals}${tag}`
+      camp.scrimmage?.results.push(result)
+      camp.games = [...(camp.games ?? []), { label: i === 0 ? `Preseason vs ${opp.abbreviation}` : `Preseason at ${opp.abbreviation}`, kind: 'preseason', day, result, opponentAbbr: opp.abbreviation }]
+      if (camp.schedule?.[day - 1]) camp.schedule[day - 1].info = result
+    })
+  }
+
+  /** RE-EVALUATE the coach's plan from everything camp has shown: re-rank each
+   *  battle on prior + evidence, refresh the waiver dry runs (claim order
+   *  moves with the table), and rewrite each contender's cut-day call. */
+  private rerankCamp(): void {
+    const camp = this.trainingCamp
+    if (!camp?.battles) return
+    camp.battles = camp.battles.map((b) => rankBattle({
+      ...b,
+      contenders: b.contenders.map((c) => {
+        if (c.current !== 'nhl' || !c.waiverRequired) return c
+        const p = this.data.players.get(asPlayerId(c.playerId))
+        const claimants = p ? this.waiverClaimantsFor(p, this.userTeamId) : []
+        const { claimedBy: _drop, ...rest } = c
+        return { ...rest, claimants: claimants.length, ...(claimants[0] ? { claimedBy: claimants[0].abbreviation } : {}) }
+      }),
+    }))
+    for (const d of camp.decisions) {
+      if (!d.battleId) continue
+      const b = camp.battles.find((x) => x.id === d.battleId)
+      const c = b?.contenders.find((x) => x.playerId === d.playerId)
+      if (!b || !c) continue
+      d.coachPlan = c.winning ? 'nhl' : 'ahl'
+      if (c.claimedBy) d.claimedBy = c.claimedBy
+      else delete d.claimedBy
+      const label = `“${b.label}”`
+      const played = c.lines.length > 0
+      const waiverNote = !c.winning && c.waiverRequired && c.current === 'nhl'
+        ? c.claimedBy
+          ? ` Sending him down needs waivers — ${c.claimedBy} would claim him.`
+          : ' Sending him down needs waivers, but no club would put in a claim.'
+        : ''
+      d.line = played
+        ? `${c.winning ? 'Winning' : 'Losing'} ${label}: he ${c.cite ?? 'has played'}.${waiverNote}`
+        : `${c.winning ? 'Holds a spot in' : 'Chasing a spot in'} ${label} on the coach's opening chart.${waiverNote}`
+    }
+  }
+
+  /** The coach's reports at the end of camp, argued by the camp's evidence. */
+  private fileBattleReports(): void {
+    const camp = this.trainingCamp
+    if (!camp) return
+    const coachName = this.getTeamStaff(this.userTeamId as string).headCoach?.name ?? 'The head coach'
+    camp.reports = camp.decisions.map((d) => {
+      const b = d.battleId ? camp.battles?.find((x) => x.id === d.battleId) : undefined
+      const c = b?.contenders.find((x) => x.playerId === d.playerId)
+      const rec: CampReport['recommendation'] = d.tryout
+        ? (d.coachPlan === 'nhl' ? 'sign' : 'watch')
+        : d.coachPlan === 'nhl' ? 'keep' : d.age >= 30 ? 'watch' : 'develop'
+      let verdict: string
+      if (b && c) {
+        const won = c.winning
+        verdict = `${coachName}: ${d.name} ${won ? 'won' : 'lost'} “${b.label}”. He ${c.cite ?? 'did not get into a game'}.`
+        if (won && d.tryout) verdict += ' He has earned a league-minimum deal.'
+        else if (won && d.current === 'ahl') verdict += ' He has taken the job from the outside.'
+        else if (!won && d.current === 'nhl') {
+          verdict += d.waiverRequired
+            ? c.claimedBy ? ` He needs waivers, and ${c.claimedBy} would claim him — keep him up or risk losing him for nothing.` : ' He needs waivers, but nobody would claim him; the AHL is safe.'
+            : ' He is waiver-exempt; the AHL is the place to prove it.'
+        } else if (!won && d.tryout) verdict += ' Not enough for a contract.'
+      } else {
+        verdict = d.tryout
+          ? d.coachPlan === 'nhl'
+            ? `${coachName}: ${d.name} was never in doubt on his tryout. Worth a league-minimum deal.`
+            : `${coachName}: ${d.name} was a useful camp body on his tryout, not a roster player.`
+          : d.coachPlan === 'nhl'
+            ? `${coachName}: ${d.name} was not part of any battle — he is simply better than the men he replaces.`
+            : `${coachName}: ${d.name} is below the cut line and was never in the fight.${d.waiverRequired ? d.claimedBy ? ` Waivers: ${d.claimedBy} would claim him.` : ' He would clear waivers.' : ''}`
+      }
+      return {
+        playerId: d.playerId,
+        name: d.name,
+        position: d.position,
+        recommendation: rec,
+        tryout: d.tryout ?? false,
+        verdict,
+        ...(d.faceId !== undefined ? { faceId: d.faceId } : {}),
+      }
+    })
+  }
+
+  /** Each battle's standing as bullet lines for the camp mail. */
+  private campBattleDigest(): string {
+    const camp = this.trainingCamp
+    const coachName = this.getTeamStaff(this.userTeamId as string).headCoach?.name ?? 'The coach'
+    const lines = (camp?.battles ?? []).map((b) => `• ${b.label}: ${battleRead(b, coachName)}`)
+    return lines.length > 0 ? `\n\n${lines.join('\n')}` : ''
+  }
+
+  /** A battles camp advances in three beats: scrimmages → preseason → cut day. */
+  private advanceBattleCamp(): void {
+    const camp = this.trainingCamp
+    if (!camp || camp.resolved) return
+    const teamId = this.userTeamId as string
+    const day = camp.campDay ?? 1
+    if (day < 3) {
+      this.playCampScrimmages()
+      camp.campDay = 3
+      this.rerankCamp()
+      const res = camp.scrimmage?.results ?? []
+      this.pushNews(
+        'scouting',
+        `Camp: ${res.slice(0, 2).join(' · ')}`,
+        `Two Blue-Red scrimmages, played for real. Where the battles stand:` + this.campBattleDigest() +
+        `\n\nThe preseason games are next — every contender dresses.`,
+        { teamId }
+      )
+      this.runBeatCampDay(3)
+      return
+    }
+    if (day < 8) {
+      this.playCampPreseason()
+      camp.campDay = 8
+      this.rerankCamp()
+      this.fileBattleReports()
+      const pre = (camp.games ?? []).filter((g) => g.kind === 'preseason').map((g) => g.result)
+      this.pushNews(
+        'scouting',
+        `Preseason: ${pre.join(' · ') || 'the exhibition games are in'}`,
+        `The preseason games are in the books and the coaches have filed their reports.` + this.campBattleDigest(),
+        { teamId }
+      )
+      this.pushNews(
+        'contract',
+        'Cut day — camp verdicts are in',
+        'Training camp is over and the battles have verdicts. The final roster calls are yours — ' +
+        'make them before the opener, or the coach makes them for you.',
+        { teamId }
+      )
+      this.runBeatCampDay(8)
+    }
+  }
+
+  /** "Give him the look": the GM names up to two battle contenders to skate in
+   *  the top six (or start in goal) in the next camp games. More ice is more
+   *  chance to shine and more chance to be exposed. */
+  setCampLook(playerIds: string[]): { ok: boolean; message?: string } {
+    const camp = this.trainingCamp
+    if (!camp || camp.resolved || !camp.battles) return { ok: false, message: 'There is no camp running.' }
+    if ((camp.campDay ?? 1) >= 8) return { ok: false, message: 'Camp games are over — it is cut day.' }
+    const contenders = new Set<string>()
+    for (const b of camp.battles) for (const c of b.contenders) contenders.add(c.playerId)
+    const ids = [...new Set(playerIds)].filter((id) => contenders.has(id))
+    if (ids.length > 2) return { ok: false, message: 'Two looks at most — the coach has a lineup to run.' }
+    camp.look = ids
+    return { ok: true }
+  }
+
   /** Simming past cut day: fast-forward any camp days still unplayed (so the
    *  scrimmages and reports exist), then the coach applies his own plan —
    *  waivers and all. */
   autoResolveTrainingCamp(): void {
-    if (!this.trainingCamp || this.trainingCamp.resolved) return
+    this.delegateTrainingCamp()
+  }
+
+  /** "Let the coach run camp": the rest of the camp games are played, then the
+   *  coach applies his own verdicts — waivers and all. Returns the cut notes. */
+  delegateTrainingCamp(): { ok: boolean; notes: string[] } {
+    if (!this.trainingCamp || this.trainingCamp.resolved) return { ok: false, notes: ['Camp has already broken.'] }
     let guard = 0
     while ((this.trainingCamp.campDay ?? 8) < 8 && guard++ < 16) this.advanceTrainingCampDay()
-    this.submitTrainingCamp([])
+    return this.submitTrainingCamp([])
   }
 
   private reassignFarmSystems(): void {
@@ -15030,98 +15670,14 @@ export class Career {
         resolve: (id) => this.data.players.get(id),
         score: scorer,
       })
-      if (split.promoted.length === 0 && split.demoted.length === 0) continue
-
       if (team.id === this.userTeamId) {
-        // Season Rhythm M3: camp's battle verdicts become CUT DAY — a staged
-        // set of keep/send decisions the GM resolves on the camp screen
-        // before opening night. Simming past hands the coach the clipboard.
-        const decisions: TrainingCampState['decisions'] = []
-        for (const id of split.promoted.slice(0, 6)) {
-          const p = this.data.players.get(id)
-          if (!p) continue
-          decisions.push({
-            playerId: id as string,
-            name: p.name,
-            position: p.position,
-            age: p.age,
-            current: 'ahl',
-            coachPlan: 'nhl',
-            waiverRequired: false,
-            line: "Won his camp battle — he's making it impossible to send him down.",
-            ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
-          })
-        }
-        // Cut day must get the club to 23. Six verdicts is the usual camp, but a
-        // GM who took over a gutted roster in July and filled it (E3: a new job
-        // mid-summer) can arrive with far more; every surplus body needs a
-        // verdict or opening night dresses 28.
-        const mustCut = Math.max(0, team.roster.length + Math.min(6, split.promoted.length) - 23)
-        for (const id of split.demoted.slice(0, Math.max(6, mustCut))) {
-          const p = this.data.players.get(id)
-          if (!p) continue
-          const waiver = this.requiresWaivers(p)
-          decisions.push({
-            playerId: id as string,
-            name: p.name,
-            position: p.position,
-            age: p.age,
-            current: 'nhl',
-            coachPlan: 'ahl',
-            waiverRequired: waiver,
-            line: waiver
-              ? 'Lost the numbers game — but he NEEDS WAIVERS to go down. Any club can claim him for nothing.'
-              : 'Lost the numbers game. Waiver-exempt — he can develop in the AHL and be recalled any time.',
-            ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
-          })
-        }
-        // PTOs (professional tryouts): unsigned veterans brought to camp on
-        // tryout deals — depth bodies who must earn a contract. The GM may curate
-        // the list (#182); absent a curated list the AGM auto-picks. Only genuine
-        // still-available FAs make it (a curated invitee since signed drops out).
-        this.stockFreeAgentMarket()
-        const faStill = new Set(this.faPool.map((id) => id as string))
-        const inviteIds = (this.campPtoInvites ?? this.defaultCampPtoInvites()).filter((id) => faStill.has(id))
-        const invitees = inviteIds
-          .map((id) => this.data.players.get(asPlayerId(id)))
-          .filter((p): p is Player => !!p)
-        this.campPtoInvites = undefined // consumed — next offseason starts fresh
-        for (const p of invitees) {
-          const ovr = ratedOverall(p)
-          const worthNhl = ovr >= 73
-          decisions.push({
-            playerId: p.id as string,
-            name: p.name,
-            position: p.position,
-            age: p.age,
-            current: 'ahl', // not on the club — a tryout body fighting for a deal
-            coachPlan: worthNhl ? 'nhl' : 'ahl',
-            waiverRequired: false,
-            tryout: true,
-            line: worthNhl
-              ? 'In on a tryout and turning heads — the staff think he can still play a role. Worth a contract.'
-              : 'In on a tryout as a look. Fine body for camp, but not pushing for a roster spot.',
-            ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
-          })
-        }
-
-        if (decisions.length > 0) {
-          this.trainingCamp = { decisions, resolved: false }
-          // Training Camp v2: flesh out the week (roster, schedule, box score,
-          // reports) + push the rinkside evaluation mail.
-          this.buildTrainingCampWeek(decisions)
-          // PHASE 0: this used to send "Training camp is over" on the day camp
-          // OPENED. Camp opens today; the verdict mail comes on cut day.
-          this.pushNews(
-            'contract',
-            'Training camp opens',
-            `${decisions.length} roster call${decisions.length === 1 ? '' : 's'} to settle before opening night. ` +
-            'The staff will skate them for a week; cut day is Sep 22.',
-            { teamId: this.userTeamId as string }
-          )
-        }
+        // Camp Battles (depth audit §5): the user's camp ALWAYS opens. It names
+        // the contested roster spots, plays them out through the real sim, and
+        // the verdicts follow what happened on the ice.
+        this.openTrainingCamp(team, ahl)
         continue
       }
+      if (split.promoted.length === 0 && split.demoted.length === 0) continue
 
       // AI club: apply the split and rebuild both rosters' lines.
       team.roster = split.nhl
@@ -15611,9 +16167,13 @@ export class Career {
    *
    * Deterministic — no Rng; pure ranking by overall.
    */
-  assignRosters(): void {
+  assignRosters(forceUser = false): void {
     const NHL_TARGET = 23
+    // Camp Battles: while the GM's camp is open, HIS roster is being decided at
+    // camp — the season rollover must not trim it out from under the battles.
+    const campHolds = !forceUser && this.trainingCamp !== null && !this.trainingCamp.resolved
     for (const nhlTeamId of this.data.league.teams) {
+      if (campHolds && nhlTeamId === this.userTeamId) continue
       const nhlTeam = this.data.teams.get(nhlTeamId)
       if (!nhlTeam) continue
       const ahlTeam = nhlTeam.affiliateId ? this.data.teams.get(nhlTeam.affiliateId) : undefined
@@ -21356,6 +21916,9 @@ export class Career {
       if (this.phase === 'regularSeason') {
         if (this.trainingCamp && !this.trainingCamp.resolved) {
           const cd = this.trainingCamp.campDay ?? 1
+          if (this.trainingCamp.battles) {
+            return cd >= 8 ? 'Continue — break camp' : cd < 3 ? 'Continue — the Blue-Red scrimmages' : 'Continue — preseason games, then cut day'
+          }
           return cd >= 8 ? 'Continue — break camp' : cd === 7 ? 'Continue to cut day' : `Continue — camp day ${cd + 1}`
         }
         // The one in-season hard gate: a club that cannot legally dress a team.

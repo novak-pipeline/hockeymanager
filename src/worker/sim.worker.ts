@@ -207,6 +207,15 @@ function handle(req: WorkerRequest): WorkerResponse {
       const res = must().submitTrainingCamp(req.placements)
       return { id: req.id, type: 'trainingCamp', camp: null, notes: res.notes }
     }
+    case 'setCampLook': {
+      const res = must().setCampLook(req.playerIds)
+      if (!res.ok) throw new Error(res.message ?? 'Could not set the look.')
+      return { id: req.id, type: 'trainingCamp', camp: must().getTrainingCamp() }
+    }
+    case 'delegateTrainingCamp': {
+      const res = must().delegateTrainingCamp()
+      return { id: req.id, type: 'trainingCamp', camp: null, notes: res.notes }
+    }
     case 'getFeed':
       return { id: req.id, type: 'feed', feed: must().getFeed() }
     case 'toggleFollowAuthor': {

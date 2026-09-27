@@ -320,6 +320,14 @@ export class SimClient {
     return this.send({ type: 'submitTrainingCamp', placements })
   }
 
+  setCampLook(playerIds: string[]): Promise<WorkerResponse> {
+    return this.send({ type: 'setCampLook', playerIds })
+  }
+
+  delegateTrainingCamp(): Promise<WorkerResponse> {
+    return this.send({ type: 'delegateTrainingCamp' })
+  }
+
   getFeed(): Promise<WorkerResponse> {
     return this.send({ type: 'getFeed' })
   }

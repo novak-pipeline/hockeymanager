@@ -560,7 +560,8 @@ describe('summer takeover (#145) + camps (M3)', () => {
     expect(camp.campDay).toBe(8)
     // Accumulating scrimmage box score (sorted by points, skaters have GP).
     expect(camp.scrimmage!.skaters.length).toBeGreaterThan(10)
-    expect(camp.scrimmage!.results.length).toBe(2)
+    // Camp Battles: two Blue-Red scrimmages + two preseason games, all real sims.
+    expect(camp.scrimmage!.results.length).toBe(4)
     for (const s of camp.scrimmage!.skaters) {
       expect(s.p).toBe(s.g + s.a)
       expect(s.gp).toBeGreaterThan(0)
@@ -573,8 +574,8 @@ describe('summer takeover (#145) + camps (M3)', () => {
     }
     // Rinkside evaluation mail arrived across the week (scrimmage results).
     const inbox = staged!.getInbox().items
-    expect(inbox.some((n) => n.headline.startsWith('Camp scrimmage 1'))).toBe(true)
-    expect(inbox.some((n) => n.headline.startsWith('Camp scrimmage 2'))).toBe(true)
+    expect(inbox.some((n) => n.headline.startsWith('Camp: Team Blue'))).toBe(true)
+    expect(inbox.some((n) => n.headline.startsWith('Preseason: '))).toBe(true)
     // Round-trips whole (campDay + accumulated box score preserved).
     const snap = staged!.exportSnapshot('t', '2026-07-02T00:00:00.000Z')
     const c2 = Career.fromSnapshot(snap)

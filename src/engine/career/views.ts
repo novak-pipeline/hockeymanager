@@ -136,8 +136,22 @@ export interface TrainingCampState {
     /** PTO invitee: unsigned, on a tryout. 'nhl' = sign him to a deal, 'ahl' =
      *  release him back to the market (there's no farm assignment for a tryout). */
     tryout?: boolean
+    /** Camp Battles (additive): the battle this call belongs to, if any. A
+     *  decision without one is a clear call outside the contested slots. */
+    battleId?: string
+    /** Abbreviation of the club first in line to claim him on waivers (a real
+     *  dry run of the claim logic). Absent = he would clear. */
+    claimedBy?: string
   }>
   resolved: boolean
+  /* ── Camp Battles (depth audit §5), all additive/optional ── */
+  /** The contested roster spots, re-ranked after every camp game. */
+  battles?: CampBattle[]
+  /** "Give him the look": up to two contenders the GM wants skated in the top
+   *  six (or starting in goal) in the next games. More ice, more variance. */
+  look?: string[]
+  /** The camp games actually played by the sim, in order. */
+  games?: CampGameResult[]
   /* ── Training Camp v2 (EHM-style), all additive/optional ── */
   /** Which day of the camp week we're on (1..8); 8 = final cuts. */
   campDay?: number
@@ -179,6 +193,80 @@ export interface TrainingCampView {
   schedule?: TrainingCampState['schedule']
   scrimmage?: TrainingCampState['scrimmage']
   reports?: CampReport[]
+  /* ── Camp Battles (additive) ── */
+  battles?: CampBattle[]
+  look?: string[]
+  games?: CampGameResult[]
+  /** The coach's one-line read on each battle, keyed by battle id. */
+  reads?: Record<string, string>
+  /** Bodies on the NHL roster right now, per group — the base the cut-day
+   *  screen projects the opening-night 23 from. */
+  nhlNow?: { F: number; D: number; G: number }
+}
+
+/** One camp game in one player's camp log (scrimmage or preseason). */
+export interface CampGameLine {
+  /** How the verdicts name the game: "in the Blue-Red game", "against BOS". */
+  game: string
+  kind: 'scrimmage' | 'preseason'
+  g: number
+  a: number
+  pm: number
+  sog: number
+  toiSec: number
+  /** Goalies: shots against and goals against. */
+  sa?: number
+  ga?: number
+}
+
+/** A contender in a camp battle: the coach's prior, what camp showed, and
+ *  where that leaves him. */
+export interface CampBattleContender {
+  playerId: string
+  name: string
+  position: string
+  age: number
+  faceId?: string
+  current: 'nhl' | 'ahl'
+  tryout?: boolean
+  waiverRequired: boolean
+  /** First club in line to claim him if he is sent down (dry run). */
+  claimedBy?: string
+  claimants?: number
+  /** The coach's read before camp (ability + his eye), overall scale. */
+  prior: number
+  /** Camp evidence swing, bounded (see campBattles.EVIDENCE_CAP). */
+  evidence: number
+  score: number
+  /** Inside the slots on the current ranking. */
+  winning: boolean
+  lines: CampGameLine[]
+  /** What camp showed, as one clause ("scored twice in the Blue-Red game"). */
+  cite?: string
+}
+
+/** A named, contested roster spot at camp. */
+export interface CampBattle {
+  id: string
+  group: 'F' | 'D' | 'G'
+  /** "3 forwards for the last 2 spots", "Backup goalie", "The 7th D: …". */
+  label: string
+  /** How many of the contenders make the team. */
+  slots: number
+  /** A waiver-bound incumbent against a waiver-exempt challenger. */
+  waiverTrap?: boolean
+  contenders: CampBattleContender[]
+}
+
+/** A camp game the sim played. */
+export interface CampGameResult {
+  label: string
+  kind: 'scrimmage' | 'preseason'
+  /** Camp day it was played (1–8). */
+  day: number
+  /** "Team Blue 4, Team Red 3" / "BOS 2, PIT 3". */
+  result: string
+  opponentAbbr?: string
 }
 
 /** Dev camp is a WEEK, not a click: arrival -> scrimmage -> wrap. Persisted. */

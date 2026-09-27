@@ -312,6 +312,12 @@ export type WorkerRequestBody =
   | { type: 'skipDevCamp' }
   | { type: 'getTrainingCamp' }
   | { type: 'submitTrainingCamp'; placements: Array<{ playerId: string; place: 'nhl' | 'ahl' }> }
+  /** Camp Battles (additive): give up to two battle contenders the look (top
+   *  six / the start in goal) in the next camp games. Returns the camp. */
+  | { type: 'setCampLook'; playerIds: string[] }
+  /** Camp Battles (additive): let the coach run the rest of camp — the
+   *  remaining games are played and his calls applied. Returns the cut notes. */
+  | { type: 'delegateTrainingCamp' }
   | { type: 'getFeed' }
   | { type: 'toggleFollowAuthor'; authorId: string }
   | { type: 'getNegotiation'; playerId: string }
