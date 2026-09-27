@@ -147,7 +147,7 @@ const MAX_TURN_RATE_RAD_PER_SEC = (Math.PI * 200) / 180
 // Facing follows a SMOOTHED direction of travel, not the per-frame velocity.
 const FACING_VEL_TAU = 0.3
 // Action clips that are really locomotion: the stick stays on the ice through them (groundStick).
-const GROUNDED_CLIPS = new Set(['hockey_stop', 'skate_start'])
+const GROUNDED_CLIPS = new Set(['hockey_stop', 'skate_start', 'stickhandle'])
 
 // ── Movement limits ─────────────────────────────────────────────────────────
 // Nothing on the ice moves faster than an elite skater: a residual teleport in
@@ -1396,6 +1396,8 @@ export class Rink3dRenderer implements MatchRenderer {
       carrierPose = this.allPoses().find((p) => p.playerId === carrierId && p.rig.visible) ?? null
     }
 
+    this.updateStickhandling(carrierPose, carrierId === snap.carrier)
+
     // Puck position: if carried, sits on the carrier's blade
     let pTargetX: number
     let pTargetZ: number
@@ -1451,6 +1453,32 @@ export class Rink3dRenderer implements MatchRenderer {
    * the ice. Only for a blade hovering a little (≤ 0.8 ft, full correction up to
    * 0.6) and no action clip playing — a shot, pass or hit lifts it on purpose.
    */
+  /** Who is stickhandling now (at most one: the carrier). */
+  private handler: PlayerPose | null = null
+  /**
+   * The puck carrier handles the puck (the looping stickhandle clip) while a
+   * checker closes within ~11 ft, and settles back to the carry when he's in
+   * open ice — the puck rides the blade through it. Never over an action clip.
+   */
+  private updateStickhandling(carrier: PlayerPose | null, carrying: boolean): void {
+    let want: PlayerPose | null = null
+    if (carrier && carrying && carrier.layer && !carrier.rig.goalie) {
+      const mine = this.homePoses.includes(carrier) ? this.awayPoses : this.homePoses
+      let near = Infinity
+      for (const o of mine) {
+        if (!o.rig.visible || o.mode === 'idle') continue
+        near = Math.min(near, Math.hypot(o.worldX.pos - carrier.worldX.pos, o.worldZ.pos - carrier.worldZ.pos))
+      }
+      const busy = carrier.layer.playing.some((n) => n !== 'stickhandle' && n !== 'hockey_stop' && n !== 'skate_start')
+      // hysteresis: start inside 11 ft, keep going until 15 ft
+      const range = this.handler === carrier ? 15 : 11
+      if (near < range && !busy) want = carrier
+    }
+    if (this.handler && this.handler !== want) this.handler.layer?.stop('stickhandle')
+    if (want && this.handler !== want) want.layer?.play('stickhandle')
+    this.handler = want
+  }
+
   private readonly groundW = new WeakMap<PlayerPose, number>()
   private groundStick(pose: PlayerPose, dt: number): void {
     const rig = pose.rig

@@ -39,7 +39,7 @@ import {
 import type { BoneName, PoseOverlay } from './athlete'
 import type * as THREE from 'three'
 
-export type ActionKind = 'shot' | 'save' | 'goal' | 'hit' | 'pass' | 'faceoff'
+export type ActionKind = 'shot' | 'save' | 'goal' | 'hit' | 'pass' | 'faceoff' | 'deke'
 
 export interface ActionCue {
   kind: ActionKind
@@ -60,6 +60,16 @@ export interface ActionCue {
   hitKind?: 'boards' | 'openIce' | 'finish' | 'battle'
   /** shot (agent engine): the release type */
   shotType?: string
+  /** deke (agent engine): which move */
+  dekeKind?: string
+}
+
+/** The deke clip for each move the engine names (additive 'deke' event). */
+export const DEKE_CLIP: Readonly<Record<string, string>> = {
+  forehandBackhand: 'deke_fb',
+  toeDrag: 'deke_toedrag',
+  shoulderFake: 'deke_fake',
+  wide: 'deke_wide',
 }
 
 /** Every cue the choreographer can act on (a superset of math.extractCues). */
@@ -81,6 +91,10 @@ export function extractActionCues(stream: GameStream): ActionCue[] {
       out.push({ kind: 'hit', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.by, targetId: ev.on, ...(ev.force !== undefined ? { force: ev.force } : {}), ...(ev.kind ? { hitKind: ev.kind } : {}) })
     } else if (isEvent(ev, 'pass') && ev.completed) {
       out.push({ kind: 'pass', absT: absTime(ev.period, ev.t), nx: ev.a.x, ny: ev.a.y, actorId: ev.from, targetId: ev.to })
+    } else if ((ev as { type: string }).type === 'deke') {
+      // additive agent-engine event: { by, on?, kind, success, pos } (tolerant read)
+      const d = ev as unknown as { period: number; t: number; by: string; on?: string; kind?: string; pos?: { x: number; y: number } }
+      out.push({ kind: 'deke', absT: absTime(d.period, d.t), nx: d.pos?.x ?? 0, ny: d.pos?.y ?? 0, actorId: d.by, ...(d.on ? { targetId: d.on } : {}), dekeKind: d.kind ?? 'forehandBackhand' })
     } else if (isEvent(ev, 'faceoff')) {
       out.push({ kind: 'faceoff', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.winner })
     }
@@ -122,6 +136,8 @@ export function planCues(cues: ActionCue[], contactOf: (clip: string) => number 
       clip = shotClipFor(dist, pt === undefined ? null : cue.absT - pt, undefined, cue.shotType)
     } else if (cue.kind === 'hit') {
       clip = hitPlan(12, distToBoards(normXtoWorld(cue.nx), normYtoWorld(cue.ny)), cue.force, cue.hitKind).hitter
+    } else if (cue.kind === 'deke') {
+      clip = DEKE_CLIP[cue.dekeKind ?? ''] ?? 'deke_fb'
     } else if (cue.kind === 'faceoff') {
       clip = 'faceoff_crouch'
       lead = FACEOFF_LEAD_S

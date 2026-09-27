@@ -57,6 +57,11 @@ export const CLIPS: Record<string, ClipMeta> = {
   shot_slap: { mask: 'full', hands: 'stick', contact: f(19), fadeIn: 0.1, fadeOut: 0.22 },
   shot_onetimer: { mask: 'upper', hands: 'stick', contact: f(7), fadeIn: 0.12, fadeOut: 0.2 },
   pass: { mask: 'upper', hands: 'stick', contact: f(6), fadeIn: 0.15, fadeOut: 0.18 },
+  // dekes — `contact` = the moment the blade crosses the man (the move "beats" him there)
+  deke_fb: { mask: 'upper', hands: 'stick', contact: f(9), fadeIn: 0.1, fadeOut: 0.2 },
+  deke_toedrag: { mask: 'upper', hands: 'stick', contact: f(10), fadeIn: 0.1, fadeOut: 0.2 },
+  deke_fake: { mask: 'upper', hands: 'stick', contact: f(10), fadeIn: 0.1, fadeOut: 0.2 },
+  deke_wide: { mask: 'upper', hands: 'stick', contact: f(5), fadeIn: 0.12, fadeOut: 0.2 },
   faceoff_crouch: { mask: 'full', hands: 'stick', loop: true, fadeIn: 0.3, fadeOut: 0.15 },
   faceoff_draw: { mask: 'full', hands: 'stick', contact: f(4), fadeIn: 0.1, fadeOut: 0.2 },
   // ── hitting ──

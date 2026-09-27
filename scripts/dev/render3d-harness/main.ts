@@ -92,7 +92,7 @@ if (q.has('closeup')) {
   }
   const all = () => [...R.homePoses, ...R.awayPoses, R.homeGoaliePose, R.awayGoaliePose] as unknown as Array<{ playerId: string | null; rig: { visible: boolean }; worldX: { pos: number }; worldZ: { pos: number }; angle: number }>
   const pick = () =>
-    who === 'actor' ? all().find((p) => p.playerId === actorId && p.rig.visible)! : idx === 'g' ? (team === 'home' ? R.homeGoaliePose : R.awayGoaliePose) : (team === 'home' ? R.homePoses : R.awayPoses).filter((p) => p.rig.visible)[Number(idx)]!
+    who === 'actor' ? all().find((p) => p.playerId === actorId && p.rig.visible)! : idx === 'g' ? (team === 'home' ? R.homeGoaliePose : R.awayGoaliePose) : (team === 'home' ? R.homePoses : R.awayPoses).filter((p) => p.rig.visible && (p as { mode?: string }).mode !== 'idle')[Number(idx)]!
   const solo = q.get('solo') === '1'
   const aim = () => {
     const p = pick()
@@ -120,7 +120,7 @@ if (q.has('clip')) {
     debugClip?: (t: 'home' | 'away', i: number, n: string, at: number, f: boolean) => boolean
   }
   const list = team === 'home' ? R.homePoses : R.awayPoses
-  const raw = idx === 'g' ? 99 : list.indexOf(list.filter((p) => p.rig.visible)[Number(idx)]!)
+  const raw = idx === 'g' ? 99 : list.indexOf(list.filter((p) => p.rig.visible && (p as { mode?: string }).mode !== 'idle')[Number(idx)]!)
   R.debugClip?.(team as 'home' | 'away', raw, q.get('clip')!, Number(q.get('at') ?? 0), q.get('freeze') === '1')
 }
 if (q.get('hud') === '0') hud.style.display = 'none'
