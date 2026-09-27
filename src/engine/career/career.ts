@@ -15213,7 +15213,12 @@ export class Career {
     // a man who WOULD be claimed carries a real lean (a delegating GM must not
     // bleed veterans). Camp can still overturn it — that is the waiver trap.
     const waiverLean = claimants.length > 0 ? 5 : 0
-    const coachEye = Math.round((eye + habits + waiverLean) * 10) / 10
+    // The letters: the coach does not cut the man wearing the C (or an A) on
+    // a camp hunch.
+    const team = this.userTeam
+    const letterLean = !tryout && (team.captainId as string | undefined) === (p.id as string) ? 8
+      : !tryout && (team.alternateCaptainIds ?? []).some((a) => (a as string) === (p.id as string)) ? 4 : 0
+    const coachEye = Math.round((eye + habits + waiverLean + letterLean) * 10) / 10
     // A proven one-way pro gets a modest lean on the opening chart — no longer
     // the old wall that kept any veteran up regardless of camp.
     const protection = tryout ? 0 : Math.min(4, this.waiverProtection(p) / 6)
@@ -15274,6 +15279,16 @@ export class Career {
     if (cands.some((c) => c.tryout) && payroll(depth) > room) {
       const without = detectBattles(cands.filter((c) => !c.tryout))
       if (payroll(without) < payroll(depth)) { depth = without; ptoBlocked = true }
+    }
+    // A camp signs one tryout outright at most — a club does not rebuild its
+    // blue line out of the summer's leftovers. The rest can still win a spot
+    // in a battle, but the coach will not hand them one.
+    const inChart = (d: typeof depth): Set<string> => new Set([...d.opening.F, ...d.opening.D, ...d.opening.G])
+    const battlePtos = (d: typeof depth): Set<string> => new Set(d.battles.flatMap((b) => b.contenders.filter((x) => x.tryout).map((x) => x.playerId)))
+    const outright = cands.filter((c) => c.tryout && inChart(depth).has(c.playerId) && !battlePtos(depth).has(c.playerId)).sort((a, b) => b.ability - a.ability)
+    if (!ptoBlocked && outright.length > 1) {
+      const drop = new Set(outright.slice(1).map((c) => c.playerId))
+      depth = detectBattles(cands.filter((c) => !drop.has(c.playerId)))
     }
     const inNhl = new Set([...depth.opening.F, ...depth.opening.D, ...depth.opening.G])
     const battleOf = new Map<string, string>()
@@ -17978,12 +17993,15 @@ export class Career {
         sorted.forEach((p, i) => {
           if (p.contract.noTradeClause || p.contract.yearsRemaining <= 0) return
           const spare = i >= dressed
-          const willing = posture === 'rebuild' ? p.age >= 26 || spare : posture === 'retool' ? i >= Math.ceil(dressed / 3) : spare
+          // A contender's backup goalie can be pried loose — at a price.
+          const backupG = g === 'G' && i === 1
+          const willing = posture === 'rebuild' ? p.age >= 26 || spare : posture === 'retool' ? i >= Math.ceil(dressed / 3) : spare || backupG
           if (!willing) return
           const v = playerValue(p)
           const stance = posture === 'rebuild'
             ? `${t.abbreviation} are rebuilding and would sell`
-            : spare ? `A spare part in ${t.abbreviation}'s depth` : `${t.abbreviation} are retooling`
+            : spare ? `A spare part in ${t.abbreviation}'s depth`
+              : backupG && posture === 'contend' ? `${t.abbreviation} would move their backup — at a price` : `${t.abbreviation} are retooling`
           pool.push({
             kind: 'trade', group: g, playerId: p.id as string, name: p.name, position: p.position, age: p.age,
             overall: ratedOverall(p), ...(p.faceId !== undefined ? { faceId: p.faceId } : {}), hand: p.handedness,
