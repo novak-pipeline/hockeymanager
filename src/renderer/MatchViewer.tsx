@@ -10,8 +10,16 @@ import { RinkRenderer } from '@render2d'
 import { Rink3dRenderer, type CameraPreset } from '@render3d'
 import type { WatchedGame } from '../worker/protocol'
 import { MatchSfx } from './lib/sfx'
-import { planFor, currentSpeed, nextActiveJump, SKIP_SPEED } from '../render2d/playbackDirector'
-import type { SpeedSegment } from '../render2d/playbackDirector'
+import { planFor, currentSpeed, nextActiveJump, estimateWallSeconds, SKIP_SPEED } from '../render2d/playbackDirector'
+import type { SpeedSegment, WatchMode } from '../render2d/playbackDirector'
+import {
+  buildMatchIndex, computeMatchStats, buildIntermission, buildPostgame, rateMatch, assistantLiveLine,
+  type IntermissionDecisionPort, type IntermissionReport, type MatchIndex, type MatchStats, type PostgameReport,
+} from '../render2d/matchday'
+import {
+  DeadAir, IntermissionScreen, LiveMatchPanel, PostgameScreen, type SideTab,
+} from './components/matchday/MatchDayScreens'
+import { sideInks } from './components/matchday/MatchDayPanels'
 import { cancelSpeech } from './lib/speak'
 import { EventCursor } from '../render2d/eventCursor'
 import type { GoalEvent, StoppageReason } from '@domain'
@@ -39,6 +47,7 @@ const PANEL = 'var(--bg1)'
 const CAMERA_PRESETS: CameraPreset[] = ['broadcast', 'overhead', 'endzone', 'follow']
 const LS_RENDERER = 'hockeyMatchRenderer'
 const LS_REPLAYS = 'hockeyMatchReplays'
+const LS_PANEL = 'hockeyMatchPanel'
 
 /**
  * Goal replays are a SETTING, never a "Watch replay" button (the owner's rule:
@@ -63,8 +72,37 @@ function replaysOn(pref: ReplayPref, mode: PlaybackMode): boolean {
 // Plan-relative nudge multipliers (relative to current plan speed)
 const NUDGE_MULTIPLIERS = [0.5, 1, 2] as const
 
-type PlaybackMode = 'full' | 'extended' | 'key'
-type Phase = 'hero' | 'pregame' | 'playing'
+type PlaybackMode = WatchMode
+/**
+ * hero → pregame → playing ⇄ intermission → … → postgame. The intermission
+ * and the postgame are screens IN the flow (UX audit F-3/F-5): the game pauses
+ * on them and one Continue moves on.
+ */
+type Phase = 'hero' | 'pregame' | 'playing' | 'intermission' | 'postgame'
+
+/** Side-panel preference: which tab, or closed. */
+function readPanelPref(): SideTab | 'closed' {
+  try {
+    const v = localStorage.getItem(LS_PANEL)
+    if (v === 'stats' || v === 'ratings' || v === 'feed' || v === 'closed') return v
+  } catch { /* ignore */ }
+  return 'stats'
+}
+function writePanelPref(v: SideTab | 'closed'): void {
+  try { localStorage.setItem(LS_PANEL, v) } catch { /* ignore */ }
+}
+
+/** "~4 min" / "~50 sec" for a mode card, from the real plan of THIS game. */
+function wallLabel(sec: number): string {
+  if (sec < 90) return `~${Math.max(10, Math.round(sec / 10) * 10)} sec`
+  return `~${Math.round(sec / 60)} min`
+}
+
+/** Wall time spent on each gap between highlights (clock spin + the read). */
+const FF_SPIN_MS = 900
+const FF_READ_MS = 2600
+/** Only gaps longer than this (game seconds) earn the longer read. */
+const FF_READ_MIN_GAP_S = 75
 
 // ── Module-level singletons (survive re-renders, disposed on unmount) ──────────
 
@@ -161,6 +199,13 @@ export function MatchViewer(props: {
   /** Pick the game up at this absolute game second (the Sim view's hand-over);
    *  0 / absent = the normal "drop the puck" start. */
   startAtAbsT?: number
+  /**
+   * Intermission decisions (lines / tactics / goalie / a word to the room).
+   * Absent until the watched game is simulated period by period — the
+   * intermission then offers nothing, because nothing it offered could change
+   * a game that has already been played (render2d/matchday/decisions.ts).
+   */
+  intermissionDecisions?: IntermissionDecisionPort
 }): JSX.Element {
   const { game } = props
 
@@ -253,6 +298,22 @@ export function MatchViewer(props: {
   // Commentary
   const [visibleLines, setVisibleLines] = useState<CommentaryLine[]>([])
 
+  // ── Match-day layer (Track P) ────────────────────────────────────────────────
+  const [intermission, setIntermission] = useState<IntermissionReport | null>(null)
+  const [postgame, setPostgame] = useState<PostgameReport | null>(null)
+  const postgameDismissedRef = useRef<boolean>(false)
+  // Intermissions already shown (by period), so a replay or a rebuild never
+  // shows one twice; a scrub back before a break re-arms it.
+  const shownBreaksRef = useRef<Set<number>>(new Set())
+  // A fast-forward that an intermission interrupted: resume it on Continue.
+  const pendingJumpRef = useRef<number | null>(null)
+  const [panel, setPanel] = useState<SideTab | 'closed'>(readPanelPref)
+  // Dead air (F-8): the standings of the game + the bench's line, while the
+  // clock spins to the next highlight.
+  const [ffInfo, setFfInfo] = useState<{ stats: MatchStats; line: string } | null>(null)
+  // The spinning clock's game time (2 s buckets): the side panel follows it.
+  const [ffAbs, setFfAbs] = useState<number | null>(null)
+
   // Controls
   const [sfxEnabled, setSfxEnabled]             = useState<boolean>(true)
 
@@ -288,6 +349,33 @@ export function MatchViewer(props: {
   const ppWindows = useMemo(() => {
     const homeIds = new Set(game.homePlayerIds)
     return powerPlayWindows(game.stream, (id) => homeIds.has(id))
+  }, [game])
+
+  // The match-day fold: one pass over the stream (positions from tonight's
+  // broadcast context when it has arrived), folded on demand to any clock.
+  const matchIndex: MatchIndex = useMemo(() => {
+    const positions: Record<string, string> = {}
+    for (const p of Object.values(bctx.players)) positions[p.id] = p.position
+    return buildMatchIndex(game, positions)
+  }, [game, bctx])
+  const matchIndexRef = useRef<MatchIndex>(matchIndex)
+  matchIndexRef.current = matchIndex
+  const inks = useMemo(() => sideInks(game.homeColors), [game])
+  const abbrs = useMemo(() => ({ home: game.homeAbbr, away: game.awayAbbr }), [game])
+  const seed = bctx.gameKey || `${game.awayAbbr}@${game.homeAbbr}`
+  const seedRef = useRef(seed)
+  seedRef.current = seed
+
+  // Real wall-time estimates for the mode cards (F-9: "~60 sec" must be true).
+  const modeTimes = useMemo(() => {
+    const goals = game.stream.filter((e) => e.type === 'goal').length
+    const out = {} as Record<PlaybackMode, number>
+    for (const m of ['full', 'extended', 'comprehensive', 'key'] as const) {
+      const est = estimateWallSeconds(planFor(game.stream, m))
+      // + the goal celebration/replay the viewer holds for (replays on by default outside Key)
+      out[m] = est + goals * (m === 'key' ? 0 : 12.5)
+    }
+    return out
   }, [game])
 
   // Sync refs
@@ -495,6 +583,7 @@ export function MatchViewer(props: {
           // goals already on the board, no cues re-fired, the ticker backfilled.
           prevScoreRef.current = timeline.scoreAt(at)
           for (const c of planRefB.current.game) if (c.at <= at) firedCuesRef.current.add(c.id)
+          for (const b of matchIndexRef.current.intermissions) if (b.absT <= at) shownBreaksRef.current.add(b.period)
           lastCommentaryAbsT.current = at
           lastAbsTRef.current = at
           cursorRef.current?.seek(at)
@@ -680,6 +769,20 @@ export function MatchViewer(props: {
       stoppageTimerRef.current = setTimeout(() => setStoppageChip(null), 1800)
     }
 
+    // ── Intermission: the game stops at the end of a period (F-3) ─────────────
+    // Held while a goal replay is pending or running — it shows once the
+    // replay hands back to the live moment (which is past the horn).
+    if (!replayActiveRef.current && !replaySkipRef.current && !ffActiveRef.current) {
+      const brk = matchIndexRef.current.intermissions.find(
+        (b) => b.absT <= currentAbsT && !shownBreaksRef.current.has(b.period),
+      )
+      if (brk) {
+        _enterIntermission(brk.period, null)
+        lastAbsTRef.current = currentAbsT
+        return
+      }
+    }
+
     // ── Playback speed from plan / fast-forward between highlights ─────────────
     if (!replayActiveRef.current && !ffActiveRef.current) {
       // In extended/key modes, when we reach dead air between highlights we
@@ -709,11 +812,37 @@ export function MatchViewer(props: {
     const fromAbsT = v.progress * dur
     if (toAbsT <= fromAbsT + 0.5) return // nothing meaningful to skip
 
+    // An intermission inside the gap comes first; the jump resumes after it.
+    const brk = matchIndexRef.current.intermissions.find(
+      (b) => b.absT > fromAbsT && b.absT <= toAbsT && !shownBreaksRef.current.has(b.period),
+    )
+    if (brk) {
+      _enterIntermission(brk.period, toAbsT)
+      return
+    }
+
     ffActiveRef.current = true
     rendererRef.current?.pause()
     schedulerRef.current?.cancel()
 
-    const SPIN_MS = 900
+    // Dead air carries information (F-8): where the game stands at the next
+    // highlight and one line from the bench. Long gaps hold long enough to read.
+    const longGap = toAbsT - fromAbsT >= FF_READ_MIN_GAP_S
+    {
+      const idx = matchIndexRef.current
+      const stats = computeMatchStats(idx, toAbsT)
+      const ours = idx.userSide === 'home' ? stats.home : stats.away
+      const theirs = idx.userSide === 'home' ? stats.away : stats.home
+      const line = assistantLiveLine({
+        game: stats, us: ours, them: theirs, userSide: idx.userSide, ratings: rateMatch(stats),
+        scope: 'game', period: stats.period, seed: seedRef.current,
+      })
+      setFfInfo({ stats, line })
+    }
+    const SPIN_MS = FF_SPIN_MS
+    const TOTAL_MS = longGap ? FF_READ_MS : FF_SPIN_MS
+    const lines = commentaryLinesRef.current
+    let shownCount = -1
     let startTs: number | null = null
     const step = (ts: number): void => {
       if (startTs === null) startTs = ts
@@ -722,7 +851,15 @@ export function MatchViewer(props: {
       const eased = 1 - (1 - t) * (1 - t)
       const cur = fromAbsT + (toAbsT - fromAbsT) * eased
       setFfClock(_absToClock(cur))
-      if (t < 1) {
+      setFfAbs(Math.floor(cur / 2) * 2)
+      // The ticker keeps up with the spinning clock instead of freezing.
+      let n = 0
+      while (n < lines.length && lines[n]!.absT <= cur) n++
+      if (n !== shownCount) {
+        shownCount = n
+        setVisibleLines(lines.slice(Math.max(0, n - 50), n))
+      }
+      if (ts - startTs < TOTAL_MS) {
         ffRafRef.current = requestAnimationFrame(step)
         return
       }
@@ -741,8 +878,42 @@ export function MatchViewer(props: {
       setVisibleLines(commentaryLinesRef.current.filter((l) => l.absT <= toAbsT).slice(-50))
       ffActiveRef.current = false
       setFfClock(null)
+      setFfInfo(null)
+      setFfAbs(null)
     }
     ffRafRef.current = requestAnimationFrame(step)
+  }
+
+  /** Stop at the end of a period: pause, and put the intermission up. */
+  function _enterIntermission(period: number, resumeJumpTo: number | null): void {
+    shownBreaksRef.current.add(period)
+    pendingJumpRef.current = resumeJumpTo
+    rendererRef.current?.pause()
+    clearBroadcast()
+    setStoppageChip(null)
+    setIntermission(buildIntermission(matchIndexRef.current, period, seedRef.current))
+    setPhase('intermission')
+  }
+
+  /** Continue: back to the ice for the next period (or the interrupted jump). */
+  function continueFromIntermission(): void {
+    setIntermission(null)
+    setPhase('playing')
+    const jump = pendingJumpRef.current
+    pendingJumpRef.current = null
+    if (jump !== null) {
+      _startFastForward(jump)
+      return
+    }
+    const v = viewRef.current
+    const dur = gameDurationRef.current
+    if (v && dur > 0) {
+      const at = v.progress * dur
+      lastAbsTRef.current = at
+      cursorRef.current?.seek(at)
+      rendererRef.current?.setSpeed(currentSpeed(planRef.current, at) * nudgeRef.current)
+    }
+    rendererRef.current?.play()
   }
 
   function _endReplay(): void {
@@ -930,6 +1101,11 @@ export function MatchViewer(props: {
       // Seeking back re-arms the cues after the seek point.
       const fired = firedCuesRef.current
       for (const c of planRefB.current.game) if (c.at > at) fired.delete(c.id)
+      // A scrub past a break skips it; a scrub back before one re-arms it.
+      for (const b of matchIndexRef.current.intermissions) {
+        if (b.absT <= at) shownBreaksRef.current.add(b.period)
+        else shownBreaksRef.current.delete(b.period)
+      }
       const backfill = commentaryLinesRef.current.filter((l) => l.absT <= at)
       setVisibleLines(backfill.slice(-50))
       lastCommentaryAbsT.current = at
@@ -974,15 +1150,80 @@ export function MatchViewer(props: {
     ? { ...view, homeScore: held.homeScore, awayScore: held.awayScore, clock: held.clock, period: held.period }
     : view
 
+  // Live stats (SOG on the bug, the side panel): folded to the LIVE clock
+  // (held through a replay), bucketed to 2 game-seconds so the fold runs a few
+  // times a second of play rather than every frame.
+  const liveAbsT = ffAbs ?? ((held ?? view) ? (held ?? view)!.progress * gameDurationRef.current : 0)
+  const liveBucket = phase === 'hero' || phase === 'pregame' ? -1 : Math.floor(liveAbsT / 2) * 2
+  const liveStats: MatchStats | null = useMemo(
+    () => (liveBucket < 0 ? null : computeMatchStats(matchIndex, liveBucket)),
+    [matchIndex, liveBucket],
+  )
+
+  // The final horn → the postgame screen (F-5), once any goal replay is done.
+  const ended = !!view?.ended
+  useEffect(() => {
+    if (phase !== 'playing' || !ended || replayActive || postgameDismissedRef.current) return
+    const t = setTimeout(() => {
+      if (replaySkipRef.current || postgameDismissedRef.current) return
+      schedulerRef.current?.cancel()
+      setPostgame(buildPostgame(matchIndexRef.current))
+      setPhase('postgame')
+    }, 1400)
+    return () => clearTimeout(t)
+  }, [phase, ended, replayActive])
+
+  function stayOnIce(): void {
+    postgameDismissedRef.current = true
+    setPostgame(null)
+    setPhase('playing')
+  }
+
+  function handlePanel(next: SideTab | 'closed'): void {
+    writePanelPref(next)
+    setPanel(next)
+    requestAnimationFrame(() => rendererRef.current?.resize())
+  }
+
+  const feed = (
+    <div ref={tickerRef} style={{ ...tickerScrollStyle, padding: 0 }}>
+      {visibleLines.length === 0 ? (
+        <div style={{ color: MUTED, fontSize: 12, padding: '8px 4px' }}>
+          {phase === 'hero' ? 'Pick a mode to begin…' : 'Awaiting first event…'}
+        </div>
+      ) : (
+        visibleLines.map((line, i) => (
+          <div key={`${line.absT}-${i}`} style={{
+            padding: '5px 4px',
+            borderBottom: `1px solid rgba(42,34,64,0.4)`,
+            fontSize: 12, lineHeight: 1.4,
+            color: line.importance === 3 ? '#ffd700' : line.importance === 2 ? 'var(--text)' : MUTED,
+            fontWeight: line.importance === 3 ? 700 : 400,
+            background: line.importance === 3 ? 'rgba(255,215,0,0.06)' : 'transparent',
+          }}>
+            <span style={{ color: MUTED, fontSize: 10, marginRight: 4 }}>{line.clock}</span>
+            {line.text}
+          </div>
+        ))
+      )}
+    </div>
+  )
+
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
-    <section style={{ position: 'relative' }}>
-      {/* ── Top bar ────────────────────────────────────────────────────── */}
+    <section style={{ position: 'relative', minHeight: phase === 'intermission' || phase === 'postgame' ? 'calc(100vh - 32px)' : undefined }}>
+      {/* ── Top bar ──────────────────────────────────────────────────────
+          One scoreboard only: the broadcast bug on the ice (F-23). */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         marginBottom: 12, gap: 10, flexWrap: 'wrap',
       }}>
-        <Scoreboard game={game} view={shownView} userSide={userSide} replay={replayActive} />
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
+          <span style={{ fontSize: 16, fontWeight: 800, letterSpacing: 0.4 }}>
+            {game.awayAbbr} <span style={{ color: MUTED, fontWeight: 600 }}>@</span> {game.homeAbbr}
+          </span>
+          <span style={{ color: MUTED, fontSize: 12 }}>{game.awayName} at {game.homeName}</span>
+        </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           {/* 2D / 3D toggle */}
@@ -1003,6 +1244,13 @@ export function MatchViewer(props: {
             <Icon size={14}>{commentaryOn ? <Icons.Volume /> : <Icons.VolumeOff />}</Icon> Commentary
           </button>
 
+          {/* Match panel: live stats / ratings / feed beside the ice (F-6) */}
+          <button className="btn btn-ghost" onClick={() => handlePanel(panel === 'closed' ? 'stats' : 'closed')}
+            title={panel === 'closed' ? 'Show the match panel (stats, ratings, feed)' : 'Hide the match panel'}
+            style={panel !== 'closed' ? modeActiveStyle : { opacity: 0.6 }}>
+            <Icon size={14}><Icons.Chart /></Icon> Match panel
+          </button>
+
           {/* SFX toggle */}
           <button className="btn btn-ghost" onClick={handleSfxToggle}
             title={sfxEnabled ? 'Mute SFX' : 'Enable SFX'}
@@ -1016,7 +1264,7 @@ export function MatchViewer(props: {
         </div>
       </div>
 
-      {/* ── Main layout: viewport + commentary ─────────────────────────── */}
+      {/* ── Main layout: viewport + match panel ────────────────────────── */}
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
 
         {/* ── Viewport ──────────────────────────────────────────────────── */}
@@ -1027,15 +1275,18 @@ export function MatchViewer(props: {
           }} />
 
           {/* Broadcast package: scorebug + TV graphics over either renderer */}
-          {showBroadcast && phase !== 'hero' && (
+          {phase !== 'hero' && (
             <div className="bc-layer">
-              {phase === 'playing' && (
+              {phase === 'playing' && !ffClock && (
                 <Scorebug ctx={bctx} view={shownView} pp={replayActive ? null : ppNow}
-                  ppRemaining={ppNow ? ppRemaining(ppNow.toAbsT, absNow) : null} replay={replayActive} />
+                  ppRemaining={ppNow ? ppRemaining(ppNow.toAbsT, absNow) : null} replay={replayActive}
+                  sog={liveStats ? { home: liveStats.home.shots, away: liveStats.away.shots } : null} />
               )}
-              {phase === 'pregame' && <div className="bc-live"><i /> LIVE</div>}
-              <BroadcastOverlayLayer ctx={bctx} live={liveOverlays}
-                projector={projectorOf(rendererRef.current)} bounds={hostSize} />
+              {showBroadcast && phase === 'pregame' && <div className="bc-live"><i /> LIVE</div>}
+              {showBroadcast && (
+                <BroadcastOverlayLayer ctx={bctx} live={liveOverlays}
+                  projector={projectorOf(rendererRef.current)} bounds={hostSize} />
+              )}
             </div>
           )}
           {phase === 'pregame' && (
@@ -1061,20 +1312,26 @@ export function MatchViewer(props: {
               <div style={{ display: 'flex', gap: 12, justifyContent: 'center', flexWrap: 'wrap' }}>
                 <ModeCard
                   title="Full Game"
-                  subtitle="~10 min"
-                  desc="2× with drama at 1×"
+                  subtitle={wallLabel(modeTimes.full)}
+                  desc="Every shift, drama at 1×"
                   onClick={() => handleDropPuck('full')}
                 />
                 <ModeCard
                   title="Extended"
-                  subtitle="~4 min"
-                  desc="All highlights at 1.5×"
+                  subtitle={wallLabel(modeTimes.extended)}
+                  desc="Every chance, save, penalty and hit"
                   onClick={() => handleDropPuck('extended')}
                 />
                 <ModeCard
+                  title="Comprehensive"
+                  subtitle={wallLabel(modeTimes.comprehensive)}
+                  desc="Goals, big saves, fights, posts, big hits"
+                  onClick={() => handleDropPuck('comprehensive')}
+                />
+                <ModeCard
                   title="Key Moments"
-                  subtitle="~60 sec"
-                  desc="Fast-forward to every goal"
+                  subtitle={wallLabel(modeTimes.key)}
+                  desc="Goals only"
                   onClick={() => handleDropPuck('key')}
                 />
               </div>
@@ -1102,49 +1359,26 @@ export function MatchViewer(props: {
 
           {/* Fast-forward interstitial: the spinning clock between highlights */}
           {ffClock && (
-            <div style={ffOverlayStyle}>
-              <div style={{ fontSize: 12, letterSpacing: 2, color: MUTED, marginBottom: 6 }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon size={14}><Icons.FastForward /></Icon> FAST-FORWARDING</span>
-              </div>
-              <div style={{ fontSize: 44, fontWeight: 800, fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
-                {ffClock}
-              </div>
-              <div style={{ fontSize: 12, color: MUTED, marginTop: 6 }}>{playbackMode === 'key' ? 'to the next goal…' : 'to the next highlight…'}</div>
-            </div>
+            <DeadAir clock={ffClock} mode={playbackMode} stats={ffInfo?.stats ?? null} abbrs={abbrs} line={ffInfo?.line ?? null} />
           )}
         </div>
 
-        {/* ── Commentary ticker ──────────────────────────────────────────── */}
-        <div style={tickerContainerStyle}>
-          <div style={tickerHeaderStyle}>
-            <span style={{ color: MUTED, fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>
-              Commentary
-            </span>
+        {/* ── Match panel: stats / ratings / feed, beside the ice so it never
+            covers the play (F-6). Works the same over 2D and 3D. ────────── */}
+        {panel !== 'closed' && liveStats && (
+          <LiveMatchPanel stats={liveStats} index={matchIndex} inks={inks}
+            tab={panel} onTab={handlePanel} height={hostSize.h} feed={feed} />
+        )}
+        {panel !== 'closed' && !liveStats && (
+          <div style={tickerContainerStyle}>
+            <div style={tickerHeaderStyle}>
+              <span style={{ color: MUTED, fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 1 }}>
+                Commentary
+              </span>
+            </div>
+            {feed}
           </div>
-          <div ref={tickerRef} style={tickerScrollStyle}>
-            {visibleLines.length === 0 ? (
-              <div style={{ color: MUTED, fontSize: 12, padding: '8px 4px' }}>
-                {phase === 'hero' ? 'Pick a mode to begin…' : 'Awaiting first event…'}
-              </div>
-            ) : (
-              visibleLines
-                .filter((l) => l.importance >= 2 || true) // show all; can filter here
-                .map((line, i) => (
-                  <div key={`${line.absT}-${i}`} style={{
-                    padding: '5px 4px',
-                    borderBottom: `1px solid rgba(42,34,64,0.4)`,
-                    fontSize: 12, lineHeight: 1.4,
-                    color: line.importance === 3 ? '#ffd700' : line.importance === 2 ? 'var(--text)' : MUTED,
-                    fontWeight: line.importance === 3 ? 700 : 400,
-                    background: line.importance === 3 ? 'rgba(255,215,0,0.06)' : 'transparent',
-                  }}>
-                    <span style={{ color: MUTED, fontSize: 10, marginRight: 4 }}>{line.clock}</span>
-                    {line.text}
-                  </div>
-                ))
-            )}
-          </div>
-        </div>
+        )}
       </div>
 
       {err && (
@@ -1229,6 +1463,17 @@ export function MatchViewer(props: {
           </div>
         </div>
       )}
+
+      {/* ── Intermission (F-3) and postgame (F-5): screens in the flow ──── */}
+      {phase === 'intermission' && intermission && (
+        <IntermissionScreen report={intermission} abbrs={abbrs} inks={inks} userSide={userSide}
+          onContinue={continueFromIntermission}
+          {...(props.intermissionDecisions ? { decisions: props.intermissionDecisions } : {})} />
+      )}
+      {phase === 'postgame' && postgame && (
+        <PostgameScreen report={postgame} abbrs={abbrs} inks={inks} names={game.playerNames}
+          playoff={bctx.playoff} onBack={props.onClose} onStay={stayOnIce} />
+      )}
     </section>
   )
 }
@@ -1249,7 +1494,7 @@ function ModeCard(props: {
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
-        width: 150, padding: '16px 12px', textAlign: 'center',
+        width: 160, padding: '16px 12px', textAlign: 'center', whiteSpace: 'normal',
         background: hover ? 'var(--bg3)' : 'var(--bg2)',
         border: `1px solid ${hover ? 'var(--violet)' : 'var(--line)'}`,
         borderRadius: 10, cursor: 'pointer', transition: 'all 0.15s ease',
@@ -1260,46 +1505,6 @@ function ModeCard(props: {
       <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--violet-h)' }}>{props.subtitle}</span>
       <span style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>{props.desc}</span>
     </button>
-  )
-}
-
-function Scoreboard(props: {
-  game: WatchedGame
-  view: MatchView | null
-  userSide: 'home' | 'away'
-  replay?: boolean
-}): JSX.Element {
-  const { game, view } = props
-  const periodLabel = view ? (view.period > 3 ? 'OT' : `P${view.period}`) : 'P1'
-  return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 16,
-      background: PANEL, borderRadius: 8, padding: '10px 18px',
-    }}>
-      <TeamScore abbr={game.awayAbbr} score={view?.awayScore ?? 0}
-        color={game.awayColors.primary} mine={props.userSide === 'away'} />
-      <div style={{ textAlign: 'center', minWidth: 72 }}>
-        <div style={{ fontSize: 20, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
-          {view?.clock ?? '20:00'}
-        </div>
-        <div style={{ color: props.replay ? '#ffd700' : 'var(--muted)', fontSize: 11, fontWeight: props.replay ? 800 : 400, letterSpacing: props.replay ? 1 : 0 }}>
-          {props.replay ? 'REPLAY' : periodLabel}
-        </div>
-      </div>
-      <TeamScore abbr={game.homeAbbr} score={view?.homeScore ?? 0}
-        color={game.homeColors.primary} mine={props.userSide === 'home'} />
-    </div>
-  )
-}
-
-function TeamScore(props: { abbr: string; score: number; color: number; mine: boolean }): JSX.Element {
-  const hex = `#${props.color.toString(16).padStart(6, '0')}`
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <span style={{ width: 10, height: 10, borderRadius: '50%', background: hex, flexShrink: 0 }} />
-      <span style={{ fontWeight: props.mine ? 800 : 600 }}>{props.abbr}</span>
-      <span style={{ fontSize: 22, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{props.score}</span>
-    </div>
   )
 }
 
@@ -1360,16 +1565,6 @@ const stoppageChipStyle: CSSProperties = {
   pointerEvents: 'none', zIndex: 13,
   border: '1px solid rgba(251,191,36,0.4)',
   animation: 'fadeIn 0.12s ease',
-}
-
-const ffOverlayStyle: CSSProperties = {
-  position: 'absolute', inset: 0,
-  display: 'flex', flexDirection: 'column',
-  alignItems: 'center', justifyContent: 'center',
-  background: 'rgba(8,6,16,0.82)',
-  pointerEvents: 'none', zIndex: 12,
-  textAlign: 'center',
-  animation: 'fadeIn 0.1s ease',
 }
 
 const tickerContainerStyle: CSSProperties = {

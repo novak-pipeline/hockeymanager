@@ -88,6 +88,20 @@
   letter-spacing: 0.08em;
 }
 
+/* Shots on goal (F-24), away · home in the bug's own order */
+.bc-scorebug .sog {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 10px;
+  background: var(--bc-panel);
+  color: #fff;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.bc-scorebug .sog .lab { color: var(--bc-muted); font-size: 10px; letter-spacing: 0.1em; }
+.bc-scorebug .sog .sep { color: var(--bc-muted); }
+
 /* REPLAY tag: the bug holds the live score while a replay rewinds the picture */
 .bc-scorebug .replay {
   display: flex;

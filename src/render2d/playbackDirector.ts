@@ -13,6 +13,8 @@
  *                dead time at 5×; ~3.5 s post-goal celebration at 1×.
  *                Target wall time: 8–11 min.
  *   'extended' — 1.5× through extended highlight segments, SKIP_SPEED elsewhere.
+ *   'comprehensive' — 1.25× through the broadcast moments (goals, big saves,
+ *                fights, posts, big hits), SKIP_SPEED elsewhere.
  *   'key'      — 1× through goal + best-chance + deciding moments, SKIP_SPEED
  *                elsewhere.
  *
@@ -25,7 +27,7 @@
 
 import type { GameStream } from '@domain'
 import { absTime } from './timeline'
-import { buildHighlights, selectMode } from './highlights'
+import { highlightsFor, type HighlightMode } from './highlights'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -56,6 +58,9 @@ export const SKIP_SPEED = 30
 /** Speed through active segments in 'extended' mode. */
 const EXTENDED_ACTIVE_SPEED = 1.5
 
+/** Speed for active segments in 'comprehensive' mode. */
+const COMPREHENSIVE_ACTIVE_SPEED = 1.25
+
 /** Speed through active segments in 'key' mode. */
 const KEY_ACTIVE_SPEED = 1
 
@@ -81,7 +86,7 @@ export interface SpeedSegment {
  */
 export function planFor(
   stream: GameStream,
-  mode: 'full' | 'extended' | 'key',
+  mode: WatchMode,
 ): SpeedSegment[] {
   if (stream.length === 0) return []
 
@@ -89,8 +94,25 @@ export function planFor(
   if (duration <= 0) return []
 
   if (mode === 'full') return _planFull(stream, duration)
-  if (mode === 'extended') return _planHighlight(stream, duration, 'extended')
-  return _planHighlight(stream, duration, 'key')
+  return _planHighlight(stream, duration, mode)
+}
+
+/** Every watch level the viewer offers. */
+export type WatchMode = 'full' | HighlightMode
+
+/**
+ * Roughly how long a plan takes to watch, in wall seconds: game time / speed
+ * through everything that plays, plus a fixed cost per skip (the viewer spins
+ * the clock rather than playing the filler). Replays and the pregame open are
+ * extra and not counted here.
+ */
+export function estimateWallSeconds(plan: SpeedSegment[], perSkipSeconds = 1.5): number {
+  let s = 0
+  for (const seg of plan) {
+    if (seg.speed >= SKIP_SPEED) s += perSkipSeconds
+    else s += (seg.toAbsT - seg.fromAbsT) / seg.speed
+  }
+  return s
 }
 
 /**
@@ -222,17 +244,16 @@ function _planFull(stream: GameStream, duration: number): SpeedSegment[] {
 function _planHighlight(
   stream: GameStream,
   duration: number,
-  mode: 'extended' | 'key',
+  mode: HighlightMode,
 ): SpeedSegment[] {
-  const allSegs = buildHighlights(stream)
-  const selected = selectMode(allSegs, mode)
+  const selected = highlightsFor(stream, mode)
 
   if (selected.length === 0) {
     // No highlights — one big skip
     return [{ fromAbsT: 0, toAbsT: duration, speed: SKIP_SPEED }]
   }
 
-  const activeSpeed = mode === 'extended' ? EXTENDED_ACTIVE_SPEED : KEY_ACTIVE_SPEED
+  const activeSpeed = mode === 'extended' ? EXTENDED_ACTIVE_SPEED : mode === 'comprehensive' ? COMPREHENSIVE_ACTIVE_SPEED : KEY_ACTIVE_SPEED
   const result: SpeedSegment[] = []
   let cursor = 0
 

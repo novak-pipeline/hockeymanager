@@ -563,7 +563,7 @@ export function directBroadcast(
 }
 
 /** Watch modes, as the match viewer offers them. */
-export type WatchMode = 'full' | 'extended' | 'key'
+export type WatchMode = 'full' | 'extended' | 'comprehensive' | 'key'
 
 /** The cold open for Key Moments: the arena title, then the puck. */
 export const KEY_OPEN_MS = 3500
@@ -573,7 +573,7 @@ export const KEY_OPEN_MS = 3500
  * to sit through the whole broadcast open (rookie laps, story cards, both
  * lineups, the goalie tape — up to ~45 s) before the first puck.
  *   full     → the open the presentation setting asks for
- *   extended → at most the compact open (no lineups / tape / anthem)
+ *   extended, comprehensive → at most the compact open (no lineups / tape / anthem)
  *   key      → a cold open: the first KEY_OPEN_MS of the compact open
  * `compact` is the same game directed at presentation 'compact' (only its
  * pregame is used — the in-game cues stay the setting's).
@@ -585,7 +585,7 @@ export function openForWatchMode(
 ): Pick<BroadcastPlan, 'pregame' | 'pregameMs'> {
   if (mode === 'full' || setting.pregameMs <= 0) return { pregame: setting.pregame, pregameMs: setting.pregameMs }
   const base = setting.pregameMs <= compact.pregameMs ? setting : compact
-  if (mode === 'extended') return { pregame: base.pregame, pregameMs: base.pregameMs }
+  if (mode === 'extended' || mode === 'comprehensive') return { pregame: base.pregame, pregameMs: base.pregameMs }
   const ms = Math.min(KEY_OPEN_MS, base.pregameMs)
   return { pregame: base.pregame.filter((c) => c.at < ms), pregameMs: ms }
 }

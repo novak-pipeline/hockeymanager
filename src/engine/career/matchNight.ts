@@ -41,7 +41,11 @@ export interface MatchKeysArgs {
 }
 
 const pct = (f: number): string => `${(f * 100).toFixed(1)}%`
-const sv = (f: number): string => `.${Math.round(f * 1000).toString().padStart(3, '0')}`
+/** Save percentage the way hockey prints it: ".915", and a perfect night as "1.000" (not ".1000"). */
+const sv = (f: number): string => {
+  const r = Math.round(Math.max(0, f) * 1000)
+  return r >= 1000 ? '1.000' : `.${r.toString().padStart(3, '0')}`
+}
 
 /**
  * Rank every real, sample-backed delta between the clubs and return the top
