@@ -106,8 +106,8 @@ describe('#154: the team practice regimen reaches the whole pro organisation', (
    * farm. Without that pin the two arms diverge on the NHL side and the farm
    * comparison drowns in the noise.
    */
-  function farmScoringGains(focus: 'balanced' | 'offense'): Map<string, number> {
-    const { career, data, nhl, ahl } = setup()
+  function farmScoringGains(focus: 'balanced' | 'offense', seed = 2029): Map<string, number> {
+    const { career, data, nhl, ahl } = setup(seed)
     career.setPractice({
       teamFocus: focus,
       perPlayerFocus: nhl.roster.map((id) => [id as string, 'balanced' as const]),
@@ -139,18 +139,24 @@ describe('#154: the team practice regimen reaches the whole pro organisation', (
   })
 
   it('an offence focus grows AHL prospects’ scoring faster than a balanced one', () => {
-    const balanced = farmScoringGains('balanced')
-    const offense = farmScoringGains('offense')
-
-    const delta = [...offense.keys()]
-      .filter((id) => balanced.has(id))
-      .map((id) => offense.get(id)! - balanced.get(id)!)
-    expect(delta.length).toBeGreaterThan(5)
+    // Measured over five leagues, not one. A single seed's farm is ~20 players
+    // whose end-of-window membership (call-ups, injuries, a living AI market
+    // reshaping their opponents) moves the one-seed mean between 0.01 and 0.14
+    // with or without the lever changing — measured 2026-09-26: seeds
+    // 2029–2033 read 0.021 / 0.140 / 0.060 / 0.013 / 0.092. The bound is
+    // unchanged; the sample is just big enough to mean something.
+    const delta: number[] = []
+    for (const seed of [2029, 2030, 2031, 2032, 2033]) {
+      const balanced = farmScoringGains('balanced', seed)
+      const offense = farmScoringGains('offense', seed)
+      for (const id of offense.keys()) if (balanced.has(id)) delta.push(offense.get(id)! - balanced.get(id)!)
+    }
+    expect(delta.length).toBeGreaterThan(25)
     const mean = delta.reduce((a, b) => a + b, 0) / delta.length
     expect(
       mean,
       'the team practice focus is not reaching the farm, so it only ever touches players with ' +
         'no room left to grow — the state the audit found and fixed',
     ).toBeGreaterThan(0.05)
-  })
+  }, 180_000)
 })

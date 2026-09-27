@@ -3,7 +3,7 @@ import { generateLeague } from '@data/generate'
 import { feedStoryReachesInbox, isBreakingNews } from '@domain'
 import { playerValue } from '@engine/league/trades'
 import { DAILY_POST_BUDGET } from '@engine/story/salience'
-import { VOICE_DAILY_CAP } from '@engine/story/voices'
+import { CLUB_DAILY_CAP, VOICE_DAILY_CAP } from '@engine/story/voices'
 import { BEAT_LINK_DAILY_CAP } from '@engine/story/mediaCast'
 import { Career } from './career'
 
@@ -331,8 +331,11 @@ describe('Feed Phase A (salience engine)', () => {
     // Two streams, two caps (FEED-V2-1): pundits keep DAILY_POST_BUDGET a day,
     // player/GM voices keep VOICE_DAILY_CAP, and no day exceeds the sum.
     const kindOf = (p: { authorId?: string }): string => feed.authors[p.authorId!]?.kind ?? 'wire'
+    // F5 added a third stream — the official club accounts — with its own cap
+    // (the season harness already counts it separately; this test predated it).
     const punditPerDay = new Map<number, number>()
     const voicePerDay = new Map<number, number>()
+    const clubPerDay = new Map<number, number>()
     const perDay = new Map<number, number>()
     // MEDIA-BEAT: the beat outlet's link posts are a third stream with their own
     // cap (BEAT_LINK_DAILY_CAP), not pundit takes.
@@ -344,13 +347,14 @@ describe('Feed Phase A (salience engine)', () => {
       }
       perDay.set(p.day, (perDay.get(p.day) ?? 0) + 1)
       const k = kindOf(p)
-      const bucket = k === 'player' || k === 'gm' ? voicePerDay : punditPerDay
+      const bucket = k === 'club' ? clubPerDay : k === 'player' || k === 'gm' ? voicePerDay : punditPerDay
       bucket.set(p.day, (bucket.get(p.day) ?? 0) + 1)
     }
     for (const n of punditPerDay.values()) expect(n).toBeLessThanOrEqual(DAILY_POST_BUDGET)
     for (const n of voicePerDay.values()) expect(n).toBeLessThanOrEqual(VOICE_DAILY_CAP)
     for (const n of beatPerDay.values()) expect(n).toBeLessThanOrEqual(BEAT_LINK_DAILY_CAP)
-    for (const n of perDay.values()) expect(n).toBeLessThanOrEqual(DAILY_POST_BUDGET + VOICE_DAILY_CAP)
+    for (const n of clubPerDay.values()) expect(n).toBeLessThanOrEqual(CLUB_DAILY_CAP)
+    for (const n of perDay.values()) expect(n).toBeLessThanOrEqual(DAILY_POST_BUDGET + VOICE_DAILY_CAP + CLUB_DAILY_CAP)
     // Curation floor: with no follows, only floor-clearing (70+) posts may
     // have mirrored into the inbox — and a feed-channel story that survives
     // the curation must have cleared the ADMISSION bar. A7 split admission
@@ -601,7 +605,7 @@ describe('summer takeover (#145) + camps (M3)', () => {
     const before = staged!.getFaHub().rows.some((r) => r.playerId === ptoId)
     const res = staged!.submitTrainingCamp([{ playerId: ptoId, place: 'nhl' }])
     expect(res.ok).toBe(true)
-    expect(res.notes.some((n) => /earns a contract|makes the team/.test(n))).toBe(true)
+    expect(res.notes.join(' | ')).toMatch(/earns a contract|makes the team/)
     if (before) expect(staged!.getFaHub().rows.some((r) => r.playerId === ptoId)).toBe(false)
   })
 

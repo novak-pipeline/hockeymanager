@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { asPlayerId, asTeamId, type Lines, type PlayerId } from '@domain'
 import { generateLeague } from '@data/generate'
+import { askTerms } from '@engine/league/contracts'
 import { buildCompetitions, type RawCompetition } from '@data/leagueWorld'
 import { generateDraftClass } from '@engine/league/offseason'
 import { computeComposites } from '@engine/ratings/composites'
@@ -2446,9 +2447,11 @@ describe('Career — GM career', () => {
     }
     p.composites = computeComposites(p.ratings, p.role, p.position)
     // Cap headroom + a clear overpay → the rival-interest term clamps to zero.
-    // (7 years = the UFA term ceiling; only his own club could offer an 8th.)
+    // Offered at the term he asks for (capped at the 7-year UFA ceiling): the
+    // read under test is the money, not a veteran balking at a long term.
     data.teams.get(userId)!.finances.salaryCap = 400_000_000
-    const r = career.signFreeAgent(faId, 20_000_000, 7)
+    const term = Math.min(7, askTerms(p, (career as unknown as { year: number }).year).years)
+    const r = career.signFreeAgent(faId, 20_000_000, term)
     expect(r.signed).toBe(true)
     expect(data.teams.get(userId)!.roster.includes(asPlayerId(faId))).toBe(true)
   })
@@ -2537,6 +2540,9 @@ describe('Career — offer sheets', () => {
     rival.roster = rival.roster.slice(0, 10)
     rival.finances.salaryCap = 300_000_000
     data.teams.get(userId)!.finances.salaryCap = 300_000_000
+    // Sheets are aimed (only an aggressive GM with the room tenders), so give
+    // every rival the room — the test is the mechanics, not who has space.
+    for (const t of data.league.teams) if (t !== userId) data.teams.get(t)!.finances.salaryCap = 300_000_000
     // Two strong, young, expiring RFAs on the user's club.
     const fwds = data.teams.get(userId)!.roster
       .map((id) => data.players.get(id)!)
@@ -2744,7 +2750,9 @@ describe('#164 FA standing offers — leading/contested/trailing read', () => {
     data.teams.get(userId)!.finances.salaryCap = 600_000_000
 
     const hub = career.getFaHub()
-    const target = hub.rows.find((r) => !r.pendingOffer)
+    // A player with a modest field (a 7-club bidding war can snipe even a big
+    // overpay, by design) — the read under test is the overpay's.
+    const target = hub.rows.find((r) => !r.pendingOffer && (r.rivals?.length ?? 0) <= 3)
     if (!target) return // empty market on this seed — nothing to assert
 
     // A 40% overpay clears his ask by a mile → he should read as leading.

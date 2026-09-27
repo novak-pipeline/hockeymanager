@@ -138,4 +138,21 @@ export interface League {
   /** World Renewal: champions, awards, league records and international
    *  tournaments of the wider world. Additive — absent on old saves. */
   worldHistory?: WorldHistory
+  /**
+   * The league economy's anchor: the NHL ceiling the league OPENED with. Every
+   * price (asks, minimum, ELC, fair-salary curve) is quoted in that base year's
+   * dollars and moved by today's ceiling / baseCap (engine/league/economy.ts).
+   * Optional/additive — an older save anchors to the ceiling it loads with.
+   */
+  economy?: {
+    baseCap: number
+    /** Mean overall of the league's top 200 NHL players in the base year (the
+     *  talent anchor). Optional — set the first time the economy installs. */
+    baseTalent?: number
+    /** The talent-points shift that makes the ask curve reproduce the payroll
+     *  the league opened with (the price curve is written for the real NHL; a
+     *  fictional league whose top end sits lower on the same scale is priced by
+     *  standing). Optional — calibrated the first time the economy installs. */
+    priceShift?: number
+  }
 }

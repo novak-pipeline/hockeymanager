@@ -33,6 +33,7 @@
 import type { DraftPick, Handedness, Player, PlayerId, Position, Team, TeamId } from '@domain'
 import { ratedOverall, ratedPotential } from '@engine/ratings/composites'
 import type { Rng } from '@engine/shared/rng'
+import { talentShift, wageIndex } from './economy'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
 
@@ -97,8 +98,13 @@ function ageMultiplier(age: number): number {
  * salary curve (data/generate.ts makeContract) so contract drag is centered on
  * the league's actual pay scale.
  */
-const fairSalaryFor = (ovr: number): number =>
-  (0.7 + Math.pow(Math.max(0, ovr - 45) / 45, 2.2) * 11) * 1e6
+/** The market's fair AAV for an overall, in TODAY's dollars (the base curve
+ *  moved with the cap — economy.ts), so contracts don't all read "rich" as the
+ *  ceiling grows. */
+export const fairSalaryFor = (rawOvr: number): number => {
+  const ovr = rawOvr + talentShift()
+  return (0.7 + Math.pow(Math.max(0, ovr - 45) / 45, 2.2) * 11) * 1e6 * wageIndex()
+}
 
 /**
  * Core player value computation for a GIVEN overall, in trade points.
@@ -970,7 +976,7 @@ export function retentionValueBonus(
   receivingTeamCapSpaceAfter: number
 ): number {
   if (retainedAmount <= 0) return 0
-  const millionsRelieved = retainedAmount / 1e6
+  const millionsRelieved = retainedAmount / (1e6 * wageIndex())
   // The more cap-strapped the receiver, the more they value the relief.
   const urgencyFactor = receivingTeamCapSpaceAfter < 5e6 ? 1.4 : 1.0
   return millionsRelieved * CAP_RELIEF_POINTS_PER_MILLION * urgencyFactor
@@ -1774,6 +1780,10 @@ export interface AiAiTradeResult {
   /** Salary the SELLER retains to make the deal fit under the buyer's cap (#157).
    *  Absent/0 = no retention. The seller keeps paying this until the deal expires. */
   retainedAmount?: number
+  /** NHL roster players the BUYER sends back (a hockey trade). Absent = none. */
+  buyerPlayerIds?: PlayerId[]
+  /** Picks the SELLER attaches (a cap-dump sweetener). Absent = none. */
+  sellerPicks?: DraftPick[]
   summary: string
 }
 
@@ -1932,7 +1942,7 @@ export function generateAiAiTrade(args: {
  * juniors whose rights it holds. Healthy, no NTC, with real trade value. These
  * are what a buyer packages alongside picks in a "pick and a prospect" return.
  */
-function buyerProspects(
+export function buyerProspects(
   buyer: Team,
   teams: Map<TeamId, Team>,
   players: Map<PlayerId, Player>,

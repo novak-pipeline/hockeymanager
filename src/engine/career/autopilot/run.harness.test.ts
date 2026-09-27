@@ -20,11 +20,13 @@ import type { LeagueData } from '@data/generate'
 import { validateModDatabase, loadModDatabase } from '@data'
 import { Career } from '../career'
 import { runAutopilot } from './autopilot'
+import { renderWorldSummary } from './worldHealth'
 
 const SEED = Number(process.env.AP_SEED ?? 2029)
 const SEASONS = Number(process.env.AP_SEASONS ?? 3)
 const OUT_DIR = process.env.AP_OUT ?? join(process.cwd(), 'docs', 'autopilot')
 const MOD_DB = process.env.AP_MOD_DB ?? join(process.cwd(), 'mods', 'nhl-ehm', 'database.json')
+const OUT_TAG = process.env.AP_TAG ? `-${process.env.AP_TAG}` : ''
 
 function loadLeague(): { data: LeagueData; source: string } {
   if (existsSync(MOD_DB)) {
@@ -50,7 +52,7 @@ describe.skipIf(!process.env.AP_RUN)('autopilot — Cup campaign', () => {
     const career = new Career(data, SEED, userTid)
 
     mkdirSync(OUT_DIR, { recursive: true })
-    const liveFile = join(OUT_DIR, 'trace-live.ndjson')
+    const liveFile = join(OUT_DIR, `trace-live${OUT_TAG}.ndjson`)
     writeFileSync(liveFile, '') // reset the live stream
 
     const trace = runAutopilot(career, {
@@ -59,8 +61,12 @@ describe.skipIf(!process.env.AP_RUN)('autopilot — Cup campaign', () => {
       onEvent: (ev) => appendFileSync(liveFile, JSON.stringify(ev) + '\n'),
     })
 
-    writeFileSync(join(OUT_DIR, 'trace-latest.json'), JSON.stringify(trace, null, 2))
-    writeFileSync(join(OUT_DIR, 'summary-latest.md'), renderSummary(trace))
+    writeFileSync(join(OUT_DIR, `trace-latest${OUT_TAG}.json`), JSON.stringify(trace, null, 2))
+    writeFileSync(join(OUT_DIR, `summary-latest${OUT_TAG}.md`), renderSummary(trace))
+    if (trace.world && trace.worldSummary) {
+      writeFileSync(join(OUT_DIR, `world-health${OUT_TAG}.md`), renderWorldSummary(trace.world, trace.worldSummary))
+      console.log(renderWorldSummary(trace.world, trace.worldSummary))
+    }
 
     // Print the headline to stdout so the run is legible in the terminal.
     console.log(`\n=== AUTOPILOT: ${trace.meta.userTeamName} · ${trace.meta.leagueName} (${source}) ===`)
@@ -91,6 +97,7 @@ function renderSummary(t: ReturnType<typeof runAutopilot>): string {
   L.push(`Decisions: ${t.decisions.length} · trades ${t.summary.totalTrades} · signings ${t.summary.totalSignings} · drafted ${t.summary.totalDrafted}`)
   L.push(`Issues: **${t.summary.critical} critical**, ${t.summary.major} major, ${t.summary.minor} minor${t.summary.endedEarly ? ` — ⚠ ended early: ${t.summary.endReason}` : ''}`)
   L.push('')
+  if (t.world && t.worldSummary) L.push(renderWorldSummary(t.world, t.worldSummary))
   L.push('## Season by season')
   for (const s of t.seasons) {
     L.push(`- **${s.year}** — ${s.record ?? '—'} (${s.points ?? '?'} pts, #${s.rank ?? '?'}) → ${s.playoffResult}${s.wonCup ? ' 🏆' : ''} · ${s.trades} trades, ${s.signings} signings, ${s.drafted} picks · issues C${s.critical}/M${s.major}/m${s.minor}`)

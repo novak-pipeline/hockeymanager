@@ -15,6 +15,7 @@ import { Career } from '../career'
 import { auditSeason, type DayText, type FlavourReport } from './flavorAudit'
 import { diagnose, type Diagnosis, type NeedGroup } from './teamDiagnosis'
 import type { CareerPhase } from '../views'
+import { attachTelemetry, recordWorldSeason, samplePayroll, summarizeWorld, type WorldHealthSummary, type WorldSeasonRecord } from './worldHealth'
 
 /* ────────────────────────────── trace shapes ────────────────────────────── */
 
@@ -121,6 +122,9 @@ export interface AutopilotTrace {
   viewSamples: Record<string, unknown>
   /** E3: every time the GM was dismissed and which chair he took next. */
   jobs: JobChange[]
+  /** League-wide world health, one record per season (the other 31 clubs). */
+  world?: WorldSeasonRecord[]
+  worldSummary?: WorldHealthSummary
   summary: {
     cups: number
     bestFinish: string
@@ -166,6 +170,8 @@ interface Ctx {
   diagYear: number
   /** Board warnings already logged this season (a rise = a new warning). */
   lastWarnings: number
+  /** Mid-season payroll sample for the world-health record, keyed by year. */
+  payroll: Map<number, ReturnType<typeof samplePayroll>>
 }
 
 function log(ctx: Ctx, d: Omit<DecisionRecord, 'seq' | 'season' | 'day' | 'phase'>): void {
@@ -437,7 +443,41 @@ function maintainRoster(ctx: Ctx): void {
   const healthy = squad.rows.filter((p) => !p.injury)
   const skaters = healthy.filter((p) => p.position !== 'G').length
   const goalies = healthy.filter((p) => p.position === 'G').length
-  if (skaters >= 16 && goalies >= 2) return
+  const defence = healthy.filter((p) => p.position === 'D').length
+  // Back under the ceiling once the bodies return: emergency cover (and the
+  // weakest depth) goes down to the farm when the NHL room is over the cap and the
+  // lineup no longer needs him.
+  // A long-term injury is what LTIR is for: his hit comes off while he's out.
+  if (squad.capUsed > squad.salaryCap) {
+    for (const p of squad.rows.filter((r) => r.injury)) {
+      const r = ctx.career.placeOnLtir(p.playerId)
+      if (r.ok) log(ctx, { kind: 'callup', summary: `Placed ${p.name} on LTIR`, drivers: ['over the cap with a long-term injury'], result: r.message, ok: true })
+    }
+  }
+  if (squad.capUsed > squad.salaryCap) {
+    let f = skaters - defence
+    let d = defence
+    let used = squad.capUsed
+    // Weakest first — including an expensive veteran an emergency recall
+    // brought up because he was the only body at the position.
+    const cheap = healthy
+      .filter((p) => p.position !== 'G')
+      .sort((a, b) => a.overall - b.overall)
+    for (const p of cheap) {
+      if (used <= squad.salaryCap) break
+      const isD = p.position === 'D'
+      if (isD ? d <= 7 : f <= 13) continue
+      const r = ctx.career.sendDown(p.playerId)
+      if (!r.ok) continue
+      used -= p.contract.salary
+      if (isD) d--
+      else f--
+      log(ctx, { kind: 'callup', summary: `Sent ${p.name} (${p.overall} OVR ${p.position}) to the farm`, drivers: ['over the cap with the injured back'], result: 'sent down', ok: true })
+    }
+  }
+  // The lineup needs 12 F / 6 D / 2 G — a skater count alone hid a club with
+  // eight healthy defencemen and eleven forwards.
+  if (skaters >= 16 && goalies >= 2 && skaters - defence >= 12 && defence >= 6) return
   const ahl = guarded(ctx, 'getAhlSquadView', () => ctx.career.getAhlSquadView())
   const pool = ahl?.rows ? [...ahl.rows] : []
   const wantG = goalies < 2
@@ -446,14 +486,25 @@ function maintainRoster(ctx: Ctx): void {
     return b.overall - a.overall
   })
   let recalled = 0
+  let recalledG = 0
   for (const p of pool) {
     if (squad.rosterCount + recalled >= 23) break
     const r = ctx.career.callUp(p.playerId)
     if (r.ok) {
       recalled++
+      if (p.position === 'G') recalledG++
       log(ctx, { kind: 'callup', summary: `Recalled ${p.name} (${p.overall} OVR ${p.position})`, drivers: ['keeping NHL depth', wantG ? 'needed a goalie' : 'thin up front'], result: 'recalled', ok: true })
       if (skaters + recalled >= 16 && !wantG) break
     }
+  }
+  // Nobody in the system to recall at a position the lineup can't do without
+  // (a trade took the backup goalie): do what the GM's AGM button does — sign
+  // emergency cover off the market rather than forfeit the next game.
+  // Same for skaters: a capped-out club with an empty farm signs the bodies
+  // it needs to ice twelve forwards and six defence.
+  if (goalies + recalledG < 2 || skaters + recalled - recalledG < 18 || skaters - defence < 12 || defence < 6) {
+    const r = guarded(ctx, 'signEmergencyCover', () => ctx.career.signEmergencyCover())
+    if (r?.ok) log(ctx, { kind: 'callup', summary: `Signed emergency cover: ${r.signed.join(', ')}`, drivers: [goalies + recalledG < 2 ? 'no goalie left to recall' : 'not enough healthy skaters in the organisation'], result: r.message, ok: true })
   }
 }
 
@@ -803,7 +854,11 @@ function doFreeAgency(ctx: Ctx): void {
   if (squad && squad.rosterCount >= 23) return
   noteFeature(ctx, 'free-agency', `The FA hub shows each UFA's ask, his camp's read on us (keen/warm/cold), rival clubs circling, a "decides in N days" market clock, and whether his ask has softened as summer drags — legible two-way market. ${hub.rows.length} names, ${money(hub.capSpace)} to spend.`)
   const plan = getPlan(ctx)
-  let remaining = hub.capSpace
+  // Money already on the table is spoken for (the camps answer days later),
+  // and a sane GM keeps a cushion for the recalls an injury run forces.
+  const tabled = hub.rows.reduce((sum, r) => sum + (r.pendingOffer?.salary ?? 0), 0)
+  const cushion = (squad?.salaryCap ?? 0) * 0.04
+  let remaining = hub.capSpace - tabled - cushion
   // Offers are ASYNC: a tabled offer is a body that may arrive. Table only as
   // many as there are open spots, counting the offers already out — a GM who
   // took over a gutted roster tabled 31 at once and opened the season with 29.
@@ -936,6 +991,10 @@ function recordSeasonEnd(ctx: Ctx, s: SeasonRecord): void {
   flavourNotable.length = 0
   // seenNewsIds deliberately persists — see its declaration.
 
+  // The OTHER 31 clubs: points, champion, payroll, posture — league-wide health.
+  const world = guarded(ctx, 'recordWorldSeason', () => recordWorldSeason(ctx.career, s.year, ctx.payroll.get(s.year)))
+  if (world) (ctx.trace.world ??= []).push(world)
+
   const dash = guarded(ctx, 'getDashboard', () => ctx.career.getDashboard())
   if (dash) {
     s.rank = dash.userTeam.rank
@@ -1001,7 +1060,7 @@ export function runAutopilot(career: Career, opts: { seasons: number; source: st
       firings: 0, boardWarnings: 0, ultimatums: 0, coachChangesPerSeason: 0, coachMidseasonPerSeason: 0, gmChangesPerSeason: 0,
     },
   }
-  const ctx: Ctx = { career, trace, seq: 0, offered: new Set(), plan: 'retool', planYear: -1, diagYear: -1, lastWarnings: 0 }
+  const ctx: Ctx = { career, trace, seq: 0, offered: new Set(), plan: 'retool', planYear: -1, diagYear: -1, lastWarnings: 0, payroll: new Map() }
   if (opts.onEvent) ctx.onEvent = opts.onEvent
 
   const targetYear = career.year + opts.seasons
@@ -1064,6 +1123,11 @@ export function runAutopilot(career: Career, opts: { seasons: number; source: st
       watchBoard(ctx, dash)
       getPlan(ctx) // set + log the season's contend/retool/rebuild plan (once per year)
       if (dash.day >= 30) snapshotViews(ctx) // one mid-season capture of what the screens serve
+      // League payroll after camp and the summer market have settled.
+      if (dash.day >= 30 && !ctx.payroll.has(career.year)) {
+        const pay = guarded(ctx, 'samplePayroll', () => samplePayroll(career))
+        if (pay) ctx.payroll.set(career.year, pay)
+      }
       clearMeetings(ctx, dash)
       clearInteractions(ctx)
       maintainRoster(ctx)
@@ -1104,6 +1168,10 @@ export function runAutopilot(career: Career, opts: { seasons: number; source: st
   if (season && !season.league) attachLeagueChurn(ctx, season)
   runSanity(ctx)
 
+  if (trace.world) {
+    attachTelemetry(trace.world, career)
+    trace.worldSummary = summarizeWorld(trace.world)
+  }
   trace.meta.seasonsPlayed = trace.seasons.length
   trace.summary.cups = trace.seasons.filter((s) => s.wonCup).length
   trace.summary.totalTrades = trace.seasons.reduce((n, s) => n + s.trades, 0)
