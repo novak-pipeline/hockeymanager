@@ -557,13 +557,20 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
           faceY: cy
         })
       } else {
-        // On the puck: take the inside (between him and the net) and close.
-        const inside = 3.8
+        // On the puck: take the inside (between him and the net). CONTAIN at a
+        // stick-and-a-half gap, and only close to engage when the carrier is
+        // vulnerable — pinned on the wall, slow, or turned away from our net
+        // (the moment to strip him or finish him).
+        const onWall = distToBoards(cx, cy) < 8
+        const csp = speedOf(carrier)
+        const turnedAway = carrier.hx * ux + carrier.hy * uy < -0.2
+        const vulnerable = onWall || csp < 6 || turnedAway
+        const inside = vulnerable ? 3.2 : clamp(8.5 - pp * 4, 4.5, 8.5)
         cmds.set(presser, {
           tx: cx + ux * inside + carrier.vx * 0.25,
           ty: cy + uy * inside + carrier.vy * 0.25,
           speed: presser.caps.top * (0.75 + pp * 0.25),
-          arrive: false,
+          arrive: !vulnerable,
           urgency: 0.75 + pp * 0.25,
           faceX: cx,
           faceY: cy

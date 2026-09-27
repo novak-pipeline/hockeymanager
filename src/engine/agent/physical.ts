@@ -18,6 +18,7 @@
  * (the man didn't have the puck), elbowing (rare, undisciplined).
  */
 import { BLUE_X, distToBoards } from './rink'
+import type { HitKind } from '@domain'
 import type { Rng } from '@engine/shared/rng'
 import { speedOf, type Body, type Contact } from './physics'
 import { other, type Side, type World } from './world'
@@ -50,6 +51,9 @@ export interface HitResult {
   loosePuck: boolean
   penalty: string | null
   planned: boolean
+  kind: HitKind
+  /** The victim had the puck, or had just moved it. */
+  hadPuck: boolean
 }
 
 function roleBoost(b: Body): number {
@@ -206,7 +210,8 @@ export function resolveHit(w: World, ct: Contact, intents: Map<Body, HitIntent>,
   else if (ct.closing > 22 && rng.chance(0.04 * k)) penalty = 'charging'
   else if (hard > 0.5 && rng.chance(0.015 * k)) penalty = 'elbowing'
   void hs
-  return { hitter, victim, force, boards, loosePuck, penalty, planned }
+  const kind: HitKind = !planned ? 'battle' : boards ? 'boards' : w.carrier === victim ? 'openIce' : 'finish'
+  return { hitter, victim, force, boards, loosePuck, penalty, planned, kind, hadPuck }
 }
 
 function sideOfBody(w: World, b: Body): Side | null {

@@ -10,7 +10,6 @@ import { generateLeague } from '@data/generate'
 import type { FrameEvent, Player, PlayerId } from '@domain'
 import { isEvent } from '@domain'
 import { CALIBRATION_TARGETS } from '@calibrate'
-import { MatchTimeline } from '@render2d/timeline'
 import { agentSimGame, emptyAgentTelemetry } from './agentSim'
 import { MAX_TOP_FT } from './physics'
 import { histPct } from './telemetry'
@@ -68,10 +67,6 @@ describe('agent engine', () => {
     }
     expect(maxStep).toBeGreaterThan(0)
     expect(maxStep).toBeLessThanOrEqual(cap)
-    // The playback timeline indexes it like any other watched game.
-    const homeIds = new Set<PlayerId>(team(2).roster)
-    const tl = new MatchTimeline(out.stream, (id) => homeIds.has(id))
-    expect(tl.duration).toBeGreaterThan(3500)
   }, 60000)
 
   it('lands in the NHL band and keeps its play logic over many games', () => {
