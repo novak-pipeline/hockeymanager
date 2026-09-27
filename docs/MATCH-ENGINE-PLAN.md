@@ -68,6 +68,36 @@ xG shot maps, heat maps, pass networks, zone-entry breakdown, hits map, player r
 ### M7 — Quick-sim parity
 The Continue path must reflect the same hockey: the quick sim is re-calibrated from the agent engine's outcome distributions per tactic and attribute, so a team that plays a certain way wins and loses the same way whether you watch or not (closes the audit's Watch-vs-Play gap).
 
+## Revision 2026-09-27 — after the 3D audit
+
+The audit ([3D-MATCH-AUDIT.md](3D-MATCH-AUDIT.md)) found the plan was almost all *engine* work. It adds engine scope and two new tracks. All three tracks run in parallel.
+
+**Track E — the agent engine (M1–M3, one lead).** Status: behind a flag, scorecard 68/24 vs the old engine's 50/42. Already in: momentum physics, puck physics, collision hits, fatigue, positional offside/icing, delayed penalties, 13 infraction types, rounded corners, net obstacle, identity-stable deploy, shot release from the blade, saves on arrival, additive stream fields (puckZ, facing, hit/pass/shot detail). Scope added by the audit, in order:
+1. **Bench and line changes:** gate geometry, per-team change timing driven by fatigue and puck state, no change with the puck in your own zone or after icing, too many men.
+2. **Faceoffs as a system:** legal alignment, everyone set before the drop, the draw goes back, post-draw plays, faceoff tactics wired.
+3. **Pulled goalie and empty net:** pull on possession or at a stoppage, goalie to the bench door, extra attacker from the gate, long-range empty-net attempts.
+4. **Shots:** mean distance ~34 ft, D ~30% of shots (misses and posts done).
+5. **No crease camping;** 4v4, 5v3 and 6v5 shapes; never drop the puck on unset players.
+6. **Switch the default** to the agent engine when the scorecard and calibration gates pass. The old director stays as the quick-sim reference.
+
+**Track V — viewer quick wins (renderer and match screen, now).** Puck render lag; replay score rewind; view switch restarting the game; 2D DPI size; display clock frozen in dead time; outcome-aware commentary and report facts; mode-scaled pregame and replays as a setting; calm, zone-framed broadcast camera; readable puck and carrier; screen-space labels; follow and endzone camera fixes.
+
+**Track P — the match-day product (new; FM's layer around the engine).** Starts once Track E's engine can simulate in chunks:
+1. **Segmented live sim:** the watched game simulates period by period (then in shorter chunks), so decisions change the outcome. This is the keystone.
+2. **Intermission screen:** period stats, three stars so far, the assistant's read, decisions (lines, tactics, goalie, a message to the room).
+3. **In-game levers:** FM-style shouts, timeout, shorten the bench, pull the goalie, tactic changes.
+4. **Live info layer:** stats panel, live player ratings, shot map and xG race during play; dead air in condensed modes filled with stats and assistant advice.
+5. **Pregame decisions:** team talk, starting goalie, matchup directive. Keys name only real levers.
+6. **Postgame in the flow:** FINAL, three stars, box score, shot map, the turning point, player ratings that explain themselves (folds in M6).
+7. **Highlight levels:** key / extended / comprehensive / full plus a dynamic mode. Replays are a setting, never a button. Sim view and ice view become one screen with one clock.
+
+**M5 (animation and presentation) now also owns:** the 3D broadcast consumer (`requestShot`/`playMoment`/`projectPlayer`: replay angles, ceremonies, on-ice goal tag), puck height in 3D, the missing action clips (stickhandle, receive, deke, poke, battle, T-push, RVH, freeze, fights, bench), one consistent clip style, crowd and bench art, sound, and LOD. Every animation is checked against the [FILM-STUDY.md](FILM-STUDY.md) targets. **The sim is the source of truth:** the renderer consumes hit force and kind, save type and change timing instead of inventing them.
+
+**Gates added by the audit:**
+- Engine: 0 puck or skater teleports; interceptor within stick reach of the lane; blocker in the shot lane; no skaters in the net cage or outside the rounded boards; offside never uncalled; faceoffs set at the drop with the draw going back; line changes never with the puck in the changing team's own zone; attribute correlations r ≥ 0.3 (hitting→hits, takeaway→takeaways, puckControl→giveaways, passing→pass%); hits 90%+ near the boards; infraction mix realistic.
+- Readability (new): puck on screen ≥ 99% of broadcast frames; carrier identifiable; label overlap < 5%; skater height in the NHL-TV framing range; camera angular speed p95 < 60°/s with no peaks > 180°/s.
+- Match day: no view switch loses state; the scorebug never shows a stale score; the clock is stopped in dead time.
+
 ## Gates (every phase)
 - Realism scorecard improves vs the previous engine and lands in NHL bands for the phase's metrics.
 - Calibration suite stays green (goals, shots, save%, PP%, PK%, shootouts, OT).
