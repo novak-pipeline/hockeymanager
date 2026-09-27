@@ -16352,7 +16352,9 @@ export class Career {
     // camp — the season rollover must not trim it out from under the battles.
     const campHolds = !forceUser && this.trainingCamp !== null && !this.trainingCamp.resolved
     for (const nhlTeamId of this.data.league.teams) {
-      if (campHolds && nhlTeamId === this.userTeamId) continue
+      // During camp the GM's roster is only ever FILLED to the legal minimum
+      // (a lineup must exist); it is never trimmed — cut day does that.
+      const holdTrim = campHolds && nhlTeamId === this.userTeamId
       const nhlTeam = this.data.teams.get(nhlTeamId)
       if (!nhlTeam) continue
       const ahlTeam = nhlTeam.affiliateId ? this.data.teams.get(nhlTeam.affiliateId) : undefined
@@ -16384,7 +16386,7 @@ export class Career {
         nhlTeam.roster = nhlTeam.roster.filter((id) => !toSendSet.has(id))
         for (const id of toSend) ahlTeam.roster.push(id)
       }
-      trimToTarget()
+      if (!holdTrim) trimToTarget()
 
       // ── Step 2: pull AHL players up if NHL team below position minimums ──
       // This handles post-offseason scenarios where contract expiries left gaps.
@@ -16433,7 +16435,7 @@ export class Career {
       }
       // Pull-ups can push a lopsided roster back over the target (23 with four
       // forwards short → 27): shed the surplus at the over-stocked positions.
-      trimToTarget()
+      if (!holdTrim) trimToTarget()
 
       repairLines(nhlTeam, this.data.players)
       repairLines(ahlTeam, this.data.players)
