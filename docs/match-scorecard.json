@@ -1,0 +1,2617 @@
+{
+ "generated": "2026-09-27T01:31:50.084Z",
+ "engine": "full/director",
+ "league": "imported real-roster league (mods/nhl-ehm, read-only)",
+ "games": 60,
+ "runSeconds": 39,
+ "summary": {
+  "pass": 46,
+  "fail": 46,
+  "info": 33,
+  "na": 0
+ },
+ "rows": [
+  {
+   "id": "kinematics.speedMean",
+   "group": "kinematics",
+   "ours": 8.12105,
+   "verdict": "pass",
+   "band": [
+    7,
+    14
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "kinematics.speedP50",
+   "group": "kinematics",
+   "ours": 8.32745,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "kinematics.speedP90",
+   "group": "kinematics",
+   "ours": 14.80233,
+   "verdict": "pass",
+   "band": [
+    13,
+    20
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "kinematics.speedP99",
+   "group": "kinematics",
+   "ours": 20.4091,
+   "verdict": "pass",
+   "band": [
+    17,
+    23.5
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "kinematics.shareAbove20",
+   "group": "kinematics",
+   "ours": 0.01259,
+   "verdict": "pass",
+   "band": [
+    0.002,
+    0.04
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "kinematics.gameMaxMean",
+   "group": "kinematics",
+   "ours": 20.84254,
+   "verdict": "pass",
+   "band": [
+    19,
+    23.5
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "kinematics.gameMaxMax",
+   "group": "kinematics",
+   "ours": 29.67276,
+   "verdict": "fail",
+   "band": [
+    22,
+    25.5
+   ],
+   "value": null,
+   "confidence": "published",
+   "trend": null
+  },
+  {
+   "id": "kinematics.bursts20",
+   "group": "kinematics",
+   "ours": 11.85228,
+   "verdict": "fail",
+   "band": [
+    0.3,
+    3
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "kinematics.bursts22",
+   "group": "kinematics",
+   "ours": 1.32662,
+   "verdict": "fail",
+   "band": [
+    0.02,
+    0.6
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "kinematics.milesPer60",
+   "group": "kinematics",
+   "ours": 7.75574,
+   "verdict": "fail",
+   "band": [
+    8,
+    14
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "kinematics.milesPer60F",
+   "group": "kinematics",
+   "ours": 8.36688,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "kinematics.milesPer60D",
+   "group": "kinematics",
+   "ours": 6.58723,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "kinematics.accelP50",
+   "group": "kinematics",
+   "ours": 17.2175,
+   "verdict": "fail",
+   "band": [
+    1,
+    8
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "kinematics.accelP99",
+   "group": "kinematics",
+   "ours": 21.33607,
+   "verdict": "pass",
+   "band": [
+    8,
+    25
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "kinematics.tangAccelP99",
+   "group": "kinematics",
+   "ours": 20.84724,
+   "verdict": "fail",
+   "band": [
+    6,
+    20
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "kinematics.latAccelP99",
+   "group": "kinematics",
+   "ours": 20.19576,
+   "verdict": "pass",
+   "band": [
+    8,
+    32
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "kinematics.jerkP95",
+   "group": "kinematics",
+   "ours": 124.65872,
+   "verdict": "fail",
+   "band": [
+    0,
+    120
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "kinematics.radiusP5_10to15",
+   "group": "kinematics",
+   "ours": 14.24455,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "kinematics.radiusP5_15to20",
+   "group": "kinematics",
+   "ours": 28.81857,
+   "verdict": "pass",
+   "band": [
+    10,
+    200
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "kinematics.radiusP5_20plus",
+   "group": "kinematics",
+   "ours": 49.68616,
+   "verdict": "pass",
+   "band": [
+    20,
+    250
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "shape.spacingAtt",
+   "group": "shape",
+   "ours": 36.94745,
+   "verdict": "pass",
+   "band": [
+    28,
+    55
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "shape.spacingDef",
+   "group": "shape",
+   "ours": 34.49966,
+   "verdict": "pass",
+   "band": [
+    22,
+    45
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "shape.compactDef",
+   "group": "shape",
+   "ours": 22.09928,
+   "verdict": "pass",
+   "band": [
+    12,
+    30
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "shape.widthAtt",
+   "group": "shape",
+   "ours": 41.13254,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "shape.depthAtt",
+   "group": "shape",
+   "ours": 50.42951,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "shape.dPairDef",
+   "group": "shape",
+   "ours": 24.03145,
+   "verdict": "pass",
+   "band": [
+    15,
+    45
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "shape.dPairAtt",
+   "group": "shape",
+   "ours": 30.74378,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "shape.pressureP50",
+   "group": "shape",
+   "ours": 8.87899,
+   "verdict": "pass",
+   "band": [
+    5,
+    16
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "shape.gapP50",
+   "group": "shape",
+   "ours": 20.7952,
+   "verdict": "pass",
+   "band": [
+    10,
+    35
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "shape.attackersInOz",
+   "group": "shape",
+   "ours": 4.09356,
+   "verdict": "pass",
+   "band": [
+    3.5,
+    5
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "shape.defendersInDz",
+   "group": "shape",
+   "ours": 4.44754,
+   "verdict": "pass",
+   "band": [
+    3.5,
+    5
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "possession.passesPerTeam60",
+   "group": "possession",
+   "ours": 431.0884,
+   "verdict": "fail",
+   "band": [
+    150,
+    400
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "possession.completion",
+   "group": "possession",
+   "ours": 0.78134,
+   "verdict": "pass",
+   "band": [
+    0.68,
+    0.88
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "possession.lengthMean",
+   "group": "possession",
+   "ours": 31.6571,
+   "verdict": "pass",
+   "band": [
+    18,
+    50
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "possession.speedMean",
+   "group": "possession",
+   "ours": 53.63635,
+   "verdict": "pass",
+   "band": [
+    25,
+    65
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "possession.backShare",
+   "group": "possession",
+   "ours": 0.44156,
+   "verdict": "fail",
+   "band": [
+    0.08,
+    0.3
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "possession.fwdShare",
+   "group": "possession",
+   "ours": 0.29173,
+   "verdict": "fail",
+   "band": [
+    0.35,
+    0.65
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "possession.backShare.dz",
+   "group": "possession",
+   "ours": 0.42383,
+   "verdict": "fail",
+   "band": [
+    0.03,
+    0.25
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "possession.fwdShare.dz",
+   "group": "possession",
+   "ours": 0.32812,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "possession.backShare.nz",
+   "group": "possession",
+   "ours": 0.59483,
+   "verdict": "fail",
+   "band": [
+    0.05,
+    0.3
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "possession.fwdShare.nz",
+   "group": "possession",
+   "ours": 0.21806,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "possession.backShare.oz",
+   "group": "possession",
+   "ours": 0.39562,
+   "verdict": "pass",
+   "band": [
+    0.12,
+    0.4
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "possession.fwdShare.oz",
+   "group": "possession",
+   "ours": 0.28709,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "possession.backShare.ozSetup",
+   "group": "possession",
+   "ours": 0.37133,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "possession.fwdShare.ozSetup",
+   "group": "possession",
+   "ours": 0.30097,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "possession.backShare.rush",
+   "group": "possession",
+   "ours": 0.66312,
+   "verdict": "fail",
+   "band": [
+    0,
+    0.12
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "possession.fwdShare.rush",
+   "group": "possession",
+   "ours": 0.1493,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "possession.backShare.oddMan",
+   "group": "possession",
+   "ours": 0.41667,
+   "verdict": "fail",
+   "band": [
+    0,
+    0.1
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "possession.fwdShare.oddMan",
+   "group": "possession",
+   "ours": 0.2655,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "possession.backShare.breakaway",
+   "group": "possession",
+   "ours": 0.60656,
+   "verdict": "fail",
+   "band": [
+    0,
+    0.02
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "possession.fwdShare.breakaway",
+   "group": "possession",
+   "ours": 0.21311,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "possession.backShare.pp",
+   "group": "possession",
+   "ours": 0.46742,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "possession.fwdShare.pp",
+   "group": "possession",
+   "ours": 0.33851,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "possession.backShare.sh",
+   "group": "possession",
+   "ours": 0.42565,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "possession.fwdShare.sh",
+   "group": "possession",
+   "ours": 0.30537,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "possession.rushPassesPerTeamGame",
+   "group": "possession",
+   "ours": 56.375,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "possession.breakawayPassesPerTeamGame",
+   "group": "possession",
+   "ours": 0.50833,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "possession.turnoversPerTeamGame",
+   "group": "possession",
+   "ours": 13.3,
+   "verdict": "pass",
+   "band": [
+    11.0667,
+    16.6
+   ],
+   "value": 13.833333333333332,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "possession.giveawaysPerTeamGame",
+   "group": "possession",
+   "ours": 7.39167,
+   "verdict": "pass",
+   "band": [
+    6.2133,
+    9.32
+   ],
+   "value": 7.766666666666667,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "possession.takeawaysPerTeamGame",
+   "group": "possession",
+   "ours": 5.90833,
+   "verdict": "pass",
+   "band": [
+    4.8533,
+    7.28
+   ],
+   "value": 6.066666666666666,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "possession.lengthSecMean",
+   "group": "possession",
+   "ours": 7.15358,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "entries.perTeam60",
+   "group": "entries",
+   "ours": 150.67956,
+   "verdict": "fail",
+   "band": [
+    35,
+    80
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "entries.controlledShare",
+   "group": "entries",
+   "ours": 0.24354,
+   "verdict": "fail",
+   "band": [
+    0.4,
+    0.62
+   ],
+   "value": null,
+   "confidence": "published",
+   "trend": null
+  },
+  {
+   "id": "entries.carryShare",
+   "group": "entries",
+   "ours": 0.24029,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "entries.oddManPerTeamGame",
+   "group": "entries",
+   "ours": 16.69167,
+   "verdict": "fail",
+   "band": [
+    1,
+    6
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "shots.sogPerTeamGame",
+   "group": "shots",
+   "ours": 36.21667,
+   "verdict": "fail",
+   "band": [
+    26.422,
+    33.628
+   ],
+   "value": 30.025,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "shots.goalsPerTeamGame",
+   "group": "shots",
+   "ours": 4,
+   "verdict": "fail",
+   "band": [
+    2.6987,
+    3.4347
+   ],
+   "value": 3.066666666666667,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "shots.shootingPct",
+   "group": "shots",
+   "ours": 0.11045,
+   "verdict": "pass",
+   "band": [
+    0.0899,
+    0.1144
+   ],
+   "value": 0.10213710796558423,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "shots.blockedShare",
+   "group": "shots",
+   "ours": 0.36341,
+   "verdict": "fail",
+   "band": [
+    0.2339,
+    0.3339
+   ],
+   "value": 0.2839,
+   "confidence": "derived",
+   "trend": null
+  },
+  {
+   "id": "shots.locationTvd",
+   "group": "shots",
+   "ours": 0.49557,
+   "verdict": "fail",
+   "band": [
+    0,
+    0.15
+   ],
+   "value": 0,
+   "confidence": "derived",
+   "trend": null
+  },
+  {
+   "id": "shots.meanDist",
+   "group": "shots",
+   "ours": 18.40278,
+   "verdict": "fail",
+   "band": [
+    29.922747918243758,
+    38.08349735049206
+   ],
+   "value": 34.003122634367905,
+   "confidence": "derived",
+   "trend": null
+  },
+  {
+   "id": "shots.rushShareProxy",
+   "group": "shots",
+   "ours": 0.5675,
+   "verdict": "pass",
+   "band": [
+    0.4285,
+    0.6285
+   ],
+   "value": 0.52853095912586,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "shots.reboundShareProxy",
+   "group": "shots",
+   "ours": 0.11743,
+   "verdict": "fail",
+   "band": [
+    0.035,
+    0.11
+   ],
+   "value": 0.06657223796033994,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "shots.speedMean",
+   "group": "shots",
+   "ours": 61.17513,
+   "verdict": "pass",
+   "band": [
+    40,
+    80
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "shots.dangerMean",
+   "group": "shots",
+   "ours": 0.54246,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "physical.hitsPerTeamGame",
+   "group": "physical",
+   "ours": 20.44167,
+   "verdict": "pass",
+   "band": [
+    19.3729,
+    26.2104
+   ],
+   "value": 22.791666666666668,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "physical.hitBoardsShare",
+   "group": "physical",
+   "ours": 0.25561,
+   "verdict": "fail",
+   "band": [
+    0.8834,
+    1.0034
+   ],
+   "value": 0.9434,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "physical.hitByDShare",
+   "group": "physical",
+   "ours": 0.24419,
+   "verdict": "fail",
+   "band": [
+    0.265,
+    0.425
+   ],
+   "value": 0.345,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "physical.hitOnCarrierShare",
+   "group": "physical",
+   "ours": 1,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "physical.hitOzShare",
+   "group": "physical",
+   "ours": 0.35467,
+   "verdict": "pass",
+   "band": [
+    0.343,
+    0.543
+   ],
+   "value": 0.443,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "physical.penaltiesPerTeamGame",
+   "group": "physical",
+   "ours": 2.79167,
+   "verdict": "fail",
+   "band": [
+    2.9733,
+    4.46
+   ],
+   "value": 3.716666666666667,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "physical.penaltyTypes",
+   "group": "physical",
+   "ours": 2,
+   "verdict": "fail",
+   "band": [
+    10,
+    60
+   ],
+   "value": 27,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "physical.fightsPerGame",
+   "group": "physical",
+   "ours": 0.18333,
+   "verdict": "pass",
+   "band": [
+    0.08,
+    0.4
+   ],
+   "value": 0.234,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "flow.ozShareProxy",
+   "group": "flow",
+   "ours": 0.64353,
+   "verdict": "pass",
+   "band": [
+    0.6003,
+    0.7603
+   ],
+   "value": 0.680259013832548,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "flow.nzShareProxy",
+   "group": "flow",
+   "ours": 0.14124,
+   "verdict": "pass",
+   "band": [
+    0.0391,
+    0.1591
+   ],
+   "value": 0.09910554561717352,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "flow.dzShareProxy",
+   "group": "flow",
+   "ours": 0.21523,
+   "verdict": "pass",
+   "band": [
+    0.1406,
+    0.3006
+   ],
+   "value": 0.22063544055027842,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "flow.nzShareFrames",
+   "group": "flow",
+   "ours": 0.23623,
+   "verdict": "pass",
+   "band": [
+    0.13,
+    0.24
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "flow.faceoffsPerGame",
+   "group": "flow",
+   "ours": 49.51667,
+   "verdict": "pass",
+   "band": [
+    48.3707,
+    61.5627
+   ],
+   "value": 54.96666666666667,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "flow.secBetweenFaceoffs",
+   "group": "flow",
+   "ours": 73.27164,
+   "verdict": "pass",
+   "band": [
+    54.6644,
+    78.6633
+   ],
+   "value": 66.66385189996753,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "flow.foHomeOz",
+   "group": "flow",
+   "ours": 0.2935,
+   "verdict": "pass",
+   "band": [
+    0.2908,
+    0.4308
+   ],
+   "value": 0.36084688554771405,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "flow.foHomeNz",
+   "group": "flow",
+   "ours": 0.43756,
+   "verdict": "fail",
+   "band": [
+    0.2295,
+    0.3695
+   ],
+   "value": 0.2994783675974225,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "flow.foHomeDz",
+   "group": "flow",
+   "ours": 0.26893,
+   "verdict": "fail",
+   "band": [
+    0.2697,
+    0.4097
+   ],
+   "value": 0.33967474685486343,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "flow.foFollowShot10",
+   "group": "flow",
+   "ours": 0.12858,
+   "verdict": "pass",
+   "band": [
+    0.0831,
+    0.2031
+   ],
+   "value": 0.1431,
+   "confidence": "measured",
+   "trend": null
+  },
+  {
+   "id": "flow.whistleReasonCoverage",
+   "group": "flow",
+   "ours": 0.17167,
+   "verdict": "fail",
+   "band": [
+    0.95,
+    1
+   ],
+   "value": 1,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "flow.shiftMeanF",
+   "group": "flow",
+   "ours": 55.42454,
+   "verdict": "fail",
+   "band": [
+    36,
+    52
+   ],
+   "value": null,
+   "confidence": "published",
+   "trend": null
+  },
+  {
+   "id": "flow.shiftMeanD",
+   "group": "flow",
+   "ours": 60.75803,
+   "verdict": "fail",
+   "band": [
+    40,
+    58
+   ],
+   "value": null,
+   "confidence": "published",
+   "trend": null
+  },
+  {
+   "id": "flow.onTheFlyShare",
+   "group": "flow",
+   "ours": 0.89942,
+   "verdict": "fail",
+   "band": [
+    0.45,
+    0.85
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "goalie.depthP50",
+   "group": "goalie",
+   "ours": 2.85113,
+   "verdict": "pass",
+   "band": [
+    1,
+    5
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "goalie.angleErrP50",
+   "group": "goalie",
+   "ours": 1.17183,
+   "verdict": "pass",
+   "band": [
+    0,
+    2
+   ],
+   "value": null,
+   "confidence": "estimate",
+   "trend": null
+  },
+  {
+   "id": "goalie.latSpeedP99",
+   "group": "goalie",
+   "ours": 7.58782,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "goalie.freezeShare",
+   "group": "goalie",
+   "ours": 0.20021,
+   "verdict": "fail",
+   "band": [
+    0.2425,
+    0.3825
+   ],
+   "value": 0.3125,
+   "confidence": "derived",
+   "trend": null
+  },
+  {
+   "id": "motion.teleportsLive",
+   "group": "motion",
+   "ours": 11.21667,
+   "verdict": "fail",
+   "band": [
+    0,
+    0
+   ],
+   "value": 0,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "motion.teleportsDead",
+   "group": "motion",
+   "ours": 0.86667,
+   "verdict": "pass",
+   "band": [
+    0,
+    6
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "motion.overlapPerFrame",
+   "group": "motion",
+   "ours": 0.26347,
+   "verdict": "fail",
+   "band": [
+    0,
+    0.02
+   ],
+   "value": 0,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "shapeSim.breakoutWall.attack",
+   "group": "shapeSim",
+   "ours": 15.44055,
+   "verdict": "pass",
+   "band": [
+    0,
+    16
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "shapeSim.breakoutWall.defend",
+   "group": "shapeSim",
+   "ours": 19.68341,
+   "verdict": "fail",
+   "band": [
+    0,
+    16
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "shapeSim.breakoutWall.framesPerGame",
+   "group": "shapeSim",
+   "ours": 101.31667,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "shapeSim.ozLowCycle.attack",
+   "group": "shapeSim",
+   "ours": 11.15829,
+   "verdict": "pass",
+   "band": [
+    0,
+    16
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "shapeSim.ozLowCycle.defend",
+   "group": "shapeSim",
+   "ours": 10.32569,
+   "verdict": "pass",
+   "band": [
+    0,
+    16
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "shapeSim.ozLowCycle.framesPerGame",
+   "group": "shapeSim",
+   "ours": 568.03333,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "shapeSim.ozPointShot.attack",
+   "group": "shapeSim",
+   "ours": 32.0585,
+   "verdict": "fail",
+   "band": [
+    0,
+    16
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "shapeSim.ozPointShot.defend",
+   "group": "shapeSim",
+   "ours": 24.36898,
+   "verdict": "fail",
+   "band": [
+    0,
+    16
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "shapeSim.ozPointShot.framesPerGame",
+   "group": "shapeSim",
+   "ours": 764.36667,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "shapeSim.nzRegroup.attack",
+   "group": "shapeSim",
+   "ours": 37.00658,
+   "verdict": "fail",
+   "band": [
+    0,
+    16
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "shapeSim.nzRegroup.defend",
+   "group": "shapeSim",
+   "ours": 35.81637,
+   "verdict": "fail",
+   "band": [
+    0,
+    16
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "shapeSim.nzRegroup.framesPerGame",
+   "group": "shapeSim",
+   "ours": 506.61667,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "shapeSim.rushEntry.attack",
+   "group": "shapeSim",
+   "ours": 32.99673,
+   "verdict": "fail",
+   "band": [
+    0,
+    16
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "shapeSim.rushEntry.defend",
+   "group": "shapeSim",
+   "ours": 28.49617,
+   "verdict": "fail",
+   "band": [
+    0,
+    16
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "shapeSim.rushEntry.framesPerGame",
+   "group": "shapeSim",
+   "ours": 941.75,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "shapeSim.pp131.attack",
+   "group": "shapeSim",
+   "ours": 13.78177,
+   "verdict": "pass",
+   "band": [
+    0,
+    16
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "shapeSim.pp131.defend",
+   "group": "shapeSim",
+   "ours": 11.72318,
+   "verdict": "pass",
+   "band": [
+    0,
+    16
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "shapeSim.pp131.framesPerGame",
+   "group": "shapeSim",
+   "ours": 68.96667,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  },
+  {
+   "id": "shapeSim.ppUmbrella.attack",
+   "group": "shapeSim",
+   "ours": 21.93973,
+   "verdict": "fail",
+   "band": [
+    0,
+    16
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "shapeSim.ppUmbrella.defend",
+   "group": "shapeSim",
+   "ours": 22.31204,
+   "verdict": "fail",
+   "band": [
+    0,
+    16
+   ],
+   "value": null,
+   "confidence": "design",
+   "trend": null
+  },
+  {
+   "id": "shapeSim.ppUmbrella.framesPerGame",
+   "group": "shapeSim",
+   "ours": 49.13333,
+   "verdict": "info",
+   "band": null,
+   "value": null,
+   "confidence": null,
+   "trend": null
+  }
+ ],
+ "shapeOffsets": [
+  {
+   "id": "breakoutWall",
+   "frames": 6079,
+   "attack": [
+    {
+     "role": "D1 (puck)",
+     "dx": 0.5,
+     "dy": -2.4
+    },
+    {
+     "role": "D2 (net-side support)",
+     "dx": 2.5,
+     "dy": 10.9
+    },
+    {
+     "role": "strong W (half-wall)",
+     "dx": -1.4,
+     "dy": -14.8
+    },
+    {
+     "role": "C (low swing)",
+     "dx": -2,
+     "dy": 3.3
+    },
+    {
+     "role": "weak W (mid-lane stretch)",
+     "dx": -16.5,
+     "dy": 12.5
+    }
+   ],
+   "defend": [
+    {
+     "role": "F1 (pressure)",
+     "dx": -7.3,
+     "dy": -4
+    },
+    {
+     "role": "F2 (strong-side wall)",
+     "dx": -11.3,
+     "dy": -11.7
+    },
+    {
+     "role": "F3 (high middle)",
+     "dx": -13.7,
+     "dy": 3.9
+    },
+    {
+     "role": "D strong (hold line)",
+     "dx": 10.1,
+     "dy": -12
+    },
+    {
+     "role": "D weak (hold line)",
+     "dx": 6.6,
+     "dy": 1.2
+    }
+   ]
+  },
+  {
+   "id": "ozLowCycle",
+   "frames": 34082,
+   "attack": [
+    {
+     "role": "F1 (puck, wall low)",
+     "dx": -1.6,
+     "dy": -5.3
+    },
+    {
+     "role": "F2 (low support)",
+     "dx": 6.9,
+     "dy": -1.2
+    },
+    {
+     "role": "F3 (net-front)",
+     "dx": -6.7,
+     "dy": 0.3
+    },
+    {
+     "role": "D strong (point)",
+     "dx": -1.2,
+     "dy": -17.1
+    },
+    {
+     "role": "D weak (point)",
+     "dx": -1.1,
+     "dy": 4.2
+    }
+   ],
+   "defend": [
+    {
+     "role": "D strong (on puck)",
+     "dx": -4.4,
+     "dy": -2.8
+    },
+    {
+     "role": "D weak (net-front)",
+     "dx": -1.2,
+     "dy": 2.4
+    },
+    {
+     "role": "C (low strong side)",
+     "dx": 4.5,
+     "dy": -0.6
+    },
+    {
+     "role": "W strong (point lane)",
+     "dx": 12.7,
+     "dy": -11.4
+    },
+    {
+     "role": "W weak (high slot)",
+     "dx": 2.9,
+     "dy": 5.6
+    }
+   ]
+  },
+  {
+   "id": "ozPointShot",
+   "frames": 45862,
+   "attack": [
+    {
+     "role": "D strong (puck)",
+     "dx": -15.6,
+     "dy": -10.9
+    },
+    {
+     "role": "D weak (point)",
+     "dx": -21.2,
+     "dy": 0.2
+    },
+    {
+     "role": "F net-front",
+     "dx": -39.9,
+     "dy": 4.9
+    },
+    {
+     "role": "F strong wall",
+     "dx": -15.4,
+     "dy": -18.1
+    },
+    {
+     "role": "F weak low",
+     "dx": -33.7,
+     "dy": 11.8
+    }
+   ],
+   "defend": [
+    {
+     "role": "W strong (pressure point)",
+     "dx": -11.8,
+     "dy": -3.3
+    },
+    {
+     "role": "W weak (lane)",
+     "dx": -15.2,
+     "dy": 5.8
+    },
+    {
+     "role": "C (slot)",
+     "dx": -31.2,
+     "dy": 4.8
+    },
+    {
+     "role": "D strong (low)",
+     "dx": -22.2,
+     "dy": 1
+    },
+    {
+     "role": "D weak (net-front)",
+     "dx": -21.3,
+     "dy": 2.1
+    }
+   ]
+  },
+  {
+   "id": "nzRegroup",
+   "frames": 30397,
+   "attack": [
+    {
+     "role": "D1 (puck)",
+     "dx": -22.5,
+     "dy": 0.2
+    },
+    {
+     "role": "D2 (partner)",
+     "dx": -37.1,
+     "dy": 9.7
+    },
+    {
+     "role": "W strong (swing wide)",
+     "dx": -36.8,
+     "dy": -11.8
+    },
+    {
+     "role": "C (middle)",
+     "dx": -23.9,
+     "dy": 3.6
+    },
+    {
+     "role": "W weak (swing wide)",
+     "dx": -36.8,
+     "dy": 14.4
+    }
+   ],
+   "defend": [
+    {
+     "role": "F1 (steer)",
+     "dx": -24.7,
+     "dy": -1.7
+    },
+    {
+     "role": "F2 (strong lane)",
+     "dx": -41.3,
+     "dy": -5.3
+    },
+    {
+     "role": "F3 (weak lane)",
+     "dx": -34.8,
+     "dy": 12.3
+    },
+    {
+     "role": "D strong (gap)",
+     "dx": -31.3,
+     "dy": -2.3
+    },
+    {
+     "role": "D weak (gap)",
+     "dx": -31.2,
+     "dy": 4.5
+    }
+   ]
+  },
+  {
+   "id": "rushEntry",
+   "frames": 56505,
+   "attack": [
+    {
+     "role": "F carrier (wide lane)",
+     "dx": 11.4,
+     "dy": -2.3
+    },
+    {
+     "role": "F middle-lane drive",
+     "dx": 28.1,
+     "dy": 3.9
+    },
+    {
+     "role": "F far-lane drive",
+     "dx": 23.9,
+     "dy": 13.6
+    },
+    {
+     "role": "D trailer",
+     "dx": 34,
+     "dy": 5.5
+    },
+    {
+     "role": "D back",
+     "dx": 41.9,
+     "dy": 0.7
+    }
+   ],
+   "defend": [
+    {
+     "role": "D strong (gap)",
+     "dx": 13.4,
+     "dy": -2.8
+    },
+    {
+     "role": "D weak (middle)",
+     "dx": 14.9,
+     "dy": 0.8
+    },
+    {
+     "role": "F backcheck (middle)",
+     "dx": 27,
+     "dy": 0.9
+    },
+    {
+     "role": "F backcheck (weak)",
+     "dx": 31.8,
+     "dy": 8.8
+    },
+    {
+     "role": "F late (strong)",
+     "dx": 37.2,
+     "dy": -3.3
+    }
+   ]
+  },
+  {
+   "id": "pp131",
+   "frames": 4138,
+   "attack": [
+    {
+     "role": "flank (puck, half-wall)",
+     "dx": -9.2,
+     "dy": -8.4
+    },
+    {
+     "role": "Q (top)",
+     "dx": -1.2,
+     "dy": 0.2
+    },
+    {
+     "role": "flank weak (one-timer)",
+     "dx": -11.6,
+     "dy": 10.7
+    },
+    {
+     "role": "bumper (high slot)",
+     "dx": 6.2,
+     "dy": 2.3
+    },
+    {
+     "role": "net-front",
+     "dx": -9.8,
+     "dy": 1.8
+    }
+   ],
+   "defend": [
+    {
+     "role": "F strong (pressure)",
+     "dx": 4.6,
+     "dy": -5
+    },
+    {
+     "role": "F weak (seam)",
+     "dx": 9.7,
+     "dy": 1.1
+    },
+    {
+     "role": "D strong (low)",
+     "dx": -7.6,
+     "dy": 3.6
+    },
+    {
+     "role": "D weak (net-front)",
+     "dx": 1,
+     "dy": 6.2
+    }
+   ]
+  },
+  {
+   "id": "ppUmbrella",
+   "frames": 2948,
+   "attack": [
+    {
+     "role": "point (puck)",
+     "dx": -3.6,
+     "dy": -1.2
+    },
+    {
+     "role": "flank strong",
+     "dx": -2.6,
+     "dy": -19.5
+    },
+    {
+     "role": "flank weak",
+     "dx": 1.5,
+     "dy": 16.2
+    },
+    {
+     "role": "net-front",
+     "dx": -19.3,
+     "dy": -3.8
+    },
+    {
+     "role": "low bumper",
+     "dx": -9.7,
+     "dy": -9.5
+    }
+   ],
+   "defend": [
+    {
+     "role": "top of diamond",
+     "dx": -10.3,
+     "dy": 2.8
+    },
+    {
+     "role": "side strong",
+     "dx": -14.8,
+     "dy": -6.4
+    },
+    {
+     "role": "side weak",
+     "dx": -19.6,
+     "dy": 9.7
+    },
+    {
+     "role": "bottom (net-front)",
+     "dx": -19.6,
+     "dy": 0.1
+    }
+   ]
+  }
+ ],
+ "shotGrid": {
+  "ours": [
+   36,
+   33,
+   48,
+   113,
+   369,
+   0,
+   453,
+   546,
+   426,
+   113,
+   242,
+   0,
+   89,
+   218,
+   114,
+   54,
+   173,
+   0,
+   144,
+   509,
+   57,
+   17,
+   80,
+   0,
+   28,
+   163,
+   43,
+   8,
+   34,
+   0,
+   7,
+   5,
+   16,
+   4,
+   17,
+   0,
+   183,
+   4,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ],
+  "nhl": [
+   78,
+   70,
+   43,
+   71,
+   119,
+   0,
+   243,
+   165,
+   108,
+   139,
+   168,
+   0,
+   159,
+   135,
+   88,
+   99,
+   114,
+   0,
+   114,
+   125,
+   144,
+   145,
+   146,
+   0,
+   129,
+   209,
+   282,
+   179,
+   104,
+   0,
+   224,
+   257,
+   321,
+   189,
+   32,
+   0,
+   190,
+   287,
+   291,
+   9,
+   0,
+   0,
+   32,
+   69,
+   7,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0
+  ],
+  "cols": 6
+ },
+ "heat": {
+  "skaters": {
+   "cols": 20,
+   "rows": 9,
+   "cells": [
+    797,
+    3931,
+    846,
+    523,
+    531,
+    3405,
+    37789,
+    27382,
+    12781,
+    6461,
+    6234,
+    7745,
+    13145,
+    24154,
+    4737,
+    374,
+    531,
+    1156,
+    3350,
+    494,
+    647,
+    4265,
+    11418,
+    6320,
+    61685,
+    122006,
+    60019,
+    33125,
+    31911,
+    19224,
+    14887,
+    17090,
+    19605,
+    31393,
+    13883,
+    11013,
+    4367,
+    15268,
+    4991,
+    4504,
+    2032,
+    10390,
+    15184,
+    35164,
+    86875,
+    47565,
+    41435,
+    38195,
+    45500,
+    76448,
+    61205,
+    60342,
+    189894,
+    52598,
+    25087,
+    26443,
+    17745,
+    23480,
+    43776,
+    2615,
+    13748,
+    202033,
+    110574,
+    90107,
+    164414,
+    132728,
+    116513,
+    122751,
+    266192,
+    103599,
+    86295,
+    73250,
+    163026,
+    57417,
+    35054,
+    34360,
+    52193,
+    31921,
+    32209,
+    10932,
+    25676,
+    71832,
+    125884,
+    78513,
+    113739,
+    57642,
+    51682,
+    47760,
+    41421,
+    60626,
+    62221,
+    47957,
+    71290,
+    53485,
+    38050,
+    39505,
+    45850,
+    129558,
+    46748,
+    28060,
+    13861,
+    203571,
+    109208,
+    88587,
+    163302,
+    133690,
+    116631,
+    122740,
+    266354,
+    104056,
+    86338,
+    73084,
+    162777,
+    57936,
+    35516,
+    34583,
+    51180,
+    32938,
+    32496,
+    10697,
+    2189,
+    10150,
+    14822,
+    33528,
+    84725,
+    46377,
+    41197,
+    37639,
+    45762,
+    77418,
+    61644,
+    61018,
+    190718,
+    53409,
+    25213,
+    26375,
+    18085,
+    24005,
+    45225,
+    2824,
+    675,
+    4183,
+    10970,
+    6479,
+    60609,
+    120274,
+    58707,
+    33460,
+    31888,
+    19160,
+    15025,
+    17361,
+    19674,
+    32213,
+    14150,
+    11405,
+    4426,
+    15883,
+    4904,
+    4425,
+    836,
+    3829,
+    776,
+    520,
+    522,
+    3408,
+    36434,
+    27397,
+    12854,
+    6257,
+    6004,
+    7729,
+    13083,
+    24942,
+    4962,
+    406,
+    547,
+    1220,
+    3310,
+    448
+   ],
+   "n": 8125998
+  },
+  "hits": {
+   "cols": 20,
+   "rows": 9,
+   "cells": [
+    0,
+    3,
+    0,
+    0,
+    1,
+    2,
+    20,
+    0,
+    1,
+    0,
+    1,
+    6,
+    15,
+    148,
+    5,
+    0,
+    1,
+    1,
+    5,
+    2,
+    0,
+    5,
+    110,
+    6,
+    12,
+    5,
+    19,
+    4,
+    1,
+    0,
+    1,
+    3,
+    13,
+    44,
+    15,
+    6,
+    7,
+    3,
+    0,
+    0,
+    0,
+    10,
+    10,
+    16,
+    23,
+    18,
+    59,
+    72,
+    2,
+    28,
+    11,
+    8,
+    9,
+    4,
+    7,
+    6,
+    12,
+    7,
+    0,
+    3,
+    5,
+    8,
+    26,
+    24,
+    12,
+    6,
+    28,
+    45,
+    4,
+    21,
+    12,
+    8,
+    7,
+    7,
+    7,
+    9,
+    9,
+    22,
+    15,
+    12,
+    74,
+    31,
+    13,
+    3,
+    1,
+    5,
+    37,
+    58,
+    1,
+    28,
+    20,
+    6,
+    9,
+    1,
+    9,
+    9,
+    7,
+    18,
+    19,
+    22,
+    3,
+    7,
+    15,
+    23,
+    7,
+    6,
+    38,
+    42,
+    6,
+    26,
+    11,
+    8,
+    15,
+    9,
+    5,
+    8,
+    9,
+    18,
+    23,
+    17,
+    0,
+    11,
+    12,
+    13,
+    16,
+    12,
+    50,
+    65,
+    9,
+    30,
+    6,
+    11,
+    11,
+    3,
+    5,
+    10,
+    16,
+    4,
+    3,
+    0,
+    0,
+    3,
+    83,
+    4,
+    17,
+    3,
+    23,
+    5,
+    3,
+    0,
+    3,
+    2,
+    9,
+    38,
+    23,
+    1,
+    4,
+    3,
+    2,
+    0,
+    0,
+    10,
+    1,
+    0,
+    0,
+    2,
+    12,
+    2,
+    0,
+    0,
+    0,
+    4,
+    13,
+    163,
+    0,
+    1,
+    0,
+    0,
+    7,
+    1
+   ],
+   "n": 2453
+  },
+  "shots": {
+   "cols": 20,
+   "rows": 9,
+   "cells": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    21,
+    1,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    7,
+    3,
+    18,
+    6,
+    5,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    4,
+    0,
+    36,
+    18,
+    39,
+    76,
+    4,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    57,
+    0,
+    56,
+    327,
+    339,
+    277,
+    48,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    3,
+    71,
+    2,
+    15,
+    87,
+    849,
+    326,
+    278,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    3,
+    49,
+    4,
+    51,
+    338,
+    336,
+    273,
+    37,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    43,
+    29,
+    46,
+    90,
+    6,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    7,
+    4,
+    18,
+    8,
+    4,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    2,
+    22,
+    0
+   ],
+   "n": 4346
+  }
+ }
+}

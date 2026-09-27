@@ -1,0 +1,1079 @@
+{
+  "meta": {
+    "generated": "2026-09-27T01:13:41.018Z",
+    "note": "Realism-scorecard targets. Aggregates and bands only. Built by scripts/data/build-match-targets.mjs; sources and license verdicts in docs/MATCH-DATA-SOURCES.md."
+  },
+  "sources": {
+    "nhlApiLegacy": {
+      "title": "NHL public API play-by-play (api-web.nhle.com), aggregates from the calibration cache",
+      "url": "https://api-web.nhle.com/v1/gamecenter/{id}/play-by-play",
+      "license": "NHL.com Terms of Service — personal/non-commercial use; automated compilation not authorised. FLAGGED for owner/legal review (docs/MATCH-DATA-SOURCES.md). Facts/aggregates only, nothing raw committed; no new fetching done for M0",
+      "dateRange": "2023-2024 regular season, 60–64 evenly spaced games",
+      "use": "event rates, xG / shot-location grid, sequence proxies, hit locations, penalty/shot-type mixes"
+    },
+    "zoneEntryTracking": {
+      "title": "Public manual zone-entry tracking research (E. Tulsky, G. Detweiler, R. Spencer, C. Sznajder et al., \"Using Zone Entry Data To Separate Offensive, Neutral, And Defensive Zone Performance\", MIT Sloan Sports Analytics Conference 2013, and follow-up volunteer tracking projects)",
+      "license": "Published research findings (facts), cited — no data copied",
+      "use": "controlled-entry share band"
+    },
+    "publicStatPages": {
+      "title": "Widely published NHL figures noted by hand (NHL.com stat pages: average TOI per shift; NHL EDGE public leaderboards: top skating speeds ~24 mph, typical team neutral-zone time ~17–18%)",
+      "license": "Individual public facts looked up manually for reference (no automated access); approximate — verify by hand when refreshing",
+      "use": "shift length, top-speed and NZ-time bands"
+    },
+    "sportsScience": {
+      "title": "Skating biomechanics / sports-science literature (on-ice sprint acceleration ~3–6 m/s², lateral grip in tight turns ≲ 1 g, top in-game speeds 20–25 mph)",
+      "license": "Published findings (facts), cited generally",
+      "use": "acceleration, turning and speed-distribution bands (estimates)"
+    },
+    "coachingTemplates": {
+      "title": "Our own role-position diagrams of standard team systems (src/engine/analysis/shapes.ts), concepts checked against USA Hockey and Hockey Canada coach-education \"team play / systems\" material",
+      "license": "Our original coordinates — no diagrams or text copied",
+      "use": "shape-similarity targets"
+    },
+    "design": {
+      "title": "Owner / design requirements (docs/MATCH-ENGINE-PLAN.md gates; owner: \"no backwards passing on rushes/breakaways\")",
+      "license": "n/a",
+      "use": "motion gates, backward-pass bands, observability"
+    }
+  },
+  "metrics": {
+    "kinematics.speedMean": {
+      "value": null,
+      "band": [
+        7,
+        14
+      ],
+      "source": "sportsScience",
+      "confidence": "estimate",
+      "note": "mean over all live-play skater time, incl. standing/gliding"
+    },
+    "kinematics.speedP90": {
+      "value": null,
+      "band": [
+        13,
+        20
+      ],
+      "source": "sportsScience",
+      "confidence": "estimate"
+    },
+    "kinematics.speedP99": {
+      "value": null,
+      "band": [
+        17,
+        23.5
+      ],
+      "source": "sportsScience",
+      "confidence": "estimate"
+    },
+    "kinematics.shareAbove20": {
+      "value": null,
+      "band": [
+        0.002,
+        0.04
+      ],
+      "source": "publicStatPages",
+      "confidence": "estimate"
+    },
+    "kinematics.gameMaxMean": {
+      "value": null,
+      "band": [
+        19,
+        23.5
+      ],
+      "source": "publicStatPages",
+      "confidence": "estimate",
+      "note": "EDGE per-game top speeds cluster ~20–22 mph"
+    },
+    "kinematics.gameMaxMax": {
+      "value": null,
+      "band": [
+        22,
+        25.5
+      ],
+      "source": "publicStatPages",
+      "confidence": "published",
+      "note": "fastest EDGE-recorded skaters ≈ 24–25 mph"
+    },
+    "kinematics.bursts20": {
+      "value": null,
+      "band": [
+        0.3,
+        3
+      ],
+      "source": "publicStatPages",
+      "confidence": "estimate",
+      "note": "EDGE 20+ mph burst leaders ≈ 2–3 per game; typical skater far fewer"
+    },
+    "kinematics.bursts22": {
+      "value": null,
+      "band": [
+        0.02,
+        0.6
+      ],
+      "source": "publicStatPages",
+      "confidence": "estimate"
+    },
+    "kinematics.milesPer60": {
+      "value": null,
+      "band": [
+        8,
+        14
+      ],
+      "source": "publicStatPages",
+      "confidence": "estimate",
+      "note": "EDGE distance skated ≈ 3–5 mi per game at 15–25 min TOI"
+    },
+    "kinematics.accelP50": {
+      "value": null,
+      "band": [
+        1,
+        8
+      ],
+      "source": "sportsScience",
+      "confidence": "estimate"
+    },
+    "kinematics.accelP99": {
+      "value": null,
+      "band": [
+        8,
+        25
+      ],
+      "source": "sportsScience",
+      "confidence": "estimate",
+      "note": "sprint starts peak ≈ 3–6 m/s² (10–20 ft/s²)"
+    },
+    "kinematics.tangAccelP99": {
+      "value": null,
+      "band": [
+        6,
+        20
+      ],
+      "source": "sportsScience",
+      "confidence": "estimate"
+    },
+    "kinematics.latAccelP99": {
+      "value": null,
+      "band": [
+        8,
+        32
+      ],
+      "source": "sportsScience",
+      "confidence": "estimate",
+      "note": "≤ ~1 g lateral grip"
+    },
+    "kinematics.jerkP95": {
+      "value": null,
+      "band": [
+        0,
+        120
+      ],
+      "source": "design",
+      "confidence": "design",
+      "note": "catches bang-bang steering (max-accel twitch)"
+    },
+    "kinematics.radiusP5_20plus": {
+      "value": null,
+      "band": [
+        20,
+        250
+      ],
+      "source": "sportsScience",
+      "confidence": "estimate",
+      "note": "r = v²/a_lat: 20 mph at ≤1 g → ≥ ~27 ft"
+    },
+    "kinematics.radiusP5_15to20": {
+      "value": null,
+      "band": [
+        10,
+        200
+      ],
+      "source": "sportsScience",
+      "confidence": "estimate"
+    },
+    "shape.spacingAtt": {
+      "value": null,
+      "band": [
+        28,
+        55
+      ],
+      "source": "coachingTemplates",
+      "confidence": "estimate",
+      "note": "template mean pairwise distance ≈ 35–50 ft"
+    },
+    "shape.spacingDef": {
+      "value": null,
+      "band": [
+        22,
+        45
+      ],
+      "source": "coachingTemplates",
+      "confidence": "estimate"
+    },
+    "shape.compactDef": {
+      "value": null,
+      "band": [
+        12,
+        30
+      ],
+      "source": "coachingTemplates",
+      "confidence": "estimate"
+    },
+    "shape.dPairDef": {
+      "value": null,
+      "band": [
+        15,
+        45
+      ],
+      "source": "coachingTemplates",
+      "confidence": "estimate"
+    },
+    "shape.pressureP50": {
+      "value": null,
+      "band": [
+        5,
+        16
+      ],
+      "source": "coachingTemplates",
+      "confidence": "estimate"
+    },
+    "shape.gapP50": {
+      "value": null,
+      "band": [
+        10,
+        35
+      ],
+      "source": "coachingTemplates",
+      "confidence": "estimate",
+      "note": "coaching: \"stick plus a stride\" gap in the neutral zone"
+    },
+    "shape.attackersInOz": {
+      "value": null,
+      "band": [
+        3.5,
+        5
+      ],
+      "source": "coachingTemplates",
+      "confidence": "estimate"
+    },
+    "shape.defendersInDz": {
+      "value": null,
+      "band": [
+        3.5,
+        5
+      ],
+      "source": "coachingTemplates",
+      "confidence": "estimate"
+    },
+    "possession.passesPerTeam60": {
+      "value": null,
+      "band": [
+        150,
+        400
+      ],
+      "source": "design",
+      "confidence": "estimate",
+      "note": "No legal public pass-count source; commercial trackers (Sportlogiq) report on the order of a few hundred passes per team-game. Wide estimate."
+    },
+    "possession.completion": {
+      "value": null,
+      "band": [
+        0.68,
+        0.88
+      ],
+      "source": "design",
+      "confidence": "estimate"
+    },
+    "possession.lengthMean": {
+      "value": null,
+      "band": [
+        18,
+        50
+      ],
+      "source": "coachingTemplates",
+      "confidence": "estimate"
+    },
+    "possession.speedMean": {
+      "value": null,
+      "band": [
+        25,
+        65
+      ],
+      "source": "design",
+      "confidence": "estimate",
+      "note": "plan: passes ~30–60 mph; frames at 4 fps under-read"
+    },
+    "possession.backShare": {
+      "value": null,
+      "band": [
+        0.08,
+        0.3
+      ],
+      "source": "design",
+      "confidence": "design",
+      "note": "D-to-D, wall-to-point and regroups are legitimately backward; everything else goes north"
+    },
+    "possession.backShare.oz": {
+      "value": null,
+      "band": [
+        0.12,
+        0.4
+      ],
+      "source": "design",
+      "confidence": "design",
+      "note": "wall-to-point passes are backward by geometry"
+    },
+    "possession.backShare.nz": {
+      "value": null,
+      "band": [
+        0.05,
+        0.3
+      ],
+      "source": "design",
+      "confidence": "design"
+    },
+    "possession.backShare.dz": {
+      "value": null,
+      "band": [
+        0.03,
+        0.25
+      ],
+      "source": "design",
+      "confidence": "design"
+    },
+    "possession.backShare.rush": {
+      "value": null,
+      "band": [
+        0,
+        0.12
+      ],
+      "source": "design",
+      "confidence": "design",
+      "note": "owner: no backward passing on rushes (a drop pass is the rare exception)"
+    },
+    "possession.backShare.oddMan": {
+      "value": null,
+      "band": [
+        0,
+        0.1
+      ],
+      "source": "design",
+      "confidence": "design"
+    },
+    "possession.backShare.breakaway": {
+      "value": null,
+      "band": [
+        0,
+        0.02
+      ],
+      "source": "design",
+      "confidence": "design",
+      "note": "owner: never pass backwards on a breakaway"
+    },
+    "possession.fwdShare": {
+      "value": null,
+      "band": [
+        0.35,
+        0.65
+      ],
+      "source": "design",
+      "confidence": "estimate"
+    },
+    "possession.turnoversPerTeamGame": {
+      "value": 13.833333333333332,
+      "band": [
+        11.0667,
+        16.6
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured"
+    },
+    "possession.giveawaysPerTeamGame": {
+      "value": 7.766666666666667,
+      "band": [
+        6.2133,
+        9.32
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured"
+    },
+    "possession.takeawaysPerTeamGame": {
+      "value": 6.066666666666666,
+      "band": [
+        4.8533,
+        7.28
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured"
+    },
+    "entries.perTeam60": {
+      "value": null,
+      "band": [
+        35,
+        80
+      ],
+      "source": "zoneEntryTracking",
+      "confidence": "estimate"
+    },
+    "entries.controlledShare": {
+      "value": null,
+      "band": [
+        0.4,
+        0.62
+      ],
+      "source": "zoneEntryTracking",
+      "confidence": "published",
+      "note": "manual tracking: roughly half of entries are carried/passed in"
+    },
+    "entries.oddManPerTeamGame": {
+      "value": null,
+      "band": [
+        1,
+        6
+      ],
+      "source": "design",
+      "confidence": "estimate"
+    },
+    "shots.sogPerTeamGame": {
+      "value": 30.025,
+      "band": [
+        26.422,
+        33.628
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured"
+    },
+    "shots.goalsPerTeamGame": {
+      "value": 3.066666666666667,
+      "band": [
+        2.6987,
+        3.4347
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured"
+    },
+    "shots.shootingPct": {
+      "value": 0.10213710796558423,
+      "band": [
+        0.0899,
+        0.1144
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured"
+    },
+    "shots.blockedShare": {
+      "value": 0.2839,
+      "band": [
+        0.2339,
+        0.3339
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "derived"
+    },
+    "shots.locationTvd": {
+      "value": 0,
+      "band": [
+        0,
+        0.15
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "derived",
+      "note": "distance×angle distribution vs NHL unblocked attempts (incl. misses; ours are SOG only)"
+    },
+    "shots.rushShareProxy": {
+      "value": 0.52853095912586,
+      "band": [
+        0.4285,
+        0.6285
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured",
+      "note": "event-proxy definition identical to importNhl.ts"
+    },
+    "shots.reboundShareProxy": {
+      "value": 0.06657223796033994,
+      "band": [
+        0.035,
+        0.11
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured"
+    },
+    "shots.speedMean": {
+      "value": null,
+      "band": [
+        40,
+        80
+      ],
+      "source": "publicStatPages",
+      "confidence": "estimate",
+      "note": "frames at 4 fps under-read fast shots"
+    },
+    "physical.hitsPerTeamGame": {
+      "value": 22.791666666666668,
+      "band": [
+        19.3729,
+        26.2104
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured"
+    },
+    "physical.hitBoardsShare": {
+      "value": 0.9434,
+      "band": [
+        0.8834,
+        1.0034
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured",
+      "note": "share of hits recorded within 10 ft of the boards"
+    },
+    "physical.hitByDShare": {
+      "value": 0.345,
+      "band": [
+        0.265,
+        0.425
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured"
+    },
+    "physical.hitOzShare": {
+      "value": 0.443,
+      "band": [
+        0.343,
+        0.543
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured"
+    },
+    "physical.penaltiesPerTeamGame": {
+      "value": 3.716666666666667,
+      "band": [
+        2.9733,
+        4.46
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured"
+    },
+    "physical.penaltyTypes": {
+      "value": 27,
+      "band": [
+        10,
+        60
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured",
+      "note": "distinct infraction names in the sample"
+    },
+    "physical.fightsPerGame": {
+      "value": 0.234,
+      "band": [
+        0.08,
+        0.4
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured"
+    },
+    "flow.ozShareProxy": {
+      "value": 0.680259013832548,
+      "band": [
+        0.6003,
+        0.7603
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured",
+      "note": "event-proxy"
+    },
+    "flow.nzShareProxy": {
+      "value": 0.09910554561717352,
+      "band": [
+        0.0391,
+        0.1591
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured",
+      "note": "event-proxy"
+    },
+    "flow.dzShareProxy": {
+      "value": 0.22063544055027842,
+      "band": [
+        0.1406,
+        0.3006
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured",
+      "note": "event-proxy"
+    },
+    "flow.nzShareFrames": {
+      "value": null,
+      "band": [
+        0.13,
+        0.24
+      ],
+      "source": "publicStatPages",
+      "confidence": "estimate",
+      "note": "EDGE team zone-time pages show ~17–18% neutral"
+    },
+    "flow.faceoffsPerGame": {
+      "value": 54.96666666666667,
+      "band": [
+        48.3707,
+        61.5627
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured"
+    },
+    "flow.secBetweenFaceoffs": {
+      "value": 66.66385189996753,
+      "band": [
+        54.6644,
+        78.6633
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured"
+    },
+    "flow.foHomeOz": {
+      "value": 0.36084688554771405,
+      "band": [
+        0.2908,
+        0.4308
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured"
+    },
+    "flow.foHomeNz": {
+      "value": 0.2994783675974225,
+      "band": [
+        0.2295,
+        0.3695
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured"
+    },
+    "flow.foHomeDz": {
+      "value": 0.33967474685486343,
+      "band": [
+        0.2697,
+        0.4097
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured"
+    },
+    "flow.foFollowShot10": {
+      "value": 0.1431,
+      "band": [
+        0.0831,
+        0.2031
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "measured",
+      "note": "NHL counts unblocked attempts incl. misses; ours SOG only"
+    },
+    "flow.whistleReasonCoverage": {
+      "value": 1,
+      "band": [
+        0.95,
+        1
+      ],
+      "source": "design",
+      "confidence": "design",
+      "note": "observability: every whistle should say why"
+    },
+    "flow.shiftMeanF": {
+      "value": null,
+      "band": [
+        36,
+        52
+      ],
+      "source": "publicStatPages",
+      "confidence": "published",
+      "note": "NHL average forward TOI/shift ≈ 0:40–0:48"
+    },
+    "flow.shiftMeanD": {
+      "value": null,
+      "band": [
+        40,
+        58
+      ],
+      "source": "publicStatPages",
+      "confidence": "published",
+      "note": "NHL average defence TOI/shift ≈ 0:45–0:55"
+    },
+    "flow.onTheFlyShare": {
+      "value": null,
+      "band": [
+        0.45,
+        0.85
+      ],
+      "source": "design",
+      "confidence": "estimate"
+    },
+    "goalie.depthP50": {
+      "value": null,
+      "band": [
+        1,
+        5
+      ],
+      "source": "sportsScience",
+      "confidence": "estimate",
+      "note": "modern goalies play at or just above the crease edge (crease = 6 ft)"
+    },
+    "goalie.angleErrP50": {
+      "value": null,
+      "band": [
+        0,
+        2
+      ],
+      "source": "sportsScience",
+      "confidence": "estimate"
+    },
+    "goalie.freezeShare": {
+      "value": 0.3125,
+      "band": [
+        0.2425,
+        0.3825
+      ],
+      "source": "nhlApiLegacy",
+      "confidence": "derived",
+      "note": "goalie-freeze stoppages / saves"
+    },
+    "motion.teleportsLive": {
+      "value": 0,
+      "band": [
+        0,
+        0
+      ],
+      "source": "design",
+      "confidence": "design",
+      "note": "plan gate: 0 teleports"
+    },
+    "motion.teleportsDead": {
+      "value": null,
+      "band": [
+        0,
+        6
+      ],
+      "source": "design",
+      "confidence": "design"
+    },
+    "motion.overlapPerFrame": {
+      "value": 0,
+      "band": [
+        0,
+        0.02
+      ],
+      "source": "design",
+      "confidence": "design",
+      "note": "bodies occupy space"
+    },
+    "shapeSim.breakoutWall.attack": {
+      "value": null,
+      "band": [
+        0,
+        16
+      ],
+      "source": "coachingTemplates",
+      "confidence": "design",
+      "note": "mean assigned distance to the textbook spot"
+    },
+    "shapeSim.breakoutWall.defend": {
+      "value": null,
+      "band": [
+        0,
+        16
+      ],
+      "source": "coachingTemplates",
+      "confidence": "design",
+      "note": "mean assigned distance to the textbook spot"
+    },
+    "shapeSim.ozLowCycle.attack": {
+      "value": null,
+      "band": [
+        0,
+        16
+      ],
+      "source": "coachingTemplates",
+      "confidence": "design",
+      "note": "mean assigned distance to the textbook spot"
+    },
+    "shapeSim.ozLowCycle.defend": {
+      "value": null,
+      "band": [
+        0,
+        16
+      ],
+      "source": "coachingTemplates",
+      "confidence": "design",
+      "note": "mean assigned distance to the textbook spot"
+    },
+    "shapeSim.ozPointShot.attack": {
+      "value": null,
+      "band": [
+        0,
+        16
+      ],
+      "source": "coachingTemplates",
+      "confidence": "design",
+      "note": "mean assigned distance to the textbook spot"
+    },
+    "shapeSim.ozPointShot.defend": {
+      "value": null,
+      "band": [
+        0,
+        16
+      ],
+      "source": "coachingTemplates",
+      "confidence": "design",
+      "note": "mean assigned distance to the textbook spot"
+    },
+    "shapeSim.nzRegroup.attack": {
+      "value": null,
+      "band": [
+        0,
+        16
+      ],
+      "source": "coachingTemplates",
+      "confidence": "design",
+      "note": "mean assigned distance to the textbook spot"
+    },
+    "shapeSim.nzRegroup.defend": {
+      "value": null,
+      "band": [
+        0,
+        16
+      ],
+      "source": "coachingTemplates",
+      "confidence": "design",
+      "note": "mean assigned distance to the textbook spot"
+    },
+    "shapeSim.rushEntry.attack": {
+      "value": null,
+      "band": [
+        0,
+        16
+      ],
+      "source": "coachingTemplates",
+      "confidence": "design",
+      "note": "mean assigned distance to the textbook spot"
+    },
+    "shapeSim.rushEntry.defend": {
+      "value": null,
+      "band": [
+        0,
+        16
+      ],
+      "source": "coachingTemplates",
+      "confidence": "design",
+      "note": "mean assigned distance to the textbook spot"
+    },
+    "shapeSim.pp131.attack": {
+      "value": null,
+      "band": [
+        0,
+        16
+      ],
+      "source": "coachingTemplates",
+      "confidence": "design",
+      "note": "mean assigned distance to the textbook spot"
+    },
+    "shapeSim.pp131.defend": {
+      "value": null,
+      "band": [
+        0,
+        16
+      ],
+      "source": "coachingTemplates",
+      "confidence": "design",
+      "note": "mean assigned distance to the textbook spot"
+    },
+    "shapeSim.ppUmbrella.attack": {
+      "value": null,
+      "band": [
+        0,
+        16
+      ],
+      "source": "coachingTemplates",
+      "confidence": "design",
+      "note": "mean assigned distance to the textbook spot"
+    },
+    "shapeSim.ppUmbrella.defend": {
+      "value": null,
+      "band": [
+        0,
+        16
+      ],
+      "source": "coachingTemplates",
+      "confidence": "design",
+      "note": "mean assigned distance to the textbook spot"
+    }
+  },
+  "shotGrid": {
+    "distanceEdges": [
+      0,
+      8,
+      15,
+      22,
+      30,
+      40,
+      55,
+      75,
+      100,
+      200
+    ],
+    "angleEdges": [
+      0,
+      15,
+      30,
+      45,
+      60,
+      90,
+      180
+    ],
+    "attempts": [
+      [
+        78,
+        70,
+        43,
+        71,
+        119,
+        0
+      ],
+      [
+        243,
+        165,
+        108,
+        139,
+        168,
+        0
+      ],
+      [
+        159,
+        135,
+        88,
+        99,
+        114,
+        0
+      ],
+      [
+        114,
+        125,
+        144,
+        145,
+        146,
+        0
+      ],
+      [
+        129,
+        209,
+        282,
+        179,
+        104,
+        0
+      ],
+      [
+        224,
+        257,
+        321,
+        189,
+        32,
+        0
+      ],
+      [
+        190,
+        287,
+        291,
+        9,
+        0,
+        0
+      ],
+      [
+        32,
+        69,
+        7,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ]
+  },
+  "nhlMixes": {
+    "shotTypeShare": {
+      "wrist": 0.553,
+      "snap": 0.1349,
+      "slap": 0.1211,
+      "tip-in": 0.0808,
+      "backhand": 0.0715,
+      "deflected": 0.0225,
+      "wrap-around": 0.0075,
+      "poke": 0.0046,
+      "bat": 0.0036,
+      "between-legs": 0.0004,
+      "cradle": 0.0002
+    },
+    "missedReasonShare": {
+      "wide-left": 0.3834,
+      "wide-right": 0.3687,
+      "above-crossbar": 0.068,
+      "high-and-wide-right": 0.0528,
+      "high-and-wide-left": 0.045,
+      "short": 0.0253,
+      "hit-right-post": 0.0247,
+      "hit-left-post": 0.018,
+      "hit-crossbar": 0.0141
+    },
+    "penaltyTypeShare": {
+      "tripping": 0.1899,
+      "hooking": 0.1139,
+      "roughing": 0.1076,
+      "slashing": 0.0844,
+      "high-sticking": 0.0823,
+      "interference": 0.0802,
+      "holding": 0.0633,
+      "fighting": 0.0633,
+      "delaying-game-puck-over-glass": 0.0359,
+      "too-many-men-on-the-ice": 0.0338,
+      "cross-checking": 0.0316,
+      "game-misconduct": 0.019,
+      "boarding": 0.0148,
+      "delaying-game-unsuccessful-challenge": 0.0105,
+      "holding-the-stick": 0.0105,
+      "high-sticking-double-minor": 0.0084,
+      "instigator": 0.0084,
+      "misconduct": 0.0084,
+      "unsportsmanlike-conduct": 0.0084,
+      "interference-goalkeeper": 0.0063,
+      "instigator-misconduct": 0.0063,
+      "ps-holding-on-breakaway": 0.0021,
+      "match-penalty": 0.0021,
+      "goalie-participation-beyond-center": 0.0021,
+      "charging": 0.0021,
+      "clipping": 0.0021,
+      "ps-hooking-on-breakaway": 0.0021
+    },
+    "hitBoardDistShare5ftBins": [
+      0.837,
+      0.106,
+      0.0188,
+      0.0118,
+      0.0076,
+      0.0056,
+      0.0049,
+      0.0035,
+      0.0049
+    ],
+    "hitZoneShareHitterPerspective": {
+      "D": 0.451,
+      "O": 0.443,
+      "N": 0.106
+    },
+    "missedPerTeamGame": 13.898
+  }
+}
