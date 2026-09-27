@@ -273,7 +273,7 @@ Verdict: against the same world, the per-day cost is within the ~10% budget. Aga
 `AP_RUN=1 AP_SEASONS=10` on the modded 32-team league (seed 2029). Before the fix below the run finished 0 critical / **2 major**: "NHL roster size 27/31 outside 18–26" at the 2034 and 2035 openers.
 - **Cause.** `assignRosters`, the rollover roster sort, trimmed without regard to position. The autopilot GM had signed a lopsided roster: five goalies, ten D and eight F, from a deeper renewed free-agent market. The trim sent the worst forwards down, and the minimum-fill pulled four forwards straight back up, which left the club at 27.
 - **Fix.** The trim now never takes a group below its legal minimum, and it runs again after the pull-ups.
-- **Result.** After the fix: 10/10 seasons, **0 critical / 0 major** (151 minor, all flavour or repetition notes).
+- **Result.** After the fix: 10/10 seasons, **0 critical / 0 major** and 151 minor issues.
 
 The full suite is green apart from the known heavy-sim timeouts under parallel load (`rules`, `goaliePull`, `scoreEffects`). Those pass in isolation.
 
