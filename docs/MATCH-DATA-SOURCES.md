@@ -114,7 +114,7 @@ This is a hand-written reading of the first `docs/MATCH-SCORECARD.md` run: 60 ga
   - Median acceleration is 17 ft/s², where real skating is ≲ 8, so skaters are always at max steering.
   - Jerk p95 is 125 ft/s³.
   - Skaters make **11.9 bursts of 20+ mph per game** (NHL-like ≲ 3), and the fastest reaches 29.7 mph (real max ≈ 25).
-  - There are **~11 position teleports per game in live play**, all at on-the-fly line changes (incoming skaters inherit slots, and a skater jumps 30–70 ft in one frame).
+  - There are **~11 position teleports per game in live play**, in the game inspected every one coincided with an on-the-fly line change (incoming skaters inherit slots, and a skater jumps 30–70 ft in one frame).
   - Skater pairs overlap (< 2.5 ft) 0.26 times per live frame.
 - **Hits.** The rate is fine (20.3 vs 22.8 per team-game). But **only 26% land within 10 ft of the boards (NHL 94%)**, 100% are on the puck carrier, and D throw 24% (NHL 35%). Hits are a proximity dice roll, not a board play.
 - **Shots.** The engine takes 36.2 SOG and scores 4.0 goals per team-game (NHL 30.0 / 3.07). The **mean shot distance is 18 ft vs NHL 34 ft** (location TVD 0.50), so shots come from far too close. It never misses the net (NHL: 13.9 misses per team-game). Blocked share is 36% (NHL 28%).
