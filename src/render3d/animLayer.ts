@@ -208,6 +208,13 @@ export class ActionLayer {
     for (const a of this.active) if (a.meta.hands === 'clip' || a.clip.ownArms) blendClip(bones, a.clip, this.time(a), !!a.meta.loop, this.weight(a), a.meta.mask, 'arms')
   }
 
+  /** Weight of active clips whose hands are re-gripped onto THEIR stick by IK (upper / full body). */
+  ikArmsWeight(): number {
+    let w = 0
+    for (const a of this.active) if (a.meta.hands === 'stick' && !a.clip.ownArms && a.meta.mask !== 'lower') w = Math.max(w, this.weight(a))
+    return w
+  }
+
   /** Does any active clip drive the arms directly? (skip nothing — IK still runs first) */
   armsWeight(): number {
     let w = 0

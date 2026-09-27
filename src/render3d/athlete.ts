@@ -496,6 +496,9 @@ export function ownerGeometry(t: AthleteTemplate, slot: number): THREE.BufferGeo
 }
 const ownerUv1 = new WeakMap<AthleteTemplate, THREE.BufferAttribute>()
 
+/** Blade centre in the carry, root space (ft): forehand side (+X = his left), out front. Matches math.puckCarriedOffset. */
+export const CARRY_BLADE = { x: 1.0, z: 4.1 }
+
 /** Segment lengths the pose / IK maths uses (the owner's rig keeps its own proportions). */
 export interface RigDims {
   upperArm: number
@@ -689,7 +692,6 @@ export class AthleteRig {
     }
     overlay?.body(B)
     r.updateMatrixWorld(true)
-
     // ── hands & stick, solved in root space ──
     _inv.copy(r.matrixWorld).invert()
     // the arm chain starts at the upper-arm joint (== the shoulder bone on RIG bodies)
@@ -722,14 +724,17 @@ export class AthleteRig {
       handR = add3(heel, scale3(shaftDir, topGrip))
       handL = add3(heel, scale3(shaftDir, lowGrip))
     } else {
-      // carry / shoot: blade centred on the puck spot (math.puckCarriedOffset)
-      let bz = 3.0
+      // carry / shoot: blade centred on the puck spot (math.puckCarriedOffset):
+      // a real carry — blade flat on the ice ~3.7 ft out front on the forehand
+      // side, stick at a ~45° lie, top hand at the hip/waist out in front,
+      // bottom hand a third of the way down the shaft, arms reaching forward
+      let bz = CARRY_BLADE.z
       let by = 0.02
       const t = stick.mode === 'shoot' ? (stick.t ?? 0) : -1
       if (t >= 0) {
         if (t < 0.45) {
           const k = t / 0.45
-          bz = 3.0 - 2.2 * k
+          bz = CARRY_BLADE.z - 2.9 * k
           by = 0.02 + 0.9 * k
         } else {
           const k = (t - 0.45) / 0.55
@@ -738,14 +743,52 @@ export class AthleteRig {
         }
       }
       bladeDir = norm({ x: 1, y: 0, z: 0.28 })
-      const mid = { x: 1.2 + pose.stickSway, y: by, z: bz }
+      const mid = { x: CARRY_BLADE.x + pose.stickSway, y: by, z: bz }
       heel = add3(mid, scale3(bladeDir, -0.45))
-      // top hand out in front of the hip, bottom hand halfway down the shaft
-      const top = { x: shR.x + 0.5, y: hipY + 0.5, z: 1.05 }
+      // top hand in front of the right hip (he shoots left), ahead of the
+      // chest; if the bottom hand (a third of the way down) can't reach the
+      // shaft from there, the top hand eases up / forward / toward the middle
+      // just enough (bisection → continuous, no pops) — both hands stay on
+      const reachL = (this.dims.upperArm + this.dims.forearm) * 0.97
+      const T0 = { x: shR.x * 0.6, y: hipY + 0.2, z: Math.max(1.0, shR.z + 0.7) }
+      const T1 = { x: shR.x * 0.3, y: hipY + 0.45, z: Math.max(1.3, shR.z + 1.2) }
+      const lowOk = (k: number): boolean => {
+        const t = add3(T0, scale3(sub3(T1, T0), k))
+        const dd = sub3(t, heel)
+        const g = Math.min(len3(dd), this.dims.stickLen - 0.25) * 0.66
+        // (the bottom hand may also slide up to ~⅕ below the top: gripOnShaft)
+        const g2 = Math.min(len3(dd), this.dims.stickLen - 0.25) * 0.82
+        return len3(sub3(add3(heel, scale3(norm(dd), g)), shL)) <= reachL || len3(sub3(add3(heel, scale3(norm(dd), g2)), shL)) <= reachL
+      }
+      let kk = 0
+      if (!lowOk(0)) {
+        let lo = 0
+        let hi = 1
+        for (let it = 0; it < 10; it++) {
+          const m = (lo + hi) / 2
+          if (lowOk(m)) hi = m
+          else lo = m
+        }
+        kk = hi
+      }
+      const top = add3(T0, scale3(sub3(T1, T0), kk))
+      // the top hand holds the KNOB (no stick poking up past the hand like a
+      // cane): slide the blade out along the ice until the shaft is full length
+      const full = this.dims.stickLen - 0.25
+      {
+        const dd = sub3(top, heel)
+        const hx = heel.x - top.x
+        const hz = heel.z - top.z
+        const hl = Math.hypot(hx, hz)
+        if (len3(dd) < full && hl > 1e-3 && full > Math.abs(dd.y)) {
+          const want = Math.sqrt(full * full - dd.y * dd.y)
+          heel = { x: top.x + (hx / hl) * want, y: heel.y, z: top.z + (hz / hl) * want }
+        }
+      }
       const d = sub3(top, heel)
       shaftDir = norm(d)
       topGrip = Math.min(len3(d), this.dims.stickLen - 0.25)
-      lowGrip = topGrip * 0.55
+      lowGrip = topGrip * 0.66
       handR = add3(heel, scale3(shaftDir, topGrip))
       handL = add3(heel, scale3(shaftDir, lowGrip))
     }
@@ -775,7 +818,7 @@ export class AthleteRig {
     }
     handR = add3(heel, scale3(shaftDir, top.t))
     if (!this.goalie) {
-      const low = gripOnShaft(heel, shaftDir, shL, lowGrip, reach, lowGrip * 0.8, top.t - 0.3)
+      const low = gripOnShaft(heel, shaftDir, shL, lowGrip, reach, lowGrip * 0.8, top.t - 0.25)
       handL = add3(heel, scale3(shaftDir, low.t))
     }
     B.stick.updateMatrixWorld(true)
@@ -791,7 +834,8 @@ export class AthleteRig {
 
   /** Two-bone IK → bone-local rotations (bones keep their fixed lengths). */
   private placeArm(sh: V3, target: V3, upper: THREE.Bone, fore: THREE.Bone, side: 1 | -1): void {
-    const pole = { x: sh.x + side * 1.6, y: sh.y - 1.2, z: sh.z - 0.8 }
+    // elbows out and down, not tucked back: the arms reach forward to the stick
+    const pole = { x: sh.x + side * 1.5, y: sh.y - 1.3, z: sh.z + 0.2 }
     const { elbow, hand } = solveTwoBone(sh, target, this.dims.upperArm, this.dims.forearm, pole)
     this.aimBone(upper, _v.set(elbow.x - sh.x, elbow.y - sh.y, elbow.z - sh.z).normalize())
     this.aimBone(fore, _v.set(hand.x - elbow.x, hand.y - elbow.y, hand.z - elbow.z).normalize())

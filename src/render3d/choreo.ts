@@ -427,14 +427,28 @@ export class Choreographer {
     const gclips = this.locoClips.goalie
     const loco = this.loco
     const owner = this.ownerLoco
+    // Owner imports: the authored skating / stance cycles carry their own arms
+    // and stick handling (retargeted together from the source), so they drive
+    // arms + stick too — the renderer's carry IK is only the fallback under
+    // them. An action clip that re-grips the stick by IK (a Blender shot or
+    // pass on an owner rig) takes the arms back in proportion to its weight.
+    const skate = (B: Record<BoneName, THREE.Bone>, part: 'body' | 'stick' | 'arms', k = 1) => {
+      if (clips && !actor.rig.goalie && loco !== 'code') blendLocomotion(B, clips, actor, loco, owner, part, k)
+      if (gclips && actor.rig.goalie && gclips.has('g_stance')) blendGoalieLocomotion(B, gclips, actor, part, k)
+    }
     return {
       body: (B) => {
-        if (clips && !actor.rig.goalie && loco !== 'code') blendLocomotion(B, clips, actor, loco, owner)
-        if (gclips && actor.rig.goalie && gclips.has('g_stance')) blendGoalieLocomotion(B, gclips, actor)
+        skate(B, 'body')
         actor.layer?.blendBody(B)
       },
-      stick: (B) => actor.layer?.blendStick(B),
-      arms: (B) => actor.layer?.blendArms(B),
+      stick: (B) => {
+        if (owner) skate(B, 'stick')
+        actor.layer?.blendStick(B)
+      },
+      arms: (B) => {
+        if (owner) skate(B, 'arms', 1 - (actor.layer?.ikArmsWeight() ?? 0))
+        actor.layer?.blendArms(B)
+      },
     }
   }
 }
@@ -446,7 +460,16 @@ export class Choreographer {
  *   'hybrid' — the code keeps the forward stride/glide; the clips add
  *              crossovers and backward skating on top.
  */
-export function blendLocomotion(B: Record<BoneName, THREE.Bone>, clips: Map<string, BakedClip>, a: ChoreoActor, mode: LocoMode, owner = false): void {
+export function blendLocomotion(
+  B: Record<BoneName, THREE.Bone>,
+  clips: Map<string, BakedClip>,
+  a: ChoreoActor,
+  mode: LocoMode,
+  owner = false,
+  part: 'body' | 'stick' | 'arms' = 'body',
+  scale = 1
+): void {
+  if (scale <= 0.001) return
   const facing = a.angle
   const { st, dt } = locoState(a)
   const vAng = Math.atan2(st.vx, st.vz)
@@ -474,7 +497,7 @@ export function blendLocomotion(B: Record<BoneName, THREE.Bone>, clips: Map<stri
     if (!clip || weight <= 0.001) continue
     const f = weight / (W + weight)
     W += weight
-    blendClip(B as unknown as Record<string, THREE.Bone>, clip, phase01 * clip.duration, true, f, mask, 'body')
+    blendClip(B as unknown as Record<string, THREE.Bone>, clip, phase01 * clip.duration, true, f * scale, mask, part)
   }
 }
 
@@ -482,7 +505,14 @@ export function blendLocomotion(B: Record<BoneName, THREE.Bone>, clips: Map<stri
  * Owner goalies: stance loop / forward / backward / lateral shuffle by the
  * direction of travel relative to his facing; yields to the code butterfly.
  */
-export function blendGoalieLocomotion(B: Record<BoneName, THREE.Bone>, clips: Map<string, BakedClip>, a: ChoreoActor): void {
+export function blendGoalieLocomotion(
+  B: Record<BoneName, THREE.Bone>,
+  clips: Map<string, BakedClip>,
+  a: ChoreoActor,
+  part: 'body' | 'stick' | 'arms' = 'body',
+  scale = 1
+): void {
+  if (scale <= 0.001) return
   const { st, dt } = locoState(a)
   const sp = Math.hypot(st.vx, st.vz)
   const vAng = Math.atan2(st.vx, st.vz)
@@ -491,7 +521,7 @@ export function blendGoalieLocomotion(B: Record<BoneName, THREE.Bone>, clips: Ma
   const w = smoothWeights(st.w, goalieLocoWeights(sp, fwd, lat), dt)
   // one integrated cycle phase (s) for the travel clips — cadence follows speed
   st.phase += dt * Math.min(1.5, Math.max(0.6, sp / 8))
-  const k = 1 - (a.butterfly ?? 0)
+  const k = (1 - (a.butterfly ?? 0)) * scale
   if (k <= 0.001) return
   let W = 0
   for (const [name, weight] of Object.entries(w) as Array<[string, number]>) {
@@ -501,6 +531,6 @@ export function blendGoalieLocomotion(B: Record<BoneName, THREE.Bone>, clips: Ma
     W += weight
     // animTime only runs while the game clock does (a paused game is a frozen frame)
     const t = name === 'g_stance' ? (a.animTime ?? 0) : st.phase
-    blendClip(B as unknown as Record<string, THREE.Bone>, clip, t, true, f * k, 'full', 'body')
+    blendClip(B as unknown as Record<string, THREE.Bone>, clip, t, true, f * k, 'full', part)
   }
 }

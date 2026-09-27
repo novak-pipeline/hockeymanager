@@ -526,7 +526,10 @@ def stick_frame(stick_mesh, stick_arm):
     heel = axis_pt(far)
     heel[k] = end
     REPORT['stickAuthored'] = {'axis': 'xyz'[k], 'bladeEnd': 'max' if top else 'min', 'flipped': bool(top)}
-    return {'heel': heel, 'shaft': shaft, 'blade': blade, 'length': L, 'k': k, 'end': end, 'axis': ax}
+    # the grip bone (top hand) along the shaft from the heel
+    gb = stick_arm.matrix_world @ stick_arm.data.bones[0].head_local
+    grip = abs((gb - heel).dot(shaft))
+    return {'heel': heel, 'shaft': shaft, 'blade': blade, 'length': L, 'k': k, 'end': end, 'axis': ax, 'grip': grip}
 
 
 def stick_to_rest(stick_mesh, sf, s):
@@ -551,12 +554,14 @@ def stick_to_rest(stick_mesh, sf, s):
     gs = ob.vertex_groups.new(name='__stick__')
     gb = ob.vertex_groups.new(name='__blade__')
     k = sf['k']
+    sf['bladeLocal'] = []
     for i, p in enumerate(world):
         q = p.copy()
         q[k] = sf['axis'][k]
         r = (q - sf['axis']).length
         if abs(p[k] - sf['end']) < 0.1 * sf['length'] and r > 0.04:
             gb.add([i], 1.0, 'REPLACE')
+            sf['bladeLocal'].append(M @ p)
         else:
             gs.add([i], 1.0, 'REPLACE')
     return ob, M
@@ -662,6 +667,11 @@ def evaluate_clip(path, prim_rot, prim_pos, K, G_rot, s, ground, sf):
             M = stick_arm.matrix_world @ spb.matrix @ spb.bone.matrix_local.inverted() @ stick_arm.matrix_world.inverted()
             st = (M @ sf['heel'], (M.to_3x3() @ sf['shaft']).normalized(), (M.to_3x3() @ sf['blade']).normalized())
         hands = [whead(char, char.pose.bones[prim_pos[b]]) for b in ('hand_L', 'hand_R', 'foot_L', 'foot_R')]
+        # toes (first child of each foot bone: UE ball_l / Mixamo ToeBase): the
+        # skate blade's front end — for the ground lock
+        for b in ('foot_L', 'foot_R'):
+            kids = char.pose.bones[prim_pos[b]].children
+            hands.append(whead(char, kids[0]) if kids else hands[2 if b == 'foot_L' else 3])
         samples.append((D, pel, st, hands))
     delete(new)
     for a in list(bpy.data.actions):
@@ -699,6 +709,60 @@ def evaluate_clip(path, prim_rot, prim_pos, K, G_rot, s, ground, sf):
             stick = (heel, (GR @ st[1]).normalized(), (GR @ st[2]).normalized())
         out.append({'D': Dg, 'hips': hp, 'stick': stick, 'probe': [place(p) for p in hands]})
     return {'frames': out, 'travelFt': round(travel * s, 2), 'yawDeg': round(math.degrees(dy), 1), 'fps': sc.render.fps}
+
+
+def blade_low(heel, shaft, blade, local):
+    """Lowest blade vertex height (ft) for a stick frame (local = stick-frame blade verts)."""
+    bx = (blade - shaft * blade.dot(shaft)).normalized()
+    bz = shaft.normalized()
+    by = bz.cross(bx)
+    return min(heel.z + bx.z * v.x + by.z * v.y + bz.z * v.z for v in local)
+
+
+def pivot_to(heel, shaft, blade, grip_ft, heel_z):
+    """Swing the stick about its top-hand grip so the heel is at height heel_z."""
+    G = heel + shaft * grip_ft
+    h = G.z - heel_z
+    if not (0 < h < grip_ft):
+        return heel, shaft, blade
+    hor = Vector((heel.x - G.x, heel.y - G.y, 0))
+    if hor.length < 1e-6:
+        return heel, shaft, blade
+    hor.normalize()
+    nh = Vector((G.x, G.y, heel_z)) + hor * math.sqrt(grip_ft * grip_ft - h * h)
+    nshaft = (G - nh).normalized()
+    q = shaft.rotation_difference(nshaft)
+    return nh, nshaft, (q @ blade).normalized()
+
+
+def ground_lock(tr, rest_ankle, grip_ft=None, blade_local=None):
+    """Skaters keep a skate on the ice. Per frame the lowest point of either
+    skate blade — its toe (ball joint) or its heel (ankle − rest ankle height)
+    — is put on the ice by shifting the whole body (hips, stick, probes). The
+    FAB stride has both skates ~0.1 m in the air mid-cycle (the skater floated).
+    A stick blade near or through the ice is then swung about the top hand
+    (the grip stays in the hand) until its LOWEST blade point sits on the ice —
+    no hovering carry, no blade through the ice. Returns the largest body
+    correction (ft)."""
+    worst = 0.0
+    for fr in tr['frames']:
+        pr = fr['probe']
+        dz = -min(pr[4].z, pr[5].z, pr[2].z - rest_ankle, pr[3].z - rest_ankle)
+        if abs(dz) > 1e-4:
+            worst = max(worst, abs(dz))
+            fr['hips'] = fr['hips'] + Vector((0, 0, dz))
+            fr['probe'] = [p + Vector((0, 0, dz)) for p in pr]
+            if fr['stick']:
+                heel, shaft, blade = fr['stick']
+                fr['stick'] = (heel + Vector((0, 0, dz)), shaft, blade)
+        if fr['stick'] and grip_ft and blade_local:
+            heel, shaft, blade = fr['stick']
+            low = blade_low(heel, shaft, blade, blade_local)
+            if low < 0.45:
+                for _ in range(3):
+                    heel, shaft, blade = pivot_to(heel, shaft, blade, grip_ft, heel.z + (0.02 - blade_low(heel, shaft, blade, blade_local)))
+                fr['stick'] = (heel, shaft, blade)
+    return round(worst, 2)
 
 
 def heel_heights(tr):
@@ -933,7 +997,8 @@ def main():
             continue
         if slots == ['shot*']:
             slots = shot_kind(tr)
-        rep = {'slots': slots, 'frames': len(tr['frames']), 'rootTravelStrippedFt': tr['travelFt'], 'netYawStrippedDeg': tr['yawDeg'],
+        lift = ground_lock(tr, joints_b['foot_L'].z, sf['grip'] * s if sf else None, sf['bladeLocal'] if sf else None) if not GOALIE else 0.0
+        rep = {'slots': slots, 'frames': len(tr['frames']), 'rootTravelStrippedFt': tr['travelFt'], 'netYawStrippedDeg': tr['yawDeg'], 'groundLockFt': lift,
                'stick': tr['frames'][0]['stick'] is not None}
         for slot in slots:
             name = slot
