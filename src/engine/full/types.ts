@@ -188,6 +188,11 @@ export interface Ctx {
   /** Tonight's in-game injury, if the hash roll produced one. `done` once the
    *  victim has gone down. */
   injury?: { plan: { atSecond: number; homeSide: boolean }; rng: Rng; done: boolean }
+  /** The rating level tonight's outcomes are read against: LEAGUE_AVG shifted
+   *  by how far the two dressed rosters sit from the calibration league, so an
+   *  imported NHL league (ratings ~9 points higher across the board) doesn't
+   *  shoot and score more just for its rating scale. Absent → LEAGUE_AVG. */
+  levelAvg?: number
 }
 
 export function clamp(v: number, lo: number, hi: number): number {

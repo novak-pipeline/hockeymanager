@@ -927,9 +927,14 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
       .filter((o) => o !== carrier)
       .map((o) => ({ o, xg: xgAt(o.x, o.y, opp.a) }))
       .sort((p, q) => q.xg - p.xg)
-    const freeD = new Set(rest)
+    // Man-on-man still keeps a man home: whoever holds the net-front/slot
+    // role stays in it, and nobody is dragged out to shadow a point man at the
+    // blue line (the winger's zone spot covers his lane) — otherwise the
+    // house empties and the other team walks in.
+    const freeD = new Set(rest.filter((b) => roles.get(b)?.role !== 'D_NET' && roles.get(b)?.role !== 'B4_LOW_W'))
+    const reach = me.tactics.dZoneCoverage === 'hybrid' ? 30 : 42
     for (const th of threats) {
-      if (me.tactics.dZoneCoverage === 'hybrid' && Math.hypot(th.o.x - ownNetX, th.o.y) > 30) continue
+      if (Math.hypot(th.o.x - ownNetX, th.o.y) > reach) continue
       const n = nearestTo([...freeD], th.o.x, th.o.y)
       if (!n.b) break
       marks.set(n.b, th.o)

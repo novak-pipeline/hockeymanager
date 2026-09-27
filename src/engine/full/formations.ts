@@ -377,12 +377,31 @@ export function defenderOrders(c: DefendCtx): MoveOrder[] {
   if (adv > 0.3 && (phase === 'cycle' || phase === 'entry')) {
     if (tactics.dZoneCoverage === 'man') {
       // Each defender shadows a distinct attacker, body between man and net.
+      // (One man stays home: the defender deepest in our end keeps the slot
+      // instead of chasing a point man out to the blue line.)
       const taken = new Set<number>()
+      let home = -1
+      let hx = Infinity
       unit.skaters.forEach((r, i) => {
+        const dn = Math.hypot(r.pos.x - a * 0.89, r.pos.y)
+        if (dn < hx) {
+          hx = dn
+          home = i
+        }
+      })
+      unit.skaters.forEach((r, i) => {
+        if (i === home) {
+          orders[i] = { tx: a * 0.8, ty: side * 0.04, urgency: 0.8 }
+          return
+        }
         let pick = -1
         let bd = Infinity
         attackers.forEach((atk, j) => {
           if (taken.has(j)) return
+          // Nobody is dragged out to the blue line to shadow a point man
+          // (the carrier excepted): past ~45 ft from our net he is left to
+          // the zone, and the would-be marker sags into the slot.
+          if (j !== carrierIdx && Math.hypot((atk.pos.x - a * 0.89) * 100, atk.pos.y * 42.5) > 45) return
           const d = (r.pos.x - atk.pos.x) ** 2 + (r.pos.y - atk.pos.y) ** 2
           if (d < bd) {
             bd = d
@@ -390,7 +409,7 @@ export function defenderOrders(c: DefendCtx): MoveOrder[] {
           }
         })
         if (pick < 0) {
-          orders[i] = { tx: a * 0.8, ty: 0, urgency: 0.7 }
+          orders[i] = { tx: a * 0.62, ty: side * 0.1, urgency: 0.7 }
           return
         }
         taken.add(pick)
