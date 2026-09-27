@@ -596,7 +596,7 @@ export class Rink3dRenderer implements MatchRenderer {
         color: 0xffd24a, transparent: true, opacity, depthWrite: false, toneMapped: false,
         polygonOffset: true, polygonOffsetFactor: -3,
       })
-    this.puckGlowRing = new THREE.Mesh(flat(0.68), markMat(0.6))
+    this.puckGlowRing = new THREE.Mesh(flat(0.58), markMat(0.75))
     this.puckGlowRing.renderOrder = 2
     this.scene.add(this.puckGlowRing)
     this.carrierRing = new THREE.Mesh(flat(0.8), markMat(0.85))
@@ -702,10 +702,14 @@ export class Rink3dRenderer implements MatchRenderer {
     const pz = this.puck.z
     const carried = this.carrierMarkPose !== null
     // halo: ≥ 7 px radius; quieter while the carrier ring already marks the play
-    const haloR = Math.max(PUCK_R + 0.45, 7 * wpp(px, pz))
+    const w = wpp(px, pz)
+    const haloR = Math.max(PUCK_R + 0.45, 8 * w)
     this.puckGlowRing.position.set(px, 0.05, pz)
     this.puckGlowRing.scale.setScalar(haloR)
-    ;(this.puckGlowRing.material as THREE.MeshBasicMaterial).opacity = carried ? 0.35 : 0.6
+    ;(this.puckGlowRing.material as THREE.MeshBasicMaterial).opacity = carried ? 0.45 : 0.75
+    // the puck itself never shrinks below ~3.5 px radius on screen (real size up close)
+    const ps = Math.max(1, (3.5 * w) / PUCK_R)
+    this.puckMesh.scale.set(ps, Math.min(ps, 2), ps)
     const c = this.carrierMarkPose
     this.carrierRing.visible = c !== null && c.rig.visible
     if (c) {
