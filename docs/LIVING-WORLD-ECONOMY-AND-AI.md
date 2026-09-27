@@ -64,20 +64,20 @@ is how the fixes in §3 were found.
 
 ## 2. Before / after (imported 32-team league, seed 2029, autopilot as FLA-index 3)
 
-| metric | NHL band | **baseline** (dbf54b7, pre-change) | predecessor (da06e04) | after3 (11f2b31) | **final** (this branch) |
+| metric | NHL band | **baseline** (dbf54b7, pre-change) | predecessor (da06e04) | after3 (11f2b31) | **final** (9ca3853) |
 |---|---|---|---|---|---|
-| points SD (mean) | 12–16 | 14.4 | 15.0 | 15.0 | FINAL_SD |
-| min distinct champions / 10 | ≥ 6 | **5** | 6 | 6 | FINAL_CHAMPS |
-| most Cups (20 seasons) | — | FLA ×5 | SJS ×4 | CAR ×5 | FINAL_MOST |
-| longest ≥100-pt streak | ≤ 7 | **FLA 14** | CAR 9 | CAR 10 | FINAL_STREAK |
-| median AI payroll | 85–98% | **52.7%** (4/20 seasons in band; 37% by 2044) | 89.5% (15/20) | 88.5% (13/18) | FINAL_PAY |
-| AI clubs under floor / season | 0 | **21.8** (31 of 31 by 2036) | 3.9 | 2.7 | FINAL_FLOOR |
-| trades / season | 70–130 | **12.2** | 38.6 | 53.1 | FINAL_TRADES |
-| … deadline day | 15–35 | 1.1 | 7.6 | 9.9 | FINAL_DD |
-| … offseason | — | 0 | 11.2 | 14.5 | FINAL_OFF |
-| AI trade shapes | varied | rental 162, prospectFor 26 | rental 488, capDump 103, prospectFor 66, goalie 29, hockey 21 | rental 431, prospectFor 240, capDump 100, hockey 97, goalie 34 | FINAL_SHAPES |
-| AI FA signings / season (stars ≥78) | — | 22.1 (1.6) | 55.5 (8.8) | 53.4 (8.3) | FINAL_FA |
-| offer sheets / season | ~0–1 | 0.2 at user | 0.1 | 0.3 at user | FINAL_OS |
+| points SD (mean) | 12–16 | 14.4 | 15.0 | 15.0 | **14.7** |
+| min distinct champions / 10 | ≥ 6 | **5** | 6 | 6 | **8** (14 in 20) |
+| most Cups (20 seasons) | — | FLA ×5 | SJS ×4 | CAR ×5 | CAR ×3 |
+| longest ≥100-pt streak | ≤ 7 | **FLA 14** | CAR 9 | CAR 10 | **CAR 7** |
+| median AI payroll | 85–98% | **52.7%** (4/20 seasons in band; 37% by 2044) | 89.5% (15/20) | 88.5% (13/18) | **89.8%** (19/20) |
+| AI clubs under floor / season | 0 | **21.8** (31 of 31 by 2036) | 3.9 | 2.7 | **2.3** (0 in 7 of the last 10) |
+| trades / season | 70–130 | **12.2** | 38.6 | 53.1 | **64.1** |
+| … deadline day | 15–35 | 1.1 | 7.6 | 9.9 | **12.9** |
+| … offseason | — | 0 | 11.2 | 14.5 | 20.0 |
+| AI trade shapes | varied | rental 162, prospectFor 26 | rental 488, capDump 103, prospectFor 66, goalie 29, hockey 21 | rental 431, prospectFor 240, capDump 100, hockey 97, goalie 34 | rental 469, prospectFor 361, capDump 122, pickSwap 110, hockey 104, goalie 56 |
+| AI FA signings / season (stars ≥78) | — | 22.1 (1.6) | 55.5 (8.8) | 53.4 (8.3) | 51.7 (9.5) |
+| offer sheets / season | ~0–1 | 0.2 at user | 0.1 | 0.3 at user | 0.1 at user |
 | postures c/r/r | reacts to the table | 10/11/11 every season (fixed thirds) | varies 10–13 / 3–8 / 11–16 | varies | varies |
 
 The fictional default league (16 clubs, vanilla autopilot gate, 10 seasons) was measured the same
@@ -225,17 +225,20 @@ actual proposal. The `tradeTalk` and `tradeThread` dialogue is unchanged.
 
 ## 5. What's left (honest)
 
-- **Trade volume is at the low edge.** Before the last changes it was about 53 a season against a
-  70–130 band. Deadline day was about 10 against 15–35. Market diagnostics show deadline day is
+- **Trade volume is just under the band.** The final run averages 64.1 trades a season against a
+  70–130 band (the first two seasons run 87 and 69), and 12.9 on deadline day against 15–35. The
+  volume sags mid-run: 2032–2038 average about 48. Market diagnostics show deadline day is
   *supply-limited*. By then the real pieces have moved, and the remaining depth veterans (value about 5)
   are worth less than the cheapest pick (a 7th is about 8–10 on the Perri scale), so both books reject
   every price. A "future considerations" or conditional-pick currency for depth deals would unlock the
-  deadline flurry. It needs a pick-condition model, which is out of scope here.
-- **Dynasties.** In the imported league, CAR ran 10 straight 100-point seasons and won 5 Cups in 18.
-  That clears the brief's "no 17-year juggernauts" but not the ≤7 band. CAR sits at 92–101% of the cap
-  every year and still reloads. The next lever would be structural: ring-inflated asks on a champion's
-  expiring core, or cap-recapture on front-loaded deals. It was not pursued, to avoid grinding the
-  *player's* dynasty down.
+  rest of the deadline flurry. It needs a pick-condition model, which is out of scope here.
+- **Dynasties are now in band, but only just.** CAR's longest run of 100-point seasons is 7, down from
+  10 (and FLA 14 at baseline), and no club won more than 3 Cups in 20 seasons. It sits exactly on the
+  ≤7 bound, so a different seed could land one over. The next lever would be structural: ring-inflated
+  asks on a champion's expiring core. It was not pursued, to avoid grinding the *player's* dynasty down.
+- **The floor mostly binds.** 2.3 clubs a season are under it on average. Those are mid-2030s summers
+  where the market had nobody left to sign; it is 0 in 7 of the final 10 seasons. A club that can't
+  find a body could absorb a dump or front-load a re-sign, but neither is built yet.
 - **Clubs over the ceiling.** One path is fixed: the opening-night roster re-balance
   (`assignRosters`) used to pull a sent-down veteran's full salary back up unchecked, which put clubs
   7–9% over. It now takes the best *affordable* body. In-season emergency recalls still eat an
