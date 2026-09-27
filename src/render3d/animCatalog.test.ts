@@ -132,6 +132,18 @@ describe('boards + hits', () => {
     expect(hitPlan(40, 30).hardness).toBe(1)
     expect(hitPlan(0, 30).hardness).toBe(0)
   })
+  it('the engine\'s force + kind win over the closing-speed guess (agent engine)', () => {
+    // a slow closing speed but a thunderous hit → knocked down
+    expect(hitPlan(2, 30, 0.9, 'openIce').target).toBe('hit_fall')
+    // near the boards but an open-ice hit → not pinned
+    expect(hitPlan(20, BOARDS_PIN_FT - 1, 0.5, 'openIce').pinned).toBe(false)
+    // a boards pin even a few feet off the wall
+    expect(hitPlan(20, 30, 0.5, 'boards').target).toBe('pinned_boards')
+    // a battle is a shove, never a knockdown
+    const b = hitPlan(30, 30, 1, 'battle')
+    expect(b.target).toBe('hit_stagger')
+    expect(b.hardness).toBeLessThanOrEqual(0.4)
+  })
 })
 
 describe('celebrations', () => {

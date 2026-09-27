@@ -55,6 +55,9 @@ export interface ActionCue {
   shotFrom?: { x: number; y: number }
   shotTarget?: { x: number; y: number }
   rebound?: boolean
+  /** hit (agent engine): impact 0..1 and where it happened */
+  force?: number
+  hitKind?: 'boards' | 'openIce' | 'finish' | 'battle'
 }
 
 /** Every cue the choreographer can act on (a superset of math.extractCues). */
@@ -73,7 +76,7 @@ export function extractActionCues(stream: GameStream): ActionCue[] {
     } else if (isEvent(ev, 'goal')) {
       out.push({ kind: 'goal', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.scorer, assists: [...ev.assists] })
     } else if (isEvent(ev, 'hit')) {
-      out.push({ kind: 'hit', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.by, targetId: ev.on })
+      out.push({ kind: 'hit', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.by, targetId: ev.on, ...(ev.force !== undefined ? { force: ev.force } : {}), ...(ev.kind ? { hitKind: ev.kind } : {}) })
     } else if (isEvent(ev, 'pass') && ev.completed) {
       out.push({ kind: 'pass', absT: absTime(ev.period, ev.t), nx: ev.a.x, ny: ev.a.y, actorId: ev.from, targetId: ev.to })
     } else if (isEvent(ev, 'faceoff')) {
@@ -116,7 +119,7 @@ export function planCues(cues: ActionCue[], contactOf: (clip: string) => number 
       const pt = lastPassTo.get(cue.actorId)
       clip = shotClipFor(dist, pt === undefined ? null : cue.absT - pt)
     } else if (cue.kind === 'hit') {
-      clip = distToBoards(normXtoWorld(cue.nx), normYtoWorld(cue.ny)) <= 6 ? 'check_boards' : 'check'
+      clip = hitPlan(12, distToBoards(normXtoWorld(cue.nx), normYtoWorld(cue.ny)), cue.force, cue.hitKind).hitter
     } else if (cue.kind === 'faceoff') {
       clip = 'faceoff_crouch'
       lead = FACEOFF_LEAD_S
@@ -315,7 +318,8 @@ export class Choreographer {
     const rel = hitter ? Math.hypot(hitter.vx - target.vx, hitter.vz - target.vz) : 12
     const wx = normXtoWorld(c.nx)
     const wz = normYtoWorld(c.ny)
-    const plan = hitPlan(rel, distToBoards(wx, wz))
+    // the engine's own impact + kind when it has them (agent engine), else read it from the closing speed
+    const plan = hitPlan(rel, distToBoards(wx, wz), c.force, c.hitKind)
     target.layer.play(plan.target, { weight: plan.target === 'hit_stagger' ? 0.55 + 0.45 * plan.hardness : 1 })
     const meta = CLIPS[plan.target]!
     const len = (meta.hold ?? 0) + 1.2 + (meta.next ? 1.4 : 0)

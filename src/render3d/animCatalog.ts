@@ -198,9 +198,12 @@ export interface HitPlan {
  * Near the boards the hitter PINS (check_boards / pinned_boards); in open ice
  * the target staggers (light), stumbles (medium) or goes down and gets up (hard).
  */
-export function hitPlan(relSpeedFtS: number, boardsDistFt: number): HitPlan {
-  const hardness = Math.min(1, Math.max(0, (relSpeedFtS - 4) / 22))
-  if (boardsDistFt <= BOARDS_PIN_FT) return { hitter: 'check_boards', target: 'pinned_boards', hardness, pinned: true }
+export function hitPlan(relSpeedFtS: number, boardsDistFt: number, force?: number, kind?: 'boards' | 'openIce' | 'finish' | 'battle'): HitPlan {
+  const hardness = force !== undefined ? Math.min(1, Math.max(0, force)) : Math.min(1, Math.max(0, (relSpeedFtS - 4) / 22))
+  // a battle is two bodies leaning on each other: a shove, never a knockdown
+  if (kind === 'battle') return { hitter: 'check', target: 'hit_stagger', hardness: Math.min(hardness, 0.4), pinned: false }
+  const onBoards = kind ? kind === 'boards' : boardsDistFt <= BOARDS_PIN_FT
+  if (onBoards) return { hitter: 'check_boards', target: 'pinned_boards', hardness, pinned: true }
   const target = hardness < 0.35 ? 'hit_stagger' : hardness < 0.7 ? 'hit_stumble' : 'hit_fall'
   return { hitter: 'check', target, hardness, pinned: false }
 }
