@@ -171,7 +171,7 @@ import {
   type LivePosture,
   type TableRead,
 } from '@engine/league/gmPersona'
-import { generateLeagueDeal, type LeagueDeal, type MarketClub, type MarketWindow } from '@engine/league/aiMarket'
+import { generateLeagueDeal, generatePickSwap, type LeagueDeal, type MarketClub, type MarketWindow } from '@engine/league/aiMarket'
 import { WorldTelemetry, type AiTradeShape } from '@engine/league/worldTelemetry'
 import { indexed, setAskModifier, setCeiling, setTalentShift, setWageIndex, wageIndex } from '@engine/league/economy'
 import {
@@ -6478,7 +6478,7 @@ export class Career {
       // vet isn't traded twice and the market thins as pieces move.
       // Talks open and close over days (two-phase) — see leagueMarketTick.
       const dl = this.deadlineDay - day
-      const attempts = dl <= 5 ? 1.6 : dl <= 20 ? 1.4 : 1.3
+      const attempts = dl <= 5 ? 2.2 : dl <= 20 ? 1.7 : 1.5
       this.leagueMarketTick(dl <= 5 ? 'deadline' : 'inSeason', attempts, day)
     }
     this.currentDay = day
@@ -7984,6 +7984,8 @@ export class Career {
           picks: this.picks.filter((p) => p.year === draftYear),
           standingsWorstFirst: worstFirst,
         })
+        // The draft floor: AI clubs move up and down before the first pick.
+        this.draftFloorMarket(os.draft)
 
         /* ── scouting combine on the new class ── */
         const combine = runCombine({
@@ -11199,8 +11201,20 @@ export class Career {
           .filter((x): x is { id: PlayerId; ovr: number; pos: Position } => x !== null && posNeed(x.pos))
           .sort((a, b) => b.ovr - a.ovr || (a.id < b.id ? -1 : 1))
 
-        for (const cand of candidates) {
-          if (!posNeed(cand.pos)) continue
+        // The cap binds here too: the best AFFORDABLE man comes up. Only when
+        // nobody at the position fits does the cheapest one come up anyway — a
+        // legal lineup outranks the ceiling, but by as little as possible (a
+        // sent-down veteran's full salary used to ride up unchecked).
+        const salaryOf = (id: PlayerId): number => this.data.players.get(id)?.contract.salary ?? 0
+        const byFit = (bucketOf: (pos: Position) => boolean) => {
+          const room = nhlTeam.finances.salaryCap - rosterCapUsed(nhlTeam, this.data.players)
+          const pool = candidates.filter((c) => bucketOf(c.pos) && nhlTeam.roster.every((id) => id !== c.id))
+          return pool.find((c) => salaryOf(c.id) <= room) ??
+            [...pool].sort((a, b) => salaryOf(a.id) - salaryOf(b.id) || b.ovr - a.ovr)[0]
+        }
+        for (let guard = 0; guard < 12 && deficit.G + deficit.D + deficit.F > 0; guard++) {
+          const cand = byFit((pos) => posNeed(pos))
+          if (!cand) break
           nhlTeam.roster.push(cand.id)
           ahlTeam.roster = ahlTeam.roster.filter((id) => id !== cand.id)
           const bucket = cand.pos === 'G' ? 'G' : cand.pos === 'D' ? 'D' : 'F'
@@ -15247,6 +15261,35 @@ export class Career {
       })
     }
     if (opts.deadlineDay) this.closeLeagueTalks(Infinity, day, true)
+  }
+
+  /**
+   * Draft-floor pick swaps, priced on the real order (see generatePickSwap).
+   * They close on the spot — the draft is about to start — and land on the
+   * ledger and the ticker; the draft order already holds the same pick objects,
+   * so the new owners are the ones who step to the podium.
+   */
+  private draftFloorMarket(draft: { year: number; order: DraftPick[] }): void {
+    const key = (p: DraftPick): string => `${p.year}:${p.round}:${p.originalTeamId as string}`
+    const slotByKey = new Map(draft.order.map((p, i) => [key(p), i + 1]))
+    const clubs = this.marketClubs()
+    const busy = new Set<DraftPick>()
+    const rng = this.rngFor(7220, this.year)
+    const attempts = 24 + rng.int(12)
+    for (let i = 0; i < attempts; i++) {
+      const deal = generatePickSwap({
+        clubs,
+        picks: this.picks,
+        draftYear: draft.year,
+        slotOf: (p) => slotByKey.get(key(p)),
+        rng: this.rngFor(7221, this.year, i),
+        busy,
+        ...(this.marketDiagnostics ? { why: (r: string) => this.marketDiagnostics?.(`draft:${r}`) } : {}),
+      })
+      if (!deal) continue
+      for (const pk of [...deal.picks, ...(deal.sellerPicks ?? [])]) busy.add(pk)
+      this.executeAiAiDeal(deal, this.currentDay)
+    }
   }
 
   private pickInTalks(pk: DraftPick): boolean {

@@ -9,7 +9,7 @@ import { Rng } from '@engine/shared/rng'
 import { askTerms, aiFloorTopUp, CAP_GROWTH, aiFreeAgencyDay, aiResignDay, capFloorFor, capUsedFor, leagueMinSalary } from './contracts'
 import { MAX_CONTRACT_SHARE, setAskModifier, setCeiling, setWageIndex, wageIndex } from './economy'
 import { buildGmPersona, deriveLivePosture, scoutingDeptFor, type GmPersona, type PostureKind } from './gmPersona'
-import { generateLeagueDeal, type MarketClub } from './aiMarket'
+import { generateLeagueDeal, generatePickSwap, type MarketClub } from './aiMarket'
 import { makePick, makePlayer, makeTeam } from './trades.test.fixtures'
 
 afterEach(() => {
@@ -277,6 +277,48 @@ describe('the league market', () => {
     for (let i = 0; i < 30; i++) {
       const d = generateLeagueDeal({ window: 'deadline', deadlineProximity: 1, ...w, clubs, picks, rng: new Rng(i), floorOf: () => 0, prospectsOf: () => [] })
       expect(d?.playerIds.includes(vet.id) ?? false).toBe(false)
+    }
+  })
+})
+
+describe('the draft floor', () => {
+  // Twenty clubs; each owns its own 1st and 2nd this year and a 2nd next year.
+  // Draft slot = club index + 1 in round 1, + 20 in round 2.
+  function floor(over: (i: number) => Partial<GmPersona>): { clubs: MarketClub[]; picks: DraftPick[]; slotOf: (p: DraftPick) => number | undefined } {
+    const clubs: MarketClub[] = []
+    const picks: DraftPick[] = []
+    for (let i = 0; i < 20; i++) {
+      const id = `c${i}`
+      clubs.push({ team: makeTeam(id, []), persona: persona(id, over(i)), posture: 'retool', strengthRank: 20 - i })
+      picks.push(makePick(2030, 1, id), makePick(2030, 2, id), makePick(2031, 2, id))
+    }
+    const idx = (p: DraftPick): number => Number((p.originalTeamId as string).slice(1))
+    const slotOf = (p: DraftPick): number | undefined => (p.year === 2030 ? (p.round - 1) * 20 + idx(p) + 1 : undefined)
+    return { clubs, picks, slotOf }
+  }
+
+  it('a gambler climbs: his pick plus a sweetener for an earlier slot, priced on the real chart', () => {
+    const { clubs, picks, slotOf } = floor((i) => (i === 11 ? { aggression: 1, riskTolerance: 1 } : { aggression: 0, riskTolerance: 0, pickHoarding: 0.9, patience: 0.1 }))
+    let found = 0
+    for (let s = 0; s < 30; s++) {
+      const d = generatePickSwap({ clubs, picks, draftYear: 2030, slotOf, rng: new Rng(s) })
+      if (!d) continue
+      found++
+      expect(d.shape).toBe('pickSwap')
+      expect(d.buyerTeamId as string).toBe('c11')
+      expect(d.playerIds).toEqual([])
+      // He gives his own 1st (No. 12) and one more pick; he gets an earlier slot.
+      expect(d.picks).toHaveLength(2)
+      expect(slotOf(d.picks[0]!)).toBe(12)
+      expect(slotOf(d.sellerPicks![0]!)!).toBeLessThan(12)
+    }
+    expect(found).toBeGreaterThan(5)
+  })
+
+  it('nobody climbs when every GM is cautious and every seller wants a fat premium', () => {
+    const { clubs, picks, slotOf } = floor(() => ({ aggression: 0, riskTolerance: 0, pickHoarding: 0, patience: 1 }))
+    for (let s = 0; s < 30; s++) {
+      expect(generatePickSwap({ clubs, picks, draftYear: 2030, slotOf, rng: new Rng(s) })).toBeNull()
     }
   })
 })

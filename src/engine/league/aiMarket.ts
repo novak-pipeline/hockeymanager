@@ -36,6 +36,7 @@ import {
   MAX_RETAIN_SLOTS,
   HEADLINE_MIN_VALUE,
   MIN_SHOP_VALUE,
+  perriPickValue,
   pickValue,
   playerValue,
   rosterCapUsed,
@@ -697,6 +698,91 @@ function capDump(args: LeagueDealArgs, ranks: Map<string, number>, year: number)
       buyer: underFloor
         ? `${taker.persona.name} needed salary to reach the floor and got paid to take it`
         : `${taker.persona.name} rents out his cap space for picks`,
+    },
+  }
+}
+
+/* ── the draft floor: pick swaps (move up / move down) ── */
+
+export interface PickSwapArgs {
+  clubs: MarketClub[]
+  /** Every pick in the world (current draft + future years). */
+  picks: DraftPick[]
+  draftYear: number
+  /** Overall slot (1-based) of a pick in THIS draft, from the real order. */
+  slotOf: (pick: DraftPick) => number | undefined
+  rng: Rng
+  busy?: ReadonlySet<DraftPick>
+  why?: (reason: string) => void
+}
+
+/**
+ * A club that loves a player on its own board trades up to get him: its pick
+ * plus a sweetener for an earlier slot. Priced on the REAL draft chart (the
+ * Perri curve at the actual slot) — the trade evaluator values every pick at a
+ * mid-round slot and cannot see the order, so the floor keeps its own book.
+ *
+ *  - the mover is drawn by aggression x risk tolerance (the gambler climbs);
+ *  - the club moving down wants a premium, smaller for a pick-hoarder (more
+ *    picks is the point) and larger for a patient GM who likes his slot;
+ *  - the mover pays at most what his GM thinks the jump is worth: more for an
+ *    aggressive, risk-tolerant GM (his board has a man he must have).
+ */
+export function generatePickSwap(args: PickSwapArgs): LeagueDeal | null {
+  const { clubs, picks, draftYear, slotOf, rng } = args
+  const valueOf = (pk: DraftPick): number => {
+    const s = pk.year === draftYear ? slotOf(pk) : undefined
+    if (s !== undefined) return perriPickValue(s)
+    return pickValue(pk, { year: draftYear })
+  }
+  const free = (pk: DraftPick): boolean => !(args.busy?.has(pk) ?? false)
+  const owned = (c: MarketClub): DraftPick[] => picks.filter((p) => p.ownerTeamId === c.team.id && free(p))
+  const mover = weightedPick(rng, clubs, (c) => (0.2 + c.persona.aggression) * (0.3 + c.persona.riskTolerance))
+  if (!mover) return null
+  const mine = owned(mover)
+  // His best pick in this draft, outside the top three (nobody trades into #1).
+  const aPick = mine
+    .filter((p) => p.year === draftYear && p.round <= 2 && (slotOf(p) ?? 0) >= 4)
+    .sort((x, y) => (slotOf(x) ?? 999) - (slotOf(y) ?? 999))[0]
+  if (!aPick) { args.why?.('pickSwap:noPick'); return null }
+  const aSlot = slotOf(aPick)!
+  const targets = picks
+    .filter((p) => p.year === draftYear && p.ownerTeamId !== mover.team.id && free(p))
+    .map((p) => ({ p, slot: slotOf(p), club: clubs.find((c) => c.team.id === p.ownerTeamId) }))
+    .filter((x): x is { p: DraftPick; slot: number; club: MarketClub } =>
+      x.slot !== undefined && x.club !== undefined && x.slot >= 2 && x.slot <= aSlot - 2 && x.slot >= aSlot - 14)
+  const target = weightedPick(rng, targets, (x) => 1 / (1 + Math.abs(aSlot - x.slot - 5)))
+  if (!target) { args.why?.('pickSwap:noTarget'); return null }
+  const down = target.club
+  // The club moving down: a hoarder takes a thin premium, a patient GM a fat one.
+  const wants = valueOf(target.p) * (1.02 + 0.08 * (1 - down.persona.pickHoarding) + 0.04 * down.persona.patience) - valueOf(aPick)
+  // The mover's ceiling: the jump is worth more to a gambler with a man on his board.
+  const willPay = valueOf(target.p) * (1.0 + 0.12 * mover.persona.aggression + 0.1 * mover.persona.riskTolerance) - valueOf(aPick)
+  if (willPay < wants) { args.why?.('pickSwap:price'); return null }
+  // The sweetener: the cheapest single pick of his that covers what the other
+  // side wants (this draft's later rounds first, then next year's).
+  const sweet = mine
+    .filter((p) => p !== aPick && (p.year === draftYear || p.year === draftYear + 1))
+    .map((p) => ({ p, v: valueOf(p) }))
+    .filter((x) => x.v >= wants && x.v <= willPay)
+    .sort((x, y) => x.v - y.v)[0]
+  if (!sweet) { args.why?.('pickSwap:noSweetener'); return null }
+  const label = (p: DraftPick): string => {
+    const s = p.year === draftYear ? slotOf(p) : undefined
+    return s !== undefined ? `No. ${s}` : pickLabel(p)
+  }
+  return {
+    shape: 'pickSwap',
+    sellerTeamId: down.team.id,
+    buyerTeamId: mover.team.id,
+    playerIds: [],
+    picks: [aPick, sweet.p],
+    sellerPicks: [target.p],
+    prospectIds: [],
+    summary: `Draft-floor trade: ${mover.team.abbreviation} move up to ${label(target.p)}, sending ${label(aPick)} and ${label(sweet.p)} to ${down.team.abbreviation}.`,
+    rationale: {
+      seller: `${down.persona.name} moves down${down.persona.pickHoarding >= 0.6 ? ' — more picks, as ever' : ' and adds a pick'}`,
+      buyer: `${mover.persona.name}${mover.persona.riskTolerance >= 0.65 ? ' has a man on his board he will not wait for' : ' climbs for a player he likes'}`,
     },
   }
 }

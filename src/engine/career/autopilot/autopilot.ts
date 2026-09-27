@@ -388,15 +388,24 @@ function maintainRoster(ctx: Ctx): void {
   const skaters = healthy.filter((p) => p.position !== 'G').length
   const goalies = healthy.filter((p) => p.position === 'G').length
   const defence = healthy.filter((p) => p.position === 'D').length
-  // Back under the ceiling once the bodies return: emergency cover (and other
-  // cheap depth) goes down to the farm when the NHL room is over the cap and the
+  // Back under the ceiling once the bodies return: emergency cover (and the
+  // weakest depth) goes down to the farm when the NHL room is over the cap and the
   // lineup no longer needs him.
+  // A long-term injury is what LTIR is for: his hit comes off while he's out.
+  if (squad.capUsed > squad.salaryCap) {
+    for (const p of squad.rows.filter((r) => r.injury)) {
+      const r = ctx.career.placeOnLtir(p.playerId)
+      if (r.ok) log(ctx, { kind: 'callup', summary: `Placed ${p.name} on LTIR`, drivers: ['over the cap with a long-term injury'], result: r.message, ok: true })
+    }
+  }
   if (squad.capUsed > squad.salaryCap) {
     let f = skaters - defence
     let d = defence
     let used = squad.capUsed
+    // Weakest first — including an expensive veteran an emergency recall
+    // brought up because he was the only body at the position.
     const cheap = healthy
-      .filter((p) => p.position !== 'G' && p.contract.salary <= squad.salaryCap * 0.02)
+      .filter((p) => p.position !== 'G')
       .sort((a, b) => a.overall - b.overall)
     for (const p of cheap) {
       if (used <= squad.salaryCap) break
@@ -789,7 +798,11 @@ function doFreeAgency(ctx: Ctx): void {
   if (squad && squad.rosterCount >= 23) return
   noteFeature(ctx, 'free-agency', `The FA hub shows each UFA's ask, his camp's read on us (keen/warm/cold), rival clubs circling, a "decides in N days" market clock, and whether his ask has softened as summer drags — legible two-way market. ${hub.rows.length} names, ${money(hub.capSpace)} to spend.`)
   const plan = getPlan(ctx)
-  let remaining = hub.capSpace
+  // Money already on the table is spoken for (the camps answer days later),
+  // and a sane GM keeps a cushion for the recalls an injury run forces.
+  const tabled = hub.rows.reduce((sum, r) => sum + (r.pendingOffer?.salary ?? 0), 0)
+  const cushion = (squad?.salaryCap ?? 0) * 0.04
+  let remaining = hub.capSpace - tabled - cushion
   const affordable = hub.rows
     // A rebuilder doesn't hand term/money to win-now vets — only cheap young upside.
     .filter((r) => !r.pendingOffer && !r.inTalks && (plan !== 'rebuild' || r.age <= 25))
