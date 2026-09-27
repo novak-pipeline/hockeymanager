@@ -69,6 +69,7 @@ import { ClubPickerScreen } from './screens/ClubPickerScreen'
 import { SaveManager } from './components/SaveManager'
 import { WrappedHost } from './components/WrappedOverlay'
 import { YearbookScreen } from './screens/YearbookScreen'
+import { getMatchEngine } from './lib/matchEngine'
 
 /** The pre-career flow (F6): title → new career → club picker → the game. */
 type AppPhase = 'title' | 'setup' | 'picking' | 'settings' | 'shell'
@@ -122,6 +123,7 @@ export function App(): JSX.Element {
   useEffect(() => {
     const c = new SimClient()
     setClient(c)
+    void c.setMatchEngine(getMatchEngine())
     void c.version().then((res) => {
       if (res.type === 'version') setEngine(res.engine)
     })

@@ -384,6 +384,8 @@ export type WorkerRequestBody =
   | { type: 'applyLineSetup'; name: string }
   | { type: 'deleteLineSetup'; name: string }
   | { type: 'setLineManagementMode'; mode: 'coach' | 'fillGaps' }
+  /** Additive: which engine plays the user's games (app preference; applied to every career the worker holds). */
+  | { type: 'setMatchEngine'; engine: 'classic' | 'agent' }
   | { type: 'markNewsRead'; ids: string[] }
   | { type: 'respondToInteraction'; interactionId: string; optionId: string }
   | { type: 'requestInterview'; playerId: string }
