@@ -123,6 +123,28 @@ describe('passing direction', () => {
   })
 })
 
+describe('rush context', () => {
+  it('a D-to-D pass right after a retrieval is not a rush pass; the same pass after skating up ice is', () => {
+    const home: [string, XY][] = [['h1', { x: -0.7, y: 0.3 }], ['h2', { x: -0.7, y: -0.3 }]]
+    const away: [string, XY][] = [['a1', { x: -0.5, y: 0 }]]
+    const pass = (t: number, a: XY, b: XY): GameEvent => ({ t, period: 1, type: 'pass', from: P('h1'), to: P('h2'), a, b, completed: true })
+    const s: GameEvent[] = [
+      faceoff(),
+      // Away wins possession first, then home retrieves deep in its own end.
+      frame(0, home, away, { x: -0.5, y: 0 }, 'a1'),
+      frame(0.25, home, away, { x: -0.7, y: 0.3 }, 'h1'),
+      pass(0.3, { x: -0.7, y: 0.3 }, { x: -0.7, y: -0.3 }), // own zone D-to-D: not a rush
+      frame(0.5, [['h1', { x: 0.1, y: 0.3 }], ['h2', { x: 0.2, y: -0.3 }]], away, { x: 0.1, y: 0.3 }, 'h1'),
+      pass(0.6, { x: 0.1, y: 0.3 }, { x: 0.3, y: -0.3 }), // 80 ft up ice, same possession: rush
+      ...end(1)
+    ]
+    const m = analyzeGame(s)
+    expect(m.counts['pass.n']).toBe(2)
+    expect(m.counts['pass.rush.n']).toBe(1)
+    expect(m.counts['pass.rush.fwd']).toBe(1)
+  })
+})
+
 describe('hits, entries, shots', () => {
   it('splits hits boards vs open ice, detects a carried entry, bins a slot shot', () => {
     const s: GameEvent[] = [faceoff()]

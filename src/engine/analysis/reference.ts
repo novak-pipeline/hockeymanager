@@ -168,11 +168,14 @@ export function templateSequence(
  * Find the first live frame in a stream where a template's situation occurs
  * (possessing team, strength, puck within the template radius) and return a
  * window of the stream around it, re-based to t = 0, as a standalone stream.
+ * With `normalize` (default true) the clip's frames are rotated/swapped so the
+ * possessing team is HOME attacking +x — the same picture as a textbook
+ * reference — which makes a side-by-side eye test read at a glance.
  */
 export function findSituationClip(
   stream: GameStream,
   template: ShapeTemplate,
-  opts: { beforeS?: number; afterS?: number; skip?: number } = {}
+  opts: { beforeS?: number; afterS?: number; skip?: number; normalize?: boolean } = {}
 ): { stream: GameStream; atT: number; period: number } | null {
   const before = opts.beforeS ?? 2
   const after = opts.afterS ?? 6
@@ -209,9 +212,26 @@ export function findSituationClip(
     const t0 = ev.t - before
     const t1 = ev.t + after
     const clip: GameEvent[] = []
+    const norm = opts.normalize ?? true
+    const rot = (p: XY): XY => (a === 1 ? p : { x: -p.x, y: -p.y })
     for (const e of stream) {
       if (e.period !== ev.period || e.t < t0 || e.t > t1) continue
       if (e.type === 'gameEnd' || e.type === 'periodEnd') continue
+      if (norm && e.type === 'frame') {
+        const mine = side === 'home'
+        const r = (xs: readonly SkaterSnapshot[]): SkaterSnapshot[] => xs.map((q) => ({ player: q.player, pos: rot(q.pos) }))
+        clip.push({
+          ...e,
+          t: e.t - t0,
+          period: 1,
+          home: r(mine ? e.home : e.away),
+          away: r(mine ? e.away : e.home),
+          homeGoalie: { player: (mine ? e.homeGoalie : e.awayGoalie).player, pos: rot((mine ? e.homeGoalie : e.awayGoalie).pos) },
+          awayGoalie: { player: (mine ? e.awayGoalie : e.homeGoalie).player, pos: rot((mine ? e.awayGoalie : e.homeGoalie).pos) },
+          puck: rot(e.puck)
+        })
+        continue
+      }
       clip.push({ ...e, t: e.t - t0, period: 1 } as GameEvent)
     }
     // Ensure the clip starts live for downstream consumers.
@@ -219,6 +239,7 @@ export function findSituationClip(
     if (firstFrame && !clip.some((e) => e.type === 'faceoff' && e.t <= firstFrame.t)) {
       clip.unshift({ t: 0, period: 1, type: 'faceoff', zone: 'neutral', winner: ev.puckCarrier, pos: firstFrame.puck })
     }
+    // (Non-frame event positions stay in raw rink coordinates; only frames are normalized.)
     return { stream: clip, atT: ev.t, period: ev.period }
   }
   return null

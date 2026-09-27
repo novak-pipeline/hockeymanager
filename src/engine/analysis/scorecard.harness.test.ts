@@ -10,7 +10,7 @@
  *   docs/match-scorecard.json   machine copy (rows + shape offsets + shot grids)
  *   .cache/replay/*.html        side-by-side eye-test pages (git-ignored)
  *
- * Env: SCORECARD_GAMES (default 30), SCORECARD_DB (mod path), SCORECARD_VANILLA=1,
+ * Env: SCORECARD_GAMES (default 60), SCORECARD_DB (mod path), SCORECARD_VANILLA=1,
  *      REF_TRACKING=<TrackedSequence json> to use real tracking as the reference.
  */
 import { it } from 'vitest'
@@ -52,7 +52,7 @@ function findModDb(): string | null {
 
 it('realism scorecard', () => {
   const t0 = Date.now()
-  const games = Number(process.env.SCORECARD_GAMES ?? 30)
+  const games = Number(process.env.SCORECARD_GAMES ?? 60)
   const dbPath = findModDb()
   const data = dbPath
     ? loadModDatabase(validateModDatabase(JSON.parse(readFileSync(dbPath, 'utf8'))), { seed: 2029 })

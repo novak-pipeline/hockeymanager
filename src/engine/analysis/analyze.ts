@@ -54,6 +54,8 @@ export interface GameMeta {
   angleEdges?: readonly number[]
   /** Shape templates to score (default SHAPE_TEMPLATES). */
   templates?: readonly ShapeTemplate[]
+  /** Optional hook: called on every detected zone entry (clip reels, debugging). */
+  onEntry?: (e: { period: number; t: number; side: Side; kind: 'carry' | 'pass' | 'dump'; fromAdvFt: number; toAdvFt: number }) => void
 }
 
 export interface GameMetrics {
@@ -179,6 +181,10 @@ export function aggregate(games: readonly GameMetrics[]): GameMetrics {
 
 const MPH20 = 20 * FT_PER_S_PER_MPH
 const MPH22 = 22 * FT_PER_S_PER_MPH
+/** Burst hysteresis: a new 20+ (22+) burst needs the skater to drop below 18 (20) mph first. */
+const MPH18 = 18 * FT_PER_S_PER_MPH
+/** Rush / breakaway passes are thrown on the approach, above the hash marks. */
+const RUSH_MAX_ADV_FT = 75
 /** Faster than any human skater (~30.7 mph) — a position jump, not skating. */
 const TELEPORT_FT_S = 45
 /** A frame gap above this breaks a kinematic track / shift. */
@@ -192,6 +198,8 @@ interface Track {
   vel: XY | null
   acc: XY | null
   speed: number
+  armed20: boolean
+  armed22: boolean
 }
 
 interface Shift {
@@ -333,12 +341,15 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
   let puckPrev: { t: number; pos: XY } | null = null
   let possTeam: Side | null = null
   let possStart = 0
+  /** Puck advancement (ft, possessing team's frame) when possession was gained. */
+  let possStartAdv = 0
   const entryArmed: Record<Side, boolean> = { home: false, away: false }
   const lastCompletedPass: Record<Side, { t: number; bAdv: number } | null> = { home: null, away: null }
   let pendingShot: { t: number; from: XY; max: number } | null = null
   let pendingPass: { t: number; from: XY; max: number } | null = null
   let pendingFo: { t: number; side: Side } | null = null
   let lastFoAbs = -1
+  let lastShotAbs = -Infinity
   // Event-proxy state (NHL-comparable; mirrors src/calibrate/importNhl.ts).
   const px = {
     prevAbs: -1,
@@ -438,7 +449,7 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
             const v = Math.hypot(posFt.x - prev.pos.x, posFt.y - prev.pos.y) / (t - prev.t)
             if (v > TELEPORT_FT_S) inc('motion.teleportsDead')
           }
-          tracks.set(s.player, { t, pos: posFt, vel: null, acc: null, speed: 0 })
+          tracks.set(s.player, { t, pos: posFt, vel: null, acc: null, speed: 0, armed20: true, armed22: true })
           continue
         }
         const h = t - prev.t
@@ -446,7 +457,7 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
         const speed = Math.hypot(vel.x, vel.y)
         if (speed > TELEPORT_FT_S) {
           inc('motion.teleportsLive')
-          tracks.set(s.player, { t, pos: posFt, vel: null, acc: null, speed: 0 })
+          tracks.set(s.player, { t, pos: posFt, vel: null, acc: null, speed: 0, armed20: true, armed22: true })
           continue
         }
         const mph = speed / FT_PER_S_PER_MPH
@@ -457,9 +468,17 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
         distFtBy.set(s.player, (distFtBy.get(s.player) ?? 0) + speed * h)
         if (mph > (maxSpeedBy.get(s.player) ?? 0)) maxSpeedBy.set(s.player, mph)
         let acc: XY | null = null
+        let armed20 = prev.armed20
+        let armed22 = prev.armed22
+        if (speed >= MPH20 && armed20) {
+          inc('skate.bursts20')
+          armed20 = false
+        } else if (speed < MPH18) armed20 = true
+        if (speed >= MPH22 && armed22) {
+          inc('skate.bursts22')
+          armed22 = false
+        } else if (speed < MPH20) armed22 = true
         if (prev.vel) {
-          if (speed >= MPH20 && prev.speed < MPH20) inc('skate.bursts20')
-          if (speed >= MPH22 && prev.speed < MPH22) inc('skate.bursts22')
           acc = { x: (vel.x - prev.vel.x) / h, y: (vel.y - prev.vel.y) / h }
           addSample(H['skate.accelFt'], Math.hypot(acc.x, acc.y))
           addSample(H['skate.tangAccelFt'], Math.abs(speed - prev.speed) / h)
@@ -477,7 +496,7 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
           }
           if (prev.acc) addSample(H['skate.jerkFt'], Math.hypot(acc.x - prev.acc.x, acc.y - prev.acc.y) / h)
         }
-        tracks.set(s.player, { t, pos: posFt, vel, acc, speed })
+        tracks.set(s.player, { t, pos: posFt, vel, acc, speed, armed20, armed22 })
       }
     }
     // Drop tracks of skaters who left.
@@ -532,6 +551,7 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
       if (possTeam && live) addSample(H['flow.possessionSec'], t - possStart)
       possTeam = carrierSide
       possStart = t
+      possStartAdv = advFt(f.puck, signOf(carrierSide, f.period))
       inc('poss.changes')
     }
 
@@ -554,6 +574,7 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
               : 'dump'
         inc('entry.n')
         inc(`entry.${kind}`)
+        meta.onEntry?.({ period: f.period, t: f.t, side: possTeam, kind, fromAdvFt: prevAdv, toAdvFt: adv })
         // Odd-man: attackers level with/ahead of the puck vs defenders goal-side.
         const atk = skatersOf(f, possTeam).filter((s) => advFt(s.pos, a) >= adv - 10).length
         const def = skatersOf(f, other(possTeam)).filter((s) => advFt(s.pos, a) > adv).length
@@ -667,6 +688,7 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
         if (side && possTeam !== side) {
           possTeam = side
           possStart = t
+          possStartAdv = advFt(ev.pos, signOf(side, ev.period))
         }
         live = true
         stoppedSinceFrame = true
@@ -690,17 +712,29 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
         const buckets = ['pass', `pass.${zone}`]
         const passerPos = posInFrame(ev.from) ?? ev.a
         const passerAdv = advFt(passerPos, a)
-        const inRush = t - possStart <= 8 && passerAdv > -BLUE_LINE_FT
+        // Rush = transition: possession won outside the offensive zone ≤ 8 s ago, the
+        // puck has already been moved ≥ 15 ft up ice, and the pass is thrown on the
+        // approach (own blue line to the hash marks). A D-to-D regroup right after a
+        // retrieval has not advanced yet, so it is NOT a rush pass.
+        const inRush =
+          t - possStart <= 8 &&
+          possStartAdv < BLUE_LINE_FT &&
+          passerAdv > possStartAdv + 15 &&
+          passerAdv > -BLUE_LINE_FT &&
+          passerAdv < RUSH_MAX_ADV_FT
         const f = lastFrame
         let goalSideDef = 99
         let atkAhead = 0
+        let nearestDef = Infinity
         if (f) {
+          for (const s of skatersOf(f, other(side))) nearestDef = Math.min(nearestDef, distFt(s.pos, passerPos))
           goalSideDef = skatersOf(f, other(side)).filter((s) => advFt(s.pos, a) > passerAdv).length
           atkAhead = skatersOf(f, side).filter((s) => advFt(s.pos, a) >= passerAdv - 10).length
         }
         if (inRush) buckets.push('pass.rush')
         if (inRush && atkAhead > goalSideDef) buckets.push('pass.oddMan')
-        if (f && goalSideDef === 0 && passerAdv > 0) buckets.push('pass.breakaway')
+        // Breakaway: on the approach (centre line to the hash marks), nobody goal-side, nobody close.
+        if (f && goalSideDef === 0 && passerAdv > 0 && passerAdv < RUSH_MAX_ADV_FT && nearestDef > 10) buckets.push('pass.breakaway')
         const st = strengthOf(side)
         if (st !== 'ev') buckets.push(`pass.${st}`)
         if (!inRush && zone === 'oz') buckets.push('pass.ozSetup')
@@ -736,6 +770,7 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
           pendingFo = null
         }
         pendingShot = { t, from: ev.from, max: 0 }
+        lastShotAbs = t
         proxyEvent(ev, ev.shooter, ev.from)
         break
       }
@@ -751,6 +786,11 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
         else inc('save.freeze')
         break
       case 'goal':
+        // A goal with no shot just before it is the shootout's nominal winner (not a real goal).
+        if (abs(ev) - lastShotAbs > 3) {
+          inc('goal.nominal')
+          break
+        }
         inc('goal.n')
         inc(`goal.${ev.strength}`)
         proxyEvent(ev, ev.scorer, ev.pos)
@@ -769,7 +809,8 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
         }
         const tag = fdTag(ev.by)
         if (tag) inc(`hit.by${tag}`)
-        if (lastFrame && lastFrame.puckCarrier === ev.on) inc('hit.onCarrier')
+        const lf = lastFrame as FrameEv | null // assigned inside onFrame (closure) — widen the narrowed type
+        if (lf && lf.puckCarrier === ev.on) inc('hit.onCarrier')
         proxyEvent(ev, ev.by, ev.pos)
         break
       }

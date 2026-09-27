@@ -55,7 +55,7 @@ function passDefs(): MetricDef[] {
     ['pass.nz', 'from the neutral zone', false],
     ['pass.oz', 'from the offensive zone', false],
     ['pass.ozSetup', 'offensive-zone set play (not rush)', false],
-    ['pass.rush', 'on the rush (≤ 8 s after gaining possession, outside own zone)', true],
+    ['pass.rush', 'on the rush (transition: puck won outside the o-zone ≤ 8 s ago and already moved ≥ 15 ft up ice)', true],
     ['pass.oddMan', 'on odd-man rushes', true],
     ['pass.breakaway', 'on breakaways (no defender goal-side of the passer)', true],
     ['pass.pp', 'on the power play', false],
