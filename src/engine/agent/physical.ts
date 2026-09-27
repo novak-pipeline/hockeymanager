@@ -28,13 +28,13 @@ const r01 = (v: number | undefined): number => clamp((v ?? 50) / 100, 0, 1)
 
 export const HIT_TUNING = {
   /** Per-think chance scale that a willing defender commits to a check. */
-  intentK: 0.013,
+  intentK: 0.005,
   /** Contact closing speed (ft/s) needed for a collision to count as a hit when unplanned. */
   incidentalClosing: 19,
   /** Minimum closing speed for a planned hit to land as a hit. */
   plannedClosing: 4.5,
   /** Penalty scale on dangerous hits. */
-  penaltyK: 1.0
+  penaltyK: 2.0
 }
 
 export interface HitIntent {

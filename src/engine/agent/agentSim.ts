@@ -71,7 +71,7 @@ import {
   type Puck
 } from './physics'
 import { BLUE_X, DOT_EZ_X, DOT_NZ_X, DOT_Y, GOAL_X, HALF_X, HALF_Y, NET_HALF_W, boardsClamp, distToBoards } from './rink'
-import { REACH, decideCarrier, pressureOn, realPressure, thinkSide, xgAt, type ThinkOut } from './brain'
+import { REACH, blockChance, decideCarrier, pressureOn, realPressure, thinkSide, xgAt, type ThinkOut } from './brain'
 import { decideHit, resolveHit, type HitIntent } from './physical'
 import { emptyAgentTelemetry, type AgentTelemetry } from './telemetry'
 import type { Side, World } from './world'
@@ -89,17 +89,15 @@ const DT = FRAME_DT / SUBSTEPS
 // ---------------------------------------------------------------------------
 export const AGENT_TUNING = {
   /** Reconciles the empirical xG with this engine's shot mix → goals/game. */
-  finishK: 0.53,
+  finishK: 0.79,
   /** Base share of unblocked attempts that miss the net. */
   missBase: 0.3,
-  /** Base per-contact shot-block chance for a body square in the lane. */
-  blockBase: 1.7,
   /** Poke-check success scale (takeaways). */
-  pokeK: 0.07,
+  pokeK: 0.17,
   /** Unforced fumble rate under pressure (giveaways). */
-  fumbleK: 0.6,
+  fumbleK: 1.2,
   /** Per-think stick-foul chance when beaten (penalties). */
-  stickFoulK: 0.32,
+  stickFoulK: 2.5,
   /** Misc stoppages per second of live play ("other": net off, high stick…). */
   miscStopPerSec: 0.0028
 }
@@ -237,6 +235,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   let gotHow = 'faceoff'
   let flightKindAtGain = 'faceoff'
   let gotPos: XY = { x: 0, y: 0 }
+  let turnSnap = ""
 
   const tries = (...bs: Body[]): Map<Body, number> => new Map(bs.map((b) => [b, now] as [Body, number]))
   const ev = (e: GameEvent): void => {
@@ -318,6 +317,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   // teleports), so a change takes a few real seconds.
   interface Change {
     swaps: { out: Body; inId: PlayerId }[]
+    swapped: number
     key: string
   }
   const changing = new Map<Side, Change>()
@@ -344,7 +344,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       swaps.push({ out: b, inId: left[k] })
       left.splice(k, 1)
     }
-    changing.set(s, { swaps, key: `${d.kind}:${d.count}` })
+    changing.set(s, { swaps, swapped: 0, key: `${d.kind}:${d.count}` })
   }
   const stepChanges = (): void => {
     for (const [s, ch] of changing) {
@@ -354,6 +354,14 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const b = sw.out
         if (b === w.carrier) continue // he gets rid of it first
         const dg = Math.hypot(b.x - gate.x, b.y - gate.y)
+        // They've turned it over and are coming: a man still far from the
+        // door stays on and plays (a change is abandoned, not completed into
+        // an odd-man rush against).
+        const oppS = oppOf(s)
+        if (dg > 30 && w.control === oppS && w.carrier && (w.carrier.x - b.x) * s.a > -10 && w.carrier.vx * s.a < -8) {
+          ch.swaps.splice(i, 1)
+          continue
+        }
         if (dg > 8) {
           cmds.set(b, { tx: gate.x, ty: gate.y, speed: b.caps.top * 0.88, arrive: false, urgency: 0.9 })
           continue
@@ -377,12 +385,13 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         hitIntent.delete(b)
         if (w.passTo === b) w.passTo = null
         ch.swaps.splice(i, 1)
+        ch.swapped++
       }
       if (ch.swaps.length === 0) {
         changing.delete(s)
         s.sim.deployKey = ch.key
-        if (tm) tm.lineChanges++
-        ev({ t: T(), period, type: 'lineChange', team: s.sim.team.id, onIce: s.skaters.map((q) => q.player.id), onTheFly: true })
+        if (tm && ch.swapped > 0) tm.lineChanges++
+        if (ch.swapped > 0) ev({ t: T(), period, type: 'lineChange', team: s.sim.team.id, onIce: s.skaters.map((q) => q.player.id), onTheFly: true })
       }
     }
   }
@@ -660,6 +669,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   const gainControl = (b: Body, s: Side): void => {
     const prevSide = w.control ?? w.lastTouch
     flightKindAtGain = flight ? (flight.kind === 'pass' && flight.side === s ? 'pass' : flight.kind === 'shot' ? 'shotDeflect' : flight.side === s ? 'ownLoose' : 'oppLoose') : 'none'
+    const gainKind = `${flightKindAtGain}:${flight?.kind ?? "-"}${poke ? "+poke" : ""}${fumble ? "+fumble" : ""}`
     w.carrier = b
     puck.carrier = b
     w.control = s
@@ -702,6 +712,12 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     w.flightSide = null
     w.oneTimerFor = null
     if (prevSide !== s) {
+      if (tm) {
+        const ls = oppOf(s)
+        turnSnap = `${gainKind}@${(puck.x * s.a).toFixed(0)} | ` + ls.skaters.map((q) => `${q.player.position}:${ls.roles.get(q) ?? '?'}(${(q.x * ls.a).toFixed(0)},${(q.y * ls.a).toFixed(0)})`).join(' ')
+        const tz = puck.x * s.a < -BLUE_X ? "DZ" : puck.x * s.a < BLUE_X ? "NZ" : "OZ"
+        tm.dbg[`turn:${gainKind}:${tz}`] = (tm.dbg[`turn:${gainKind}:${tz}`] ?? 0) + 1
+      }
       touches.length = 0
       w.possSince = now
       w.possStartAdv = puck.x * s.a
@@ -714,6 +730,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     // Delayed offside: an offside attacker's team plays the puck in the zone.
     if (w.delayedOffside === s && puck.x * s.a > BLUE_X) {
       if (anyOffside(s)) {
+        if (tm) tm.dbg[`offside:delayed:${gainKind}`] = (tm.dbg[`offside:delayed:${gainKind}`] ?? 0) + 1
         callOffside(s)
         return
       }
@@ -904,10 +921,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       const s1 = (o.x - from.x) * ux + (o.y - from.y) * uy
       if (s1 < 3 || s1 > L - 5) continue
       const d = Math.abs(-(o.x - from.x) * uy + (o.y - from.y) * ux)
-      const base = d < 2 ? 1 : d < 4 ? 0.5 : d < 6 ? 0.18 : 0
-      if (base === 0) continue
-      const pB = AGENT_TUNING.blockBase * base * (0.55 + r01(o.player.ratings.defensive.shotBlocking) * 0.8) * (slap ? 1.1 : 1)
-      if (rng.chance(clamp(pB, 0, 0.9))) {
+      const pB = blockChance(o, d, slap)
+      if (pB > 0 && rng.chance(pB)) {
         blocker = o
         break
       }
@@ -1425,6 +1440,30 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     }
 
     if (!pending && !celebration) stepChanges()
+    if (tm && w.carrier && w.control && !pending && !celebration && puck.x * w.control.a > BLUE_X) {
+      const cs = w.control
+      for (const q of cs.skaters) {
+        if (q === w.carrier || q.player.position !== 'D' || q.x * cs.a >= BLUE_X) continue
+        const cm = cmds.get(q)
+        const k = `Dout:${cs.roles.get(q)}:tgt${cm ? Math.round((cm.tx * cs.a) / 10) * 10 : 'none'}:${hitIntent.has(q) ? 'hit' : ''}${changing.get(cs)?.swaps.some((x) => x.out === q) ? 'chg' : ''}`
+        tm.dbg[k] = (tm.dbg[k] ?? 0) + 1
+        if (cm && tm.dbgLog.length < 40 && rng.chance(0.01)) tm.dbgLog.push(`Dout t=${now.toFixed(1)} ${cs.roles.get(q)} x${(q.x * cs.a).toFixed(1)} y${q.y.toFixed(0)} vx${(q.vx * cs.a).toFixed(1)} vy${q.vy.toFixed(1)} tgt${(cm.tx * cs.a).toFixed(0)},${cm.ty.toFixed(0)} sp${cm.speed.toFixed(0)} u${cm.urgency.toFixed(2)} arr${cm.arrive} e${q.energy.toFixed(2)} face${cm.faceX !== undefined} stun${q.stun.toFixed(1)} puck${(puck.x * cs.a).toFixed(0)}`)
+      }
+    }
+    if (tm && tm.dbgRing && !pending && !celebration) {
+      const ctl = w.control ?? w.lastTouch ?? H
+      const fa = ctl.a
+      const f1 = (v: number): string => v.toFixed(0)
+      const row = (s: Side, tag: string): string =>
+        s.skaters
+          .map((q) => {
+            const cm = cmds.get(q)
+            return `${tag}${q.player.position}${q === w.carrier ? '*' : ''}:${s.roles.get(q) ?? '?'}(${f1(q.x * fa)},${f1(q.y * fa)} v${f1(q.vx * fa)},${f1(q.vy * fa)}${cm ? ` ->${f1(cm.tx * fa)},${f1(cm.ty * fa)} u${cm.urgency.toFixed(1)}` : ''})`
+          })
+          .join(' ')
+      tm.dbgRing.push(`t=${now.toFixed(2)} puck(${f1(puck.x * fa)},${f1(puck.y * fa)} v${f1(puck.vx * fa)}) ${w.carrier ? 'C' : 'L'} | ATK ${row(ctl, 'a')} | DEF ${row(oppOf(ctl), 'd')}`)
+      if (tm.dbgRing.length > 40) tm.dbgRing.shift()
+    }
 
     // ---- Command shaping (once per frame). ----
     // Personal space: steer around teammates instead of bumping into them
@@ -1579,6 +1618,25 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
             const key = `${atk}v${def}${now - w.possSince <= 8 ? 'T' : ''} c${caught}`
             tm.entryNumbers[key] = (tm.entryNumbers[key] ?? 0) + 1
             if (def === 0 && tm.entryLog.length < 40) tm.entryLog.push(`P${period} ${now.toFixed(1)} ${key}`)
+            if (atk > def && now - w.possSince <= 8) {
+              const how = turnSnap.split('@')[0] + ':' + (Number(turnSnap.split('@')[1]?.split(' ')[0] ?? 0) < -BLUE_X ? 'DZ' : Number(turnSnap.split('@')[1]?.split(' ')[0] ?? 0) < BLUE_X ? 'NZ' : 'OZ')
+              tm.dbg[`odd:${how}`] = (tm.dbg[`odd:${how}`] ?? 0) + 1
+              const at = Number(turnSnap.split('@')[1]?.split(' ')[0] ?? 0)
+              const zone = at < -BLUE_X ? 'DZ' : at < BLUE_X ? 'NZ' : 'OZ'
+              tm.dbg[`oddZone:${zone}`] = (tm.dbg[`oddZone:${zone}`] ?? 0) + 1
+              const os = oppOf(s)
+              const dnow = os.skaters.map((q) => {
+                const cm = cmds.get(q)
+                return `${q.player.position}:${os.roles.get(q)}${hitIntent.has(q) ? '+HIT' : ''}${changing.get(os)?.swaps.some((x) => x.out === q) ? '+CHG' : ''} x${(q.x * s.a).toFixed(0)} v${(q.vx * s.a).toFixed(0)} tgt${cm ? (cm.tx * s.a).toFixed(0) : '-'} u${cm ? cm.urgency.toFixed(1) : '-'}`
+              })
+              if (tm.dbgRing && tm.dbg.dumps === undefined) tm.dbg.dumps = 0
+              if (tm.dbgRing && tm.dbg.dumps < 4 && zone === 'NZ') {
+                tm.dbg.dumps++
+                const n = Math.min(tm.dbgRing.length, Math.round((now - w.possSince) / FRAME_DT) + 4)
+                tm.dbgLog.push(`===== ${key}`, ...tm.dbgRing.slice(-n))
+              }
+              if (tm.dbgLog.length < 60) tm.dbgLog.push(`${key} poss ${(now - w.possSince).toFixed(1)}s puck x${adv0.toFixed(0)} v${(c.vx * s.a).toFixed(0)} | NOW ${dnow.join(' ; ')}`)
+            }
           }
         }
         prevAdv = adv
@@ -1695,6 +1753,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   function checkOffside(s: Side, carried: boolean): boolean {
     if (!anyOffside(s)) return false
     if (carried) {
+      if (tm && tm.dbgLog.length < 50) { const off = s.skaters.filter((b) => b !== w.carrier && b.x * s.a > BLUE_X + 1).map((b) => { const cm = cmds.get(b); return `${s.roles.get(b)} x${(b.x * s.a).toFixed(1)} vx${(b.vx * s.a).toFixed(1)} tgt${cm ? (cm.tx * s.a).toFixed(0) : "-"} u${cm?.urgency.toFixed(2)} stun${b.stun.toFixed(1)}` }).join(" / "); tm.dbgLog.push(`OFFSIDE carrier vx${((w.carrier?.vx ?? 0) * s.a).toFixed(1)} | ${off}`) }
       callOffside(s)
       return true
     }

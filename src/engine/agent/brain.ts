@@ -52,9 +52,27 @@ const r01 = (v: number | undefined): number => clamp((v ?? 50) / 100, 0, 1)
 
 /** Multiplier on the value of shooting (the shot-volume lever). */
 
-/** Value of a teammate at the net-front for a shot from distance (tip/screen/rebound). */
-export const TIP_VALUE = { value: 0.012 }
-export const SHOOT_BIAS = { value: 0.355 }
+
+/**
+ * The offensive-zone value model. Holding the puck in their zone is worth the
+ * CONTINUATION of the possession (a chance will come: VAL.oz) plus part of
+ * what a shot from the spot is worth (VAL.kPos · xG, the spot's option value).
+ * A shot is worth its finish (VAL.shoot · xG through the lane) plus what it
+ * keeps: rebounds, tips and retrievals with bodies at the net (VAL.keep · oz).
+ * So a carrier with a lane from a decent spot SHOOTS (it beats holding), and
+ * a carrier who drives into a crowded house risks the whole continuation
+ * value on a low-retention carry. That is what brings shots out to range.
+ */
+export const VAL = { oz: 0.09, kPos: 0.15, shoot: 0.9, keep: 0.25, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 2, laneRead: 1 }
+/**
+ * D safety (gap discipline): how far ahead a defenceman reads an attacker
+ * coming at him (s), the base gap (ft) plus gap per ft/s of the attacker's
+ * speed toward our net, and the margin (s) by which a D must win a loose-puck
+ * race above the safety line before he steps up for it.
+ */
+export const D_SAFETY = { look: 1.5, gap: 10, gapPerV: 0.5, stepUpMargin: 0.8, pinchMaxX: 55, gapLead: 0.5, looseGuard: 1 }
+/** Defending the house: the on-puck man engages (no containing) inside this radius of our net (ft). */
+export const DZ = { engageFt: 30 }
 /** Seconds after a zone entry that play is still a "rush". */
 const RUSH_WINDOW = 4.5
 /** Stick reach from the body centre, ft. */
@@ -76,10 +94,14 @@ export function posValue(x: number, y: number, a: number): number {
   // than shooting from it once the spot is dangerous enough, which is what
   // makes carriers shoot from range instead of skating everyone to the crease.
   if (adv >= BLUE_X) {
-    if (adv > GOAL_X) return 0.014
-    return 0.012 + 0.6 * xgAt(x, y, a)
+    if (adv > GOAL_X) return VAL.oz
+    return VAL.oz + VAL.kPos * xgAt(x, y, a)
   }
-  return 0.004 + (0.009 * (adv + 100)) / 125
+  // Outside their zone: the value of territory rises toward their blue line
+  // (joining the zone value there), so a turnover deep in your own end costs
+  // the other side's whole zone possession.
+  const f = clamp((adv + 100) / 125, 0, 1)
+  return 0.004 + VAL.nz * Math.pow(f, VAL.nzExp)
 }
 
 /** Rough seconds for a body to reach a point (current momentum + thrust). */
@@ -192,6 +214,62 @@ function rimSpeed(c: Body, at: XY, k: number): number {
   return clamp(Math.sqrt(2 * 4 * d) * k + 6, 22, 80)
 }
 
+/**
+ * What a shot by `c` from (x, y) is worth right now: the finish through the
+ * lane, plus what a shot KEEPS (rebounds, retrievals — more with bodies at the
+ * net), plus the tip/screen play a net-front teammate makes of a shot from
+ * distance, minus the turnover a blocked shot hands back. Used for the
+ * carrier's own shot and, at a pass target, for "pass it to the man who can
+ * shoot" (low-to-high to the point, the seam one-timer).
+ */
+export function shotValue(me: Side, opps: readonly Body[], c: Body, x: number, y: number, eager: number, tight: boolean): number {
+  const a = me.a
+  const xg = xgAt(x, y, a)
+  // Bodies in the lane to the net take shots away.
+  let lane = 1
+  const nx = a * GOAL_X
+  const L = Math.max(Math.hypot(nx - x, -y), 1)
+  // (The shooter reads the lane with the same odds the sim will resolve it
+  // by — so he walks the line to open a lane instead of firing into shins.)
+  for (const o of opps) {
+    const s1 = ((o.x - x) * (nx - x) + (o.y - y) * -y) / L
+    if (s1 < 3 || s1 > L - 5) continue
+    const d = Math.abs(-(o.x - x) * (-y / L) + (o.y - y) * ((nx - x) / L))
+    lane *= 1 - blockChance(o, d, false) * VAL.laneRead
+  }
+  // A man on him in tight will lift his stick.
+  if (tight) for (const o of opps) if (Math.hypot(o.x - x, o.y - y) < 3.4) lane *= 0.6
+  const shooter = (r01(c.player.ratings.technical.wristShot) + r01(c.player.composites.scoring)) / 2
+  // From distance, a shot through traffic is a PLAY: a teammate at the
+  // net-front makes tips, screens and rebounds, and the puck stays in the
+  // zone. That is why D shoot from the point.
+  let tips = 0
+  if (L > 32) for (const b of me.skaters) if (b !== c && Math.hypot(b.x - nx, b.y) < 14) tips++
+  tips = Math.min(tips, 2)
+  // From the point every teammate is BELOW the shot: they are first to the
+  // rebound and the retrieval, so a point shot keeps the puck in the zone
+  // far more often than a shot from the half-wall.
+  let below = 0
+  if (L > 45) for (const b of me.skaters) if (b !== c && (b.x - x) * a > 15) below++
+  const turnover = (1 - lane) * 0.6 * posValue(x, y, -a)
+  return (
+    xg * lane * (0.7 + shooter * 0.6) * eager * VAL.shoot +
+    (VAL.keep + tips * VAL.tipKeep + (L > 45 ? VAL.pointKeep * (below / 4) : 0)) * VAL.oz * lane +
+    tips * VAL.tip * lane -
+    turnover
+  )
+}
+
+/** Shot blocking: per-body chance scale for a body square in the lane. */
+export const SHOT_BLOCK = { base: 1.7 }
+
+/** Chance a body `d` ft off the shot line (between shooter and net) blocks it. */
+export function blockChance(o: Body, d: number, slap: boolean): number {
+  const w = d < 2 ? 1 : d < 4 ? 0.5 : d < 6 ? 0.18 : 0
+  if (w === 0) return 0
+  return clamp(SHOT_BLOCK.base * w * (0.55 + r01(o.player.ratings.defensive.shotBlocking) * 0.8) * (slap ? 1.1 : 1), 0, 0.9)
+}
+
 // ---------------------------------------------------------------------------
 // Carrier
 // ---------------------------------------------------------------------------
@@ -220,9 +298,13 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
   const sp = speedOf(c)
 
   // Teammates still offside: don't take the puck over the line yet.
-  const offsideMate = adv < BLUE_X && me.skaters.some((b) => b !== c && b.x * a > BLUE_X + 0.5)
-  const lineCap = (x: number): number =>
-    offsideMate && x * a > BLUE_X - 1 ? a * (BLUE_X - 1.5) : x
+  // (A mate gliding at the line counts: he will be over it before the puck.)
+  const offsideMate = adv < BLUE_X && me.skaters.some((b) => b !== c && b.x * a + Math.max(0, b.vx * a) * 0.5 > BLUE_X + 0.5)
+  // He has to be able to STOP short of the line at his speed (a hockey stop
+  // from 22 ft/s takes ~15 ft), so the cap moves back as he comes faster.
+  const vIn = Math.max(0, c.vx * a)
+  const capX = BLUE_X - 5 - (vIn * vIn) / (2 * c.caps.brake * 0.5)
+  const lineCap = (x: number): number => (offsideMate && x * a > capX ? a * capX : x)
 
   // --- Empty net: fire it from anywhere with a lane (mind the icing). ---
   if (opp.pulled && adv > -60 && adv < GOAL_X - 1) {
@@ -243,30 +325,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
 
   // --- Shoot ---
   if (adv > BLUE_X && adv < GOAL_X - 1 && !opp.pulled) {
-    const xg = xgAt(c.x, c.y, a)
-    // Bodies in the lane to the net take shots away.
-    let lane = 1
-    const nx = a * GOAL_X
-    for (const o of opps) {
-      const L = Math.hypot(nx - c.x, -c.y)
-      const s = clamp(((o.x - c.x) * (nx - c.x) + (o.y - c.y) * -c.y) / (L * L), 0, 1)
-      if (s < 0.05 || s > 0.92) continue
-      const d = Math.hypot(o.x - (c.x + (nx - c.x) * s), o.y - (c.y - c.y * s))
-      if (d < 3) lane *= 0.75
-      else if (d < 6) lane *= 0.92
-    }
-    // A man on him in tight will lift his stick.
-    for (const o of opps) if (Math.hypot(o.x - c.x, o.y - c.y) < 3.4) lane *= 0.6
-    const shooter = (r01(c.player.ratings.technical.wristShot) + r01(c.player.composites.scoring)) / 2
-    // A shot also keeps some of the possession (rebounds, retrievals).
-    // From distance, a shot through traffic is a PLAY: a teammate at the
-    // net-front makes tips, screens and rebounds, and the puck stays in the
-    // zone. That is why D shoot from the point.
-    const dNet = Math.hypot(a * GOAL_X - c.x, c.y)
-    let tips = 0
-    if (dNet > 32) for (const b of me.skaters) if (b !== c && Math.hypot(b.x - a * GOAL_X, b.y) < 14) tips++
-    const ev = (xg * lane * (0.7 + shooter * 0.6) * eager + 0.005) * SHOOT_BIAS.value + Math.min(tips, 2) * TIP_VALUE.value * lane
-    opts.push({ ev, act: { kind: 'shoot' } })
+    opts.push({ ev: shotValue(me, opps, c, c.x, c.y, eager, true), act: { kind: 'shoot' } })
   }
 
   // --- Carry (8 headings) ---
@@ -301,7 +360,8 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
             tx: qx,
             ty: qy,
             speed: protect ? 8 : c.caps.top * clamp(0.5 + urg * 0.4, 0.5, 0.9),
-            arrive: false,
+            // Holding up at the line for a mate to tag up: stop short of it.
+            arrive: offsideMate && qx * a >= capX - 1,
             urgency: clamp(urg, 0.3, 1),
             ...(protect ? { faceX: c.x - Math.cos(ang) * 10, faceY: c.y - Math.sin(ang) * 10 } : {})
           }
@@ -355,6 +415,10 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       if (cosF < -0.35 && w.rng.next() > 0.25 + r01(m.vision) * 0.6) continue
       const comp = passCompletion({ x: c.x, y: c.y }, f.R, f.speed, c, opps)
       let v = posValue(f.R.x, f.R.y, a)
+      // A pass to a man who can SHOOT from where he takes it is worth his shot
+      // (low-to-high to a point man with a screen in front, the seam feed).
+      const radv = f.R.x * a
+      if (radv > BLUE_X && radv < GOAL_X - 1 && !opp.pulled) v = Math.max(v, shotValue(me, opps, f.r, f.R.x, f.R.y, eager, false) * VAL.passShot)
       // Across the royal road to a shooter: the one-timer look (goalie moving).
       const royal =
         f.R.x * a > 55 && Math.abs(f.R.y) < 16 && Math.sign(f.R.y || 1) !== Math.sign(c.y || 1) && Math.abs(c.y) > 8
@@ -408,7 +472,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
   }
 
   // Decision quality: good readers take the best option nearly every time.
-  const T = 0.0004 + (1 - reading) * 0.0022 + pressure * 0.0012 * (1 - r01(m.composure))
+  const T = (0.0004 + (1 - reading) * 0.0022 + pressure * 0.0012 * (1 - r01(m.composure))) * VAL.noise
   let best = opts[0]
   for (const o of opts) if (o.ev > best.ev) best = o
   let sum = 0
@@ -456,7 +520,28 @@ function supportTable(w: World, me: Side, withPuck: boolean): RoleSpot[] {
 function assignRoles(me: Side, pool: Body[], table: RoleSpot[], targets: Map<string, XY>): Map<Body, RoleSpot> {
   const out = new Map<Body, RoleSpot>()
   const free = new Set(pool)
-  for (const spot of table) {
+  // Fewer men than roles (4-on-4, a shorthanded rush, the carrier is a D):
+  // drop FORWARD roles first. The D roles are the safety valve — a table cut
+  // from the end would otherwise send a defenceman to the net-front and
+  // leave nobody back.
+  let used = table
+  if (pool.length < table.length) {
+    const nD = pool.filter((b) => b.player.position === 'D').length
+    let keepD = Math.min(nD, table.filter((s) => s.pos === 'D').length)
+    let keepOther = pool.length - keepD
+    used = table.filter((s) => {
+      if (s.pos === 'D' && keepD > 0) {
+        keepD--
+        return true
+      }
+      if (s.pos !== 'D' && keepOther > 0) {
+        keepOther--
+        return true
+      }
+      return false
+    })
+  }
+  for (const spot of used) {
     if (free.size === 0) break
     const tgt = targets.get(spot.role)!
     let best: Body | null = null
@@ -526,6 +611,25 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
   const pool = me.skaters.filter((b) => b !== carrier)
   const cmds = out.cmds
 
+  // The D safety line (x in OUR attack frame): goal-side of every attacker's
+  // projected position, with a gap that grows with his speed toward our net.
+  let safety = Infinity
+  // (Also while the puck is loose outside their zone — not a pass of ours in
+  // flight, not a rebound they must keep in: a D does not leave the goal side for a
+  // puck nobody has yet — the other team may get to it first.)
+  const guard = !shapeWithPuck || (loose && (D_SAFETY.looseGuard === 1 || (D_SAFETY.looseGuard === 2 && w.passTo === null && puck.x * a < BLUE_X)))
+  if (guard) {
+    for (const o of opp.skaters) {
+      const ox = o.x * a
+      const vIn = Math.min(0, o.vx * a)
+      safety = Math.min(safety, ox + vIn * D_SAFETY.look - (D_SAFETY.gap - vIn * D_SAFETY.gapPerV))
+    }
+    // A chip or rim coming up the ice: the D meet it from the goal side
+    // (facing it), never chase it from behind with a winger on their heels.
+    const pIn = Math.min(0, puck.vx * a)
+    if (loose && pIn < -8) safety = Math.min(safety, puck.x * a + pIn * D_SAFETY.look * 0.5 - D_SAFETY.gap)
+  }
+
   // --- Loose puck: the nearest man (two when it is deep in our end) races it.
   const chasers = new Set<Body>()
   if (loose) {
@@ -551,11 +655,23 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
     const eligible = pool.filter((b) => !(w.delayedOffside === me && b.x * a > BLUE_X - 1))
     const icpt = new Map(eligible.map((b) => [b, intercept(b)] as [Body, { t: number; p: XY }]))
     const sorted = [...eligible].sort((p, q) => icpt.get(p)!.t - icpt.get(q)!.t)
+    // A defenceman steps up for a loose puck above the safety line only when
+    // he wins it clearly; otherwise the chip gets by him and he's beaten.
+    // (Their fastest man's intercept is the race he'd lose.)
+    let theirBest = Infinity
+    if (!shapeWithPuck || loose) for (const o of opp.skaters) theirBest = Math.min(theirBest, intercept(o).t)
+    const mayChase = (b: Body): boolean => {
+      if (b.player.position !== 'D' || !guard) return true
+      const ip = icpt.get(b)!
+      if (ip.p.x * a <= safety) return true
+      return ip.t + D_SAFETY.stepUpMargin < theirBest
+    }
     if (w.passTo && sorted.includes(w.passTo)) {
       // The intended receiver meets the pass.
       chasers.add(w.passTo)
-    } else if (sorted[0]) {
-      chasers.add(sorted[0])
+    } else {
+      const first = sorted.find(mayChase)
+      if (first) chasers.add(first)
     }
     for (const b of chasers) {
       const ip = icpt.get(b)?.p ?? { x: puck.x, y: puck.y }
@@ -579,7 +695,10 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
       if ((b.x - carrier.x) * -a > 0) tt -= 0.3
       else tt += 0.9
       // Deep in their end the forwards forecheck (F1) and the D hold the line.
+      // A D may pinch down the wall to the top of the circles, never below
+      // it (a D chasing into their corner leaves nobody back).
       if (b.player.position === 'D' && carrier.x * a > 10) tt += 0.7
+      if (b.player.position === 'D' && carrier.x * a > D_SAFETY.pinchMaxX && pool.some((q) => q.player.position !== 'D' && !chasers.has(q))) continue
       if (b === me.presser) tt -= 0.4
       if (tt < bestT) {
         bestT = tt
@@ -602,15 +721,19 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
         // system's gap setting, facing the carrier (backward skating).
         const csp = speedOf(carrier)
         const gap = clamp((10 + csp * 0.55) * (1.25 - gc * 0.5), 8, 30)
+        // Hold the gap on where he is GOING (his speed carries him half a
+        // second on while you react), and only read him backward while you
+        // can still match his speed that way — a carrier coming faster than a
+        // D can backpedal is met by a D who has pivoted and is skating.
+        const lead = D_SAFETY.gapLead
+        const backOk = csp < presser.caps.topBack * 0.85
         cmds.set(presser, {
-          tx: cx + ux * gap,
-          ty: cy * 0.8 + uy * gap,
+          tx: cx + carrier.vx * lead + ux * gap,
+          ty: (cy + carrier.vy * lead) * 0.8 + uy * gap,
           speed: presser.caps.top,
           arrive: true,
-          urgency: 0.9,
-          // Read him backward while he's far or slow; pivot and skate when he
-          // comes at you with speed (backward you'd be beaten wide).
-          ...(Math.hypot(presser.x - cx, presser.y - cy) > 16 || csp < 15 ? { faceX: cx, faceY: cy } : {})
+          urgency: 1,
+          ...((Math.hypot(presser.x - cx, presser.y - cy) > 16 && backOk) || csp < 10 ? { faceX: cx, faceY: cy } : {})
         })
       } else {
         // On the puck: take the inside (between him and the net). CONTAIN at a
@@ -620,7 +743,11 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
         const onWall = distToBoards(cx, cy) < 5
         const csp = speedOf(carrier)
         const turnedAway = carrier.hx * ux + carrier.hy * uy < -0.2
-        const vulnerable = onWall || csp < 4 || turnedAway
+        // Inside the house (near our net) there is no containing: the man on
+        // the puck closes and takes the body/stick before the carrier can
+        // walk in or circle the net for seconds.
+        const inHouse = Math.hypot(ownNetX - cx, cy) < DZ.engageFt
+        const vulnerable = onWall || csp < 4 || turnedAway || inHouse
         const inside = vulnerable ? 3.2 : clamp(10 - pp * 4, 6, 10)
         cmds.set(presser, {
           tx: cx + ux * inside + carrier.vx * 0.25,
@@ -734,7 +861,13 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
       faceY = carrier.y
     } else {
       const dr = drift(b, w.t, shapeWithPuck)
-      t = { x: t.x + dr.x, y: t.y + dr.y }
+      // A point man walks the LINE (lateral drift), holding the blue line
+      // from inside the zone: he is the outlet and the shooter up top.
+      const onPoint = shapeWithPuck && inZone && b.player.position === 'D' && t.x * a < 45
+      t = { x: t.x + (onPoint ? 0 : dr.x), y: t.y + dr.y }
+      if (onPoint && t.x * a < BLUE_X + 3) t = { x: a * (BLUE_X + 3), y: t.y }
+      // Late to the line after the entry: get up there (the puck can come back).
+      if (onPoint && b.x * a < BLUE_X + 2) urgency = Math.max(urgency, 0.95)
     }
     // Delayed offside against us: everyone in the zone skates out to tag up.
     if (w.delayedOffside === me && b.x * a > BLUE_X - 1) {
@@ -743,8 +876,8 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
     }
     // Onside discipline: while the puck is outside the zone, attackers stay
     // (or get back) onside — the tag-up.
-    if (shapeWithPuck && !inZone && t.x * a > BLUE_X - 1.5) t = { x: a * (BLUE_X - 2), y: t.y }
-    if (shapeWithPuck && !inZone && b.x * a > BLUE_X) urgency = Math.max(urgency, 0.9)
+    if (shapeWithPuck && !inZone && t.x * a > BLUE_X - 3) t = { x: a * (BLUE_X - 4), y: t.y }
+    if (shapeWithPuck && !inZone && b.x * a + Math.max(0, b.vx * a) * 0.6 > BLUE_X - 1) urgency = Math.max(urgency, 0.95)
     // Get open: slide off a spot a defender is sitting in / on the lane.
     if (weHaveIt && carrier) {
       const n = nearestTo(opp.skaters, t.x, t.y)
@@ -755,6 +888,7 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
         t = { x: t.x + (ox / o) * (8 - n.d), y: t.y + (oy / o) * (8 - n.d) }
       }
     }
+    if (shapeWithPuck && !inZone && t.x * a > BLUE_X - 3) t = { x: a * (BLUE_X - 4), y: t.y }
     // Defenders read the play facing the puck in their own half — but when a
     // carrier is coming with speed they pivot and skate (backward is slow).
     const rushing = theyHaveIt && carrier !== null && speedOf(carrier) > 15 && Math.hypot(carrier.x - b.x, carrier.y - b.y) < 40
@@ -763,12 +897,16 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
       faceY = puck.y
     }
     // D never let a man behind them: when they have it (or it's loose off
-    // their stick), a defenceman stays goal-side of their deepest attacker.
-    if (!shapeWithPuck && b.player.position === 'D' && !mk) {
-      let deepest = Infinity
-      for (const o of opp.skaters) deepest = Math.min(deepest, o.x * a)
-      const cap = deepest - 6
-      if (t.x * a > cap) t = { x: a * Math.max(cap, -84), y: t.y }
+    // their stick), a defenceman stays goal-side of their deepest attacker —
+    // where that attacker WILL be, not where he is. A D who waits for the
+    // winger to go by is beaten wide along the wall; he reads the breakout
+    // and starts back as it starts.
+    if (guard && b.player.position === 'D' && !mk && safety < Infinity) {
+      if (t.x * a > safety) {
+        const back = t.x * a - safety
+        t = { x: a * Math.max(safety, -84), y: t.y }
+        if (back > 8) urgency = Math.max(urgency, 0.95)
+      }
     }
     // Caught up ice when they have it: BACKCHECK — sprint back goal-side.
     let backcheck = false
