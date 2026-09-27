@@ -84,6 +84,8 @@ const LABEL_MAX = 5
 
 /** Bench gates on the far boards (home bench at x = -26, away at +26, matching arena.ts). */
 const BENCH_GATE = { home: { x: -26, z: RINK_HALF_W - 1.5 }, away: { x: 26, z: RINK_HALF_W - 1.5 } } as const
+/** Standing spots along each bench (arena.ts: 30 ft benches centred on the gates). */
+const BENCH_SLOTS = 9
 
 /**
  * Athlete source: 'owner' = the owner-supplied rigged athletes imported by
@@ -1346,7 +1348,8 @@ export class Rink3dRenderer implements MatchRenderer {
   private readonly groundW = new WeakMap<PlayerPose, number>()
   private groundStick(pose: PlayerPose, dt: number): void {
     const rig = pose.rig
-    if (!rig.visible || rig.goalie) { this.groundW.delete(pose); return }
+    // (not on the bench: his stick would go through the dasher)
+    if (!rig.visible || rig.goalie || pose.mode === 'idle') { this.groundW.delete(pose); return }
     const w = rig.bladeWorld()
     if (!w) return
     const lift = w.y - 0.02
@@ -1459,28 +1462,35 @@ export class Rink3dRenderer implements MatchRenderer {
       poses[r]!.departSeq = ++this.departSeq
       poses[r]!.labelOn = false
     }
+    let benchSlot = 0
     poses.forEach((pose, r) => {
       const slot = slots[r]!
       pose.mode = slot.mode
       if (slot.id !== (pose.playerId as string | null)) this.updatePoseLabelForPlayer(pose, slot.id as PlayerId | null)
       const k = follow[r]!
       if (pose.mode === 'idle' || (pose.mode === 'departing' && dt === 0)) {
-        // idle, or a seek landed mid-change: nobody is skating off
+        // idle, or a seek landed mid-change: nobody is skating off — he's on
+        // the bench, standing at the boards and watching the play
         pose.mode = 'idle'
         pose.playerId = null
-        pose.rig.visible = false
         pose.labelOn = false
+        const slot = benchSlot++
+        const b = BENCH_GATE[team]
+        pose.rig.visible = slot < BENCH_SLOTS
+        if (pose.rig.visible) this.updatePose(pose, b.x - 12 + slot * 3 + (slot % 2) * 0.4, RINK_HALF_W + 4.9, dt, simDt, puckWx, puckWz, 10)
         return
       }
       pose.rig.visible = true
       if (pose.mode === 'departing') {
         pose.departT += dt
-        this.updatePose(pose, gate.x, gate.z, dt, simDt, puckWx, puckWz, DEPART_SPEED)
-        const home = Math.hypot(pose.worldX.pos - gate.x, pose.worldZ.pos - gate.z)
+        // spread along the bench front (5 men don't all hop the boards at one spot)
+        const exitX = gate.x + ((pose.departSeq % 5) - 2) * 2.6
+        this.updatePose(pose, exitX, gate.z, dt, simDt, puckWx, puckWz, DEPART_SPEED)
+        const home = Math.hypot(pose.worldX.pos - exitX, pose.worldZ.pos - gate.z)
         if (home < 2 || pose.departT > DEPART_TIMEOUT_S) {
+          // through the gate: from next frame he stands on the bench (idle)
           pose.mode = 'idle'
           pose.playerId = null
-          pose.rig.visible = false
         }
         return
       }
@@ -1490,14 +1500,17 @@ export class Rink3dRenderer implements MatchRenderer {
       if (entered.includes(r)) {
         if (dt === 0) pose.mode = 'play'
         else {
-          // enter from the bench gate, not from wherever this rig last was
-          pose.worldX = snapSpring(gate.x)
+          // over the boards from where he stood on the bench (else the gate),
+          // not from wherever this rig last was — and not all from one spot
+          const onBench = pose.rig.visible && Math.abs(pose.worldZ.pos - (RINK_HALF_W + 4.9)) < 1.5 && Math.abs(pose.worldX.pos - gate.x) < 16
+          const ex = onBench ? pose.worldX.pos : gate.x
+          pose.worldX = snapSpring(ex)
           pose.worldZ = snapSpring(gate.z)
-          pose.prevWx = gate.x
+          pose.prevWx = ex
           pose.prevWz = gate.z
           pose.velSmX = 0
           pose.velSmZ = 0
-          pose.angle = Math.atan2(tx - gate.x, tz - gate.z)
+          pose.angle = Math.atan2(tx - ex, tz - gate.z)
         }
       }
       if (pose.mode === 'arriving') {
