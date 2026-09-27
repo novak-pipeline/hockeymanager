@@ -358,6 +358,16 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       const ev = (0.25 + chase * 0.25) * posValue(a * 80, side * 30, a) - 0.45 * posValue(a * 80, side * 30, -a) * 0.6
       opts.push({ ev: ev * (0.8 + dumping * 0.4), act: { kind: 'dump', at, speed: rimSpeed(c, at, 1.35), lift: 0 } })
     }
+    if (adv >= -BLUE_X - 5 && adv <= 2 && pressure > 0.35 && !offsideMate) {
+      // Met in the neutral zone: chip it past the man into the space behind
+      // him and skate onto it (or for a teammate to chase) — the NZ chip.
+      const side = c.y >= 0 ? 1 : -1
+      const at = { x: c.x + a * 32, y: clamp(c.y + side * 6, -38, 38) }
+      let chase = 0
+      for (const r of me.skaters) chase = Math.max(chase, 1 - clamp(reachTime(r, at.x, at.y) / 3, 0, 1))
+      const ev = (0.3 + chase * 0.35) * posValue(at.x, at.y, a) - 0.5 * posValue(at.x, at.y, -a)
+      opts.push({ ev, act: { kind: 'dump', at, speed: rimSpeed(c, at, 1.2), lift: 4 } })
+    }
     if (adv < -BLUE_X) {
       // Get it out: chip it off the glass to the neutral-zone boards; a PK
       // (or a desperate man) fires it down the ice.
@@ -494,11 +504,28 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
   // --- Loose puck: the nearest man (two when it is deep in our end) races it.
   const chasers = new Set<Body>()
   if (loose) {
-    const lead = Math.min(0.5, Math.hypot(puck.vx, puck.vy) / 60)
-    const tx = puck.x + puck.vx * lead
-    const ty = puck.y + puck.vy * lead
+    // Read the puck's path: every skater finds the earliest point on it he
+    // can get to first (an intercept — cutting off a rim, stepping up to keep
+    // a chip in at the line), and the man with the earliest intercept goes.
+    const psp = Math.hypot(puck.vx, puck.vy)
+    const path = (t: number): XY => {
+      if (psp < 0.5) return { x: puck.x, y: puck.y }
+      const tt = Math.min(t, psp / 4.5)
+      const d = psp * tt - 0.5 * 4.5 * tt * tt
+      const h = boardsClamp(puck.x + (puck.vx / psp) * d, puck.y + (puck.vy / psp) * d, 1.5)
+      return { x: h.x, y: h.y }
+    }
+    const intercept = (b: Body): { t: number; p: XY } => {
+      for (let t = 0; t <= 2.4; t += 0.15) {
+        const p = path(t)
+        if (reachTime(b, p.x, p.y) - REACH / Math.max(b.caps.top, 1) <= t) return { t, p }
+      }
+      const p = path(2.4)
+      return { t: 2.4 + reachTime(b, p.x, p.y), p }
+    }
     const eligible = pool.filter((b) => !(w.delayedOffside === me && b.x * a > BLUE_X - 1))
-    const sorted = [...eligible].sort((p, q) => reachTime(p, tx, ty) - reachTime(q, tx, ty))
+    const icpt = new Map(eligible.map((b) => [b, intercept(b)] as [Body, { t: number; p: XY }]))
+    const sorted = [...eligible].sort((p, q) => icpt.get(p)!.t - icpt.get(q)!.t)
     if (w.passTo && sorted.includes(w.passTo)) {
       // The intended receiver meets the pass.
       chasers.add(w.passTo)
@@ -506,7 +533,8 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
       chasers.add(sorted[0])
     }
     for (const b of chasers) {
-      const h = boardsClamp(tx, ty, 1.5)
+      const ip = icpt.get(b)?.p ?? { x: puck.x, y: puck.y }
+      const h = boardsClamp(ip.x, ip.y, 1.5)
       const far = Math.hypot(h.x - b.x, h.y - b.y) > 45
       cmds.set(b, { tx: h.x, ty: h.y, speed: b.caps.top * (far ? 1 : 0.9), arrive: false, urgency: 1 })
       me.roles.set(b, 'CHASE')
@@ -521,10 +549,12 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
     for (const b of pool) {
       if (chasers.has(b)) continue
       let tt = reachTime(b, carrier.x, carrier.y)
-      // Men already between the carrier and our net are better pressers.
+      // Men already between the carrier and our net are better pressers; a
+      // man chasing from behind can't stop him (he backchecks instead).
       if ((b.x - carrier.x) * -a > 0) tt -= 0.3
-      // Outside our zone the forwards pressure (F1) and the D hold their gap.
-      if (b.player.position === 'D' && carrier.x * a > -BLUE_X) tt += 0.7
+      else tt += 0.9
+      // Deep in their end the forwards forecheck (F1) and the D hold the line.
+      if (b.player.position === 'D' && carrier.x * a > 10) tt += 0.7
       if (b === me.presser) tt -= 0.4
       if (tt < bestT) {
         bestT = tt
@@ -552,9 +582,10 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
           ty: cy * 0.8 + uy * gap,
           speed: presser.caps.top,
           arrive: true,
-          urgency: 0.8,
-          faceX: cx,
-          faceY: cy
+          urgency: 0.9,
+          // Read him backward while he's far or slow; pivot and skate when he
+          // comes at you with speed (backward you'd be beaten wide).
+          ...(Math.hypot(presser.x - cx, presser.y - cy) > 16 || csp < 15 ? { faceX: cx, faceY: cy } : {})
         })
       } else {
         // On the puck: take the inside (between him and the net). CONTAIN at a
@@ -572,8 +603,9 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
           speed: presser.caps.top * (0.75 + pp * 0.25),
           arrive: !vulnerable,
           urgency: 0.75 + pp * 0.25,
-          faceX: cx,
-          faceY: cy
+          // Face him while he's slow or still coming; once he has speed on
+          // you, skate WITH him (angling him to the wall), not backward.
+          ...(csp < 12 || Math.hypot(presser.x - cx, presser.y - cy) > 16 ? { faceX: cx, faceY: cy } : {})
         })
       }
       me.roles.set(presser, 'ONPUCK')
@@ -698,8 +730,10 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
         t = { x: t.x + (ox / o) * (8 - n.d), y: t.y + (oy / o) * (8 - n.d) }
       }
     }
-    // Defenders read the play facing the puck in their own half.
-    if (!shapeWithPuck && faceX === undefined && puck.x * a < 0) {
+    // Defenders read the play facing the puck in their own half — but when a
+    // carrier is coming with speed they pivot and skate (backward is slow).
+    const rushing = theyHaveIt && carrier !== null && speedOf(carrier) > 15 && Math.hypot(carrier.x - b.x, carrier.y - b.y) < 40
+    if (!shapeWithPuck && faceX === undefined && puck.x * a < 0 && !rushing) {
       faceX = puck.x
       faceY = puck.y
     }

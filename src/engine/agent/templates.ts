@@ -56,18 +56,18 @@ const S = (
 // each spot reproduces the diagram at the snapshot's puck position and moves
 // sensibly with the puck elsewhere.
 export const BREAKOUT: RoleSpot[] = [
-  S('C_LOW', 'F', -70, 6, 0, 0, 0.6),
-  S('W_STRONG', 'F', -56, 37, 0, 0, 0.6),
-  S('D_PARTNER', 'D', -84, -10, 0, 0, 0.5),
-  S('W_WEAK', 'F', -38, -22, 0, 0, 0.55),
+  S('C_LOW', 'F', -70, 6, 0, 0, 0.85),
+  S('W_STRONG', 'F', -56, 37, 0, 0, 0.85),
+  S('D_PARTNER', 'D', -84, -10, 0, 0, 0.6),
+  S('W_WEAK', 'F', -38, -22, 0, 0, 0.85),
   S('D_HIGH', 'D', -60, -24, 0.2, 0, 0.45)
 ]
 
 /** Puck in the neutral zone: fill three lanes, D trail. */
 export const TRANSITION: RoleSpot[] = [
-  S('LANE_MID', 'F', 10, 2, 0.5, 0, 0.8, -60, 23),
-  S('LANE_WEAK', 'F', 14, -28, 0.2, 0, 0.8, -60, 23),
-  S('LANE_STRONG', 'F', 14, 32, 0.2, 0, 0.8, -60, 23),
+  S('LANE_MID', 'F', 10, 2, 0.5, 0, 0.9, -60, 23),
+  S('LANE_WEAK', 'F', 14, -28, 0.2, 0, 0.9, -60, 23),
+  S('LANE_STRONG', 'F', 14, 32, 0.2, 0, 0.9, -60, 23),
   S('D_TRAIL_S', 'D', -14, 8, 0.35, 0, 0.65, -80, 20),
   S('D_TRAIL_W', 'D', -26, -16, 0.2, 0, 0.65, -80, 20)
 ]

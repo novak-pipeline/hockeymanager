@@ -100,7 +100,7 @@ export const AGENT_TUNING = {
   /** Unforced fumble rate under pressure (giveaways). */
   fumbleK: 0.6,
   /** Per-think stick-foul chance when beaten (penalties). */
-  stickFoulK: 0.45,
+  stickFoulK: 0.38,
   /** Misc stoppages per second of live play ("other": net off, high stick…). */
   miscStopPerSec: 0.0028
 }
@@ -1374,7 +1374,23 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         if (lastCarrierAdvSide === s && prevAdv < BLUE_X && adv >= BLUE_X) {
           if (checkOffside(s, true)) continue
           s.entryAt = now
-          if (tm) tm.entriesCarry++
+          if (tm) {
+            tm.entriesCarry++
+            // Entry numbers (scorecard definition): attackers level/ahead vs defenders goal-side.
+            const adv0 = puck.x * s.a
+            const c0x = puck.x
+            let atk = 0
+            let def = 0
+            let caught = 0
+            for (const b of s.skaters) if (b.x * s.a >= adv0 - 10) atk++
+            for (const o of oppOf(s).skaters) {
+              if (o.x * s.a > adv0) def++
+              else if (o.x * s.a < adv0 - 20) caught++
+            }
+            const key = `${atk}v${def}${now - w.possSince <= 8 ? 'T' : ''} c${caught}`
+            tm.entryNumbers[key] = (tm.entryNumbers[key] ?? 0) + 1
+            if (def === 0 && tm.entryLog.length < 40) tm.entryLog.push(`P${period} ${now.toFixed(1)} ${key} got=${gotHow}@${(now - gotAt).toFixed(1)}s from x'=${(gotPos.x * s.a).toFixed(0)} c=(${(c0x * s.a).toFixed(0)},${puck.y.toFixed(0)}) v=${speedOf(w.carrier!).toFixed(0)} opp=[${oppOf(s).skaters.map((o) => `${(o.x * s.a).toFixed(0)},${o.y.toFixed(0)}`).join(' ')}]`)
+          }
         }
         prevAdv = adv
         lastCarrierAdvSide = s

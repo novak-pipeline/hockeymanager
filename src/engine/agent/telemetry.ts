@@ -61,6 +61,9 @@ export interface AgentTelemetry {
   infractions: Record<string, number>
   fights: number
   battles: number
+  /** Carry entries by numbers: '<attackers>v<goal-side defenders>[T=transition] c<defenders caught up ice>'. */
+  entryNumbers: Record<string, number>
+  entryLog: string[]
   /** Dirty/star hits answered at the next whistle (fight or roughing). */
   codeAnswers: number
   /** Per-attempt diagnostics: distance, nearest defender, defenders in the house, seconds since the side won the puck. */
@@ -124,6 +127,8 @@ export function emptyAgentTelemetry(): AgentTelemetry {
     infractions: {},
     fights: 0,
     battles: 0,
+    entryNumbers: {},
+    entryLog: [],
     codeAnswers: 0,
     shotLog: [],
     noteAccel(acc, speed) {

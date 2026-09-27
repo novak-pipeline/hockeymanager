@@ -360,7 +360,7 @@ export interface Puck {
 }
 
 /** Ice friction on a sliding puck (ft/s²). */
-const PUCK_FRICTION = 4
+const PUCK_FRICTION = 4.5
 /** Height of the boards; above this at the boards the puck hits glass. */
 const BOARD_H = 3.5
 const GLASS_H = 8
@@ -405,7 +405,9 @@ export function stepPuck(p: Puck, dt: number): PuckStepResult {
     p.y = h.y
     const vn = p.vx * h.nx + p.vy * h.ny
     if (vn > 0) {
-      const e = p.z > BOARD_H ? 0.3 : 0.42
+      // Boards and glass soak up most of a head-on hit (pucks don't come off
+      // the end wall at shot speed); a glancing rim keeps its pace along the wall.
+      const e = p.z > BOARD_H ? 0.18 : 0.25
       p.vx -= (1 + e) * vn * h.nx
       p.vy -= (1 + e) * vn * h.ny
       p.vx *= 0.86
