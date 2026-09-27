@@ -74,10 +74,10 @@ import { BLUE_X, DOT_EZ_X, DOT_NZ_X, DOT_Y, GOAL_X, HALF_X, HALF_Y, NET_HALF_W, 
 import { REACH, blockChance, decideCarrier, pressureOn, realPressure, thinkSide, xgAt, type ThinkOut } from './brain'
 import { decideHit, resolveHit, type HitIntent } from './physical'
 import { emptyAgentTelemetry, type AgentTelemetry } from './telemetry'
-import type { Side, World } from './world'
+import { LEVEL, levelOffset, rLevel, type Side, type World } from './world'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
-const r01 = (v: number | undefined): number => clamp((v ?? 50) / 100, 0, 1)
+const r01 = rLevel
 
 export const FRAME_DT = 0.25
 const SUBSTEPS = 5
@@ -89,7 +89,7 @@ const DT = FRAME_DT / SUBSTEPS
 // ---------------------------------------------------------------------------
 export const AGENT_TUNING = {
   /** Reconciles the empirical xG with this engine's shot mix → goals/game. */
-  finishK: 0.74,
+  finishK: 0.85,
   /** Base share of unblocked attempts that miss the net. */
   missBase: 0.3,
   /** Poke-check success scale (takeaways). */
@@ -159,6 +159,11 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   const { period, lengthSeconds, suddenDeath, absBase, baseSkaters } = spec
   home.defendsPositive = period % 2 === 0
   away.defendsPositive = !home.defendsPositive
+  // The rating level of tonight's two rosters (outcomes read ratings relative to it).
+  {
+    const dressed = [home, away].flatMap((t) => [...t.team.lines.forwards.flat(), ...t.team.lines.defensePairs.flat()].map((id) => t.resolve(id)))
+    LEVEL.offset = levelOffset(dressed)
+  }
 
   const bodies = new Map<PlayerId, Body>()
   const bodyFor = (r: RSkater): Body => {
@@ -991,8 +996,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const gMoving = speedOf(g)
         const gRatings = g.player.ratings.goalie
         const goalieSkill = g.player.composites.goaltending
-        const finish = c.player.composites.scoring / 50
-        const goalieEdge = (goalieSkill - 50) / 220
+        // Shooter vs goalie on one scale (relative, so a league whose ratings
+        // all sit lower or higher still scores NHL goals).
+        const finish = clamp(1 + (c.player.composites.scoring - goalieSkill + 4.5) / 45, 0.4, 1.8)
         const cf = s.sim.team.coachFit === undefined ? 1 : coachFitMultiplier(s.sim.team.coachFit)
         let eff = xg
         eff *= 1 + clamp(err, 0, 5) * 0.12 // caught out of position
@@ -1006,7 +1012,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const pGoal = opp.pulled
           ? 1
           : clamp(
-              eff * AGENT_TUNING.finishK * finish * (1 - goalieEdge) * cf * opp.sim.goalieNight * (ctx.scoringMult ?? 1) * strength,
+              eff * AGENT_TUNING.finishK * finish * cf * opp.sim.goalieNight * (ctx.scoringMult ?? 1) * strength,
               0.004,
               0.9
             )

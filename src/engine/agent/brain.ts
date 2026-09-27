@@ -45,10 +45,10 @@ import {
   spotTarget,
   type RoleSpot
 } from './templates'
-import { other, type CarrierAction, type Side, type World } from './world'
+import { other, rLevel, type CarrierAction, type Side, type World } from './world'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
-const r01 = (v: number | undefined): number => clamp((v ?? 50) / 100, 0, 1)
+const r01 = rLevel
 
 // ---------------------------------------------------------------------------
 // Tunables — measured against the realism scorecard / calibration suite.
@@ -67,7 +67,7 @@ const r01 = (v: number | undefined): number => clamp((v ?? 50) / 100, 0, 1)
  * a carrier who drives into a crowded house risks the whole continuation
  * value on a low-retention carry. That is what brings shots out to range.
  */
-export const VAL = { oz: 0.09, kPos: 0.15, shoot: 0.9, keep: 0.25, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 2, laneRead: 1 }
+export const VAL = { oz: 0.09, kPos: 0.15, shoot: 0.9, keep: 0.25, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 2, laneRead: 0.75 }
 /**
  * D safety (gap discipline): how far ahead a defenceman reads an attacker
  * coming at him (s), the base gap (ft) plus gap per ft/s of the attacker's
@@ -226,7 +226,7 @@ function rimSpeed(c: Body, at: XY, k: number): number {
  * carrier's own shot and, at a pass target, for "pass it to the man who can
  * shoot" (low-to-high to the point, the seam one-timer).
  */
-export function shotValue(me: Side, opps: readonly Body[], c: Body, x: number, y: number, eager: number, tight: boolean): number {
+export function shotValue(me: Side, opps: readonly Body[], c: Body, x: number, y: number, eager: number, tight: boolean, goalie?: Body): number {
   const a = me.a
   const xg = xgAt(x, y, a)
   // Bodies in the lane to the net take shots away.
@@ -243,7 +243,11 @@ export function shotValue(me: Side, opps: readonly Body[], c: Body, x: number, y
   }
   // A man on him in tight will lift his stick.
   if (tight) for (const o of opps) if (Math.hypot(o.x - x, o.y - y) < 3.4) lane *= 0.6
-  const shooter = (r01(c.player.ratings.technical.wristShot) + r01(c.player.composites.scoring)) / 2
+  // The shooter reads his chance against THIS goalie (the scale of a league's
+  // ratings cancels out: a sniper vs an average goalie is the same edge in
+  // any league).
+  const raw = (c.player.ratings.technical.wristShot + c.player.composites.scoring) / 2
+  const shooter = clamp(0.5 + (raw - (goalie?.player.composites.goaltending ?? raw + 4.5) + 4.5) / 60, 0, 1)
   // From distance, a shot through traffic is a PLAY: a teammate at the
   // net-front makes tips, screens and rebounds, and the puck stays in the
   // zone. That is why D shoot from the point.
@@ -265,7 +269,7 @@ export function shotValue(me: Side, opps: readonly Body[], c: Body, x: number, y
 }
 
 /** Shot blocking: per-body chance scale for a body square in the lane. */
-export const SHOT_BLOCK = { base: 1.7 }
+export const SHOT_BLOCK = { base: 2.0 }
 
 /** Chance a body `d` ft off the shot line (between shooter and net) blocks it. */
 export function blockChance(o: Body, d: number, slap: boolean): number {
@@ -329,7 +333,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
 
   // --- Shoot ---
   if (adv > BLUE_X && adv < GOAL_X - 1 && !opp.pulled) {
-    opts.push({ ev: shotValue(me, opps, c, c.x, c.y, eager, true), act: { kind: 'shoot' } })
+    opts.push({ ev: shotValue(me, opps, c, c.x, c.y, eager, true, opp.goalie), act: { kind: 'shoot' } })
   }
 
   // --- Carry (8 headings) ---
@@ -422,7 +426,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       // A pass to a man who can SHOOT from where he takes it is worth his shot
       // (low-to-high to a point man with a screen in front, the seam feed).
       const radv = f.R.x * a
-      if (radv > BLUE_X && radv < GOAL_X - 1 && !opp.pulled) v = Math.max(v, shotValue(me, opps, f.r, f.R.x, f.R.y, eager, false) * VAL.passShot)
+      if (radv > BLUE_X && radv < GOAL_X - 1 && !opp.pulled) v = Math.max(v, shotValue(me, opps, f.r, f.R.x, f.R.y, eager, false, opp.goalie) * VAL.passShot)
       // Across the royal road to a shooter: the one-timer look (goalie moving).
       const royal =
         f.R.x * a > 55 && Math.abs(f.R.y) < 16 && Math.sign(f.R.y || 1) !== Math.sign(c.y || 1) && Math.abs(c.y) > 8

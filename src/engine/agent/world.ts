@@ -72,3 +72,27 @@ export function sideOf(w: World, b: Body): Side | null {
 export function other(w: World, s: Side): Side {
   return w.sides[0] === s ? w.sides[1] : w.sides[0]
 }
+
+/**
+ * The game's rating LEVEL. Outcomes that read a rating (pass aim, fumbles,
+ * stick checks, blocks, misses…) read it relative to the level of the two
+ * rosters on the ice, so a league whose ratings all sit lower (a fictional
+ * or minor league) plays the same hockey as the NHL instead of a game full
+ * of fumbles and missed passes. Set once per period by the sim; `REF` is the
+ * NHL (imported real-roster) level.
+ */
+export const LEVEL = { offset: 0 }
+const LEVEL_REF = 66.5
+
+export function levelOffset(players: readonly { composites: { scoring: number; puckControl: number; skating: number } }[]): number {
+  if (players.length === 0) return 0
+  let s = 0
+  for (const p of players) s += (p.composites.scoring + p.composites.puckControl + p.composites.skating) / 3
+  return s / players.length - LEVEL_REF
+}
+
+/** A 0–100 rating as 0..1, relative to the game's level. */
+export function rLevel(v: number | undefined): number {
+  const x = ((v ?? 50) - LEVEL.offset) / 100
+  return x < 0 ? 0 : x > 1 ? 1 : x
+}
