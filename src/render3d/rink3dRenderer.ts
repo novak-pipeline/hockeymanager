@@ -33,6 +33,8 @@ import {
   cameraTargetFor,
   endzoneChooseEnd,
   puckCarriedOffset,
+  puckTrackStep,
+  type PuckTrack,
   softDeadzone,
   emaStep,
   clampSpeed,
@@ -236,8 +238,7 @@ export class Rink3dRenderer implements MatchRenderer {
   // ── Puck ───────────────────────────────────────────────────────────────────
   private puckMesh!: THREE.Mesh
   private puckGlowRing!: THREE.Mesh
-  private puckRenderX: Spring1D = { pos: 0, vel: 0 }
-  private puckRenderZ: Spring1D = { pos: 0, vel: 0 }
+  private puck: PuckTrack = { x: 0, z: 0, cx: 0, cz: 0, key: '' }
 
   // ── Goal lights ────────────────────────────────────────────────────────────
   private goalLights: GoalLight[] = []
@@ -856,8 +857,7 @@ export class Rink3dRenderer implements MatchRenderer {
       p.worldX = snapSpring(p.worldX.pos)
       p.worldZ = snapSpring(p.worldZ.pos)
     }
-    this.puckRenderX = snapSpring(this.puckMesh.position.x)
-    this.puckRenderZ = snapSpring(this.puckMesh.position.z)
+    this.puck = { x: this.puckMesh.position.x, z: this.puckMesh.position.z, cx: 0, cz: 0, key: this.puck.key }
   }
 
   private currentTarget() {
@@ -1138,17 +1138,12 @@ export class Rink3dRenderer implements MatchRenderer {
       this.carrierWz = pTargetZ
     }
 
-    // Smooth puck position with a tight spring (not teleport-snappy but responsive)
-    if (dt > 0) {
-      this.puckRenderX = springStep(this.puckRenderX, pTargetX, dt, PLAYER_FOLLOW_HL)
-      this.puckRenderZ = springStep(this.puckRenderZ, pTargetZ, dt, PLAYER_FOLLOW_HL)
-    } else {
-      this.puckRenderX = snapSpring(pTargetX)
-      this.puckRenderZ = snapSpring(pTargetZ)
-    }
+    // The drawn puck TRACKS the stream (loose) or the blade (carried); only a
+    // carried↔loose handoff blends, over a few frames (math.ts puckTrackStep).
+    this.puck = puckTrackStep(this.puck, pTargetX, pTargetZ, carrierPose?.playerId ?? '', dt)
 
-    this.puckMesh.position.set(this.puckRenderX.pos, PUCK_H / 2, this.puckRenderZ.pos)
-    this.puckGlowRing.position.set(this.puckRenderX.pos, 0.06, this.puckRenderZ.pos)
+    this.puckMesh.position.set(this.puck.x, PUCK_H / 2, this.puck.z)
+    this.puckGlowRing.position.set(this.puck.x, 0.06, this.puck.z)
     this.puckGlowRing.visible = snap.carrier !== null
 
     this.batch.sync()
@@ -1167,7 +1162,7 @@ export class Rink3dRenderer implements MatchRenderer {
       }
       this.blobs.setMatrixAt(i, m)
     })
-    m.makeScale(1.1, 1, 1.1).setPosition(this.puckRenderX.pos, 0.035, this.puckRenderZ.pos)
+    m.makeScale(1.1, 1, 1.1).setPosition(this.puck.x, 0.035, this.puck.z)
     this.blobs.setMatrixAt(poses.length, m)
     this.blobs.instanceMatrix.needsUpdate = true
   }
@@ -1511,8 +1506,8 @@ export class Rink3dRenderer implements MatchRenderer {
     // The focus trails the puck by up to a few feet, so stick-handling and
     // rebounds don't move the shot, and a real rush eases the pan in from zero
     // (the old hard deadzone stepped the target → stop/start pans).
-    const rawX = this.puckRenderX.pos
-    const rawZ = this.puckRenderZ.pos
+    const rawX = this.puck.x
+    const rawZ = this.puck.z
     const committedX = softDeadzone(rawX, this.playFocusX, PLAY_FOCUS_DEADZONE_X)
     const committedZ = softDeadzone(rawZ, this.playFocusZ, PLAY_FOCUS_DEADZONE_Z)
 

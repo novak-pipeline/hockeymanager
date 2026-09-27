@@ -425,3 +425,57 @@ export function puckCarriedOffset(angle: number): { dx: number; dz: number } {
     dz: -localX * sin + localZ * cos,
   }
 }
+
+// ── rendered puck tracking ───────────────────────────────────────────────────
+
+/**
+ * The drawn puck TRACKS its target (the stream puck when loose, the carrier's
+ * blade when carried). It used to ride a 0.08 s critically damped spring, and a
+ * spring's steady-state lag is speed × ~0.095 s — a 130 ft/s shot was drawn
+ * 12+ ft behind the real one (up to 27 ft), so saves and receptions happened
+ * before the puck arrived (audit C2).
+ *
+ * Now: position = target + a correction that only exists across a HANDOFF
+ * (the target switching between carried and loose, or to a new carrier). The
+ * correction decays with a short half-life, so a pass leaving the blade blends
+ * over a few frames but never trails. A handoff bigger than `snapFt` (a
+ * stoppage reset, a seek) just snaps.
+ */
+export interface PuckTrack {
+  x: number
+  z: number
+  /** Handoff correction still to bleed off (rendered − target). */
+  cx: number
+  cz: number
+  /** Identity of the current target: carrier id, or '' when loose. */
+  key: string
+}
+
+export const PUCK_HANDOFF_HL = 0.05
+export const PUCK_HANDOFF_SNAP_FT = 12
+
+export function puckTrackStep(
+  s: PuckTrack,
+  tx: number,
+  tz: number,
+  key: string,
+  dt: number,
+  hl = PUCK_HANDOFF_HL,
+  snapFt = PUCK_HANDOFF_SNAP_FT,
+): PuckTrack {
+  if (dt <= 0) return { x: tx, z: tz, cx: 0, cz: 0, key }
+  let cx = s.cx
+  let cz = s.cz
+  if (key !== s.key) {
+    // re-base the correction so the drawn puck is continuous across the switch
+    cx = s.x - tx
+    cz = s.z - tz
+    if (Math.hypot(cx, cz) > snapFt) cx = cz = 0
+  }
+  const k = Math.pow(0.5, dt / hl)
+  cx *= k
+  cz *= k
+  if (Math.abs(cx) < 1e-3) cx = 0
+  if (Math.abs(cz) < 1e-3) cz = 0
+  return { x: tx + cx, z: tz + cz, cx, cz, key }
+}
