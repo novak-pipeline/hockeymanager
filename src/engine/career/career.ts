@@ -146,6 +146,8 @@ import { buildScoutSummary } from '@engine/career/scoutSummary'
 import { buildProspectGrade, type NeedLevel } from '@engine/career/prospectGrade'
 import { buildScoutDraftRead, scoutBoardNote, scoutSignalParts } from '@engine/career/scoutDraftRead'
 import { farmSplit } from '@engine/career/farmReassign'
+import { detectBattles, rankBattle, battleRead, type CampCandidate, type CampGroup } from '@engine/career/campBattles'
+import { buildNeeds, leagueBenchmark, type DepthEntry, type NeedsCandidate, type NeedGroup } from '@engine/career/offseasonNeeds'
 import { buildOppositionReport } from '@engine/career/oppositionReport'
 import { buildDraftClassArticle } from '@engine/career/draftClassArticle'
 import { projectProspect, hashSigned, type ProspectProjection } from '@engine/career/prospectModel'
@@ -535,6 +537,17 @@ import {
   requiresWaivers as requiresWaiversRule,
   aiFloorTopUp,
   aiFreeAgencyDay,
+  marketClubs,
+  clubMarketState,
+  marketBidsFor,
+  rankOffers,
+  faDecisionDay,
+  faClassDecisionDay,
+  clubWant,
+  type ClubMarketState,
+  type FaChoice,
+  type FaMarketContext,
+  type FaUserOutcome,
   aiResignDay,
   askTerms,
   capUsedFor,
@@ -594,6 +607,7 @@ import {
   buyerProspects,
   pickValue,
   playerValue,
+  assetValueTier,
   rosterCapUsed,
   solicitOffersForPlayer,
   askingPriceText,
@@ -819,6 +833,8 @@ import {
   type TrainingCampState,
   type TrainingCampView,
   type CampReport,
+  type OffseasonNeedsView,
+  type CampGameLine,
   type MedicalView,
   type MedicalRow,
   type LeagueStatTableView,
@@ -1099,6 +1115,10 @@ const PICK_YEARS_AHEAD = 3
  *  (the NHL rule is 10 games / 24 days; we key off the games estimate). */
 const LTIR_MIN_GAMES = 10
 const FA_WINDOW_DAYS = 8
+/** Offseason 3.0: the market day arbitration hearings are held (July 6).
+ *  Real hearings run late July; the summer's compressed calendar keeps the
+ *  hearing inside the July window so the award is a decision, not a surprise. */
+const ARB_HEARING_DAY = 6
 /** Inclusive integer range [a..b] — used for jersey-number preference pools. */
 function range(a: number, b: number): number[] {
   const out: number[] = []
@@ -1448,7 +1468,11 @@ export class Career {
   private buyoutFas: PlayerId[] = []
   /** Pending arbitration awards for the user's unsigned RFAs (M2). Each is an
    *  ultimatum: accept the award or walk away and lose him to the open market. */
-  private arbitrationCases: Array<{ playerId: string; salary: number; years: number }> = []
+  /** Arbitration cases. `salary` is the arbitrator's award; before the
+   *  hearing (`heard === false`) it is sealed — the GM sees only the two
+   *  filings and can settle at the door. Older saves carry no hearing fields
+   *  and read as already heard. */
+  private arbitrationCases: Array<{ playerId: string; salary: number; years: number; clubFiling?: number; playerFiling?: number; hearingDay?: number; heard?: boolean }> = []
   /** True while the sim is held on deadline day (one continue's grace). */
   private deadlineHold = false
   /** The deadline hold already happened this season. */
@@ -11931,6 +11955,8 @@ export class Career {
         if (rDay < RESIGN_WINDOW_DAYS) {
           os.resignDay = rDay + 1
           this.tickResignWindow(os.resignDay)
+          // Offseason 3.0: June 30 is the QO deadline — its own dated beat.
+          if (os.resignDay === RESIGN_WINDOW_DAYS - 1) this.qoDeadlineBeat()
           return true
         }
         // Offers still sitting on a desk when the window shuts simply lapse.
@@ -11977,16 +12003,23 @@ export class Career {
           const fileChance = ratedOverall(p) >= 70 ? 0.65 : 0.3
           if (!this.rngFor(8010, Career.pidNum(e.playerId as string)).chance(fileChance)) continue
           const ask = askTerms(p, this.year)
-          const award = Math.round(ask.salary * this.rngFor(8009, Career.pidNum(e.playerId as string)).float(0.98, 1.12) / 25000) * 25000
-          this.arbitrationCases.push({ playerId: e.playerId as string, salary: award, years: 1 })
+          // Both sides file a number; the award lands between them (sealed
+          // until the hearing). Settling at the door splits the difference.
+          const r25 = (n: number): number => Math.round(n / 25000) * 25000
+          const clubFiling = r25(Math.max(qualifyingOffer(p), ask.salary * 0.85))
+          const playerFiling = r25(Math.max(clubFiling + 100_000, ask.salary * 1.15))
+          const lean = this.rngFor(8009, Career.pidNum(e.playerId as string)).float(0.3, 0.7)
+          const award = r25(clubFiling + (playerFiling - clubFiling) * lean)
+          this.arbitrationCases.push({ playerId: e.playerId as string, salary: award, years: 1, clubFiling, playerFiling, hearingDay: ARB_HEARING_DAY, heard: false })
           arbFiled.add(e.playerId as string)
           this.pushNews(
             'contract',
-            `${p.name} files for arbitration`,
-            `Unsigned and restricted, ${p.name} has taken the club to arbitration. The arbitrator's award: ` +
-            `$${(award / 1e6).toFixed(2)}M × 1 year. Accept it and he's signed at that number — or walk away and he ` +
-            `becomes an unrestricted free agent. Decide before free agency closes; an unanswered award binds the club.`,
-            { playerId: e.playerId as string }
+            `${p.name} files for arbitration — hearing July ${ARB_HEARING_DAY}`,
+            `Unsigned and restricted, ${p.name} has filed. His camp's number: $${(playerFiling / 1e6).toFixed(2)}M. ` +
+            `The club's: $${(clubFiling / 1e6).toFixed(2)}M. The hearing is July ${ARB_HEARING_DAY}; the arbitrator's award will land somewhere between.\n\n` +
+            `Settle at the door — $${(r25((clubFiling + playerFiling) / 2) / 1e6).toFixed(2)}M, one or two years — and nobody has to hear the club argue his case down. ` +
+            `Go to the hearing and you get the arbitrator's number, and the room remembers what was said about him. After the award you may still walk away.`,
+            { playerId: e.playerId as string, teamId: this.userTeamId as string }
           )
         }
         // Expiries + buyouts JOIN the standing market (which was stocked when
@@ -12042,6 +12075,14 @@ export class Career {
         this.qualifyingOffers.clear()
         os.stage = 'freeAgency'
         os.faDay = 0
+        // The class as it stands at the open, richest ask first: the top of it
+        // decides on July 1 itself (the frenzy), the rest over the week.
+        os.faClassOrder = this.faPool
+          .map((id) => this.data.players.get(id))
+          .filter((p): p is Player => !!p)
+          .map((p) => [p.id as string, askTerms(p, this.year).salary] as const)
+          .sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))
+          .map(([id]) => id)
         return true
       }
       case 'freeAgency': {
@@ -12050,16 +12091,21 @@ export class Career {
         // on free agency's own advancing clock (so the daily cap still binds —
         // the regular-season story tick doesn't run out here).
         this.runVoices(os.faDay)
-        // #167: resolve the GM's standing offers first — his money gets first
-        // look each day before the AI market moves.
-        this.resolveFaOffers()
+        // Offers on men who are gone (signed in the world sweep, retired) lapse.
+        this.sweepLapsedFaOffers()
+        // Arbitration hearings on their day: the sealed award is read out.
+        this.holdArbitrationHearings(os.faDay)
         // #183: offer sheets whose 7-day match window has elapsed resolve here.
         this.resolveOfferSheets()
-        // AI clubs work the phones a beat behind the user: released veterans
-        // don't all sign within 24 hours, and the GM you play gets the same
-        // first-mover window a real front office fights for. (Cadence law —
-        // the market should be a week of decisions, not one press.)
+        // July 1 is a FRENZY: the AI market moves on day one (the big contracts
+        // decide on July 1 — see faDecisionDay), and the GM's standing offers
+        // go into the SAME pile as the real AI bids. The player chooses.
         const faRanks = this.strengthRanks()
+        const userBids = new Map(
+          this.faPendingOffers
+            .filter((o) => o.decideDay <= os.faDay)
+            .map((o) => [o.playerId, { salary: o.salary, years: o.years }] as const)
+        )
         const res = aiFreeAgencyDay({
           teams: this.data.teams,
           players: this.data.players,
@@ -12067,18 +12113,16 @@ export class Career {
           userTeamId: this.userTeamId,
           year: this.year,
           rng: this.rngFor(8004, os.faDay),
-          faDay: Math.max(0, os.faDay - 2),
+          faDay: os.faDay,
           // Competitive window shapes the market: rebuilders sign youth/stopgaps,
           // contenders chase the difference-makers.
           postureOf: (tid) => this.clubPostureFor(tid, faRanks).posture,
           // LW-econ: clubs bid by upgrade x posture x GM; players choose.
-          market: {
-            personaOf: (tid) => this.gmPersonaFor(tid),
-            postureOf: (tid) => this.clubPostureFor(tid, faRanks).posture,
-            strengthRankOf: (tid) => faRanks.get(tid as string) ?? 16,
-            floorOf: (t) => capFloorFor(t.finances.salaryCap),
-          },
+          market: this.faMarketCtx(faRanks),
+          userBids,
+          decisionDayOf: (p) => this.faDecisionDayFor(p),
         })
+        this.applyFaUserOutcomes(res.userOutcomes ?? [])
         const signedIds = new Set(res.signings.map((s) => s.playerId as string))
         {
           const tele = this.telemetry.season(this.year)
@@ -12087,6 +12131,17 @@ export class Career {
         }
         this.faPool = this.faPool.filter((id) => !signedIds.has(id as string))
         for (const s of res.signings) this.lockerArrival(s.teamId, s.playerId)
+        // The July wire: every AI signing, dated, with the bidding behind it.
+        os.faWire = [...(os.faWire ?? []), ...res.signings.map((s) => {
+          const p = this.resolve(s.playerId)
+          return {
+            day: os.faDay, playerId: s.playerId as string, name: p.name, position: p.position,
+            teamId: s.teamId as string, teamAbbr: this.data.teams.get(s.teamId)?.abbreviation ?? '?',
+            salary: s.salary, years: s.years,
+            ...(s.suitors !== undefined ? { suitors: s.suitors } : {}),
+            ...(s.reason ? { reason: s.reason } : {}),
+          }
+        })].slice(-200)
         // World Chronicle: every signing writes provenance (future "he walked on
         // us in free agency" callbacks); notable ones get a chronicle event.
         // Every deal ALSO hits the transaction ledger — the July market is the
@@ -12119,11 +12174,9 @@ export class Career {
             })
           }
         }
-        // Season Rhythm M2 — July 1 is a FRENZY, not a queue. The AI market
-        // runs two beats behind the user (the head start above), so the
-        // roundup keys on the EFFECTIVE market day: the first day AI money
-        // actually moves gets the full story, the next day the recap.
-        const marketDay = Math.max(0, os.faDay - 2)
+        // Season Rhythm M2 — July 1 is a FRENZY, not a queue: day one of the
+        // market gets the full story, the next day the recap.
+        const marketDay = os.faDay
         if (marketDay === 1 && res.signings.length > 0) {
           const total = res.signings.reduce((sum, s) => sum + s.salary * s.years, 0)
           const top = [...res.signings]
@@ -13973,14 +14026,77 @@ export class Career {
   }
 
   /** Pending arbitration cases (for the offseason screen). */
-  getArbitrationCases(): Array<{ playerId: string; name: string; position: string; age: number; salary: number; years: number }> {
+  getArbitrationCases(): Array<{ playerId: string; name: string; position: string; age: number; salary: number; years: number; heard?: boolean; clubFiling?: number; playerFiling?: number; settleAt?: number; hearingDay?: number }> {
     return this.arbitrationCases.map((c) => {
       const p = this.data.players.get(asPlayerId(c.playerId))
+      const sealed = c.heard === false
       return {
         playerId: c.playerId, name: p?.name ?? '—', position: p?.position ?? '?',
-        age: p?.age ?? 0, salary: c.salary, years: c.years,
+        age: p?.age ?? 0,
+        // Before the hearing the award is sealed: show the settlement figure.
+        salary: sealed ? this.arbSettleFigure(c) : c.salary,
+        years: c.years,
+        ...(c.heard !== undefined ? { heard: c.heard } : {}),
+        ...(c.clubFiling !== undefined ? { clubFiling: c.clubFiling } : {}),
+        ...(c.playerFiling !== undefined ? { playerFiling: c.playerFiling } : {}),
+        ...(sealed ? { settleAt: this.arbSettleFigure(c) } : {}),
+        ...(c.hearingDay !== undefined ? { hearingDay: c.hearingDay } : {}),
       }
     })
+  }
+
+  /** The number both sides can live with before the hearing: the midpoint. */
+  private arbSettleFigure(c: { clubFiling?: number; playerFiling?: number; salary: number }): number {
+    if (c.clubFiling === undefined || c.playerFiling === undefined) return c.salary
+    return Math.round(((c.clubFiling + c.playerFiling) / 2) / 25000) * 25000
+  }
+
+  /** Settle at the door: sign him at the midpoint of the filings for one or
+   *  two years, before the hearing — no award, no bad blood. */
+  settleArbitration(playerId: string, years: 1 | 2): { ok: boolean; message: string } {
+    const c = this.arbitrationCases.find((x) => x.playerId === playerId)
+    if (!c) return { ok: false, message: 'No arbitration case for that player.' }
+    if (c.heard !== false) return { ok: false, message: 'The hearing has been held — accept the award or walk away.' }
+    const p = this.data.players.get(asPlayerId(playerId))
+    if (!p) return { ok: false, message: 'Player not found.' }
+    const salary = this.arbSettleFigure(c)
+    if (this.userCapUsed() + this.userDeadCap + salary > this.userTeam.finances.salaryCap) {
+      return { ok: false, message: 'A settlement at that number does not fit under your cap.' }
+    }
+    if (!this.userTeam.roster.includes(asPlayerId(playerId)) && this.userTeam.roster.length >= MAX_ROSTER_SIZE) {
+      return { ok: false, message: `Your roster is full at ${MAX_ROSTER_SIZE} — clear a spot first.` }
+    }
+    const term = years === 2 ? 2 : 1
+    signPlayer({ team: this.userTeam, player: p, salary, years: term, year: this.year, players: this.data.players })
+    this.faPool = this.faPool.filter((id) => (id as string) !== playerId)
+    this.arbitrationCases = this.arbitrationCases.filter((x) => x.playerId !== playerId)
+    this.lockerArrival(this.userTeamId, asPlayerId(playerId))
+    repairLines(this.userTeam, this.data.players)
+    p.morale = Math.min(100, p.morale + 2)
+    this.pushNews('contract', `${p.name} settles before his hearing`,
+      `The sides met in the middle: $${(salary / 1e6).toFixed(2)}M × ${term} year${term === 1 ? '' : 's'}. No arbitrator, no case argued against him — he walks into camp without a grudge.`,
+      { playerId, teamId: this.userTeamId as string })
+    return { ok: true, message: `${p.name} settled at $${(salary / 1e6).toFixed(2)}M × ${term}.` }
+  }
+
+  /** Hearing day: the arbitrator reads the sealed award, and the club's case
+   *  (arguing his value down) leaves a mark on the man. */
+  private holdArbitrationHearings(faDay: number): void {
+    for (const c of this.arbitrationCases) {
+      if (c.heard !== false || (c.hearingDay ?? 0) > faDay) continue
+      c.heard = true
+      const p = this.data.players.get(asPlayerId(c.playerId))
+      if (!p) continue
+      p.morale = Math.max(0, p.morale - 4)
+      const mid = this.arbSettleFigure(c)
+      const lean = c.salary > mid
+        ? `a win for his camp — above the midpoint of $${(mid / 1e6).toFixed(2)}M`
+        : c.salary < mid ? `a win for the club — below the midpoint of $${(mid / 1e6).toFixed(2)}M` : 'right down the middle'
+      this.pushNews('contract', `Arbitration: ${p.name} is awarded $${(c.salary / 1e6).toFixed(2)}M`,
+        `The arbitrator has ruled on ${p.name}: $${(c.salary / 1e6).toFixed(2)}M × ${c.years} — ${lean}. ` +
+        `He sat through the club's case against him, and it stung.\n\nAccept the award, or walk away and he is an unrestricted free agent. An unanswered award binds the club when the window closes.`,
+        { playerId: c.playerId, teamId: this.userTeamId as string })
+    }
   }
 
   /** Accept the arbitrator's award: he signs at that number, like it or not. */
@@ -13989,6 +14105,8 @@ export class Career {
     if (!c) return { ok: false, message: 'No arbitration case for that player.' }
     const p = this.data.players.get(asPlayerId(playerId))
     if (!p) return { ok: false, message: 'Player not found.' }
+    // No award exists before the hearing: accepting now means going to it.
+    if (c.heard === false) this.holdArbitrationHearings(Number.MAX_SAFE_INTEGER)
     const capUsed = this.userCapUsed()
     if (capUsed + this.userDeadCap + c.salary > this.userTeam.finances.salaryCap) {
       return { ok: false, message: 'The award does not fit under your cap — clear space or walk away.' }
@@ -14648,90 +14766,26 @@ export class Career {
       ...(c.schedule ? { schedule: c.schedule.map((s) => ({ ...s })) } : {}),
       ...(c.scrimmage ? { scrimmage: structuredClone(c.scrimmage) } : {}),
       ...(c.reports ? { reports: c.reports.map((r) => ({ ...r })) } : {}),
+      ...(c.battles ? { battles: structuredClone(c.battles) } : {}),
+      ...(c.look ? { look: [...c.look] } : {}),
+      ...(c.games ? { games: c.games.map((g) => ({ ...g })) } : {}),
+      ...(c.battles
+        ? { reads: Object.fromEntries(c.battles.map((b) => [b.id, battleRead(b, staff.headCoach?.name ?? 'The coach')])) }
+        : {}),
+      nhlNow: (() => {
+        const n = { F: 0, D: 0, G: 0 }
+        for (const id of this.userTeam.roster) {
+          const p = this.data.players.get(id)
+          if (p) n[this.posGroup(p.position)]++
+        }
+        return n
+      })(),
     }
   }
 
-  /** Open the EHM-style camp week: the camp roster split Blue/Red and the
-   *  day-by-day schedule. The scrimmage box score and coach reports start
-   *  EMPTY — the week plays out beat by beat via {@link advanceTrainingCampDay}
-   *  (each Continue on the camp screen walks one day forward), so camp READS
-   *  like a week rather than resolving as one button. */
-  private buildTrainingCampWeek(decisions: TrainingCampState['decisions']): void {
-    const camp = this.trainingCamp
-    if (!camp) return
-    const year = this.year
-    camp.startISO = `${year}-09-15`
-    camp.endISO = `${year}-09-23`
-    camp.campDay = 1
-
-    // Camp roster = the NHL group + the AHL bodies fighting for a spot.
-    const nhlIds = [...this.userTeam.roster]
-    const ahlBattleIds = decisions.filter((d) => d.current === 'ahl').map((d) => d.playerId)
-    const seen = new Set<string>()
-    const bodies: Player[] = []
-    for (const id of [...nhlIds.map((x) => x as string), ...ahlBattleIds]) {
-      if (seen.has(id)) continue
-      seen.add(id)
-      const p = this.data.players.get(asPlayerId(id))
-      if (p) bodies.push(p)
-    }
-    // Split into balanced Blue/Red teams within each position group.
-    const teamOf = new Map<string, 'Blue' | 'Red'>()
-    for (const grp of ['G', 'D', 'F'] as const) {
-      const inGrp = bodies.filter((p) => (p.position === 'G' ? 'G' : p.position === 'D' ? 'D' : 'F') === grp)
-      inGrp.forEach((p, i) => teamOf.set(p.id as string, i % 2 === 0 ? 'Blue' : 'Red'))
-    }
-    const ahlSet = new Set(ahlBattleIds)
-    const ptoSet = new Set(decisions.filter((d) => d.tryout).map((d) => d.playerId))
-    camp.roster = bodies.map((p) => ({
-      playerId: p.id as string,
-      name: p.name,
-      position: p.position,
-      age: p.age,
-      team: teamOf.get(p.id as string) ?? 'Blue',
-      status: ptoSet.has(p.id as string) ? 'PTO' : ahlSet.has(p.id as string) ? 'AHL invite' : 'On Roster',
-      ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
-    }))
-
-    // The box score starts empty and fills scrimmage by scrimmage; reports are
-    // filed on the final practice day, not before.
-    camp.scrimmage = { skaters: [], goalies: [], results: [] }
-    delete camp.reports
-
-    // Day-by-day schedule; scrimmage results fill in as each is played.
-    camp.schedule = [
-      { label: 'Day 1', activity: 'Fitness Tests & Camp Meeting', info: 'Physical evaluations of all players' },
-      { label: 'Day 2', activity: 'Intra-squad Scrimmage', info: 'Blue vs Red — first look' },
-      { label: 'Day 3', activity: 'Skating Drills · Staff Meeting' },
-      { label: 'Day 4', activity: 'Intra-squad Scrimmage', info: 'Blue vs Red — second look' },
-      { label: 'Day 5', activity: 'Video Sessions · Dryland' },
-      { label: 'Day 6', activity: 'Morning Skate · General Practice' },
-      { label: 'Day 7', activity: 'Final Practice — coaches file reports' },
-      { label: 'Day 8', activity: 'Final Cuts — the roster is set' },
-    ]
-
-    // ── Day 1: camp opens. Headcount + who arrived sharp in fitness testing. ──
-    const fitRng = this.rngFor(9603, year)
-    const fitness = bodies
-      .filter((p) => p.position !== 'G')
-      .map((p) => [p.name, ratedOverall(p) + fitRng.range(-8, 8)] as const)
-      .sort((a, b) => b[1] - a[1])
-    const sharp = fitness.slice(0, 2).map(([name]) => name)
-    const question = fitness.length > 0 ? fitness[fitness.length - 1][0] : undefined
-    this.pushNews(
-      'scouting',
-      'Training camp opens',
-      `${bodies.length} players reported for camp today — the NHL group plus the AHL bodies fighting for a spot. ` +
-      `Day one was physical testing and a camp meeting.` +
-      `${sharp.length > 0 ? ` ${sharp.join(' and ')} ${sharp.length > 1 ? 'were' : 'was'} sharpest in the fitness drills.` : ''}` +
-      `${question ? ` ${question} has some questions to answer this week.` : ''} ` +
-      `Two intra-squad scrimmages and the coaches' final reads come before cut day.`,
-      { teamId: this.userTeamId as string }
-    )
-  }
-
-  /** Play ONE intra-squad scrimmage and ACCUMULATE it into the camp box score
-   *  (deterministic from talent). Merges each player's line with any prior
+  /** LEGACY (pre-Battles saves caught mid-camp): play ONE intra-squad
+   *  scrimmage and ACCUMULATE it into the camp box score (deterministic from
+   *  talent). New camps play real games — see playCampScrimmages. Merges each player's line with any prior
    *  scrimmage so the totals grow across the week. */
   private playCampScrimmage(scrimNo: number): void {
     const camp = this.trainingCamp
@@ -14844,6 +14898,8 @@ export class Career {
   advanceTrainingCampDay(): void {
     const camp = this.trainingCamp
     if (!camp || camp.resolved) return
+    // Camp Battles: a battles camp plays its games in three beats.
+    if (camp.battles) { this.advanceBattleCamp(); return }
     const CUT_DAY = 8
     const day = Math.min(CUT_DAY, (camp.campDay ?? 1) + 1)
     camp.campDay = day
@@ -14930,46 +14986,129 @@ export class Career {
       const wb = placements.find((pl) => pl.playerId === b.playerId)?.place ?? b.coachPlan
       return (wa === 'nhl' ? 0 : 1) - (wb === 'nhl' ? 0 : 1)
     })
+    // Where each man ACTUALLY is at cut day (the season rollover can move a
+    // body between camp open and cut day), so a stale "current" never turns a
+    // no-op into a refused move.
+    const farm = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
+    const whereNow = (pid: string): 'nhl' | 'ahl' | 'gone' =>
+      this.userTeam.roster.some((id) => (id as string) === pid) ? 'nhl'
+        : farm?.roster.some((id) => (id as string) === pid) ? 'ahl' : 'gone'
+    type Move = { d: TrainingCampState['decisions'][number]; want: 'nhl' | 'ahl'; reason?: string }
+    let queue: Move[] = []
     for (const d of ordered) {
       const want = placements.find((pl) => pl.playerId === d.playerId)?.place ?? d.coachPlan
       // PTO invitees: 'nhl' signs him to a league-minimum deal, anything else
       // ends the tryout and returns him to the open market.
       if (d.tryout) {
-        if (want === 'nhl') {
-          const res = this.signTryout(d.playerId)
-          notes.push(res.ok
-            ? `${d.name} earns a contract out of his tryout — he makes the team on a league-minimum deal.`
-            : `${d.name}'s tryout ends without a deal: ${res.message ?? 'no room'}.`)
-        } else {
-          notes.push(`${d.name}'s tryout ends without a contract — he returns to the open market.`)
-        }
+        if (want === 'nhl') queue.push({ d, want })
+        else notes.push(`${d.name}'s tryout ends without a contract — he returns to the open market.`)
         continue
       }
-      if (want === d.current) {
+      const now = whereNow(d.playerId)
+      if (now === 'gone') {
+        notes.push(`${d.name} is no longer with the organisation.`)
+        continue
+      }
+      if (want === now) {
         if (want === 'nhl' && d.coachPlan === 'ahl') notes.push(`${d.name} stays on the NHL roster — you overruled the coach.`)
         continue
       }
-      if (want === 'nhl') {
-        const res = this.callUp(d.playerId)
-        // The failure branch carries `reason`, not `message` — reading the wrong
-        // field meant every camp assignment that bounced told the GM only
-        // "roster rules" instead of which rule stopped it.
-        // Roster-rule reasons are authored as whole sentences, so appending our
-        // own full stop printed "…after this call-up..". One terminator only.
-        notes.push(res.ok
-          ? `${d.name} makes the team out of camp.`
-          : `${d.name} stays with the farm club — ${oneSentence(res.reason || 'roster rules')}`)
-      } else {
-        const res = this.sendDown(d.playerId)
-        if (!res.ok) notes.push(`${d.name} could not be sent down — ${oneSentence(res.reason || 'roster rules')}`)
-        else if (res.note) notes.push(res.note)
-        else notes.push(`${d.name} is assigned to the farm.`)
+      queue.push({ d, want })
+    }
+    // Apply in passes: a call-up the cap refuses goes through once a send-down
+    // has cleared the money, and a send-down the roster minimum refuses goes
+    // through once a call-up has filled the spot. Stop when a pass moves nobody.
+    for (let pass = 0; pass < 4 && queue.length > 0; pass++) {
+      const next: Move[] = []
+      for (const m of queue) {
+        const { d, want } = m
+        if (d.tryout) {
+          const res = this.signTryout(d.playerId)
+          if (res.ok) notes.push(`${d.name} earns a contract out of his tryout — he makes the team on a league-minimum deal.`)
+          else next.push({ ...m, reason: res.message ?? 'no room' })
+        } else if (whereNow(d.playerId) === want) {
+          // An earlier move already carried him there (a call-up that had to
+          // make room, an emergency recall after a claim).
+          notes.push(want === 'nhl' ? `${d.name} makes the team out of camp.` : `${d.name} is assigned to the farm.`)
+        } else if (whereNow(d.playerId) === 'gone') {
+          notes.push(`${d.name} is no longer with the organisation.`)
+        } else if (want === 'nhl') {
+          const res = this.callUp(d.playerId)
+          // Roster-rule reasons are authored as whole sentences — one terminator.
+          if (res.ok) notes.push(`${d.name} makes the team out of camp.`)
+          else next.push({ ...m, reason: res.reason || 'roster rules' })
+        } else {
+          const res = this.sendDown(d.playerId)
+          if (!res.ok) next.push({ ...m, reason: res.reason || 'roster rules' })
+          else if (res.note) notes.push(res.note)
+          else notes.push(`${d.name} is assigned to the farm.`)
+        }
+      }
+      const stuck = next.length === queue.length
+      queue = next
+      if (stuck) break
+    }
+    // A like-for-like swap the roster rules refuse one move at a time (the
+    // backup goalie battle: neither club may drop to one goalie, even for a
+    // moment) goes through as ONE swap — waivers and all for the man going down.
+    for (;;) {
+      const up = queue.find((m) => !m.d.tryout && m.want === 'nhl')
+      const down = up && queue.find((m) => !m.d.tryout && m.want === 'ahl' && this.posGroup(this.resolve(asPlayerId(m.d.playerId)).position) === this.posGroup(this.resolve(asPlayerId(up.d.playerId)).position))
+      if (!up || !down) break
+      const res = this.campSwap(up.d.playerId, down.d.playerId)
+      queue = queue.filter((m) => m !== up && m !== down)
+      notes.push(...res.notes)
+      if (!res.ok) { const reason = res.reason ?? 'roster rules'; queue.push({ ...up, reason }, { ...down, reason }); break }
+    }
+    for (const { d, want, reason } of queue) {
+      notes.push(d.tryout
+        ? `${d.name}'s tryout ends without a deal: ${reason ?? 'no room'}.`
+        : want === 'nhl'
+          ? `${d.name} stays with the farm club — ${oneSentence(reason || 'roster rules')}`
+          : `${d.name} could not be sent down — ${oneSentence(reason || 'roster rules')}`)
+    }
+    // The opening-night roster must be legal: if overrules or refused moves
+    // left the club over 23 or short at a position, the league's own roster
+    // rule sets it (worst-first down, best affordable up).
+    {
+      const counts = this.rosterCounts(this.userTeam)
+      if (this.userTeam.roster.length > ROSTER_HARD_CAP || counts.f < Career.ROSTER_MIN_F || counts.d < Career.ROSTER_MIN_D || counts.g < Career.ROSTER_MIN_G) {
+        const before = new Set(this.userTeam.roster.map((id) => id as string))
+        this.assignRosters(true)
+        const after = new Set(this.userTeam.roster.map((id) => id as string))
+        const down = [...before].filter((id) => !after.has(id)).map((id) => this.resolve(asPlayerId(id)).name)
+        const up = [...after].filter((id) => !before.has(id)).map((id) => this.resolve(asPlayerId(id)).name)
+        if (down.length > 0 || up.length > 0) {
+          notes.push(`The league's roster rule set the last places: ${[...up.map((n) => `${n} up`), ...down.map((n) => `${n} down`)].join(', ')}.`)
+        }
       }
     }
     const team = this.data.teams.get(this.userTeamId)
     const ahl = team?.affiliateId ? this.data.teams.get(team.affiliateId) : undefined
     if (team) repairLines(team, this.data.players)
     if (ahl) repairLines(ahl, this.data.players)
+    // Camp Battles: the verdicts land on the men. Winning a job from the
+    // outside is a lift; losing one you held is a sting (a claim is its own
+    // story and is already told by the waiver mail).
+    if (camp.battles && team) {
+      const onNhl = new Set(team.roster.map((id) => id as string))
+      const inOrg = new Set([...onNhl, ...(ahl?.roster ?? []).map((id) => id as string)])
+      for (const b of camp.battles) {
+        for (const c of b.contenders) {
+          const p = this.data.players.get(asPlayerId(c.playerId))
+          if (!p || !inOrg.has(c.playerId)) continue
+          const made = onNhl.has(c.playerId)
+          if (made && c.current === 'ahl') {
+            p.morale = Math.min(100, p.morale + 6)
+            notes.push(c.evidence > 0
+              ? `${c.name} won “${b.label}” — he ${c.cite ?? 'earned it'}.`
+              : `${c.name} won “${b.label}” on the coach's read — he ${c.cite ?? 'held his own'}.`)
+          } else if (!made && c.current === 'nhl') {
+            p.morale = Math.max(0, p.morale - 5)
+          }
+        }
+      }
+    }
     // Push the mail BEFORE marking the camp resolved so it is stamped with cut
     // day (Sep 22) on the fiction clock, not the board meeting's morning after.
     this.pushNews(
@@ -14979,6 +15118,37 @@ export class Career {
       { teamId: this.userTeamId as string }
     )
     camp.resolved = true
+    return { ok: true, notes }
+  }
+
+  /** Cut day: move one man up and one down in the same position group as a
+   *  single transaction. The man going down still faces real waivers. */
+  private campSwap(upId: string, downId: string): { ok: boolean; notes: string[]; reason?: string } {
+    const nhl = this.userTeam
+    const ahl = nhl.affiliateId ? this.data.teams.get(nhl.affiliateId) : undefined
+    const up = this.data.players.get(asPlayerId(upId))
+    const down = this.data.players.get(asPlayerId(downId))
+    if (!ahl || !up || !down) return { ok: false, notes: [], reason: 'roster rules' }
+    if (!ahl.roster.includes(up.id) || !nhl.roster.includes(down.id)) return { ok: false, notes: [], reason: 'roster rules' }
+    const capAfter = this.userCapUsed() - down.contract.salary + up.contract.salary
+    if (capAfter + this.userDeadCap > nhl.finances.salaryCap) return { ok: false, notes: [], reason: `No cap room to swap ${up.name} in for ${down.name}.` }
+    const notes: string[] = []
+    nhl.roster = nhl.roster.filter((id) => id !== down.id)
+    const claimant = this.requiresWaivers(down) ? this.processWaivers(down, nhl.id) : null
+    if (claimant) {
+      notes.push(`${down.name} was claimed off waivers by ${claimant.name}.`)
+      this.pushNews('contract', `${down.name} CLAIMED off waivers by ${claimant.abbreviation}`,
+        `You sent ${down.name} (${down.position}, ${down.age}) down out of camp, but he needed waivers — ${claimant.name} claimed him and his contract.`,
+        { playerId: downId, teamId: this.userTeamId as string })
+    } else {
+      ahl.roster.push(down.id)
+      notes.push(this.requiresWaivers(down) ? `${down.name} cleared waivers.` : `${down.name} is assigned to the farm.`)
+    }
+    ahl.roster = ahl.roster.filter((id) => id !== up.id)
+    nhl.roster.push(up.id)
+    notes.push(`${up.name} makes the team out of camp.`)
+    repairLines(nhl, this.data.players)
+    repairLines(ahl, this.data.players)
     return { ok: true, notes }
   }
 
@@ -15005,14 +15175,663 @@ export class Career {
     return { ok: true }
   }
 
+  /* ─────────────── Camp Battles (depth audit §5) ─────────────── */
+
+  /** The clubs that WOULD claim a waiver-bound player if he were sent down
+   *  today, in claim priority. A side-effect-free dry run of processWaivers'
+   *  own rules (cap fit, the NHL bar, room to conform), so the waiver risk the
+   *  GM sees at cut day is the risk the wire will actually apply. */
+  private waiverClaimantsFor(p: Player, fromTeamId: TeamId): Team[] {
+    const grp = this.posGroup(p.position)
+    const ovr = ratedOverall(p)
+    const out: Team[] = []
+    const order = sortStandings([...this.standings.values()]).map((s) => s.teamId).reverse()
+    for (const tid of order) {
+      if (tid === fromTeamId) continue
+      const team = this.data.teams.get(tid)
+      if (!team || team.tier === 'ahl' || team.tier === 'world') continue
+      if (capUsedFor(team, this.data.players) + p.contract.salary > team.finances.salaryCap) continue
+      if (ovr < this.orgNhlBar(team, grp) - 2) continue
+      if (team.roster.length >= ROSTER_HARD_CAP && !team.affiliateId) continue
+      out.push(team)
+    }
+    return out
+  }
+
+  /** How one body in camp looks to the battle logic: his ability, the coach's
+   *  eye on top of it (form, morale, specialty, practice habits, and a lean
+   *  toward keeping a pro he would otherwise lose on waivers), and whether
+   *  sending him down exposes him to a claim. */
+  private campCandidate(p: Player, current: 'nhl' | 'ahl', tryout: boolean): CampCandidate {
+    const coach = this.getTeamStaff(this.userTeamId as string).headCoach
+    const ability = ratedOverall(p)
+    const eye = coach ? coachAdjustedScore(p, coach) - ability : 0
+    const habits = (((p.personality?.professionalism ?? 10.5) - 10.5) / 19) * 1.5
+    const waiver = !tryout && this.requiresWaivers(p)
+    const claimants = current === 'nhl' && waiver ? this.waiverClaimantsFor(p, this.userTeamId) : []
+    // The coach will not hand a proven pro to a rival for nothing on a hunch:
+    // a man who WOULD be claimed carries a real lean (a delegating GM must not
+    // bleed veterans). Camp can still overturn it — that is the waiver trap.
+    const waiverLean = claimants.length > 0 ? 5 : 0
+    // The letters: the coach does not cut the man wearing the C (or an A) on
+    // a camp hunch.
+    const team = this.userTeam
+    const letterLean = !tryout && (team.captainId as string | undefined) === (p.id as string) ? 8
+      : !tryout && (team.alternateCaptainIds ?? []).some((a) => (a as string) === (p.id as string)) ? 4 : 0
+    const coachEye = Math.round((eye + habits + waiverLean + letterLean) * 10) / 10
+    // A proven one-way pro gets a modest lean on the opening chart — no longer
+    // the old wall that kept any veteran up regardless of camp.
+    const protection = tryout ? 0 : Math.min(4, this.waiverProtection(p) / 6)
+    return {
+      playerId: p.id as string,
+      name: p.name,
+      position: p.position,
+      age: p.age,
+      ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+      group: this.posGroup(p.position) as CampGroup,
+      ability,
+      keep: ability + coachEye + protection,
+      coachEye,
+      current,
+      ...(tryout ? { tryout: true } : {}),
+      waiverRequired: waiver,
+      ...(claimants[0] ? { claimedBy: claimants[0].abbreviation } : {}),
+      ...(waiver && current === 'nhl' ? { claimants: claimants.length } : {}),
+    }
+  }
+
+  /** Open the user's camp: the coach's opening depth chart, the contested
+   *  spots named as battles, and every roster call staged for cut day. Camp
+   *  opens every September — even a settled roster has a backup-goalie or a
+   *  last-forward battle worth playing out. */
+  private openTrainingCamp(team: Team, ahl: Team): void {
+    // PTOs (professional tryouts): unsigned veterans in on tryout deals. The GM
+    // may curate the list (#182); absent a curated list the AGM auto-picks.
+    this.stockFreeAgentMarket()
+    const faStill = new Set(this.faPool.map((id) => id as string))
+    const inviteIds = (this.campPtoInvites ?? this.defaultCampPtoInvites()).filter((id) => faStill.has(id))
+    this.campPtoInvites = undefined // consumed — next offseason starts fresh
+
+    const cands: CampCandidate[] = []
+    const seen = new Set<string>()
+    const add = (id: string, current: 'nhl' | 'ahl', tryout: boolean): void => {
+      if (seen.has(id)) return
+      const p = this.data.players.get(asPlayerId(id))
+      if (!p) return
+      seen.add(id)
+      cands.push(this.campCandidate(p, current, tryout))
+    }
+    for (const id of team.roster) add(id as string, 'nhl', false)
+    for (const id of ahl.roster) add(id as string, 'ahl', false)
+    for (const id of inviteIds) add(id, 'ahl', true)
+
+    // The coach's chart has to fit the cap. If signing tryouts would break it,
+    // the tryouts stay camp bodies and the chart is drawn without them.
+    const salaryOf = (c: CampCandidate): number =>
+      c.tryout ? indexed(750_000) : (this.data.players.get(asPlayerId(c.playerId))?.contract.salary ?? 0)
+    const room = team.finances.salaryCap - this.userDeadCap
+    let depth = detectBattles(cands)
+    const payroll = (d: typeof depth): number => {
+      const ids = new Set([...d.opening.F, ...d.opening.D, ...d.opening.G])
+      return cands.filter((c) => ids.has(c.playerId)).reduce((s, c) => s + salaryOf(c), 0)
+    }
+    let ptoBlocked = false
+    if (cands.some((c) => c.tryout) && payroll(depth) > room) {
+      const without = detectBattles(cands.filter((c) => !c.tryout))
+      if (payroll(without) < payroll(depth)) { depth = without; ptoBlocked = true }
+    }
+    // A camp signs one tryout outright at most — a club does not rebuild its
+    // blue line out of the summer's leftovers. The rest can still win a spot
+    // in a battle, but the coach will not hand them one.
+    const inChart = (d: typeof depth): Set<string> => new Set([...d.opening.F, ...d.opening.D, ...d.opening.G])
+    const battlePtos = (d: typeof depth): Set<string> => new Set(d.battles.flatMap((b) => b.contenders.filter((x) => x.tryout).map((x) => x.playerId)))
+    const outright = cands.filter((c) => c.tryout && inChart(depth).has(c.playerId) && !battlePtos(depth).has(c.playerId)).sort((a, b) => b.ability - a.ability)
+    if (!ptoBlocked && outright.length > 1) {
+      const drop = new Set(outright.slice(1).map((c) => c.playerId))
+      depth = detectBattles(cands.filter((c) => !drop.has(c.playerId)))
+    }
+    const inNhl = new Set([...depth.opening.F, ...depth.opening.D, ...depth.opening.G])
+    const battleOf = new Map<string, string>()
+    for (const b of depth.battles) for (const c of b.contenders) battleOf.set(c.playerId, b.id)
+
+    const decisions: TrainingCampState['decisions'] = []
+    for (const c of cands) {
+      const plan: 'nhl' | 'ahl' = inNhl.has(c.playerId) ? 'nhl' : 'ahl'
+      const bid = battleOf.get(c.playerId)
+      if (!bid && !c.tryout && plan === c.current) continue
+      const line = c.tryout
+        ? plan === 'nhl'
+          ? 'In on a tryout and good enough to make it outright. Worth a contract.'
+          : ptoBlocked
+            ? 'In on a tryout, but there is no cap room to sign him without moving money first.'
+            : 'In on a tryout as a camp body. Not pushing for a roster spot.'
+        : plan === 'nhl'
+          ? 'A clear call: he has outgrown the farm and walks onto the roster.'
+          : c.waiverRequired
+            ? `Well below the cut line — but he NEEDS WAIVERS to go down${c.claimedBy ? `, and ${c.claimedBy} would claim him` : ''}.`
+            : 'Below the cut line. Waiver-exempt — he can play big minutes in the AHL and be recalled any time.'
+      decisions.push({
+        playerId: c.playerId,
+        name: c.name,
+        position: c.position,
+        age: c.age,
+        ...(c.faceId !== undefined ? { faceId: c.faceId } : {}),
+        current: c.current,
+        coachPlan: plan,
+        waiverRequired: c.waiverRequired,
+        line,
+        ...(c.tryout ? { tryout: true } : {}),
+        ...(bid ? { battleId: bid } : {}),
+        ...(c.claimedBy ? { claimedBy: c.claimedBy } : {}),
+      })
+    }
+
+    this.trainingCamp = { decisions, resolved: false, battles: depth.battles, look: [], games: [] }
+    this.buildBattleCampWeek()
+    this.rerankCamp()
+
+    const coachName = this.getTeamStaff(this.userTeamId as string).headCoach?.name ?? 'The head coach'
+    const bodies = this.trainingCamp.roster?.length ?? cands.length
+    const named = depth.battles.map((b) => `• ${b.label}: ${b.contenders.map((c) => c.name).join(', ')}${b.waiverTrap ? ' (a waiver trap)' : ''}`)
+    const [o1, o2] = this.campOpponents()
+    this.pushNews(
+      'contract',
+      'Training camp opens',
+      `${bodies} players reported for camp — the NHL group, the farm club and ${inviteIds.length > 0 ? `${inviteIds.length} tryout${inviteIds.length === 1 ? '' : 's'}` : 'no tryouts'}. ` +
+      (named.length > 0
+        ? `${coachName} has ${named.length} real battle${named.length === 1 ? '' : 's'} on his board:\n\n${named.join('\n')}\n\n`
+        : `${coachName}'s depth chart is settled; camp is about sharpness, not jobs.\n\n`) +
+      `Two Blue-Red scrimmages come first, then preseason games${o1 ? ` against ${o1.abbreviation}${o2 ? ` and ${o2.abbreviation}` : ''}` : ''}. ` +
+      `Every game is played for real and the verdicts follow what happens. Cut day is Sep 22.`,
+      { teamId: this.userTeamId as string }
+    )
+  }
+
+  /** The two preseason opponents: division rivals first (the real exhibition
+   *  circuit), deterministic per season. */
+  private campOpponents(): Team[] {
+    const me = this.userTeam
+    const nhl = this.data.league.teams
+      .filter((tid) => tid !== this.userTeamId)
+      .map((tid) => this.data.teams.get(tid))
+      .filter((t): t is Team => !!t && t.roster.length >= 18)
+    const rng = this.rngFor(9610, this.year)
+    const div = nhl.filter((t) => t.divisionId === me.divisionId)
+    const others = nhl.filter((t) => t.divisionId !== me.divisionId)
+    const first = div.length > 0 ? div : others
+    const a = first[Math.min(first.length - 1, Math.floor(rng.float(0, 1) * first.length))]
+    const rest = [...div, ...others].filter((t) => t !== a)
+    const secondBand = rest.filter((t) => t.divisionId === me.divisionId)
+    const band = secondBand.length > 0 ? secondBand : rest
+    const b = band[Math.min(band.length - 1, Math.floor(rng.float(0, 1) * band.length))]
+    return [a, b].filter((t): t is Team => !!t)
+  }
+
+  /** The camp week for a battles camp: the Blue/Red split and the dated
+   *  schedule. The box score starts empty; the sim fills it. */
+  private buildBattleCampWeek(): void {
+    const camp = this.trainingCamp
+    if (!camp) return
+    camp.startISO = `${this.year}-09-15`
+    camp.endISO = `${this.year}-09-22`
+    camp.campDay = 1
+    const { blue, red } = this.campSquads()
+    const ptoSet = new Set(camp.decisions.filter((d) => d.tryout).map((d) => d.playerId))
+    const nhlSet = new Set(this.userTeam.roster.map((id) => id as string))
+    camp.roster = [...blue.map((id) => [id, 'Blue'] as const), ...red.map((id) => [id, 'Red'] as const)]
+      .map(([id, side]) => {
+        const p = this.resolve(asPlayerId(id))
+        return {
+          playerId: id,
+          name: p.name,
+          position: p.position,
+          age: p.age,
+          team: side,
+          status: ptoSet.has(id) ? 'PTO' : nhlSet.has(id) ? 'On Roster' : 'AHL invite',
+          ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+        }
+      })
+    camp.scrimmage = { skaters: [], goalies: [], results: [] }
+    delete camp.reports
+    const [o1, o2] = this.campOpponents()
+    camp.schedule = [
+      { label: 'Day 1', activity: 'Camp opens — the battles are named', info: `${camp.battles?.length ?? 0} contested spot${(camp.battles?.length ?? 0) === 1 ? '' : 's'}` },
+      { label: 'Day 2', activity: 'Blue-Red scrimmage' },
+      { label: 'Day 3', activity: 'The Blue-Red game' },
+      { label: 'Day 4', activity: 'Practice · the coach sets his preseason lineup' },
+      { label: 'Day 5', activity: o1 ? `Preseason: vs ${o1.abbreviation}` : 'Preseason game' },
+      { label: 'Day 6', activity: 'Practice · video' },
+      { label: 'Day 7', activity: o2 ? `Preseason: at ${o2.abbreviation}` : 'Preseason game' },
+      { label: 'Day 8', activity: 'Cut day — the roster is set' },
+    ]
+  }
+
+  /** Split the camp into Blue and Red. Every battle's contenders are spread
+   *  across the two sides so they play against each other; the rest are dealt
+   *  by ability so the sides are even. Injured men watch. */
+  private campSquads(): { blue: string[]; red: string[] } {
+    const camp = this.trainingCamp
+    const ahl = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
+    const ids: string[] = []
+    const seen = new Set<string>()
+    const push = (id: string): void => { if (!seen.has(id)) { seen.add(id); ids.push(id) } }
+    for (const id of this.userTeam.roster) push(id as string)
+    for (const id of ahl?.roster ?? []) push(id as string)
+    for (const d of camp?.decisions ?? []) push(d.playerId)
+    const healthy = ids
+      .map((id) => this.data.players.get(asPlayerId(id)))
+      .filter((p): p is Player => !!p && p.injuryStatus === null)
+    const side = new Map<string, 'Blue' | 'Red'>()
+    for (const b of camp?.battles ?? []) {
+      b.contenders.forEach((c, i) => side.set(c.playerId, i % 2 === 0 ? 'Blue' : 'Red'))
+    }
+    for (const grp of ['G', 'D', 'F'] as const) {
+      const all = healthy.filter((p) => this.posGroup(p.position) === grp)
+      let blueN = all.filter((p) => side.get(p.id as string) === 'Blue').length
+      let redN = all.filter((p) => side.get(p.id as string) === 'Red').length
+      const inGrp = all
+        .filter((p) => !side.has(p.id as string))
+        .sort((a, b) => ratedOverall(b) - ratedOverall(a) || ((a.id as string) < (b.id as string) ? -1 : 1))
+      inGrp.forEach((p, i) => {
+        const snake: 'Blue' | 'Red' = i % 4 === 0 || i % 4 === 3 ? 'Blue' : 'Red'
+        const pick: 'Blue' | 'Red' = blueN < redN ? 'Blue' : redN < blueN ? 'Red' : snake
+        side.set(p.id as string, pick)
+        if (pick === 'Blue') blueN++
+        else redN++
+      })
+    }
+    // Each side needs a goalie: lend one across if a side has none.
+    const gs = healthy.filter((p) => p.position === 'G')
+    for (const [need, has] of [['Blue', 'Red'], ['Red', 'Blue']] as const) {
+      const mine = gs.filter((g) => side.get(g.id as string) === need)
+      const theirs = gs.filter((g) => side.get(g.id as string) === has)
+      if (mine.length === 0 && theirs.length >= 2) side.set(theirs[theirs.length - 1]!.id as string, need)
+    }
+    const blue = healthy.filter((p) => side.get(p.id as string) === 'Blue').map((p) => p.id as string)
+    const red = healthy.filter((p) => side.get(p.id as string) === 'Red').map((p) => p.id as string)
+    return { blue, red }
+  }
+
+  /** A camp side can take the ice: a goalie and at least a skeleton of skaters. */
+  private campSideReady(ids: string[]): boolean {
+    let g = 0
+    let f = 0
+    let d = 0
+    for (const id of ids) {
+      const p = this.data.players.get(asPlayerId(id))
+      if (!p || p.injuryStatus !== null) continue
+      const grp = this.posGroup(p.position)
+      if (grp === 'G') g++
+      else if (grp === 'D') d++
+      else f++
+    }
+    return g >= 1 && f >= 6 && d >= 4
+  }
+
+  /** Build a dressed camp lineup as a sim-ready Team. Battle contenders play
+   *  the bottom six and third pair (where bubble players live) unless the GM
+   *  gave them the look, which puts them in the top six / top four. */
+  private campSquadTeam(id: string, abbr: string, name: string, ids: string[], starter?: string): Team {
+    const camp = this.trainingCamp
+    const look = new Set(camp?.look ?? [])
+    const contenders = new Set<string>()
+    for (const b of camp?.battles ?? []) for (const c of b.contenders) contenders.add(c.playerId)
+    const players = ids
+      .map((x) => this.data.players.get(asPlayerId(x)))
+      .filter((p): p is Player => !!p && p.injuryStatus === null)
+    const byOvr = (a: Player, b: Player): number => ratedOverall(b) - ratedOverall(a) || ((a.id as string) < (b.id as string) ? -1 : 1)
+    const arrange = (grp: 'F' | 'D', topN: number, total: number): Player[] => {
+      const all = players.filter((p) => this.posGroup(p.position) === grp).sort(byOvr)
+      const lookers = all.filter((p) => look.has(p.id as string))
+      const cont = all.filter((p) => contenders.has(p.id as string) && !look.has(p.id as string))
+      const rest = all.filter((p) => !contenders.has(p.id as string) && !look.has(p.id as string))
+      const top = [...lookers, ...rest]
+      const dressedTop = top.slice(0, topN)
+      const bottom = [...cont, ...top.slice(topN)].slice(0, Math.max(0, total - dressedTop.length))
+      return [...dressedTop, ...bottom].slice(0, total)
+    }
+    const F = arrange('F', 6, 12)
+    const D = arrange('D', 4, 6)
+    const goalies = players.filter((p) => p.position === 'G').sort(byOvr)
+    const g0 = (starter ? goalies.find((g) => (g.id as string) === starter) : undefined) ?? goalies[0]
+    // Short lines stay short (never padded with empty ids): the sims guard a
+    // short or empty line, but an empty id is a player that does not exist.
+    const forwards = [0, 1, 2, 3]
+      .map((i) => F.slice(i * 3, i * 3 + 3).map((p) => p.id))
+      .filter((l) => l.length > 0) as unknown as Team['lines']['forwards']
+    const defensePairs = [0, 1, 2]
+      .map((i) => D.slice(i * 2, i * 2 + 2).map((p) => p.id))
+      .filter((l) => l.length > 0) as unknown as Team['lines']['defensePairs']
+    const E = asPlayerId('')
+    const topF = [...F].sort(byOvr)
+    const topD = [...D].sort(byOvr)
+    const lines: Team['lines'] = {
+      forwards,
+      defensePairs,
+      goalies: [g0 ? g0.id : E, g0 ? g0.id : E],
+      powerPlayUnits: [
+        [...topF.slice(0, 3), ...topD.slice(0, 2)].map((p) => p.id),
+        [...topF.slice(3, 6), ...topD.slice(2, 4)].map((p) => p.id),
+      ].filter((u) => u.length >= 4),
+      penaltyKillUnits: [
+        [...topF.slice(6, 8), ...topD.slice(0, 2)].map((p) => p.id),
+        [...topF.slice(8, 10), ...topD.slice(2, 4)].map((p) => p.id),
+      ].filter((u) => u.length >= 3),
+    }
+    const roster = [...F, ...D, ...(g0 ? [g0] : [])].map((p) => p.id)
+    return { ...this.userTeam, id: asTeamId(id), abbreviation: abbr, name, roster, lines }
+  }
+
+  /** Put one camp game's box score into the camp: the per-player camp log
+   *  that the battles read, and the camp stats tables. */
+  private recordCampGame(res: ReturnType<typeof quickSimGame>, ours: Set<string>, kind: 'scrimmage' | 'preseason', gameName: string, sideOf: (id: string) => 'Blue' | 'Red'): void {
+    const camp = this.trainingCamp
+    if (!camp?.scrimmage) return
+    const lineOf = new Map<string, CampGameLine>()
+    const bySk = new Map(camp.scrimmage.skaters.map((s) => [s.playerId, s] as const))
+    const byG = new Map(camp.scrimmage.goalies.map((g) => [g.playerId, g] as const))
+    for (const [pidRaw, st] of res.playerStats) {
+      const pid = pidRaw as string
+      if (!ours.has(pid)) continue
+      const p = this.data.players.get(pidRaw)
+      if (!p) continue
+      if (p.position === 'G') {
+        if (st.shotsAgainst <= 0 && st.toi <= 0) continue
+        lineOf.set(pid, { game: gameName, kind, g: 0, a: 0, pm: 0, sog: 0, toiSec: st.toi, sa: st.shotsAgainst, ga: st.goalsAgainst })
+        const prev = byG.get(pid)
+        const gp = (prev?.gp ?? 0) + 1
+        const mins = (prev?.mins ?? 0) + Math.max(1, Math.round(st.toi / 60))
+        const ga = (prev?.ga ?? 0) + st.goalsAgainst
+        const saves = (prev?.saves ?? 0) + st.saves
+        const shots = saves + ga
+        byG.set(pid, {
+          playerId: pid, name: p.name, team: sideOf(pid), gp, mins, ga, saves,
+          gaa: Math.round((ga * 60 / Math.max(1, mins)) * 100) / 100,
+          svPct: shots > 0 ? Math.round((saves / shots) * 1000) / 1000 : 0,
+          rating: Math.round((5.5 + (shots > 0 ? (saves / shots - 0.86) * 40 : 0)) * 10) / 10,
+          ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+        })
+        continue
+      }
+      if (st.toi <= 0) continue
+      lineOf.set(pid, { game: gameName, kind, g: st.goals, a: st.assists, pm: st.plusMinus, sog: st.shots, toiSec: st.toi })
+      const prev = bySk.get(pid)
+      const gp = (prev?.gp ?? 0) + 1
+      const g = (prev?.g ?? 0) + st.goals
+      const a = (prev?.a ?? 0) + st.assists
+      const gameRating = 6 + st.goals + st.assists * 0.5 + st.plusMinus * 0.3 + Math.min(1, st.shots * 0.15)
+      const rating = Math.round((prev ? (prev.rating * (gp - 1) + gameRating) / gp : gameRating) * 10) / 10
+      bySk.set(pid, {
+        playerId: pid, name: p.name, position: p.position, team: sideOf(pid),
+        gp, g, a, p: g + a,
+        plusMinus: (prev?.plusMinus ?? 0) + st.plusMinus,
+        pim: (prev?.pim ?? 0) + st.penaltyMinutes,
+        sog: (prev?.sog ?? 0) + st.shots,
+        rating,
+        ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+      })
+    }
+    camp.scrimmage.skaters = [...bySk.values()].sort((x, y) => y.p - x.p || y.rating - x.rating || y.sog - x.sog)
+    camp.scrimmage.goalies = [...byG.values()]
+    for (const b of camp.battles ?? []) {
+      for (const c of b.contenders) {
+        const l = lineOf.get(c.playerId)
+        if (l) c.lines = [...c.lines, l]
+      }
+    }
+  }
+
+  /** The goalies who should start camp games, in order: any goalie given the
+   *  look, then the crease battle's contenders, so the battle is decided by
+   *  games, not by the depth chart. */
+  private campStarters(): string[] {
+    const camp = this.trainingCamp
+    const g = camp?.battles?.find((b) => b.group === 'G')
+    const look = (camp?.look ?? []).filter((id) => this.data.players.get(asPlayerId(id))?.position === 'G')
+    return [...new Set([...look, ...(g?.contenders.map((c) => c.playerId) ?? [])])]
+  }
+
+  /** Days 2–3: the two Blue-Red scrimmages, played by the quick sim. */
+  private playCampScrimmages(): void {
+    const camp = this.trainingCamp
+    if (!camp) return
+    const { blue, red } = this.campSquads()
+    const side = new Map<string, 'Blue' | 'Red'>([...blue.map((id) => [id, 'Blue'] as const), ...red.map((id) => [id, 'Red'] as const)])
+    const sideOf = (id: string): 'Blue' | 'Red' => side.get(id) ?? 'Blue'
+    const starters = this.campStarters()
+    const rank = (id: string): number => { const i = starters.indexOf(id); return i < 0 ? 99 : i }
+    const goaliesOf = (ids: string[]): string[] =>
+      ids.filter((id) => this.data.players.get(asPlayerId(id))?.position === 'G')
+        .sort((a, b) => rank(a) - rank(b) || ratedOverall(this.resolve(asPlayerId(b))) - ratedOverall(this.resolve(asPlayerId(a))))
+    const blueG = goaliesOf(blue)
+    const redG = goaliesOf(red)
+    const ours = new Set([...blue, ...red])
+    // A camp too thin to split (an injury-ravaged or skeleton org) skips the
+    // scrimmages; the battles are then decided in the preseason games.
+    if (!this.campSideReady(blue) || !this.campSideReady(red)) return
+    for (const n of [1, 2] as const) {
+      // Each side's goalies split the two games so every contender gets a start.
+      const bStart = blueG[(n - 1) % Math.max(1, blueG.length)]
+      const rStart = redG[(n - 1) % Math.max(1, redG.length)]
+      const home = this.campSquadTeam('camp-blue', 'BLU', 'Team Blue', blue, bStart)
+      const away = this.campSquadTeam('camp-red', 'RED', 'Team Red', red, rStart)
+      const res = quickSimGame(home, away, this.resolve, { seed: gameSeed(this.seed ^ 0x0ca3b1e5, this.year, `camp-scrim-${n}`) })
+      const name = n === 1 ? 'in the first Blue-Red scrimmage' : 'in the Blue-Red game'
+      this.recordCampGame(res, ours, 'scrimmage', name, sideOf)
+      const result = `Team Blue ${res.homeGoals}, Team Red ${res.awayGoals}${res.decidedBy !== 'regulation' ? ` (${res.decidedBy === 'overtime' ? 'OT' : 'SO'})` : ''}`
+      camp.scrimmage?.results.push(result)
+      camp.games = [...(camp.games ?? []), { label: n === 1 ? 'Blue-Red scrimmage' : 'The Blue-Red game', kind: 'scrimmage', day: n + 1, result }]
+      if (camp.schedule?.[n]) camp.schedule[n].info = result
+    }
+  }
+
+  /** Days 5 and 7: two preseason games against real clubs, played by the
+   *  quick sim. Results never touch the standings. Every contender dresses. */
+  private playCampPreseason(): void {
+    const camp = this.trainingCamp
+    if (!camp) return
+    const opps = this.campOpponents()
+    const contenders = new Set<string>()
+    for (const b of camp.battles ?? []) for (const c of b.contenders) contenders.add(c.playerId)
+    const { blue, red } = this.campSquads()
+    const side = new Map<string, 'Blue' | 'Red'>([...blue.map((id) => [id, 'Blue'] as const), ...red.map((id) => [id, 'Red'] as const)])
+    const pool = [...blue, ...red]
+    // The preseason group: every contender and anyone given the look, then the
+    // best of the rest — the real lineup the coach wants to see.
+    const ovrOf = (id: string): number => ratedOverall(this.resolve(asPlayerId(id)))
+    const posOf = (id: string): 'F' | 'D' | 'G' => this.posGroup(this.resolve(asPlayerId(id)).position)
+    const look = new Set(camp.look ?? [])
+    const pick = (grp: 'F' | 'D' | 'G', n: number): string[] => {
+      const inGrp = pool.filter((id) => posOf(id) === grp)
+      const must = inGrp.filter((id) => contenders.has(id) || look.has(id))
+      const rest = inGrp.filter((id) => !must.includes(id)).sort((a, b) => ovrOf(b) - ovrOf(a))
+      return [...must, ...rest].slice(0, Math.max(n, must.length))
+    }
+    const group = [...pick('F', 12), ...pick('D', 6), ...pick('G', 2)]
+    const ours = new Set(group)
+    const starters = [...new Set([...this.campStarters(), ...pick('G', 2)])]
+    const me = this.userTeam
+    if (!this.campSideReady(group)) return
+    opps.forEach((opp, i) => {
+      const day = i === 0 ? 5 : 7
+      const us = this.campSquadTeam(`${me.id as string}-camp`, me.abbreviation, me.name, group, starters[i % Math.max(1, starters.length)])
+      const home = i === 0 ? us : opp
+      const away = i === 0 ? opp : us
+      const res = quickSimGame(home, away, this.resolve, { seed: gameSeed(this.seed ^ 0x0ca3b1e5, this.year, `camp-pre-${i}-${opp.id as string}`) })
+      this.recordCampGame(res, ours, 'preseason', i === 0 ? `against ${opp.abbreviation}` : `at ${opp.abbreviation}`, (id) => side.get(id) ?? 'Blue')
+      const ourGoals = i === 0 ? res.homeGoals : res.awayGoals
+      const theirGoals = i === 0 ? res.awayGoals : res.homeGoals
+      const tag = res.decidedBy !== 'regulation' ? ` (${res.decidedBy === 'overtime' ? 'OT' : 'SO'})` : ''
+      const result = i === 0
+        ? `${opp.abbreviation} ${theirGoals} at ${me.abbreviation} ${ourGoals}${tag}`
+        : `${me.abbreviation} ${ourGoals} at ${opp.abbreviation} ${theirGoals}${tag}`
+      camp.scrimmage?.results.push(result)
+      camp.games = [...(camp.games ?? []), { label: i === 0 ? `Preseason vs ${opp.abbreviation}` : `Preseason at ${opp.abbreviation}`, kind: 'preseason', day, result, opponentAbbr: opp.abbreviation }]
+      if (camp.schedule?.[day - 1]) camp.schedule[day - 1].info = result
+    })
+  }
+
+  /** RE-EVALUATE the coach's plan from everything camp has shown: re-rank each
+   *  battle on prior + evidence, refresh the waiver dry runs (claim order
+   *  moves with the table), and rewrite each contender's cut-day call. */
+  private rerankCamp(): void {
+    const camp = this.trainingCamp
+    if (!camp?.battles) return
+    camp.battles = camp.battles.map((b) => rankBattle({
+      ...b,
+      contenders: b.contenders.map((c) => {
+        if (c.current !== 'nhl' || !c.waiverRequired) return c
+        const p = this.data.players.get(asPlayerId(c.playerId))
+        const claimants = p ? this.waiverClaimantsFor(p, this.userTeamId) : []
+        const { claimedBy: _drop, ...rest } = c
+        return { ...rest, claimants: claimants.length, ...(claimants[0] ? { claimedBy: claimants[0].abbreviation } : {}) }
+      }),
+    }))
+    for (const d of camp.decisions) {
+      if (!d.battleId) continue
+      const b = camp.battles.find((x) => x.id === d.battleId)
+      const c = b?.contenders.find((x) => x.playerId === d.playerId)
+      if (!b || !c) continue
+      d.coachPlan = c.winning ? 'nhl' : 'ahl'
+      if (c.claimedBy) d.claimedBy = c.claimedBy
+      else delete d.claimedBy
+      const label = `“${b.label}”`
+      const played = c.lines.length > 0
+      const waiverNote = !c.winning && c.waiverRequired && c.current === 'nhl'
+        ? c.claimedBy
+          ? ` Sending him down needs waivers — ${c.claimedBy} would claim him.`
+          : ' Sending him down needs waivers, but no club would put in a claim.'
+        : ''
+      d.line = played
+        ? `${c.winning ? 'Winning' : 'Losing'} ${label}: he ${c.cite ?? 'has played'}.${waiverNote}`
+        : `${c.winning ? 'Holds a spot in' : 'Chasing a spot in'} ${label} on the coach's opening chart.${waiverNote}`
+    }
+  }
+
+  /** The coach's reports at the end of camp, argued by the camp's evidence. */
+  private fileBattleReports(): void {
+    const camp = this.trainingCamp
+    if (!camp) return
+    const coachName = this.getTeamStaff(this.userTeamId as string).headCoach?.name ?? 'The head coach'
+    camp.reports = camp.decisions.map((d) => {
+      const b = d.battleId ? camp.battles?.find((x) => x.id === d.battleId) : undefined
+      const c = b?.contenders.find((x) => x.playerId === d.playerId)
+      const rec: CampReport['recommendation'] = d.tryout
+        ? (d.coachPlan === 'nhl' ? 'sign' : 'watch')
+        : d.coachPlan === 'nhl' ? 'keep' : d.age >= 30 ? 'watch' : 'develop'
+      let verdict: string
+      if (b && c) {
+        const won = c.winning
+        verdict = `${coachName}: ${d.name} ${won ? 'won' : 'lost'} “${b.label}”. He ${c.cite ?? 'did not get into a game'}.`
+        if (won && d.tryout) verdict += ' He has earned a league-minimum deal.'
+        else if (won && d.current === 'ahl') verdict += ' He has taken the job from the outside.'
+        else if (!won && d.current === 'nhl') {
+          verdict += d.waiverRequired
+            ? c.claimedBy ? ` He needs waivers, and ${c.claimedBy} would claim him — keep him up or risk losing him for nothing.` : ' He needs waivers, but nobody would claim him; the AHL is safe.'
+            : ' He is waiver-exempt; the AHL is the place to prove it.'
+        } else if (!won && d.tryout) verdict += ' Not enough for a contract.'
+      } else {
+        verdict = d.tryout
+          ? d.coachPlan === 'nhl'
+            ? `${coachName}: ${d.name} was never in doubt on his tryout. Worth a league-minimum deal.`
+            : `${coachName}: ${d.name} was a useful camp body on his tryout, not a roster player.`
+          : d.coachPlan === 'nhl'
+            ? `${coachName}: ${d.name} was not part of any battle — he is simply better than the men he replaces.`
+            : `${coachName}: ${d.name} is below the cut line and was never in the fight.${d.waiverRequired ? d.claimedBy ? ` Waivers: ${d.claimedBy} would claim him.` : ' He would clear waivers.' : ''}`
+      }
+      return {
+        playerId: d.playerId,
+        name: d.name,
+        position: d.position,
+        recommendation: rec,
+        tryout: d.tryout ?? false,
+        verdict,
+        ...(d.faceId !== undefined ? { faceId: d.faceId } : {}),
+      }
+    })
+  }
+
+  /** Each battle's standing as bullet lines for the camp mail. */
+  private campBattleDigest(): string {
+    const camp = this.trainingCamp
+    const coachName = this.getTeamStaff(this.userTeamId as string).headCoach?.name ?? 'The coach'
+    const lines = (camp?.battles ?? []).map((b) => `• ${b.label}: ${battleRead(b, coachName)}`)
+    return lines.length > 0 ? `\n\n${lines.join('\n')}` : ''
+  }
+
+  /** A battles camp advances in three beats: scrimmages → preseason → cut day. */
+  private advanceBattleCamp(): void {
+    const camp = this.trainingCamp
+    if (!camp || camp.resolved) return
+    const teamId = this.userTeamId as string
+    const day = camp.campDay ?? 1
+    if (day < 3) {
+      this.playCampScrimmages()
+      camp.campDay = 3
+      this.rerankCamp()
+      const res = camp.scrimmage?.results ?? []
+      this.pushNews(
+        'scouting',
+        `Camp: ${res.slice(0, 2).join(' · ')}`,
+        `Two Blue-Red scrimmages, played for real. Where the battles stand:` + this.campBattleDigest() +
+        `\n\nThe preseason games are next — every contender dresses.`,
+        { teamId }
+      )
+      this.runBeatCampDay(3)
+      return
+    }
+    if (day < 8) {
+      this.playCampPreseason()
+      camp.campDay = 8
+      this.rerankCamp()
+      this.fileBattleReports()
+      const pre = (camp.games ?? []).filter((g) => g.kind === 'preseason').map((g) => g.result)
+      this.pushNews(
+        'scouting',
+        `Preseason: ${pre.join(' · ') || 'the exhibition games are in'}`,
+        `The preseason games are in the books and the coaches have filed their reports.` + this.campBattleDigest(),
+        { teamId }
+      )
+      this.pushNews(
+        'contract',
+        'Cut day — camp verdicts are in',
+        'Training camp is over and the battles have verdicts. The final roster calls are yours — ' +
+        'make them before the opener, or the coach makes them for you.',
+        { teamId }
+      )
+      this.runBeatCampDay(8)
+    }
+  }
+
+  /** "Give him the look": the GM names up to two battle contenders to skate in
+   *  the top six (or start in goal) in the next camp games. More ice is more
+   *  chance to shine and more chance to be exposed. */
+  setCampLook(playerIds: string[]): { ok: boolean; message?: string } {
+    const camp = this.trainingCamp
+    if (!camp || camp.resolved || !camp.battles) return { ok: false, message: 'There is no camp running.' }
+    if ((camp.campDay ?? 1) >= 8) return { ok: false, message: 'Camp games are over — it is cut day.' }
+    const contenders = new Set<string>()
+    for (const b of camp.battles) for (const c of b.contenders) contenders.add(c.playerId)
+    const ids = [...new Set(playerIds)].filter((id) => contenders.has(id))
+    if (ids.length > 2) return { ok: false, message: 'Two looks at most — the coach has a lineup to run.' }
+    camp.look = ids
+    return { ok: true }
+  }
+
   /** Simming past cut day: fast-forward any camp days still unplayed (so the
    *  scrimmages and reports exist), then the coach applies his own plan —
    *  waivers and all. */
   autoResolveTrainingCamp(): void {
-    if (!this.trainingCamp || this.trainingCamp.resolved) return
+    this.delegateTrainingCamp()
+  }
+
+  /** "Let the coach run camp": the rest of the camp games are played, then the
+   *  coach applies his own verdicts — waivers and all. Returns the cut notes. */
+  delegateTrainingCamp(): { ok: boolean; notes: string[] } {
+    if (!this.trainingCamp || this.trainingCamp.resolved) return { ok: false, notes: ['Camp has already broken.'] }
     let guard = 0
     while ((this.trainingCamp.campDay ?? 8) < 8 && guard++ < 16) this.advanceTrainingCampDay()
-    this.submitTrainingCamp([])
+    return this.submitTrainingCamp([])
   }
 
   private reassignFarmSystems(): void {
@@ -15030,98 +15849,14 @@ export class Career {
         resolve: (id) => this.data.players.get(id),
         score: scorer,
       })
-      if (split.promoted.length === 0 && split.demoted.length === 0) continue
-
       if (team.id === this.userTeamId) {
-        // Season Rhythm M3: camp's battle verdicts become CUT DAY — a staged
-        // set of keep/send decisions the GM resolves on the camp screen
-        // before opening night. Simming past hands the coach the clipboard.
-        const decisions: TrainingCampState['decisions'] = []
-        for (const id of split.promoted.slice(0, 6)) {
-          const p = this.data.players.get(id)
-          if (!p) continue
-          decisions.push({
-            playerId: id as string,
-            name: p.name,
-            position: p.position,
-            age: p.age,
-            current: 'ahl',
-            coachPlan: 'nhl',
-            waiverRequired: false,
-            line: "Won his camp battle — he's making it impossible to send him down.",
-            ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
-          })
-        }
-        // Cut day must get the club to 23. Six verdicts is the usual camp, but a
-        // GM who took over a gutted roster in July and filled it (E3: a new job
-        // mid-summer) can arrive with far more; every surplus body needs a
-        // verdict or opening night dresses 28.
-        const mustCut = Math.max(0, team.roster.length + Math.min(6, split.promoted.length) - 23)
-        for (const id of split.demoted.slice(0, Math.max(6, mustCut))) {
-          const p = this.data.players.get(id)
-          if (!p) continue
-          const waiver = this.requiresWaivers(p)
-          decisions.push({
-            playerId: id as string,
-            name: p.name,
-            position: p.position,
-            age: p.age,
-            current: 'nhl',
-            coachPlan: 'ahl',
-            waiverRequired: waiver,
-            line: waiver
-              ? 'Lost the numbers game — but he NEEDS WAIVERS to go down. Any club can claim him for nothing.'
-              : 'Lost the numbers game. Waiver-exempt — he can develop in the AHL and be recalled any time.',
-            ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
-          })
-        }
-        // PTOs (professional tryouts): unsigned veterans brought to camp on
-        // tryout deals — depth bodies who must earn a contract. The GM may curate
-        // the list (#182); absent a curated list the AGM auto-picks. Only genuine
-        // still-available FAs make it (a curated invitee since signed drops out).
-        this.stockFreeAgentMarket()
-        const faStill = new Set(this.faPool.map((id) => id as string))
-        const inviteIds = (this.campPtoInvites ?? this.defaultCampPtoInvites()).filter((id) => faStill.has(id))
-        const invitees = inviteIds
-          .map((id) => this.data.players.get(asPlayerId(id)))
-          .filter((p): p is Player => !!p)
-        this.campPtoInvites = undefined // consumed — next offseason starts fresh
-        for (const p of invitees) {
-          const ovr = ratedOverall(p)
-          const worthNhl = ovr >= 73
-          decisions.push({
-            playerId: p.id as string,
-            name: p.name,
-            position: p.position,
-            age: p.age,
-            current: 'ahl', // not on the club — a tryout body fighting for a deal
-            coachPlan: worthNhl ? 'nhl' : 'ahl',
-            waiverRequired: false,
-            tryout: true,
-            line: worthNhl
-              ? 'In on a tryout and turning heads — the staff think he can still play a role. Worth a contract.'
-              : 'In on a tryout as a look. Fine body for camp, but not pushing for a roster spot.',
-            ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
-          })
-        }
-
-        if (decisions.length > 0) {
-          this.trainingCamp = { decisions, resolved: false }
-          // Training Camp v2: flesh out the week (roster, schedule, box score,
-          // reports) + push the rinkside evaluation mail.
-          this.buildTrainingCampWeek(decisions)
-          // PHASE 0: this used to send "Training camp is over" on the day camp
-          // OPENED. Camp opens today; the verdict mail comes on cut day.
-          this.pushNews(
-            'contract',
-            'Training camp opens',
-            `${decisions.length} roster call${decisions.length === 1 ? '' : 's'} to settle before opening night. ` +
-            'The staff will skate them for a week; cut day is Sep 22.',
-            { teamId: this.userTeamId as string }
-          )
-        }
+        // Camp Battles (depth audit §5): the user's camp ALWAYS opens. It names
+        // the contested roster spots, plays them out through the real sim, and
+        // the verdicts follow what happened on the ice.
+        this.openTrainingCamp(team, ahl)
         continue
       }
+      if (split.promoted.length === 0 && split.demoted.length === 0) continue
 
       // AI club: apply the split and rebuild both rosters' lines.
       team.roster = split.nhl
@@ -15611,9 +16346,15 @@ export class Career {
    *
    * Deterministic — no Rng; pure ranking by overall.
    */
-  assignRosters(): void {
+  assignRosters(forceUser = false): void {
     const NHL_TARGET = 23
+    // Camp Battles: while the GM's camp is open, HIS roster is being decided at
+    // camp — the season rollover must not trim it out from under the battles.
+    const campHolds = !forceUser && this.trainingCamp !== null && !this.trainingCamp.resolved
     for (const nhlTeamId of this.data.league.teams) {
+      // During camp the GM's roster is only ever FILLED to the legal minimum
+      // (a lineup must exist); it is never trimmed — cut day does that.
+      const holdTrim = campHolds && nhlTeamId === this.userTeamId
       const nhlTeam = this.data.teams.get(nhlTeamId)
       if (!nhlTeam) continue
       const ahlTeam = nhlTeam.affiliateId ? this.data.teams.get(nhlTeam.affiliateId) : undefined
@@ -15645,7 +16386,7 @@ export class Career {
         nhlTeam.roster = nhlTeam.roster.filter((id) => !toSendSet.has(id))
         for (const id of toSend) ahlTeam.roster.push(id)
       }
-      trimToTarget()
+      if (!holdTrim) trimToTarget()
 
       // ── Step 2: pull AHL players up if NHL team below position minimums ──
       // This handles post-offseason scenarios where contract expiries left gaps.
@@ -15694,7 +16435,7 @@ export class Career {
       }
       // Pull-ups can push a lopsided roster back over the target (23 with four
       // forwards short → 27): shed the surplus at the over-stocked positions.
-      trimToTarget()
+      if (!holdTrim) trimToTarget()
 
       repairLines(nhlTeam, this.data.players)
       repairLines(ahlTeam, this.data.players)
@@ -15991,6 +16732,28 @@ export class Career {
       `A qualifying offer keeps his restricted rights: he can accept it as a one-year deal, file for arbitration, ` +
       `or be offer-sheeted by a rival. Decline to tender and he simply becomes an unrestricted free agent — for nothing.`
     this.pushNews('contract', `Qualifying offers due: ${rfas.length} restricted free agent${rfas.length > 1 ? 's' : ''}`, body, {})
+  }
+
+  /** RFAs whose qualifying offer is still undecided. */
+  private undecidedRfas(): PlayerId[] {
+    return this.expiringRfas().filter((id) => !this.qualifyingOffers.has(id as string))
+  }
+
+  /** June 30, the QO deadline: tender or walk. One mail naming each undecided
+   *  RFA with what qualifying him costs and what walking means, the day it
+   *  matters (the press after this one closes the window). */
+  private qoDeadlineBeat(): void {
+    const open = this.undecidedRfas()
+    if (open.length === 0) return
+    const lines = open.map((id) => {
+      const p = this.resolve(id)
+      const ask = askTerms(p, this.year)
+      return `• ${p.name} (${p.position}, ${p.age}, ${ratedOverall(p)} OVR): qualify at $${(qualifyingOffer(p) / 1e6).toFixed(2)}M — his ask is $${(ask.salary / 1e6).toFixed(2)}M × ${ask.years}`
+    })
+    this.pushNews('contract', `QO deadline tonight: ${open.length} RFA${open.length === 1 ? '' : 's'} still undecided`,
+      `Tender or walk. A qualifying offer keeps his rights — he can take it, file for arbitration, or draw an offer sheet you can match. ` +
+      `Let the deadline pass and he is an unrestricted free agent at noon tomorrow, for nothing.\n\n${lines.join('\n')}`,
+      { teamId: this.userTeamId as string })
   }
 
   /** §B2: tender the qualifying offer, keeping his restricted rights. */
@@ -16723,6 +17486,10 @@ export class Career {
     const FLOOR = 20 // never strip a club below this
     const POOL_FLOOR = 45 // aim for a market of at least this many names
     const inPool = new Set(this.faPool.map((id) => id as string))
+    // A man a club signed THIS summer is not surplus it would cut: the July
+    // market signs more on day one now (the frenzy), and without this a view
+    // that tops the market up could release a player the day after he signed.
+    for (const w of this.offseason?.faWire ?? []) inPool.add(w.playerId)
     let added = 0
     // Weakest-first across the league so the floor is filled with true depth.
     const clubs = [...this.data.teams.values()].filter(
@@ -16823,43 +17590,170 @@ export class Career {
     return { interest, note }
   }
 
-  /** The market, triaged: everything a GM filters and decides by. */
-  /** Each NHL rival club's positional depth + cap room — the inputs for who
-   *  circles a free agent. league.teams IS the NHL set (AHL/junior/European
-   *  teams live in competitions), so membership is the reliable filter. */
-  private faAiCtx(): Array<{ abbr: string; idNum: number; capRoom: number; counts: Record<'F' | 'D' | 'G', number> }> {
-    const grpOf = (p: Player): 'F' | 'D' | 'G' => (p.position === 'G' ? 'G' : p.position === 'D' ? 'D' : 'F')
-    return this.data.league.teams
-      .filter((tid) => tid !== this.userTeamId)
-      .map((tid) => this.data.teams.get(tid))
-      .filter((t): t is NonNullable<typeof t> => !!t)
-      .map((t) => {
-        const capRoom = t.finances.salaryCap - t.roster.reduce((s, id) => s + (this.data.players.get(id)?.contract.salary ?? 0), 0)
-        const counts: Record<'F' | 'D' | 'G', number> = { F: 0, D: 0, G: 0 }
-        for (const id of t.roster) {
-          const r = this.data.players.get(id)
-          if (r && r.contract.yearsRemaining > 0) counts[grpOf(r)]++
-        }
-        return { abbr: t.abbreviation, idNum: Career.pidNum(t.id as string), capRoom, counts }
-      })
+  /* ─────────────── the July market, read from the real bids (Offseason 3.0) ─────────────── */
+
+  /** The AI market's context — the same one the July market runs on. */
+  private faMarketCtx(ranks: Map<string, number> = this.strengthRanks()): FaMarketContext {
+    return {
+      personaOf: (tid) => this.gmPersonaFor(tid),
+      postureOf: (tid) => this.clubPostureFor(tid, ranks).posture,
+      strengthRankOf: (tid) => ranks.get(tid as string) ?? 16,
+      floorOf: (t) => capFloorFor(t.finances.salaryCap),
+    }
   }
 
-  /** The rival clubs circling a free agent (abbreviations). Suitor appetite
-   *  scales with talent — a star draws most of the league, a depth body a
-   *  handful; cap room only orders the list (AI payrolls aren't yet cap-real, #176). */
-  private faRivalClubs(p: Player, aiCtx = this.faAiCtx()): string[] {
-    const rivalTargets: Record<'F' | 'D' | 'G', number> = { F: 13, D: 7, G: 2 }
-    const g: 'F' | 'D' | 'G' = p.position === 'G' ? 'G' : p.position === 'D' ? 'D' : 'F'
-    const ovr = ratedOverall(p)
-    const appetite = ovr >= 80 ? 7 : ovr >= 74 ? 4 : ovr >= 68 ? 3 : 2 // out of 12
-    return aiCtx
-      .filter((c) => (Career.pidNum(p.id as string) ^ c.idNum) % 12 < appetite)
-      .sort(
-        (a, b) =>
-          (a.counts[g] >= rivalTargets[g] ? 1 : 0) - (b.counts[g] >= rivalTargets[g] ? 1 : 0) ||
-          b.capRoom - a.capRoom
+  /** A free agent's decision day: his place in the class at the open (the
+   *  frenzy is the top of it), or the ask-based day on older saves. */
+  private faDecisionDayFor(p: Player): number {
+    const os = this.offseason
+    const order = os?.faClassOrder
+    if (order && os?.stage === 'freeAgency') return faClassDecisionDay(order.indexOf(p.id as string), order.length, os.faDay)
+    return faDecisionDay(p, this.year, this.userTeam.finances.salaryCap)
+  }
+
+  /** Today's market in one read: every AI club's state (for bids) and the
+   *  context the player chooses with. Recomputed per call — the book moves
+   *  every time a club signs someone. */
+  private faBook(): { clubs: ClubMarketState[]; market: FaMarketContext; nTeams: number; faDay: number } {
+    const market = this.faMarketCtx()
+    const clubs = marketClubs(this.data.teams, this.data.players, this.userTeamId, market)
+    return { clubs, market, nTeams: Math.max(2, clubs.length + 1), faDay: this.offseason?.faDay ?? 0 }
+  }
+
+  /** The offers a free agent has on the table TODAY, each a real AI club's
+   *  bid (marketBidsFor — the function the July market signs from), ranked the
+   *  way HE ranks them, each with the reason he'd give. */
+  private faLiveOffers(p: Player, book = this.faBook()): FaChoice[] {
+    const decisionDay = this.faDecisionDayFor(p)
+    const bids = marketBidsFor({ player: p, clubs: book.clubs, year: this.year, faDay: Math.max(book.faDay, 1), decisionDay })
+    return rankOffers({ player: p, bids, year: this.year, strengthRankOf: book.market.strengthRankOf, nTeams: book.nTeams })
+  }
+
+  /** The rival clubs bidding on a free agent (abbreviations, his order). */
+  private faRivalClubs(p: Player, book = this.faBook()): string[] {
+    return this.faLiveOffers(p, book).map((c) => this.data.teams.get(c.bid.teamId)?.abbreviation ?? '?')
+  }
+
+  /** How the user's offer would score in HIS eyes against the live bids. */
+  private faUserChoice(p: Player, offer: { salary: number; years: number }, book = this.faBook()): { user: FaChoice; field: FaChoice[] } {
+    const decisionDay = this.faDecisionDayFor(p)
+    const bids = marketBidsFor({ player: p, clubs: book.clubs, year: this.year, faDay: Math.max(book.faDay, 1), decisionDay })
+    const mine = clubMarketState(this.userTeam, this.data.players, book.market)
+    const grp = this.posGroup(p.position)
+    bids.push({ teamId: this.userTeamId, salary: offer.salary, years: offer.years, upgrade: ratedOverall(p) - mine.replacement[grp], want: clubWant(mine, p), user: true })
+    const ranked = rankOffers({ player: p, bids, year: this.year, strengthRankOf: book.market.strengthRankOf, nTeams: book.nTeams })
+    return { user: ranked.find((c) => c.bid.user)!, field: ranked.filter((c) => !c.bid.user) }
+  }
+
+  /** "About $5.8M" — the market's number, the way an agent would say it. */
+  private static approxMoney(n: number): string {
+    return n >= 1e6 ? `about $${(Math.round(n / 1e5) / 10).toFixed(1)}M` : `about $${Math.round(n / 1e3)}K`
+  }
+
+  /** Where a standing offer sits against the REAL field: the club he'd pick
+   *  if he decided today, and why. */
+  private faOfferStanding(
+    player: Player,
+    offer: { salary: number; years: number },
+    ask: { salary: number; years: number },
+    book = this.faBook(),
+  ): { standing: 'leading' | 'competitive' | 'trailing'; note: string } {
+    const floor = 0.9 * ask.salary
+    const { user, field } = this.faUserChoice(player, offer, book)
+    const top = field[0]
+    const abbr = (c: FaChoice): string => this.data.teams.get(c.bid.teamId)?.abbreviation ?? 'a rival'
+    if (offer.salary < floor) {
+      return {
+        standing: 'trailing',
+        note: `Below his floor (${Career.approxMoney(floor)}) — he'd hold out${top ? `, and ${abbr(top)} is at ${Career.approxMoney(top.bid.salary)} × ${top.bid.years}` : ''}.`,
+      }
+    }
+    if (!top) return { standing: 'leading', note: 'Nobody else has made him an offer. Yours is the only one on the table.' }
+    const margin = user.utility - top.utility
+    if (margin > 0.03) {
+      return { standing: 'leading', note: `Ahead of ${field.length} offer${field.length === 1 ? '' : 's'} — he'd pick you today for ${user.reason}. Best rival: ${abbr(top)} at ${Career.approxMoney(top.bid.salary)} × ${top.bid.years}.` }
+    }
+    if (margin > -0.03) {
+      return { standing: 'competitive', note: `Neck and neck with ${abbr(top)} (${Career.approxMoney(top.bid.salary)} × ${top.bid.years}) — their pull is ${top.reason}.` }
+    }
+    return { standing: 'trailing', note: `${abbr(top)} leads at ${Career.approxMoney(top.bid.salary)} × ${top.bid.years}; he likes ${top.reason} there.` }
+  }
+
+  /** Offers on men no longer on the market lapse, with a note. */
+  private sweepLapsedFaOffers(): void {
+    const os = this.offseason
+    if (os?.stage !== 'freeAgency') { this.faPendingOffers = []; return }
+    const inPool = new Set(this.faPool.map((f) => f as string))
+    for (const o of this.faPendingOffers.filter((x) => !inPool.has(x.playerId))) {
+      const gone = this.data.players.get(asPlayerId(o.playerId))
+      this.pushNews(
+        'contract',
+        `Missed on ${gone?.name ?? 'a target'}`,
+        `While your offer sat on his desk, ${gone?.name ?? 'he'} went elsewhere. The market doesn't wait.`,
+        gone ? { playerId: o.playerId } : {}
       )
-      .map((c) => c.abbr)
+    }
+    this.faPendingOffers = this.faPendingOffers.filter((x) => inPool.has(x.playerId))
+  }
+
+  /** The July market's verdicts on the GM's standing offers: he signs (the
+   *  career's cap and roster checks apply), he picks a rival's real offer (the
+   *  winning club, its money and his reason), or he holds out for more. */
+  private applyFaUserOutcomes(outcomes: FaUserOutcome[]): void {
+    for (const o of outcomes) {
+      const pid = o.playerId as string
+      this.faPendingOffers = this.faPendingOffers.filter((x) => x.playerId !== pid)
+      const player = this.data.players.get(o.playerId)
+      if (!player) continue
+      if (o.won) {
+        const capUsedNow = this.userCapUsed()
+        if (capUsedNow + this.userDeadCap + o.salary > this.userTeam.finances.salaryCap) {
+          this.pushNews('contract', `${player.name} would sign — but the cap won't fit it now`,
+            `${player.name} chose your offer, but your cap sheet no longer fits the deal, so it lapses. He is still on the market.`, { playerId: pid })
+          continue
+        }
+        if (!this.userTeam.roster.includes(o.playerId) && this.userTeam.roster.length >= MAX_ROSTER_SIZE) {
+          this.pushNews('contract', `${player.name} would sign — but you have no roster spot`,
+            `${player.name} chose your offer, but your roster is full at ${MAX_ROSTER_SIZE}. The offer lapses unless you clear a spot.`, { playerId: pid })
+          continue
+        }
+        signPlayer({ team: this.userTeam, player, salary: o.salary, years: o.years, year: this.year, players: this.data.players })
+        this.faPool = this.faPool.filter((f) => (f as string) !== pid)
+        this.lockerArrival(this.userTeamId, o.playerId)
+        repairLines(this.userTeam, this.data.players)
+        recordAcquisition(this.chronicle, { playerId: pid, teamId: this.userTeamId as string, year: this.year, via: 'signing' })
+        this.faShortlist.delete(pid)
+        if (this.offseason) {
+          this.offseason.faWire = [...(this.offseason.faWire ?? []), {
+            day: this.offseason.faDay, playerId: pid, name: player.name, position: player.position,
+            teamId: this.userTeamId as string, teamAbbr: this.userTeam.abbreviation,
+            salary: o.salary, years: o.years, suitors: o.suitors + 1, reason: o.reason, yours: true,
+          }].slice(-200)
+        }
+        this.pushNews('contract', `${player.name} signs with you!`,
+          `He took your offer — $${(o.salary / 1e6).toFixed(2)}M × ${o.years} years` +
+          (o.suitors > 0 ? `, over ${o.suitors} other offer${o.suitors === 1 ? '' : 's'}. His camp says it came down to ${o.reason}.` : '. Nobody else had made him an offer.') +
+          ' Welcome aboard.',
+          { playerId: pid, teamId: this.userTeamId as string })
+        continue
+      }
+      if (o.reason === 'holdout') {
+        const ask = askTerms(player, this.year)
+        this.pushNews('contract', `${player.name} passes on your offer`,
+          `${player.name}'s camp came back: your $${(o.salary / 1e6).toFixed(2)}M is under his floor. He's holding out for more — around $${(ask.salary / 1e6).toFixed(2)}M × ${ask.years}.` +
+          (o.suitors > 0 ? ` ${o.suitors} club${o.suitors === 1 ? ' has' : 's have'} offered.` : ''),
+          { playerId: pid, teamId: this.userTeamId as string })
+        continue
+      }
+      const winner = o.winnerTeamId ? this.data.teams.get(o.winnerTeamId) : undefined
+      // Your mail (teamId = your club): a loss is a receipt about YOUR offer,
+      // not league churn, so it must survive the inbox's churn filter.
+      this.pushNews('contract', `You lose ${player.name} to ${winner?.abbreviation ?? 'a rival'}`,
+        `${player.name} chose ${winner?.name ?? 'another club'}: $${((o.winnerSalary ?? 0) / 1e6).toFixed(2)}M × ${o.winnerYears ?? 1} ` +
+        `against your $${(o.salary / 1e6).toFixed(2)}M × ${o.years}. His camp says it came down to ${o.reason}.` +
+        (o.suitors > 1 ? ` ${o.suitors} clubs bid for him.` : ''),
+        { playerId: pid, teamId: this.userTeamId as string })
+    }
   }
 
   /** Ask a free agent's agent what the market looks like. The agent talks about
@@ -16882,7 +17776,8 @@ export class Career {
       ]
       return { text: rng.pick(deflections) }
     }
-    const rivals = this.faRivalClubs(p)
+    const offers = this.faLiveOffers(p)
+    const rivals = offers.map((c) => this.data.teams.get(c.bid.teamId)?.abbreviation ?? '?')
     const { interest } = this.faInterestFor(p)
     const leverage =
       interest === 'keen'
@@ -16895,8 +17790,10 @@ export class Career {
     }
     const shown = rivals.slice(0, 4).join(', ')
     const more = rivals.length > 4 ? ` and ${rivals.length - 4} more` : ''
+    const top = offers[0]!
     return {
-      text: `${agent.name}, off the record: "${rivals.length} club${rivals.length > 1 ? 's have' : ' has'} called — ${shown}${more}. ${leverage}"`,
+      text: `${agent.name}, off the record: "${rivals.length} club${rivals.length > 1 ? 's have' : ' has'} made offers — ${shown}${more}. ` +
+        `${rivals[0]}'s is the one he likes: ${Career.approxMoney(top.bid.salary)} over ${top.bid.years} year${top.bid.years === 1 ? '' : 's'}, and ${top.reason}. ${leverage}"`,
     }
   }
 
@@ -16917,8 +17814,9 @@ export class Career {
       return { ok: false, message: `That doesn't fit under the cap once your $${(this.userDeadCap / 1e6).toFixed(2)}M in dead cap is counted.` }
     }
     const rivals = this.faRivalClubs(player).length
-    const rng = this.rngFor(8022, os.faDay, Career.pidNum(playerId))
-    const decideDay = os.faDay + 2 + rng.range(0, 2) // he sleeps on it a few days
+    // He decides on HIS market day (July 1 for the big names), weighing your
+    // money against the real bids on the table — never before tomorrow.
+    const decideDay = Math.max(os.faDay + 1, this.faDecisionDayFor(player))
     this.faPendingOffers = this.faPendingOffers.filter((o) => o.playerId !== playerId)
     this.faPendingOffers.push({ playerId, salary, years, decideDay })
     const agent = agentFor(player)
@@ -16926,107 +17824,10 @@ export class Career {
       'contract',
       this.offerTabledHeadline(player, salary, years, agent.name),
       `You've put ${years} year${years === 1 ? '' : 's'} at ${moneyWords(salary)} a season on the table for ${player.name}. ` +
-      `${agent.name} says his client will weigh it${rivals > 0 ? ` against ${rivals} other club${rivals > 1 ? 's' : ''}` : ''} and get back to you.`,
+      `${agent.name} says his client will weigh it${rivals > 0 ? ` against ${rivals} other offer${rivals > 1 ? 's' : ''}` : ''} and decide on ${decideDay <= 1 ? 'July 1' : `market day ${decideDay}`}.`,
       { playerId, teamId: this.userTeamId as string }
     )
-    return { ok: true, message: `Offer tabled — ${player.name}'s camp decides by free-agency day ${decideDay}.` }
-  }
-
-  /** Resolve any standing offers whose decision day has arrived: the player
-   *  signs with you, gets sniped by a rival, or passes for more. Runs each
-   *  free-agency day BEFORE the AI market so your offers get first look. */
-  private resolveFaOffers(): void {
-    const os = this.offseason
-    if (os?.stage !== 'freeAgency') { this.faPendingOffers = []; return }
-    const due = this.faPendingOffers.filter((o) => o.decideDay <= os.faDay)
-    this.faPendingOffers = this.faPendingOffers.filter((o) => o.decideDay > os.faDay)
-    for (const offer of due) {
-      const pid = offer.playerId
-      if (!this.faPool.some((f) => (f as string) === pid)) {
-        const gone = this.data.players.get(asPlayerId(pid))
-        this.pushNews(
-          'contract',
-          `Missed on ${gone?.name ?? 'a target'}`,
-          `While your offer sat on his desk, ${gone?.name ?? 'he'} signed elsewhere. The market doesn't wait.`,
-          gone ? { playerId: pid } : {}
-        )
-        continue
-      }
-      const player = this.resolve(asPlayerId(pid))
-      const ask = askTerms(player, this.year)
-      const rng = this.rngFor(8023, os.faDay, Career.pidNum(pid))
-      const acceptable = offerAcceptable(player, { salary: offer.salary, years: offer.years }, ask, rng)
-      const rivals = this.faRivalClubs(player).length
-      const generosity = offer.salary / Math.max(1, ask.salary)
-      // Even a fair offer can lose to a hot market — unless you paid up.
-      const sniped = acceptable && rng.chance(Math.max(0, Math.min(0.5, rivals * 0.07 - (generosity - 1) * 0.6)))
-      if (acceptable && !sniped) {
-        const capUsedNow = this.userCapUsed()
-        if (capUsedNow + this.userDeadCap + offer.salary > this.userTeam.finances.salaryCap) {
-          this.pushNews('contract', `${player.name} would sign — but the cap won't fit it now`,
-            `${player.name} was ready to take your offer, but your cap sheet no longer fits the deal, so it lapses.`, { playerId: pid })
-          continue
-        }
-        // Cap space isn't the only limit — signPlayer also refuses a full roster,
-        // and an unguarded throw here abandons the whole offseason. Lapse the
-        // offer the same way a cap squeeze does.
-        if (!this.userTeam.roster.includes(asPlayerId(pid)) && this.userTeam.roster.length >= MAX_ROSTER_SIZE) {
-          this.pushNews('contract', `${player.name} would sign — but you have no roster spot`,
-            `${player.name} was ready to take your offer, but your roster is full at ${MAX_ROSTER_SIZE}. The offer lapses unless you clear a spot.`, { playerId: pid })
-          continue
-        }
-        signPlayer({ team: this.userTeam, player, salary: offer.salary, years: offer.years, year: this.year, players: this.data.players })
-        this.faPool = this.faPool.filter((f) => (f as string) !== pid)
-        this.lockerArrival(this.userTeamId, asPlayerId(pid))
-        repairLines(this.userTeam, this.data.players)
-        recordAcquisition(this.chronicle, { playerId: pid, teamId: this.userTeamId as string, year: this.year, via: 'signing' })
-        this.faShortlist.delete(pid)
-        this.pushNews('contract', `${player.name} signs with you!`,
-          `He took your offer — $${(offer.salary / 1e6).toFixed(2)}M × ${offer.years} years. Welcome aboard.`,
-          { playerId: pid, teamId: this.userTeamId as string })
-      } else {
-        const reason = sniped
-          ? 'a rival matched your money and he preferred their fit'
-          : `he's holding out for more — around $${(ask.salary / 1e6).toFixed(2)}M × ${ask.years}`
-        this.pushNews('contract', `${player.name} passes on your offer`,
-          `${player.name}'s camp came back: ${reason}. He's still on the market — sweeten it or move on.`,
-          { playerId: pid, teamId: this.userTeamId as string })
-      }
-    }
-  }
-
-  /** #164: where a standing offer sits vs the field — mirrors the same factors
-   *  resolveFaOffers weighs (his ask, your generosity, the rival count). Honest,
-   *  not fabricated rival bids: 'leading' = clear front-runner, 'competitive' =
-   *  fair money a hot market could still snipe, 'trailing' = below his ask. */
-  private faOfferStanding(
-    _player: Player,
-    offer: { salary: number; years: number },
-    ask: { salary: number; years: number },
-    rivalCount: number,
-  ): { standing: 'leading' | 'competitive' | 'trailing'; note: string } {
-    const generosity = offer.salary / Math.max(1, ask.salary)
-    const snipeRisk = Math.max(0, Math.min(0.5, rivalCount * 0.07 - (generosity - 1) * 0.6))
-    if (generosity < 0.95) {
-      return {
-        standing: 'trailing',
-        note: rivalCount > 0
-          ? `Below his ask, with ${rivalCount} rival${rivalCount > 1 ? 's' : ''} circling — he'll likely hold out for more.`
-          : `Below his ask — he may wait for a stronger number.`,
-      }
-    }
-    if (snipeRisk >= 0.25) {
-      return {
-        standing: 'competitive',
-        note: `Fair money, but ${rivalCount} club${rivalCount > 1 ? 's are' : ' is'} pushing — a rival could still match and win the fit.`,
-      }
-    }
-    return {
-      standing: 'leading',
-      note: rivalCount > 0
-        ? `You're out in front — strong money against a ${rivalCount}-club field.`
-        : `You're the clear front-runner; nobody else is really pushing.`,
-    }
+    return { ok: true, message: `Offer tabled — ${player.name} decides ${decideDay <= 1 ? 'on July 1' : `on market day ${decideDay}`}, against the real bids.` }
   }
 
   getFaHub(): FaHubView {
@@ -17034,28 +17835,37 @@ export class Career {
     const faDay = os?.faDay ?? 0
     const capUsedNow = this.userCapUsed()
 
-    // The honest clock: aiFreeAgencyDay signs rank r on effective day 1+r/3,
-    // and the AI runs 2 days behind the user (the head start).
+    // The honest clock: each man decides on his own market day (July 1 for the
+    // big contracts — faDecisionDay), against the real bids on the table.
     const pool = this.faPool
       .map((id) => this.resolve(id))
       .sort((a, b) => ratedOverall(b) - ratedOverall(a) || ((a.id as string) < (b.id as string) ? -1 : 1))
 
-    const aiCtx = this.faAiCtx()
+    const book = this.faBook()
 
     // Unsigned free agents soften their demands as the summer drags on — the same
     // decay the negotiation engine applies, surfaced so the market visibly cools
     // (and the displayed ask matches what he'll actually take).
     const decay = faAskDecay(faDay)
-    const rows = pool.map((p, rank) => {
+    const rows = pool.map((p) => {
       const rawAsk = askTerms(p, this.year)
       const ask = { salary: Math.round((rawAsk.salary * decay) / 25000) * 25000, years: rawAsk.years }
       const agent = agentFor(p)
       const { interest, note } = this.faInterestFor(p)
-      const decideDay = 3 + Math.floor(rank / 3) // AI delay (2) + decision day (1 + rank/3)
+      const decideDay = this.faDecisionDayFor(p)
       const session = this.negotiations.get(p.id as string)
-      const rivals = this.faRivalClubs(p, aiCtx)
+      const offers = this.faLiveOffers(p, book)
+      const rivals = offers.map((c) => this.data.teams.get(c.bid.teamId)?.abbreviation ?? '?')
       const pending = this.faPendingOffers.find((o) => o.playerId === (p.id as string))
-      const pendingStanding = pending ? this.faOfferStanding(p, pending, ask, rivals.length) : undefined
+      const pendingStanding = pending ? this.faOfferStanding(p, pending, ask, book) : undefined
+      const bids = offers.slice(0, 5).map((c, i) => ({
+        teamId: c.bid.teamId as string,
+        teamAbbr: this.data.teams.get(c.bid.teamId)?.abbreviation ?? '?',
+        salary: Math.round(c.bid.salary / 1e5) * 1e5,
+        years: c.bid.years,
+        reason: c.reason,
+        ...(i === 0 ? { leading: true } : {}),
+      }))
       return {
         ...badge(p),
         ...(pending && pendingStanding
@@ -17073,6 +17883,8 @@ export class Career {
         shortlisted: this.faShortlist.has(p.id as string),
         inTalks: session !== undefined && session.year === this.year && session.status !== 'signed' && session.status !== 'walked',
         ...(rivals.length > 0 ? { rivals } : {}),
+        ...(bids.length > 0 ? { bids } : {}),
+        ...(offers[0] ? { lean: `Leaning ${bids[0]!.teamAbbr}: ${offers[0].reason}.` } : {}),
       }
     })
 
@@ -17081,6 +17893,152 @@ export class Career {
       faDay,
       capSpace: this.userTeam.finances.salaryCap - capUsedNow - this.userDeadCap,
       windowOpen: os?.stage === 'freeAgency',
+    }
+  }
+
+  /* ─────────────── Offseason 3.0: needs first ─────────────── */
+
+  /**
+   * The NEEDS view: next season's holes in hockey words ("a 2nd-pair LHD",
+   * "a backup G", "$6.2M of cap space"), each with three to five real answers
+   * — free agents with the actual bids against you, trade targets with what
+   * their club would want, your own expiring men, and for a cap need the
+   * contracts that would clear it. The primary offseason surface; the full
+   * lists stay a click away.
+   */
+  getOffseasonNeeds(): OffseasonNeedsView {
+    const os = this.offseason
+    const offseason = this.phase === 'offseason'
+    const org = this.ownRosterPlayers()
+    const underContract = (p: Player): boolean => (offseason ? p.contract.yearsRemaining > 0 : true)
+    const grpOf = (p: Player): NeedGroup => this.posGroup(p.position) as NeedGroup
+    const depth: DepthEntry[] = org
+      .filter((p) => underContract(p) && this.data.players.has(p.id))
+      .map((p) => ({
+        playerId: p.id as string, name: p.name, position: p.position, group: grpOf(p),
+        hand: p.handedness, ovr: ratedOverall(p), salary: p.contract.salary, age: p.age,
+      }))
+    const benchmark = leagueBenchmark(
+      this.data.league.teams
+        .map((tid) => this.data.teams.get(tid))
+        .filter((t): t is Team => !!t)
+        .map((t) => t.roster.map((id) => this.data.players.get(id)).filter((p): p is Player => !!p).map((p) => ({ group: grpOf(p), ovr: ratedOverall(p) })))
+    )
+    const nhlIds = new Set(this.userTeam.roster.map((id) => id as string))
+    const committed = org
+      .filter((p) => nhlIds.has(p.id as string) && underContract(p))
+      .reduce((s, p) => s + p.contract.salary, 0) + this.userDeadCap
+    const capCeiling = this.userTeam.finances.salaryCap
+    const tierOf = (v: number): string => assetValueTier(v).label
+    const pool: NeedsCandidate[] = []
+
+    // Free agents, with the REAL bids against you.
+    const book = this.faBook()
+    const decay = faAskDecay(os?.faDay ?? 0)
+    for (const id of this.faPool) {
+      const p = this.data.players.get(id)
+      if (!p) continue
+      const raw = askTerms(p, this.year)
+      const ask = Math.round((raw.salary * decay) / 25000) * 25000
+      const offers = this.faLiveOffers(p, book)
+      const lead = offers[0]
+      const leadAbbr = lead ? this.data.teams.get(lead.bid.teamId)?.abbreviation ?? '?' : ''
+      const v = playerValue(p)
+      const pending = this.faPendingOffers.find((o) => o.playerId === (id as string))
+      const standing = pending ? this.faOfferStanding(p, pending, { salary: ask, years: raw.years }, book) : undefined
+      pool.push({
+        ...(pending && standing ? { yourOffer: { salary: pending.salary, years: pending.years, standing: standing.standing, note: standing.note } } : {}),
+        kind: 'fa', group: grpOf(p), playerId: id as string, name: p.name, position: p.position, age: p.age,
+        overall: ratedOverall(p), ...(p.faceId !== undefined ? { faceId: p.faceId } : {}), hand: p.handedness,
+        capHit: ask, years: raw.years,
+        cost: offers.length > 0
+          ? `${offers.length} offer${offers.length === 1 ? '' : 's'} on the table — ${leadAbbr} leads (${Career.approxMoney(lead!.bid.salary)} × ${lead!.bid.years}, ${lead!.reason})`
+          : `No offers yet. His ask: $${(ask / 1e6).toFixed(2)}M × ${raw.years}`,
+        assetValue: Math.round(v), assetTier: tierOf(v), bids: offers.length,
+      })
+    }
+
+    // Your own expiring men (the re-sign window): the cheapest fix is often
+    // the man already in the room.
+    for (const [pid, status] of this.resignStatus) {
+      if (status !== 'pending') continue
+      const p = this.data.players.get(pid)
+      if (!p) continue
+      const ask = askTerms(p, this.year)
+      const v = playerValue(p)
+      const kind = contractStatus(p)
+      pool.push({
+        kind: 'resign', group: grpOf(p), playerId: pid as string, name: p.name, position: p.position, age: p.age,
+        overall: ratedOverall(p), ...(p.faceId !== undefined ? { faceId: p.faceId } : {}), hand: p.handedness,
+        capHit: ask.salary, years: ask.years,
+        cost: `Your ${kind === 'RFA' ? 'RFA — qualify or re-sign him' : 'UFA — re-sign him before July 1'}. His ask: $${(ask.salary / 1e6).toFixed(2)}M × ${ask.years}`,
+        assetValue: Math.round(v), assetTier: tierOf(v),
+      })
+    }
+
+    // Trade targets: men their clubs would actually move — a rebuilder's
+    // veterans, a retooling club's middle of the lineup, anyone's spare part.
+    const ranks = this.strengthRanks()
+    for (const tid of this.data.league.teams) {
+      if (tid === this.userTeamId) continue
+      const t = this.data.teams.get(tid)
+      if (!t) continue
+      const posture = this.clubPostureFor(tid, ranks).posture
+      const byGrp: Record<NeedGroup, Player[]> = { F: [], D: [], G: [] }
+      for (const id of t.roster) {
+        const p = this.data.players.get(id)
+        if (p) byGrp[grpOf(p)].push(p)
+      }
+      for (const g of ['F', 'D', 'G'] as const) {
+        const sorted = byGrp[g].sort((a, b) => ratedOverall(b) - ratedOverall(a))
+        const dressed = g === 'F' ? 12 : g === 'D' ? 6 : 2
+        sorted.forEach((p, i) => {
+          if (p.contract.noTradeClause || p.contract.yearsRemaining <= 0) return
+          const spare = i >= dressed
+          // A contender's backup goalie can be pried loose — at a price.
+          const backupG = g === 'G' && i === 1
+          const willing = posture === 'rebuild' ? p.age >= 26 || spare : posture === 'retool' ? i >= Math.ceil(dressed / 3) : spare || backupG
+          if (!willing) return
+          const v = playerValue(p)
+          const stance = posture === 'rebuild'
+            ? `${t.abbreviation} are rebuilding and would sell`
+            : spare ? `A spare part in ${t.abbreviation}'s depth`
+              : backupG && posture === 'contend' ? `${t.abbreviation} would move their backup — at a price` : `${t.abbreviation} are retooling`
+          pool.push({
+            kind: 'trade', group: g, playerId: p.id as string, name: p.name, position: p.position, age: p.age,
+            overall: ratedOverall(p), ...(p.faceId !== undefined ? { faceId: p.faceId } : {}), hand: p.handedness,
+            teamId: tid as string, teamAbbr: t.abbreviation,
+            capHit: p.contract.salary, years: p.contract.yearsRemaining,
+            cost: `${stance}. The price: ${tierOf(v).toLowerCase()} value (${Math.round(v)})`,
+            assetValue: Math.round(v), assetTier: tierOf(v),
+          })
+        })
+      }
+    }
+
+    // Your contracts that would clear money, dearest per unit of value first.
+    const moveable: NeedsCandidate[] = org
+      .filter((p) => nhlIds.has(p.id as string) && underContract(p) && p.contract.salary >= indexed(1_500_000))
+      .map((p) => {
+        const v = playerValue(p)
+        return {
+          kind: 'move' as const, group: grpOf(p), playerId: p.id as string, name: p.name, position: p.position, age: p.age,
+          overall: ratedOverall(p), ...(p.faceId !== undefined ? { faceId: p.faceId } : {}), hand: p.handedness,
+          capHit: p.contract.salary, years: p.contract.yearsRemaining,
+          cost: p.contract.noTradeClause
+            ? 'No-trade clause — a buyout is the way out'
+            : `Trade him (${tierOf(v).toLowerCase()} value, ${Math.round(v)}) or buy him out`,
+          assetValue: Math.round(v), assetTier: tierOf(v),
+        }
+      })
+
+    const built = buildNeeds({ depth, benchmark, capCeiling, committed, pool, moveable })
+    return {
+      headline: built.headline,
+      needs: built.needs,
+      capCeiling,
+      committed,
+      marketOpen: os?.stage === 'freeAgency',
     }
   }
 
@@ -20854,7 +21812,9 @@ export class Career {
         const d = 27 + Math.min(RESIGN_WINDOW_DAYS, os.resignDay ?? 0)
         return d > 30 ? `${summerYear}-07-01` : `${summerYear}-06-${String(d).padStart(2, '0')}`
       }
-      case 'freeAgency': return `${summerYear}-07-${String(Math.min(31, 1 + os.faDay)).padStart(2, '0')}`
+      // Market day 0 is the morning of July 1 (your first look, offers
+      // tabled); market day 1 is the same July 1 from noon — the frenzy.
+      case 'freeAgency': return `${summerYear}-07-${String(Math.min(31, Math.max(1, os.faDay))).padStart(2, '0')}`
       case 'preseason': return `${summerYear}-09-15`
     }
   }
@@ -21356,6 +22316,9 @@ export class Career {
       if (this.phase === 'regularSeason') {
         if (this.trainingCamp && !this.trainingCamp.resolved) {
           const cd = this.trainingCamp.campDay ?? 1
+          if (this.trainingCamp.battles) {
+            return cd >= 8 ? 'Continue — break camp' : cd < 3 ? 'Continue — the Blue-Red scrimmages' : 'Continue — preseason games, then cut day'
+          }
           return cd >= 8 ? 'Continue — break camp' : cd === 7 ? 'Continue to cut day' : `Continue — camp day ${cd + 1}`
         }
         // The one in-season hard gate: a club that cannot legally dress a team.
@@ -21382,10 +22345,16 @@ export class Career {
         awards: ['Continue to the draft lottery', 'Continue to the combine', 'Continue to awards night', 'Continue to the entry draft'][Math.min(3, beat)]!,
         draft: 'Continue — open free agency',
         resign:
-          (this.offseason?.resignDay ?? 0) < RESIGN_WINDOW_DAYS
-            ? `Continue — re-signing window, day ${(this.offseason?.resignDay ?? 0) + 1}`
-            : 'Continue — open free agency',
-        freeAgency: `Continue — free agency day ${(this.offseason?.faDay ?? 0) + 1}`,
+          (this.offseason?.resignDay ?? 0) === RESIGN_WINDOW_DAYS - 1 && this.undecidedRfas().length > 0
+            ? `Continue — the QO deadline passes (${this.undecidedRfas().length} undecided)`
+            : (this.offseason?.resignDay ?? 0) < RESIGN_WINDOW_DAYS
+              ? `Continue — re-signing window, day ${(this.offseason?.resignDay ?? 0) + 1}`
+              : 'Continue — open free agency',
+        freeAgency: (this.offseason?.faDay ?? 0) === 0
+          ? 'Continue — noon, July 1: the market opens'
+          : (this.offseason?.faDay ?? 0) + 1 === ARB_HEARING_DAY && this.arbitrationCases.some((c) => c.heard === false)
+            ? `Continue — arbitration hearing${this.arbitrationCases.filter((c) => c.heard === false).length === 1 ? '' : 's'}, July ${ARB_HEARING_DAY}`
+            : `Continue — free agency day ${(this.offseason?.faDay ?? 0) + 1}`,
         preseason: this.captainsPending() ? 'Name your captain to start the season' : 'Continue — start the new season',
       }
       return labels[stage]
@@ -21497,6 +22466,7 @@ export class Career {
           }
         : {}),
       campPending: this.trainingCamp !== null && !this.trainingCamp.resolved,
+      ...(this.trainingCamp && !this.trainingCamp.resolved ? { campDay: this.trainingCamp.campDay ?? 8 } : {}),
       reviewPending: this.reviewFacts !== null,
       deadlinePending: this.deadlineHold,
       ...(lineupGate !== null ? { lineupShortfall: lineupGate } : {}),
@@ -27316,6 +28286,7 @@ export class Career {
         })
       })(),
       ...(os.stage === 'resign' ? { resignDay: os.resignDay ?? 0, resignWindowDays: RESIGN_WINDOW_DAYS } : {}),
+      ...(os.stage === 'freeAgency' ? { faDay: os.faDay, faWire: (os.faWire ?? []).slice(-60).reverse().map((w) => ({ ...w })) } : {}),
       arbitration: this.getArbitrationCases(),
       freeAgents: this.faPool
         .map((id) => this.resolve(id))

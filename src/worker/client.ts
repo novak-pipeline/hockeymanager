@@ -320,6 +320,18 @@ export class SimClient {
     return this.send({ type: 'submitTrainingCamp', placements })
   }
 
+  setCampLook(playerIds: string[]): Promise<WorkerResponse> {
+    return this.send({ type: 'setCampLook', playerIds })
+  }
+
+  delegateTrainingCamp(): Promise<WorkerResponse> {
+    return this.send({ type: 'delegateTrainingCamp' })
+  }
+
+  getOffseasonNeeds(): Promise<WorkerResponse> {
+    return this.send({ type: 'getOffseasonNeeds' })
+  }
+
   getFeed(): Promise<WorkerResponse> {
     return this.send({ type: 'getFeed' })
   }
@@ -717,6 +729,10 @@ export class SimClient {
 
   acceptArbitration(playerId: string): Promise<WorkerResponse> {
     return this.send({ type: 'acceptArbitration', playerId })
+  }
+
+  settleArbitration(playerId: string, years: 1 | 2): Promise<WorkerResponse> {
+    return this.send({ type: 'settleArbitration', playerId, years })
   }
 
   walkArbitration(playerId: string): Promise<WorkerResponse> {

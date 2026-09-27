@@ -416,6 +416,9 @@ const SYSTEM_PK: Record<CoachSystemId, PenaltyKillFormation> = {
 }
 
 /** Continuous knob from a 0–1 axis: exactly 0.5 at a neutral 0.5 axis. */
+/** Gain for the offence / risk sliders (see profileToTactics). */
+const OFFENCE_GAIN = 0.6
+
 function knob(axis: number, gain = 1.2): number {
   return clamp01(0.5 + (axis - 0.5) * gain)
 }
@@ -452,11 +455,15 @@ export function profileToTactics(profile: CoachProfile, roster: Player[], base: 
     ...base,
     forecheck,
     dZoneCoverage: dZoneFromStructure(profile.structure),
+    // One personality axis drives several sliders here, and the sim's effects
+    // stack — so the offence/risk sliders take a gentler gain (a strongly
+    // offensive coach lands ~0.7, not 0.9+: that met another and produced
+    // 100-shot, 20-goal games).
     tempo: {
       pace,
-      passRisk: knob(profile.riskTolerance),
-      shotEagerness: knob(profile.offence),
-      defensivePinch: knob(profile.riskTolerance),
+      passRisk: knob(profile.riskTolerance, OFFENCE_GAIN),
+      shotEagerness: knob(profile.offence, OFFENCE_GAIN),
+      defensivePinch: knob(profile.riskTolerance, OFFENCE_GAIN),
     },
     specialTeams: {
       powerPlay: SYSTEM_PP[profile.system],
@@ -467,10 +474,10 @@ export function profileToTactics(profile: CoachProfile, roster: Player[], base: 
     hitting: knob(profile.aggression),
     puckPressure: knob(profile.forecheckDepth),
     gapControl: knob(profile.structure),
-    shooting: knob(profile.offence),
-    passing: knob((profile.offence + profile.riskTolerance) / 2),
+    shooting: knob(profile.offence, OFFENCE_GAIN),
+    passing: knob((profile.offence + profile.riskTolerance) / 2, OFFENCE_GAIN),
     dumping: knob(1 - profile.riskTolerance),
-    mentality: knob(profile.offence),
+    mentality: knob(profile.offence, OFFENCE_GAIN),
   }
 }
 

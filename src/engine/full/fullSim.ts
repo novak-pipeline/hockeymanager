@@ -178,6 +178,16 @@ const PENALTY_P = RATES.penalties / DECISION_TICKS_PER_GAME
  * Map a 0–1 slider centred at 0.5 to a multiplier in [lowEnd, highEnd].
  * At 0.5 the result is exactly 1.0 (neutral).
  */
+/**
+ * A team's shot appetite from its tactics: the mean of tempo.shotEagerness and
+ * the shooting slider, mapped to 0.7–1.3 (neutral 0.5 → 1.0). Bounded so no
+ * slider combination can blow up shot volume.
+ */
+export function shotAppetite(team: { tactics: { tempo: { shotEagerness: number }; shooting?: number } }): number {
+  const v = (team.tactics.tempo.shotEagerness + (team.tactics.shooting ?? 0.5)) / 2
+  return Math.max(0.7, Math.min(1.3, 1 + (v - 0.5) * 0.6))
+}
+
 export function sliderMult(val: number | undefined, lowEnd: number, highEnd: number): number {
   const v = val ?? 0.5
   if (v <= 0.5) return 1 + (v - 0.5) * 2 * (1 - lowEnd)
@@ -2319,9 +2329,11 @@ function simPeriod(
           break
         }
         const central = clamp(1 - Math.abs(puck.y) / 0.5, 0, 1)
-        // shooting slider (default 0.5→1.0) multiplies cycle shot eagerness.
-        const shootingMult = sliderMult(atk.team.tactics.shooting, 0.6, 1.5)
-        const eager = (0.7 + atk.team.tactics.tempo.shotEagerness * 0.6) * shootingMult
+        // Shot appetite from the tactics — ONE bounded number. The shooting
+        // slider and tempo.shotEagerness used to MULTIPLY (up to ×1.95), and a
+        // coach profile moves both together, so two attack-minded clubs met at
+        // 100+ shots and 20+ goals. Averaged and capped: neutral 1.0, range 0.7–1.3.
+        const eager = shotAppetite(atk.team)
         // Organic shot off the cycle when a lane opens — but the cycle WORKS
         // the puck first (no instant fling right after the entry; rush beats
         // own the quick-strike shots, which keeps rushShotShare on the data).

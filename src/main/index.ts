@@ -1,4 +1,5 @@
 import { join } from 'node:path'
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import electronUpdater from 'electron-updater'
 import { registerSaveIpc } from './saves'
@@ -10,18 +11,34 @@ const { autoUpdater } = electronUpdater
 
 const isDev = !app.isPackaged
 
-// Windows GPU drivers frequently crash Electron's GPU process, which cascades
-// into a renderer crash and a blank window ("npm run dev doesn't work"). This
-// app's UI is 2D (React + PixiJS); software compositing is plenty and rock
-// solid. Disable HW acceleration BEFORE app-ready so the GPU is never in the
-// loop. (The optional 3D match view is rarely used and degrades gracefully.)
-app.disableHardwareAcceleration()
-
 // Preserve existing careers across the productName rename to "The Show": Electron
 // derives userData from the app name, so renaming would silently point the app at
 // a fresh, empty saves folder. Pin userData to the original "hockey-manager" path
 // so every existing autosave/slot stays exactly where the app looks for it.
 app.setPath('userData', join(app.getPath('appData'), 'hockey-manager'))
+
+// GPU: the 3D match view needs hardware acceleration (software rendering made
+// it unwatchably laggy). Some Windows drivers crash Electron's GPU process,
+// which used to cascade into a blank window — so a GPU crash is remembered in
+// userData and the NEXT launch falls back to software rendering (the old,
+// rock-solid mode). Delete gpu-fallback.json, or set HOCKEY_GPU=1, to retry;
+// HOCKEY_GPU=0 forces software.
+const gpuFlag = join(app.getPath('userData'), 'gpu-fallback.json')
+const gpuForced = process.env.HOCKEY_GPU
+const gpuOff = gpuForced === '0' || (gpuForced !== '1' && existsSync(gpuFlag))
+if (gpuOff) app.disableHardwareAcceleration()
+app.on('child-process-gone', (_e, details) => {
+  if (gpuOff || details.type !== 'GPU' || details.reason === 'clean-exit') return
+  try {
+    mkdirSync(app.getPath('userData'), { recursive: true })
+    writeFileSync(gpuFlag, JSON.stringify({ at: new Date().toISOString(), reason: details.reason, exitCode: details.exitCode }))
+  } catch {
+    /* can't persist: the relaunch below still recovers this session */
+  }
+  // relaunch straight into software rendering rather than leave a dead window
+  app.relaunch()
+  app.exit(0)
+})
 
 function createWindow(): void {
   const win = new BrowserWindow({

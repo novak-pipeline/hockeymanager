@@ -16,6 +16,9 @@ import { PlayerFace } from '../components/PlayerFace'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { toast } from '../components/store'
 import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
+import { NeedsBoard } from '../components/NeedsBoard'
+import { Icon } from '../components/primitives'
+import { Icons } from '../components/icons'
 
 /** Offers already tabled, awaiting each camp. */
 const STANDING_OFFER_COLS = sortColumns<FaHubRowView>()([
@@ -63,7 +66,7 @@ const FA_MARKET_COLS = sortColumns<FaHubRowView>()([
     label: 'Clock',
     value: (fa) => fa.decidesInDays,
     initialDir: 'asc',
-    title: 'Days before rival clubs can sign him out from under you',
+    title: 'Days until he decides between the offers on the table (the top of the class goes on July 1)',
   },
   { key: 'act', label: '' },
 ])
@@ -111,8 +114,8 @@ function StandingOffersPanel({ hub }: { hub: FaHubView | null }): JSX.Element | 
   return (
     <Panel title={`Your standing offers (${offers.length})`}>
       <p className="muted small" style={{ marginTop: 0, marginBottom: 10 }}>
-        Offers you've tabled, awaiting each camp's decision. The read is honest — how your money
-        stacks up against the field, not a fabricated rival bid.
+        Offers you've tabled, awaiting each man's decision day. The read is real: your offer
+        scored the way HE scores offers, against the actual bids AI clubs have on the table.
       </p>
       <div className="table-wrap">
         <table className="table">
@@ -160,6 +163,9 @@ export function FreeAgentMarketScreen(): JSX.Element {
   // RFA offer-sheet targets are the niche/aggressive play — keep them collapsed
   // so the open UFA market (the primary signing flow) is the first thing you see.
   const [showRfa, setShowRfa] = useState(false)
+  // Offseason 3.0: the NEEDS board is the primary surface; the full market is
+  // a click away, not the first thing you see.
+  const [showAll, setShowAll] = useState(false)
 
   const { data: hub, loading, error, refetch: refetchHub } = useScreenData(
     () => client.getFaHub(),
@@ -223,6 +229,8 @@ export function FreeAgentMarketScreen(): JSX.Element {
 
       <CapLine finance={finance ?? null} />
 
+      <NeedsBoard focus="fa" />
+
       <StandingOffersPanel hub={hub} />
 
       {rfa?.windowOpen && rfa.rows.length > 0 && (
@@ -232,7 +240,7 @@ export function FreeAgentMarketScreen(): JSX.Element {
             style={{ marginBottom: showRfa ? 10 : 0 }}
             onClick={() => setShowRfa((v) => !v)}
           >
-            {showRfa ? 'Hide offer-sheet targets ▲' : `Show ${rfa.rows.length} offer-sheet targets ▼`}
+            {showRfa ? 'Hide offer-sheet targets' : `Show ${rfa.rows.length} offer-sheet targets`}
           </button>
           {showRfa && (<>
           <p className="muted small" style={{ marginTop: 10, marginBottom: 10 }}>
@@ -279,7 +287,7 @@ export function FreeAgentMarketScreen(): JSX.Element {
                             title={`Tendered ${fmtMoney(t.pending.salary)} × ${t.pending.years} — awaiting ${t.teamAbbr}'s decision`}
                             style={{ fontSize: 11, borderColor: 'var(--amber, #d6a056)', color: 'var(--amber, #d6a056)' }}
                           >
-                            ⏳ {t.pending.daysLeft > 0 ? `${t.pending.daysLeft}d to match` : 'deciding…'}
+                            {t.pending.daysLeft > 0 ? `${t.pending.daysLeft}d to match` : 'deciding…'}
                           </span>
                         ) : (
                           <button
@@ -305,7 +313,13 @@ export function FreeAgentMarketScreen(): JSX.Element {
         </Panel>
       )}
 
-      {(hub?.rows ?? []).length === 0 ? (
+      {(hub?.rows ?? []).length > 0 && !showAll ? (
+        <div style={{ display: 'flex', justifyContent: 'center' }}>
+          <button className="btn" onClick={() => setShowAll(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <Icon size={16}><Icons.Search /></Icon> Browse all {hub?.rows.length ?? 0} free agents
+          </button>
+        </div>
+      ) : (hub?.rows ?? []).length === 0 ? (
         <Panel title="The open market">
           <Notice kind="info">
             The board is momentarily clear — the league's unsigned depth has all found homes.
@@ -323,7 +337,7 @@ export function FreeAgentMarketScreen(): JSX.Element {
                 style={{ cursor: 'pointer', border: 'none', fontSize: 11 }}
                 onClick={() => setPosFilter(f)}
               >
-                {f === 'all' ? 'All' : f === 'starred' ? '★ Shortlist' : f === 'F' ? 'Forwards' : f === 'D' ? 'Defense' : 'Goalies'}
+                {f === 'all' ? 'All' : f === 'starred' ? 'Shortlist' : f === 'F' ? 'Forwards' : f === 'D' ? 'Defense' : 'Goalies'}
               </button>
             ))}
             <span style={{ flex: 1 }} />
@@ -358,7 +372,7 @@ export function FreeAgentMarketScreen(): JSX.Element {
                             color: fa.shortlisted ? 'var(--amber, #d6a056)' : 'var(--line)',
                           }}
                         >
-                          ★
+                          <Icon size={16}>{fa.shortlisted ? <Icons.Star /> : <Icons.StarOutline />}</Icon>
                         </button>
                       </td>
                       <td>
@@ -370,7 +384,7 @@ export function FreeAgentMarketScreen(): JSX.Element {
                       <td className="num"><OverallStars value={fa.overall} /></td>
                       <td style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
                         {fmtMoney(fa.askSalary)} × {fa.askYears}yr
-                        {fa.askSoftened && <span className="chip" style={{ fontSize: 9, marginLeft: 6, color: 'var(--success)', borderColor: 'var(--success)' }} title="His camp is dropping the ask as the summer drags on">▼ softening</span>}
+                        {fa.askSoftened && <span className="chip" style={{ fontSize: 9, marginLeft: 6, color: 'var(--success)', borderColor: 'var(--success)' }} title="His camp is dropping the ask as the summer drags on">softening</span>}
                         {capTight && <div style={{ color: 'var(--danger)', fontSize: 10 }}>over your cap</div>}
                       </td>
                       <td style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>
@@ -386,10 +400,11 @@ export function FreeAgentMarketScreen(): JSX.Element {
                       <td style={{ fontSize: 11.5, maxWidth: 260 }}>
                         <span style={{ color: im.color, fontWeight: 700 }}>{im.label}</span>
                         <span className="muted" style={{ marginLeft: 6 }} title={fa.wants}>{fa.interestNote}</span>
-                        {fa.rivals && fa.rivals.length > 0 && (
-                          <div style={{ marginTop: 3, fontSize: 10, color: 'var(--muted)' }}>
-                            <span style={{ color: fa.rivals.length >= 3 ? 'var(--danger)' : 'var(--muted)' }}>◦ circling: </span>
-                            {fa.rivals.slice(0, 4).join(' · ')}{fa.rivals.length > 4 ? ` +${fa.rivals.length - 4}` : ''}
+                        {fa.bids && fa.bids.length > 0 && (
+                          <div style={{ marginTop: 3, fontSize: 10, color: 'var(--muted)', lineHeight: 1.45 }} title="Real offers from AI clubs, in the order he ranks them">
+                            <span style={{ color: fa.bids.length >= 3 ? 'var(--danger)' : 'var(--muted)', fontWeight: 700 }}>On the table: </span>
+                            {fa.bids.slice(0, 3).map((b) => `${b.teamAbbr} ${fmtMoney(b.salary)}×${b.years}`).join(' · ')}{(fa.rivals?.length ?? 0) > 3 ? ` +${(fa.rivals?.length ?? 0) - 3}` : ''}
+                            {fa.lean && <div style={{ color: 'var(--text)' }}>{fa.lean}</div>}
                           </div>
                         )}
                       </td>
@@ -415,7 +430,7 @@ export function FreeAgentMarketScreen(): JSX.Element {
                               style={{ fontSize: 9, whiteSpace: 'nowrap', color: STANDING_META[fa.pendingOffer.standing].color, borderColor: STANDING_META[fa.pendingOffer.standing].color }}
                               title={fa.pendingOffer.standingNote}
                             >
-                              ⏳ {STANDING_META[fa.pendingOffer.standing].label} · {fmtMoney(fa.pendingOffer.salary)}×{fa.pendingOffer.years} · ~{fa.pendingOffer.decidesInDays}d
+                              {STANDING_META[fa.pendingOffer.standing].label} · {fmtMoney(fa.pendingOffer.salary)}×{fa.pendingOffer.years} · ~{fa.pendingOffer.decidesInDays}d
                             </span>
                           ) : offseasonFa ? (
                             <button

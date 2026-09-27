@@ -49,4 +49,27 @@ export interface OffseasonState {
   /** PHASE 0: which dated beat of the awards stage we are on (0/absent = not
    *  yet run; 1 lottery, 2 combine, 3 awards night). Optional for saves. */
   summerBeat?: number
+  /** Offseason 3.0: the free-agent class as it stood at the market's open,
+   *  richest ask first. A man's place in it sets his decision day (the top of
+   *  the class goes on July 1 — the frenzy), stable as the pool thins.
+   *  Optional: absent on older saves (the ask-based day is the fallback). */
+  faClassOrder?: string[]
+  /** Offseason 3.0: the July wire — every free-agent signing this summer, in
+   *  order, with how many clubs bid and the reason he gave. Optional. */
+  faWire?: FaWireEntry[]
+}
+
+export interface FaWireEntry {
+  day: number
+  playerId: string
+  name: string
+  position: string
+  teamId: string
+  teamAbbr: string
+  salary: number
+  years: number
+  suitors?: number
+  reason?: string
+  /** True when he signed with the GM's club. */
+  yours?: boolean
 }
