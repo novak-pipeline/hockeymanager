@@ -81,8 +81,11 @@ export class RinkRenderer implements MatchRenderer {
 
   private computeMetrics(): void {
     const pad = 14
-    const W = this.app.renderer.width / (window.devicePixelRatio || 1)
-    const H = this.app.renderer.height / (window.devicePixelRatio || 1)
+    // app.screen is already in CSS px (autoDensity). Dividing renderer.width by
+    // devicePixelRatio AGAIN drew the rink at 1/DPR size — 67% of the viewport,
+    // left-aligned, on a 150%-scaled Windows display (F-20).
+    const W = this.app.screen.width
+    const H = this.app.screen.height
     let w = W - pad * 2
     let h = w / RINK_ASPECT
     if (h > H - pad * 2) {
