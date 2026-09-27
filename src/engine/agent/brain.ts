@@ -67,7 +67,7 @@ const r01 = rLevel
  * a carrier who drives into a crowded house risks the whole continuation
  * value on a low-retention carry. That is what brings shots out to range.
  */
-export const VAL = { oz: 0.09, kPos: 0.15, shoot: 0.9, keep: 0.25, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 2, laneRead: 0.75 }
+export const VAL = { oz: 0.09, kPos: 0.15, shoot: 0.9, keep: 0.25, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 2, laneRead: 0.75, angleZero: 90, transMaxX: 70, transBack: 0.003, rushNoBackX: 0, regroupMaxX: 20, ozBack: 0.008 }
 /**
  * D safety (gap discipline): how far ahead a defenceman reads an attacker
  * coming at him (s), the base gap (ft) plus gap per ft/s of the attacker's
@@ -75,6 +75,9 @@ export const VAL = { oz: 0.09, kPos: 0.15, shoot: 0.9, keep: 0.25, noise: 0.5, n
  * race above the safety line before he steps up for it.
  */
 export const D_SAFETY = { look: 2, gap: 12, gapPerV: 0.5, stepUpMargin: 1.3, pinchMaxX: 55, gapLead: 0.5, looseGuard: 1 }
+/** Support-skater motion loops around a spot: radius (ft) and angular speed (rad/s). */
+export const BRAIN_DBG = { on: false, m: {} as Record<string, number> }
+export const DRIFT = { rAtk: 12, rDef: 5, omAtk: 1.1, omDef: 0.9 }
 /** Defending the house: the on-puck man engages (no containing) inside this radius of our net (ft). */
 export const DZ = { engageFt: 30 }
 /** Seconds after a zone entry that play is still a "rush". */
@@ -168,12 +171,12 @@ export function realPressure(c: Body, opps: readonly Body[]): boolean {
 }
 
 /** Backward pass (same definition as the director engine's isBackwardPass, in ft). */
-export function isBackFt(fx: number, fy: number, tx: number, ty: number, a: number): boolean {
+export function isBackFt(fx: number, fy: number, tx: number, ty: number, a: number, tanMargin = 0.364): boolean {
   // Same definition as the realism scorecard: ≥ 3 ft long and more than 110°
   // off the attack direction.
   const dx = (tx - fx) * a
   const dy = Math.abs(ty - fy)
-  return Math.hypot(dx, dy) >= 3 && dx < 0 && -dx > dy * 0.364
+  return Math.hypot(dx, dy) >= 3 && dx < 0 && -dx > dy * tanMargin
 }
 
 /**
@@ -260,10 +263,14 @@ export function shotValue(me: Side, opps: readonly Body[], c: Body, x: number, y
   let below = 0
   if (L > 45) for (const b of me.skaters) if (b !== c && (b.x - x) * a > 15) below++
   const turnover = (1 - lane) * 0.6 * posValue(x, y, -a)
+  // A shot from a bad angle makes no play: the goalie steers it to the
+  // corner, nobody can tip it. The rebound/tip value fades past ~45°.
+  const angle = (Math.atan2(Math.abs(y), Math.max(Math.abs(nx - x), 0.1)) * 180) / Math.PI
+  const play = clamp((VAL.angleZero - angle) / (VAL.angleZero - 40), 0, 1)
   return (
     xg * lane * (0.7 + shooter * 0.6) * eager * VAL.shoot +
-    (VAL.keep + tips * VAL.tipKeep + (L > 45 ? VAL.pointKeep * (below / 4) : 0)) * VAL.oz * lane +
-    tips * VAL.tip * lane -
+    (VAL.keep + tips * VAL.tipKeep + (L > 45 ? VAL.pointKeep * (below / 4) : 0)) * VAL.oz * lane * play +
+    tips * VAL.tip * lane * play -
     turnover
   )
 }
@@ -283,6 +290,7 @@ export function blockChance(o: Body, d: number, slap: boolean): number {
 // ---------------------------------------------------------------------------
 
 interface Option {
+  dbg?: string
   ev: number
   act: CarrierAction
 }
@@ -380,7 +388,9 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
 
   // --- Pass ---
   {
-    const backOkBase = adv <= 0
+    // A regroup (back to the D, D-to-D) is allowed anywhere short of their
+    // blue line — when it is not the rush.
+    const backOkBase = adv <= VAL.regroupMaxX
     const mates = me.skaters.filter((b) => b !== c)
     const infos = mates.map((r) => {
       const d0 = Math.hypot(r.x - c.x, r.y - c.y)
@@ -390,7 +400,10 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
         x: clamp(r.x + r.vx * tf, -97, 97),
         y: clamp(r.y + r.vy * tf, -40, 40)
       }
-      const back = isBackFt(c.x, c.y, R.x, R.y, a)
+      // Judged from the PUCK (on the blade, a stride ahead) and with a 10°
+      // margin under the 110° line, so a "lateral" feed never reads as a back
+      // pass on the scoresheet.
+      const back = isBackFt(w.puck.x, w.puck.y, R.x, R.y, a, 0.176)
       const open = nearestTo(opps, R.x, R.y).d
       return { r, speed, R, back, open, d0 }
     })
@@ -399,7 +412,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
     // the play goes forward (a back pass is only the pressured bail-out).
     // (Same test as the scorecard: won outside their zone, already moved ≥ 15
     // ft up ice — a D-to-D right after a retrieval is still allowed.)
-    const transition = w.t - w.possSince < 8 && w.possStartAdv < BLUE_X && adv > w.possStartAdv + 12 && adv < 70
+    const transition = w.t - w.possSince < 8 && w.possStartAdv < BLUE_X && adv > w.possStartAdv + 12 && adv < VAL.transMaxX
     // In alone / numbers: nobody (or fewer of them) goal-side of the carrier.
     let goalSide = 0
     for (const o of opps) if (o.x * a > c.x * a) goalSide++
@@ -408,7 +421,9 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
     // a real play (the scorecard's OZ back-pass band is 12–40%); on the rush
     // and in transition it is only the pressured bail-out.
     const settledOz = adv > BLUE_X && !transition
-    const backOk = (backOkBase && !transition) || settledOz || (pressed && !hasForward && !breakaway)
+    // Past the red line on the rush there is no bail-out back pass at all:
+    // a pressured carrier protects it, chips it in or takes the hit.
+    const backOk = (backOkBase && !transition) || settledOz || (pressed && !hasForward && !breakaway && !(transition && adv > VAL.rushNoBackX))
     for (const f of infos) {
       if (f.back && !backOk) continue
       // On a breakaway only a clearly forward pass (the 2-on-0 feed) is a play.
@@ -438,8 +453,8 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       v *= clamp(f.open / 11, 0.2, 1.2)
       const cost = posValue(f.R.x, f.R.y, -a)
       let ev = comp * v - (1 - comp) * cost * 0.8
-      if (f.back) ev -= 0.003
-      opts.push({ ev, act: { kind: 'pass', to: f.r, at: f.R, speed: f.speed, oneTimer } })
+      if (f.back) ev -= transition ? VAL.transBack : adv > BLUE_X ? VAL.ozBack : 0.003
+      opts.push({ ev, act: { kind: 'pass', to: f.r, at: f.R, speed: f.speed, oneTimer }, ...(f.back && BRAIN_DBG.on ? { dbg: `${transition ? 'T' : '-'}${settledOz ? 'S' : '-'}${pressed ? 'P' : '-'} adv${Math.round(adv / 10) * 10} ps${Math.round(w.possStartAdv / 10) * 10} dt${Math.round(w.t - w.possSince)}` } : {}) })
     }
   }
 
@@ -493,6 +508,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
   for (let i = 0; i < opts.length; i++) {
     r -= ws[i]
     if (r <= 0) {
+      if (opts[i].dbg && BRAIN_DBG.on) BRAIN_DBG.m[opts[i].dbg!] = (BRAIN_DBG.m[opts[i].dbg!] ?? 0) + 1
       return opts[i].act
     }
   }
@@ -590,8 +606,8 @@ function drift(b: Body, t: number, withPuck: boolean): XY {
   // Hockey players never stand still: support skaters keep their feet moving
   // in loops around their spot (getting open, timing their route), defenders
   // shuffle and re-set. Weaker positional players also wander off the spot.
-  const R = withPuck ? 9 : 5
-  const om = withPuck ? 1.5 : 1.2
+  const R = withPuck ? DRIFT.rAtk : DRIFT.rDef
+  const om = withPuck ? DRIFT.omAtk : DRIFT.omDef
   const err = (1 - pos) * 5
   return {
     x: Math.cos(t * om + ph) * R + Math.sin(t * 0.31 + ph) * err,

@@ -89,13 +89,13 @@ const DT = FRAME_DT / SUBSTEPS
 // ---------------------------------------------------------------------------
 export const AGENT_TUNING = {
   /** Reconciles the empirical xG with this engine's shot mix → goals/game. */
-  finishK: 0.85,
+  finishK: 0.84,
   /** Base share of unblocked attempts that miss the net. */
   missBase: 0.3,
   /** Poke-check success scale (takeaways). */
-  pokeK: 0.11,
+  pokeK: 0.08,
   /** Unforced fumble rate under pressure (giveaways). */
-  fumbleK: 4.5,
+  fumbleK: 5.2,
   /** Per-think stick-foul chance when beaten (penalties). */
   stickFoulK: 2.5,
   /** Misc stoppages per second of live play ("other": net off, high stick…). */
@@ -241,6 +241,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   let flightKindAtGain = 'faceoff'
   let gotPos: XY = { x: 0, y: 0 }
   let turnSnap = ""
+  let prevPoss: { side: Side; since: number; adv: number } | null = null
 
   const tries = (...bs: Body[]): Map<Body, number> => new Map(bs.map((b) => [b, now] as [Body, number]))
   const ev = (e: GameEvent): void => {
@@ -724,8 +725,18 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         tm.dbg[`turn:${gainKind}:${tz}`] = (tm.dbg[`turn:${gainKind}:${tz}`] ?? 0) + 1
       }
       touches.length = 0
-      w.possSince = now
-      w.possStartAdv = puck.x * s.a
+      // A possession the other side held for only an instant (a touch, a
+      // bobble between frames) does not end ours: the rush we were on is
+      // still the rush (the scorecard reads possession from the frames).
+      const blip = prevPoss !== null && prevPoss.side === s && now - w.possSince < 0.3
+      if (blip && prevPoss) {
+        w.possSince = prevPoss.since
+        w.possStartAdv = prevPoss.adv
+      } else {
+        if (prevSide) prevPoss = { side: prevSide, since: w.possSince, adv: w.possStartAdv }
+        w.possSince = now
+        w.possStartAdv = puck.x * s.a
+      }
     }
     touches.push({ b, side: s, t: now })
     gotAt = now
@@ -769,7 +780,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const pressure = pressureOn(c, oppOf(s).skaters)
     // Aim error grows steeply as passing falls: the good passer hits the tape
     // under pressure, the poor one puts it in skates (completion shows it).
-    const sigma = (0.02 + Math.pow(1 - passing, 1.5) * 0.3) * (1 + pressure * 0.8) * (kind === 'dump' ? 1.5 : 1)
+    const sigma = (0.02 + Math.pow(1 - passing, 1.5) * 0.36) * (1 + pressure * 0.8) * (kind === 'dump' ? 1.5 : 1)
     const dx = at.x - puck.x
     const dy = at.y - puck.y
     const L = Math.max(Math.hypot(dx, dy), 0.1)
@@ -998,7 +1009,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const goalieSkill = g.player.composites.goaltending
         // Shooter vs goalie on one scale (relative, so a league whose ratings
         // all sit lower or higher still scores NHL goals).
-        const finish = clamp(1 + (c.player.composites.scoring - goalieSkill + 4.5) / 45, 0.4, 1.8)
+        const lvl = LEVEL.offset + 66.5
+        const finish = clamp(1 + (c.player.composites.scoring - lvl) / 50 - (goalieSkill - (lvl + 6.5)) / 110, 0.4, 1.8)
         const cf = s.sim.team.coachFit === undefined ? 1 : coachFitMultiplier(s.sim.team.coachFit)
         let eff = xg
         eff *= 1 + clamp(err, 0, 5) * 0.12 // caught out of position
@@ -1394,7 +1406,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const sc = (r01(pk.player.ratings.defensive.stickChecking) + r01(pk.player.composites.takeaway)) / 2
         const pc = r01(c.player.composites.puckControl)
         const protect = (c.hx * (pk.x - c.x) + c.hy * (pk.y - c.y)) < 0 ? 0.6 : 1 // body between
-        const pSucc = clamp((0.01 + sc * sc * 0.25 + (sc - pc) * 0.1) * protect * AGENT_TUNING.pokeK, 0.001, 0.35)
+        const pSucc = clamp((0.004 + sc * sc * sc * 0.45 + (sc - pc) * 0.1) * protect * AGENT_TUNING.pokeK, 0.001, 0.35)
         if (tm) tm.pokeAttempts++
         if (rng.chance(pSucc)) {
           const s = w.control

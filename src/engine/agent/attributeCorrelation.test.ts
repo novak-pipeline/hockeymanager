@@ -104,11 +104,12 @@ describe('agent engine attribute correlations', () => {
     const rTake = rOf((p) => p.composites.takeaway, (a) => (a.takeaways / a.toi) * 3600)
     const rGive = rOf((p) => p.composites.puckControl, (a) => (a.giveaways / a.carryS) * 60, (a) => a.carryS >= 60)
     const rPass = rOf((p) => p.ratings.technical.passing, (a) => a.completed / a.passes, (a) => a.passes >= 30)
-    // eslint-disable-next-line no-console
-    console.log(
+    const line =
       `attribute r over ${skaters.length} skaters: hitting→hits/60 ${rHits.toFixed(2)}, takeaway→takeaways/60 ${rTake.toFixed(2)}, ` +
-        `puckControl→giveaways/min carried ${rGive.toFixed(2)}, passing→pass% ${rPass.toFixed(2)}`
-    )
+      `puckControl→giveaways/min carried ${rGive.toFixed(2)}, passing→pass% ${rPass.toFixed(2)}`
+    // eslint-disable-next-line no-console
+    if (process.env.CORR_LOG) process.stderr.write(line + '\n')
+    else console.log(line)
     expect(rHits).toBeGreaterThanOrEqual(0.3)
     expect(rTake).toBeGreaterThanOrEqual(0.3)
     expect(rGive).toBeLessThanOrEqual(-0.3)
