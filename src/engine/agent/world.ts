@@ -50,6 +50,8 @@ export interface World {
   oneTimerFor: Body | null
   /** Clock time each skater last had the puck on his stick (interference, finishing checks). */
   lastHad: Map<Body, number>
+  /** Delayed offside against this side: its men in the zone must tag up. */
+  delayedOffside: Side | null
 }
 
 export type CarrierAction =

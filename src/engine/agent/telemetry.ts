@@ -37,6 +37,7 @@ export interface AgentTelemetry {
   entriesDump: number
   entriesPass: number
   offsides: number
+  delayedOffsides: number
   icings: number
   overGlass: number
   pinWhistles: number
@@ -93,6 +94,7 @@ export function emptyAgentTelemetry(): AgentTelemetry {
     entriesDump: 0,
     entriesPass: 0,
     offsides: 0,
+    delayedOffsides: 0,
     icings: 0,
     overGlass: 0,
     pinWhistles: 0,

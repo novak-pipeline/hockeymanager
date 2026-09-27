@@ -50,7 +50,7 @@ const r01 = (v: number | undefined): number => clamp((v ?? 50) / 100, 0, 1)
 // ---------------------------------------------------------------------------
 
 /** Multiplier on the value of shooting (the shot-volume lever). */
-export const SHOOT_BIAS = { value: 1.0 }
+export const SHOOT_BIAS = { value: 0.75 }
 /** Seconds after a zone entry that play is still a "rush". */
 const RUSH_WINDOW = 4.5
 /** Stick reach from the body centre, ft. */
@@ -174,6 +174,12 @@ function passCompletion(p: XY, R: XY, v: number, passer: Body, opps: readonly Bo
     comp *= 1 - 0.55 * threat
   }
   return comp
+}
+
+/** Speed that sends a puck `d` ft to die around `at` (friction ≈ 4 ft/s²). */
+function rimSpeed(c: Body, at: XY, k: number): number {
+  const d = Math.hypot(at.x - c.x, at.y - c.y)
+  return clamp(Math.sqrt(2 * 4 * d) * k + 6, 22, 80)
 }
 
 // ---------------------------------------------------------------------------
@@ -322,7 +328,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       let chase = 0
       for (const r of me.skaters) if (r !== c) chase = Math.max(chase, 1 - clamp(reachTime(r, at.x, at.y) / 4, 0, 1))
       const ev = (0.25 + chase * 0.25) * posValue(a * 80, side * 30, a) - 0.45 * posValue(a * 80, side * 30, -a) * 0.6
-      opts.push({ ev: ev * (0.8 + dumping * 0.4), act: { kind: 'dump', at, speed: 58, lift: 0 } })
+      opts.push({ ev: ev * (0.8 + dumping * 0.4), act: { kind: 'dump', at, speed: rimSpeed(c, at, 1.35), lift: 0 } })
     }
     if (adv < -BLUE_X) {
       // Get it out: chip it off the glass to the neutral-zone boards; a PK
@@ -330,7 +336,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       const side = c.y >= 0 ? 1 : -1
       const chipAt = { x: a * 8, y: side * 40 }
       const ev = 0.4 * posValue(chipAt.x, chipAt.y, a) - 0.5 * posValue(chipAt.x, chipAt.y, -a) * 0.8
-      opts.push({ ev: ev - (pressure < 0.4 ? 0.004 : 0), act: { kind: 'dump', at: chipAt, speed: 46, lift: 9 } })
+      opts.push({ ev: ev - (pressure < 0.4 ? 0.004 : 0), act: { kind: 'dump', at: chipAt, speed: rimSpeed(c, chipAt, 1.1), lift: 9 } })
       if (me.shorthanded) {
         const at = { x: a * 90, y: clamp(c.y, -20, 20) }
         opts.push({ ev: 0.012, act: { kind: 'dump', at, speed: 85, lift: 0 } })
@@ -452,7 +458,8 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
     const lead = Math.min(0.5, Math.hypot(puck.vx, puck.vy) / 60)
     const tx = puck.x + puck.vx * lead
     const ty = puck.y + puck.vy * lead
-    const sorted = [...pool].sort((p, q) => reachTime(p, tx, ty) - reachTime(q, tx, ty))
+    const eligible = pool.filter((b) => !(w.delayedOffside === me && b.x * a > BLUE_X - 1))
+    const sorted = [...eligible].sort((p, q) => reachTime(p, tx, ty) - reachTime(q, tx, ty))
     if (w.passTo && sorted.includes(w.passTo)) {
       // The intended receiver meets the pass.
       chasers.add(w.passTo)
@@ -595,6 +602,11 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
     } else {
       const dr = drift(b, w.t)
       t = { x: t.x + dr.x, y: t.y + dr.y }
+    }
+    // Delayed offside against us: everyone in the zone skates out to tag up.
+    if (w.delayedOffside === me && b.x * a > BLUE_X - 1) {
+      t = { x: a * (BLUE_X - 4), y: b.y }
+      urgency = 1
     }
     // Onside discipline: while the puck is outside the zone, attackers stay
     // (or get back) onside — the tag-up.

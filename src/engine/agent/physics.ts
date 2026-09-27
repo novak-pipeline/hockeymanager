@@ -169,7 +169,7 @@ export function stepBody(b: Body, cmd: MoveCmd, dt: number): void {
   const vdx = d > 1e-6 ? (dx / d) * want : 0
   const vdy = d > 1e-6 ? (dy / d) * want : 0
 
-  const tau = 0.75 - 0.5 * clamp(cmd.urgency, 0, 1)
+  const tau = 1.6 - 1.25 * clamp(cmd.urgency, 0, 1)
   let ax = (vdx - b.vx) / tau
   let ay = (vdy - b.vy) / tau
   const sp = speedOf(b)

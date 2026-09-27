@@ -87,17 +87,17 @@ const DT = FRAME_DT / SUBSTEPS
 // ---------------------------------------------------------------------------
 export const AGENT_TUNING = {
   /** Reconciles the empirical xG with this engine's shot mix → goals/game. */
-  finishK: 0.62,
+  finishK: 0.5,
   /** Base share of unblocked attempts that miss the net. */
-  missBase: 0.33,
+  missBase: 0.24,
   /** Base per-contact shot-block chance for a body square in the lane. */
-  blockBase: 0.62,
+  blockBase: 0.9,
   /** Poke-check success scale (takeaways). */
-  pokeK: 1.0,
+  pokeK: 0.35,
   /** Unforced fumble rate under pressure (giveaways). */
   fumbleK: 1.0,
   /** Per-think stick-foul chance when beaten (penalties). */
-  stickFoulK: 1.0,
+  stickFoulK: 0.35,
   /** Misc stoppages per second of live play ("other": net off, high stick…). */
   miscStopPerSec: 0.0028
 }
@@ -199,7 +199,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     passTo: null,
     flightSide: null,
     oneTimerFor: null,
-    lastHad: new Map()
+    lastHad: new Map(),
+    delayedOffside: null
   }
   let flight = null as Flight | null
   let now = 0
@@ -215,6 +216,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   let boardPinSince = -1
   const lastShift = new Map<Side, number>([[H, 0], [A, 0]])
   const cmds = new Map<Body, MoveCmd>()
+  const smooth = new Map<Body, { x: number; y: number }>()
   let prevAdv = 0 // puck x in the controlling side's frame, last substep
   let lastCarrierAdvSide: Side | null = null
   const hitIntent = new Map<Body, HitIntent>()
@@ -338,6 +340,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     w.flightSide = null
     w.oneTimerFor = null
     puck.vx = puck.vy = puck.vz = puck.z = 0
+    w.delayedOffside = null
     hitIntent.clear()
     // A delayed penalty is assessed at the whistle.
     if (delayed) assessDelayed()
@@ -462,7 +465,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       const done = flight.side === s
       flight.passEv.completed = done
       if (done && flight.to && b !== flight.to) flight.passEv.to = b.player.id
-      if (!done && flight.from) {
+      // Scorers log an intercepted pass as a giveaway only some of the time
+      // (the NHL's recorded giveaways are the egregious ones).
+      if (!done && flight.from && rng.chance(0.3)) {
         // Picked off: the passer gave it away.
         ev({ t: T(), period, type: 'giveaway', player: flight.from.player.id, pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y } })
         if (tm) tm.giveaways++
@@ -490,6 +495,14 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     if (prevSide !== s) touches.length = 0
     touches.push({ b, side: s, t: now })
     if (touches.length > 6) touches.shift()
+    // Delayed offside: an offside attacker's team plays the puck in the zone.
+    if (w.delayedOffside === s && puck.x * s.a > BLUE_X) {
+      if (anyOffside(s)) {
+        callOffside(s)
+        return
+      }
+      w.delayedOffside = null
+    }
     // Delayed penalty: the offending side touched it — whistle.
     if (delayed && delayed.side === s) {
       stopPlay(dzDot(s, puck.y), 'defensive', s, 'penalty')
@@ -1103,7 +1116,19 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       const all: Body[] = []
       for (const s of sides) {
         for (const b of s.skaters) {
-          const cmd = cmds.get(b) ?? { tx: b.x, ty: b.y, speed: 0, arrive: true, urgency: 0.3 }
+          const raw = cmds.get(b) ?? { tx: b.x, ty: b.y, speed: 0, arrive: true, urgency: 0.3 }
+          // A player drifting into shape reads the play continuously: his
+          // target glides (≈0.45 s lag) instead of jumping every think — no
+          // twitch. Racing/pressing/carrying men react at once.
+          let cmd = raw
+          const sm = smooth.get(b)
+          if (raw.urgency < 0.85 && b !== w.carrier && sm && !pending) {
+            const f = DT / 0.45
+            sm.x += (raw.tx - sm.x) * f
+            sm.y += (raw.ty - sm.y) * f
+            cmd = { ...raw, tx: sm.x, ty: sm.y }
+          } else smooth.set(b, { x: raw.tx, y: raw.ty })
+          if (!sm) smooth.set(b, { x: raw.tx, y: raw.ty })
           stepBody(b, cmd, DT)
           all.push(b)
           if (tm) tm.noteAccel(b.accMag, speedOf(b))
@@ -1126,7 +1151,6 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         if (tm) tm.noteHit(r)
         if (r.loosePuck && w.carrier === r.victim) {
           const ang = Math.atan2(r.victim.vy, r.victim.vx) + rng.float(-1, 1)
-          poke = { by: r.hitter, from: r.victim, side: sideOf(r.hitter)!, t: now }
           loosen(Math.cos(ang) * rng.float(4, 10) + r.victim.vx * 0.3, Math.sin(ang) * rng.float(4, 10) + r.victim.vy * 0.3, null)
           flight!.tried.set(r.victim, now)
         }
@@ -1135,6 +1159,10 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       now += DT
       w.t = now
       if (deadAt !== null) continue
+      if (w.delayedOffside) {
+        const ds = w.delayedOffside
+        if (puck.x * ds.a < BLUE_X || !anyOffside(ds)) w.delayedOffside = null
+      }
 
       // Puck.
       if (w.carrier) {
@@ -1149,7 +1177,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const s = w.control!
         const adv = puck.x * s.a
         if (lastCarrierAdvSide === s && prevAdv < BLUE_X && adv >= BLUE_X) {
-          if (checkOffside(s)) continue
+          if (checkOffside(s, true)) continue
           s.entryAt = now
           if (tm) tm.entriesCarry++
         }
@@ -1181,7 +1209,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         if (fs && flight && flight.kind !== 'loose') {
           const adv = puck.x * fs.a
           if (lastCarrierAdvSide === fs && prevAdv < BLUE_X && adv >= BLUE_X) {
-            if (checkOffside(fs)) continue
+            if (checkOffside(fs, false)) continue
             fs.entryAt = now
             if (tm) {
               if (flight.kind === 'dump') tm.entriesDump++
@@ -1238,16 +1266,31 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     return null
   }
 
-  function checkOffside(s: Side): boolean {
-    const carrierNow = w.carrier
-    for (const b of s.skaters) {
-      if (b === carrierNow) continue
-      if (b.x * s.a > BLUE_X + 1) {
-        if (tm) tm.offsides++
-        stopPlay(dotFt(s.a * DOT_NZ_X, puck.y >= 0 ? DOT_Y : -DOT_Y), 'neutral', null, 'offside')
-        return true
-      }
+  function anyOffside(s: Side): boolean {
+    for (const b of s.skaters) if (b !== w.carrier && b.x * s.a > BLUE_X + 1) return true
+    return false
+  }
+
+  function callOffside(s: Side): void {
+    if (tm) tm.offsides++
+    w.delayedOffside = null
+    stopPlay(dotFt(s.a * DOT_NZ_X, puck.y >= 0 ? DOT_Y : -DOT_Y), 'neutral', null, 'offside')
+  }
+
+  /**
+   * The puck crossed `s`'s offensive blue line. Carried over with a teammate
+   * ahead of it: offside, whistle. Passed or shot in: DELAYED offside — play
+   * on while the offending men tag up; whistle only if the attackers touch
+   * the puck in the zone before they all get back out (NHL rule 83).
+   */
+  function checkOffside(s: Side, carried: boolean): boolean {
+    if (!anyOffside(s)) return false
+    if (carried) {
+      callOffside(s)
+      return true
     }
+    w.delayedOffside = s
+    if (tm) tm.delayedOffsides++
     return false
   }
 

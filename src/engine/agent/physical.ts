@@ -27,9 +27,9 @@ const r01 = (v: number | undefined): number => clamp((v ?? 50) / 100, 0, 1)
 
 export const HIT_TUNING = {
   /** Per-think chance scale that a willing defender commits to a check. */
-  intentK: 0.05,
+  intentK: 0.009,
   /** Contact closing speed (ft/s) needed for a collision to count as a hit when unplanned. */
-  incidentalClosing: 15,
+  incidentalClosing: 19,
   /** Minimum closing speed for a planned hit to land as a hit. */
   plannedClosing: 4.5,
   /** Penalty scale on dangerous hits. */
@@ -148,8 +148,8 @@ export function resolveHit(w: World, ct: Contact, intents: Map<Body, HitIntent>,
     if (ct.closing < HIT_TUNING.incidentalClosing) return null
     // Incidental contact only counts around the puck (a battle), not two men
     // brushing in open ice away from the play.
-    const near = (b: Body): boolean => Math.hypot(b.x - w.puck.x, b.y - w.puck.y) < 10
-    if (!near(ct.a) && !near(ct.b)) return null
+    const battling = (b: Body): boolean => w.carrier === b || w.t - (w.lastHad.get(b) ?? -99) < 0.6
+    if (!battling(ct.a) && !battling(ct.b)) return null
     // Incidental: the faster-moving body into the other.
     const fa = speedOf(ct.a) * ct.a.mass
     const fb = speedOf(ct.b) * ct.b.mass
