@@ -8,7 +8,7 @@
  * period clock at any instant. The renderer never computes hockey — it only
  * reads this.
  */
-import type { FrameEvent, GameStream, PlayerId, XY } from '@domain'
+import type { FrameEvent, GameStream, PlayerId, SkaterSnapshot, XY } from '@domain'
 import { isEvent } from '@domain'
 
 const REGULATION_PERIOD_SECONDS = 1200
@@ -81,6 +81,11 @@ export interface PosSnapshot {
   homeGoalieId?: PlayerId
   /** Goalie player ID (away side). */
   awayGoalieId?: PlayerId
+  /** Puck height above the ice, ft (agent engine; absent = on the ice). */
+  puckZ?: number
+  /** Body facing per skater index, radians in rink feet (agent engine; absent = infer from travel). */
+  homeFacing?: (number | undefined)[]
+  awayFacing?: (number | undefined)[]
 }
 
 export interface ClockLabel {
@@ -314,6 +319,10 @@ export class MatchTimeline {
       awayIds: dom.away.map((s) => s.player),
       homeGoalieId: dom.homeGoalie.player,
       awayGoalieId: dom.awayGoalie.player,
+      ...(a.puckZ !== undefined || b.puckZ !== undefined
+        ? { puckZ: stoppageT !== null ? (absT < stoppageT ? a.puckZ ?? 0 : b.puckZ ?? 0) : (a.puckZ ?? 0) + ((b.puckZ ?? 0) - (a.puckZ ?? 0)) * f }
+        : {}),
+      ...(dom.home.some((s) => s.facing !== undefined) ? { homeFacing: blendFacing(a.home, b.home, f), awayFacing: blendFacing(a.away, b.away, f) } : {}),
     }
   }
 
@@ -413,7 +422,20 @@ function snapshotOf(frame: FrameEvent): PosSnapshot {
     awayIds: frame.away.map((s) => s.player),
     homeGoalieId: frame.homeGoalie.player,
     awayGoalieId: frame.awayGoalie.player,
+    ...(frame.puckZ !== undefined ? { puckZ: frame.puckZ } : {}),
+    ...(frame.home.some((s) => s.facing !== undefined) ? { homeFacing: frame.home.map((s) => s.facing), awayFacing: frame.away.map((s) => s.facing) } : {}),
   }
+}
+
+/** Facing per slot: shortest-arc blend when the same player holds it, else the later frame's. */
+function blendFacing(a: SkaterSnapshot[], b: SkaterSnapshot[], f: number): (number | undefined)[] {
+  return b.map((bs, i) => {
+    const as = a[i]
+    if (bs.facing === undefined) return undefined
+    if (!as || as.player !== bs.player || as.facing === undefined) return bs.facing
+    const d = Math.atan2(Math.sin(bs.facing - as.facing), Math.cos(bs.facing - as.facing))
+    return as.facing + d * f
+  })
 }
 
 type Slot = { player: PlayerId; pos: XY }

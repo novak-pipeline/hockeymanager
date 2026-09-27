@@ -143,6 +143,8 @@ const PLAY_FOCUS_DEADZONE_Z = 5.0   // ft on the width axis
 const MAX_TURN_RATE_RAD_PER_SEC = (Math.PI * 200) / 180
 // Facing follows a SMOOTHED direction of travel, not the per-frame velocity.
 const FACING_VEL_TAU = 0.3
+// Action clips that are really locomotion: the stick stays on the ice through them (groundStick).
+const GROUNDED_CLIPS = new Set(['hockey_stop', 'skate_start'])
 
 // ── Movement limits ─────────────────────────────────────────────────────────
 // Nothing on the ice moves faster than an elite skater: a residual teleport in
@@ -1265,8 +1267,8 @@ export class Rink3dRenderer implements MatchRenderer {
     const puckWz = normYtoWorld(snap.puck.y)
 
     // Skaters: rigs are bound to PLAYERS, not timeline slots (see lineChange.ts)
-    this.syncSide('home', this.homePoses, snap.home, snap.homeIds, dt, simDt, puckWx, puckWz)
-    this.syncSide('away', this.awayPoses, snap.away, snap.awayIds, dt, simDt, puckWx, puckWz)
+    this.syncSide('home', this.homePoses, snap.home, snap.homeIds, dt, simDt, puckWx, puckWz, snap.homeFacing)
+    this.syncSide('away', this.awayPoses, snap.away, snap.awayIds, dt, simDt, puckWx, puckWz, snap.awayFacing)
 
     // Goalies
     if (this.homeGoaliePose) {
@@ -1316,7 +1318,9 @@ export class Rink3dRenderer implements MatchRenderer {
     // carried↔loose handoff blends, over a few frames (math.ts puckTrackStep).
     this.puck = puckTrackStep(this.puck, pTargetX, pTargetZ, carrierPose?.playerId ?? '', dt)
 
-    this.puckMesh.position.set(this.puck.x, PUCK_H / 2, this.puck.z)
+    // a loose puck rides the engine's height (agent engine: chips, saucers, clears; absent = on the ice)
+    const puckY = carrierPose === null ? Math.max(0, snap.puckZ ?? 0) : 0
+    this.puckMesh.position.set(this.puck.x, PUCK_H / 2 + puckY, this.puck.z)
     this.carrierMarkPose = carrierPose
 
     this.batch.sync()
@@ -1343,11 +1347,13 @@ export class Rink3dRenderer implements MatchRenderer {
     if (!w) return
     const lift = w.y - 0.02
     const playing = pose.layer?.playing
-    const eligible = !(playing && playing.some((n) => n !== 'hockey_stop')) && lift <= 0.8
+    // the puck carrier keeps his blade down harder (the puck rides it)
+    const full = pose.playerId !== null && pose.playerId === this.lastCarrier ? 1.1 : 0.6
+    const eligible = !(playing && playing.some((n) => !GROUNDED_CLIPS.has(n))) && lift <= full + 0.2
     // eased in / out (~0.1 s half-life) so a clip starting or ending doesn't pop the stick
     const prev = this.groundW.get(pose) ?? (eligible ? 1 : 0)
     const k = dt > 0 ? 1 - Math.pow(0.5, dt / 0.1) : 0
-    const gw = prev + ((eligible ? (lift <= 0.6 ? 1 : 1 - (lift - 0.6) / 0.2) : 0) - prev) * k
+    const gw = prev + ((eligible ? (lift <= full ? 1 : 1 - (lift - full) / 0.2) : 0) - prev) * k
     this.groundW.set(pose, gw)
     if (gw < 0.01 || lift < 0.02) return
     const weight = gw
@@ -1438,6 +1444,7 @@ export class Rink3dRenderer implements MatchRenderer {
     pos: ReadonlyArray<{ x: number; y: number } | undefined>,
     ids: ReadonlyArray<PlayerId | undefined> | undefined,
     dt: number, simDt: number, puckWx: number, puckWz: number,
+    facing?: ReadonlyArray<number | undefined>,
   ): void {
     const gate = BENCH_GATE[team]
     const idList = (ids ?? []).map((id) => (id as string | undefined))
@@ -1494,11 +1501,13 @@ export class Rink3dRenderer implements MatchRenderer {
         if (Math.hypot(pose.worldX.pos - tx, pose.worldZ.pos - tz) < 1.5) pose.mode = 'play'
         return
       }
-      this.updatePose(pose, tx, tz, dt, simDt, puckWx, puckWz, MAX_RENDER_SPEED)
+      this.updatePose(pose, tx, tz, dt, simDt, puckWx, puckWz, MAX_RENDER_SPEED, facing?.[k])
     })
   }
 
-  private updatePose(pose: PlayerPose, wx: number, wz: number, dt: number, simDt: number, puckWx: number, puckWz: number, maxSpeed = MAX_RENDER_SPEED): void {
+  private updatePose(pose: PlayerPose, wx: number, wz: number, dt: number, simDt: number, puckWx: number, puckWz: number, maxSpeed = MAX_RENDER_SPEED, simFacing?: number): void {
+    // the engine's own body facing (agent engine: backward-skating D, pivots) → renderer yaw
+    const simAngle = simFacing !== undefined ? Math.atan2(Math.cos(simFacing), Math.sin(simFacing)) : null
     if (dt > 0) {
       const px = pose.worldX.pos
       const pz = pose.worldZ.pos
@@ -1546,7 +1555,7 @@ export class Rink3dRenderer implements MatchRenderer {
       pose.velSmX = emaStep(pose.velSmX, vx / dt, dt, FACING_VEL_TAU)
       pose.velSmZ = emaStep(pose.velSmZ, vz / dt, dt, FACING_VEL_TAU)
       const smSpeed = Math.hypot(pose.velSmX, pose.velSmZ)
-      let target = facingTarget(Math.atan2(pose.velSmX, pose.velSmZ), smSpeed, Math.atan2(puckWx - pose.worldX.pos, puckWz - pose.worldZ.pos), pose.playerId !== null && pose.playerId === this.lastCarrier)
+      let target = simAngle ?? facingTarget(Math.atan2(pose.velSmX, pose.velSmZ), smSpeed, Math.atan2(puckWx - pose.worldX.pos, puckWz - pose.worldZ.pos), pose.playerId !== null && pose.playerId === this.lastCarrier)
       // a hit reaction / check faces the other man (choreo.ts) — through the same spring, never a snap
       const fo = pose.faceOverride
       if (fo && this.choreo && this.choreo.clock < fo.until) target = fo.angle
@@ -1560,7 +1569,7 @@ export class Rink3dRenderer implements MatchRenderer {
       }
     } else {
       // seek/load: no velocity yet — start squared up to the puck
-      pose.angle = Math.atan2(puckWx - wx, puckWz - wz)
+      pose.angle = simAngle ?? Math.atan2(puckWx - wx, puckWz - wz)
       pose.angVel = 0
       pose.velSmX = 0
       pose.velSmZ = 0
