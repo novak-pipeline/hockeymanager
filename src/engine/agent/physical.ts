@@ -28,7 +28,7 @@ const r01 = (v: number | undefined): number => clamp((v ?? 50) / 100, 0, 1)
 
 export const HIT_TUNING = {
   /** Per-think chance scale that a willing defender commits to a check. */
-  intentK: 0.005,
+  intentK: 0.006,
   /** Contact closing speed (ft/s) needed for a collision to count as a hit when unplanned. */
   incidentalClosing: 19,
   /** Minimum closing speed for a planned hit to land as a hit. */
@@ -80,7 +80,7 @@ export function hitAppetite(b: Body, side: Side, intensity: number): number {
   // strength, aggression); appetite rises steeply with it, so hitters HIT.
   const h = r01(b.player.composites.hitting)
   const m = b.player.ratings.mental
-  const base = 0.1 + h * h * 2.4 + r01(m.aggression) * 0.25
+  const base = 0.06 + Math.pow(h, 2.6) * 3.2 + r01(m.aggression) * 0.2
   const slider = 0.5 + (side.tactics.hitting ?? 0.5)
   return base * roleBoost(b) * slider * (1 + intensity * 0.35) * (0.6 + 0.4 * b.energy)
 }

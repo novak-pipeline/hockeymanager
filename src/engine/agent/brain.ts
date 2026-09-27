@@ -29,6 +29,10 @@ import {
   BREAKOUT,
   CYCLE,
   CYCLE_POINT,
+  FOUR_ATTACK,
+  FOUR_DEFEND,
+  PK_TRIANGLE,
+  PP_5V3,
   DZ_ZONE,
   NZ_DEFENSE,
   OT_ATTACK,
@@ -70,7 +74,7 @@ export const VAL = { oz: 0.09, kPos: 0.15, shoot: 0.9, keep: 0.25, noise: 0.5, n
  * speed toward our net, and the margin (s) by which a D must win a loose-puck
  * race above the safety line before he steps up for it.
  */
-export const D_SAFETY = { look: 1.5, gap: 10, gapPerV: 0.5, stepUpMargin: 0.8, pinchMaxX: 55, gapLead: 0.5, looseGuard: 1 }
+export const D_SAFETY = { look: 2, gap: 12, gapPerV: 0.5, stepUpMargin: 1.3, pinchMaxX: 55, gapLead: 0.5, looseGuard: 1 }
 /** Defending the house: the on-puck man engages (no containing) inside this radius of our net (ft). */
 export const DZ = { engageFt: 30 }
 /** Seconds after a zone entry that play is still a "rush". */
@@ -359,7 +363,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
           cmd: {
             tx: qx,
             ty: qy,
-            speed: protect ? 8 : c.caps.top * clamp(0.5 + urg * 0.4, 0.5, 0.9),
+            speed: protect ? 8 : c.caps.top * clamp(0.55 + urg * 0.4, 0.55, 0.95),
             // Holding up at the line for a mate to tag up: stop short of it.
             arrive: offsideMate && qx * a >= capX - 1,
             urgency: clamp(urg, 0.3, 1),
@@ -502,17 +506,22 @@ function supportTable(w: World, me: Side, withPuck: boolean): RoleSpot[] {
   const a = me.a
   const px = w.puck.x * a
   if (me.ot && !me.powerPlay) return withPuck ? OT_ATTACK : OT_DEFEND
+  const n = me.skaters.length
+  const m = opp.skaters.length
   if (withPuck) {
-    if (me.powerPlay && px > BLUE_X) return powerPlay(me.tactics.specialTeams.powerPlay)
+    if (me.powerPlay && px > BLUE_X) return n - m >= 2 ? PP_5V3 : powerPlay(me.tactics.specialTeams.powerPlay)
     if (px < -BLUE_X) return BREAKOUT
     if (px < BLUE_X) return TRANSITION
     if (w.t - me.entryAt < RUSH_WINDOW) return RUSH
+    // 4-on-4: more ice — two D up top, two forwards working low and the slot.
+    if (n === 4 && m === 4) return FOUR_ATTACK
     return px < 55 ? CYCLE_POINT : CYCLE
   }
-  if (me.shorthanded && px < -10) return penaltyKill(me.tactics.specialTeams.penaltyKill)
+  if (me.shorthanded && px < -10) return n <= 3 ? PK_TRIANGLE : penaltyKill(me.tactics.specialTeams.penaltyKill)
   if (px > BLUE_X) return forecheck(me.tactics.forecheck)
   if (px > -BLUE_X) return NZ_DEFENSE
-  void opp
+  // 4-on-4 in our end: a tight box.
+  if (n === 4 && m === 4) return FOUR_DEFEND
   return DZ_ZONE
 }
 
@@ -841,7 +850,7 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
       urgency = 0.7
       faceX = puck.x
       faceY = puck.y
-    } else if (!shapeWithPuck && (spot.role === 'D_NET' || spot.role === 'PK_NET' || spot.role === 'PK_LOW_W' || spot.role === 'OT_SLOT') && netFront) {
+    } else if (!shapeWithPuck && (spot.role === 'D_NET' || spot.role === 'PK_NET' || spot.role === 'PK_LOW_W' || spot.role === 'PK3_LOW_W' || spot.role === 'B4_LOW_W' || spot.role === 'OT_SLOT') && netFront) {
       // Box out the net-front man: goal-side of him, between him and the crease.
       const dx = ownNetX - netFront.x
       const dy = -netFront.y
@@ -919,7 +928,7 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
     const h = boardsClamp(t.x, t.y, 2)
     const dist = Math.hypot(h.x - b.x, h.y - b.y)
     // Far from the spot → skate; close → drift calmly into it.
-    const speed = b.caps.top * (backcheck ? 0.97 : clamp(0.45 + urgency * 0.5 + dist / 150, 0.35, 0.9))
+    const speed = b.caps.top * (backcheck ? 0.97 : clamp(0.5 + urgency * 0.5 + dist / 120, 0.4, 0.96))
     cmds.set(b, {
       tx: h.x,
       ty: h.y,

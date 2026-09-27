@@ -89,13 +89,13 @@ const DT = FRAME_DT / SUBSTEPS
 // ---------------------------------------------------------------------------
 export const AGENT_TUNING = {
   /** Reconciles the empirical xG with this engine's shot mix → goals/game. */
-  finishK: 0.79,
+  finishK: 0.74,
   /** Base share of unblocked attempts that miss the net. */
   missBase: 0.3,
   /** Poke-check success scale (takeaways). */
-  pokeK: 0.17,
+  pokeK: 0.11,
   /** Unforced fumble rate under pressure (giveaways). */
-  fumbleK: 1.2,
+  fumbleK: 4.5,
   /** Per-think stick-foul chance when beaten (penalties). */
   stickFoulK: 2.5,
   /** Misc stoppages per second of live play ("other": net off, high stick…). */
@@ -686,7 +686,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       // Scorers log an intercepted pass as a giveaway only some of the time
       // (the NHL's recorded giveaways are the egregious ones).
       if (!done) flight.passEv.interceptedBy = b.player.id
-      if (!done && flight.from && rng.chance(0.3)) {
+      if (!done && flight.from && rng.chance(0.15)) {
         // Picked off: the passer gave it away.
         ev({ t: T(), period, type: 'giveaway', player: flight.from.player.id, pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y } })
         if (tm) tm.giveaways++
@@ -762,7 +762,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     let lift = liftIn
     const passing = r01(c.player.ratings.technical.passing)
     const pressure = pressureOn(c, oppOf(s).skaters)
-    const sigma = (0.025 + (1 - passing) * 0.07) * (1 + pressure * 0.8) * (kind === 'dump' ? 1.5 : 1)
+    // Aim error grows steeply as passing falls: the good passer hits the tape
+    // under pressure, the poor one puts it in skates (completion shows it).
+    const sigma = (0.02 + Math.pow(1 - passing, 1.5) * 0.3) * (1 + pressure * 0.8) * (kind === 'dump' ? 1.5 : 1)
     const dx = at.x - puck.x
     const dy = at.y - puck.y
     const L = Math.max(Math.hypot(dx, dy), 0.1)
@@ -1373,7 +1375,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         for (const b of s.skaters) {
           const tgt = w.carrier === b ? null : decideHit(w, s, b, hitIntent, ctx.intensity ?? 0)
           if (tgt) {
-            cmds.set(b, { tx: tgt.x + tgt.vx * 0.2, ty: tgt.y + tgt.vy * 0.2, speed: b.caps.top, arrive: false, urgency: 1 })
+            cmds.set(b, { tx: tgt.x + tgt.vx * 0.2, ty: tgt.y + tgt.vy * 0.2, speed: b.caps.top, arrive: false, urgency: 1, boardsOk: true })
           }
         }
       }
@@ -1383,10 +1385,10 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         if (!c || !w.control) break
         const dp = Math.hypot(pk.x - puck.x, pk.y - puck.y)
         if (dp > REACH) continue
-        const sc = r01(pk.player.ratings.defensive.stickChecking)
+        const sc = (r01(pk.player.ratings.defensive.stickChecking) + r01(pk.player.composites.takeaway)) / 2
         const pc = r01(c.player.composites.puckControl)
         const protect = (c.hx * (pk.x - c.x) + c.hy * (pk.y - c.y)) < 0 ? 0.6 : 1 // body between
-        const pSucc = clamp((0.05 + (sc - pc) * 0.12 + sc * 0.06) * protect * AGENT_TUNING.pokeK, 0.001, 0.35)
+        const pSucc = clamp((0.01 + sc * sc * 0.25 + (sc - pc) * 0.1) * protect * AGENT_TUNING.pokeK, 0.001, 0.35)
         if (tm) tm.pokeAttempts++
         if (rng.chance(pSucc)) {
           const s = w.control
@@ -1423,7 +1425,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const c = w.carrier
         const pr = pressureOn(c, oppOf(w.control).skaters)
         const pc = r01(c.player.composites.puckControl)
-        if (pr > 0.35 && rng.chance(0.006 * AGENT_TUNING.fumbleK * pr * (1.5 - pc))) {
+        if (pr > 0.35 && rng.chance(0.006 * AGENT_TUNING.fumbleK * pr * 2.5 * Math.pow(1.2 - pc, 3))) {
           fumble = { by: c, side: w.control, t: now }
           const ang = rng.float(0, Math.PI * 2)
           loosen(c.vx + Math.cos(ang) * 6, c.vy + Math.sin(ang) * 6, w.control)
@@ -1541,7 +1543,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
             sh && (sh.ox !== 0 || sh.oy !== 0 || sh.sf !== 1 || tx !== raw.tx)
               ? { ...raw, tx: tx + sh.ox, ty: ty + sh.oy, speed: raw.speed * sh.sf }
               : raw
+          const v0x = b.vx, v0y = b.vy
           stepBody(b, cmd, DT)
+          if (tm && Math.hypot(b.vx - v0x, b.vy - v0y) / DT > 30) { const k = `dv:step:${Math.round(Math.hypot(v0x, v0y) / 5) * 5}->${Math.round(speedOf(b) / 5) * 5}`; tm.dbg[k] = (tm.dbg[k] ?? 0) + 1 }
           all.push(b)
           if (tm) tm.noteAccel(b.accMag, speedOf(b))
         }
@@ -1551,8 +1555,12 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         all.push(s.goalie)
       }
       const contacts: Contact[] = []
+      const vb = all.map((q) => [q.vx, q.vy])
       resolveBodies(all, contacts)
+      if (tm) all.forEach((q, i) => { if (Math.hypot(q.vx - vb[i][0], q.vy - vb[i][1]) / DT > 30) { const k = `dv:contact:${q.player.position}`; tm.dbg[k] = (tm.dbg[k] ?? 0) + 1 } })
+      const vc = all.map((q) => [q.vx, q.vy])
       for (const b of all) constrainBody(b)
+      if (tm) all.forEach((q, i) => { if (Math.hypot(q.vx - vc[i][0], q.vy - vc[i][1]) / DT > 30) { const k = `dv:constrain:${q.player.position}`; tm.dbg[k] = (tm.dbg[k] ?? 0) + 1 } })
       if (tm) tm.noteOverlap(all)
       // Contacts → hits (the physical game reads real collisions).
       for (const ct of contacts) {
@@ -1906,7 +1914,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       // A defender draped on the receiver contests the reception.
       let cover = 0
       for (const o of (s === H ? A : H).skaters) if (Math.hypot(o.x - b.x, o.y - b.y) < 3.5) cover++
-      if (f.kind === 'pass' && b === f.to) p = clamp(0.94 - Math.max(0, rel - 55) / 140 + (hands - 0.5) * 0.12 - cover * 0.22, 0.3, 0.99)
+      // A good pass is easy to take (on the tape, the right weight); a poor
+      // passer's puck arrives in the feet or bouncing.
+      if (f.kind === 'pass' && b === f.to) p = clamp(0.94 - Math.max(0, rel - 55) / 140 + (hands - 0.5) * 0.12 + (r01(f.from?.player.ratings.technical.passing) - 0.55) * 0.3 - cover * 0.22, 0.3, 0.99)
       else if (f.kind === 'pass' && mine) p = clamp(0.8 - Math.max(0, rel - 45) / 120, 0.4, 0.95)
       else if (f.kind === 'pass') {
         const read = (r01(b.player.ratings.mental.anticipation) + r01(b.player.ratings.defensive.stickChecking)) / 2
