@@ -1286,7 +1286,14 @@ export class Rink3dRenderer implements MatchRenderer {
     // Puck position: if carried, sits on the carrier's blade
     let pTargetX: number
     let pTargetZ: number
-    if (carrierPose !== null) {
+    const blade = carrierPose !== null ? this.bladePoint(carrierPose) : null
+    if (carrierPose !== null && blade) {
+      // on the posed blade (C3): wherever the clip / IK actually put the stick
+      pTargetX = blade.x
+      pTargetZ = blade.z
+      this.carrierWx = carrierPose.worldX.pos
+      this.carrierWz = carrierPose.worldZ.pos
+    } else if (carrierPose !== null) {
       const offset = puckCarriedOffset(carrierPose.angle)
       pTargetX = carrierPose.worldX.pos + offset.dx
       pTargetZ = carrierPose.worldZ.pos + offset.dz
@@ -1308,6 +1315,30 @@ export class Rink3dRenderer implements MatchRenderer {
 
     this.batch.sync()
     this.syncBlobs()
+  }
+
+  private readonly bladeTmp = new THREE.Vector3()
+  private readonly bladeDir = new THREE.Vector3()
+  /**
+   * Where a carried puck sits: on the carrier's POSED blade (audit C3 — a
+   * fixed body offset left the drawn puck > 1.5 ft off the blade in 32% of
+   * carried frames with the owner athletes, whose clips/IK move the stick
+   * elsewhere). The blade bone's origin, a few inches along the blade, on the
+   * ice. Null (→ the body offset) if the rig has no blade or it's implausibly
+   * far from the body (a clip mid-swing, a missing bone binding).
+   */
+  private bladePoint(pose: PlayerPose): { x: number; z: number } | null {
+    const b = pose.rig.bones?.stick_blade
+    if (!b) return null
+    b.updateWorldMatrix(true, false)
+    const e = b.matrixWorld.elements
+    this.bladeDir.setFromMatrixColumn(b.matrixWorld, 0)
+    const len = Math.hypot(this.bladeDir.x, this.bladeDir.z)
+    const along = len > 1e-6 ? 0.35 / len : 0
+    this.bladeTmp.set(e[12]! + this.bladeDir.x * along, 0, e[14]! + this.bladeDir.z * along)
+    const d = Math.hypot(this.bladeTmp.x - pose.worldX.pos, this.bladeTmp.z - pose.worldZ.pos)
+    if (!Number.isFinite(d) || d > 6.5) return null
+    return { x: this.bladeTmp.x, z: this.bladeTmp.z }
   }
 
   private syncBlobs(): void {
