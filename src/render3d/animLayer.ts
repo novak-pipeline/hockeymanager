@@ -123,6 +123,8 @@ export class ActionLayer {
    * with the new one are released (they fade out under it, no pop).
    */
   play(name: string, opts: { at?: number; speed?: number; weight?: number; fadeless?: boolean } = {}): boolean {
+    // owner-only slots fall back to the Blender clip when the import lacks them
+    if (!this.clips.has(name) && CLIPS[name]?.fallback) name = CLIPS[name]!.fallback!
     const clip = this.clips.get(name)
     const meta = CLIPS[name]
     if (!clip || !meta) return false

@@ -29,6 +29,7 @@ import {
   CLIPS,
   celebrationFor,
   distToBoards,
+  goalieLocoWeights,
   hitPlan,
   locomotionWeights,
   saveClipFor,
@@ -93,8 +94,13 @@ export interface PlannedCue {
   lead: number
 }
 
-/** Plan every cue: which clip and how early it must start (pure; tested). */
-export function planCues(cues: ActionCue[]): PlannedCue[] {
+/**
+ * Plan every cue: which clip and how early it must start (pure; tested).
+ * `contactOf` overrides a clip's catalogue contact time (owner imports carry
+ * their own, detected at import).
+ */
+export function planCues(cues: ActionCue[], contactOf: (clip: string) => number | undefined = () => undefined): PlannedCue[] {
+  const contact = (clip: string) => contactOf(clip) ?? CLIPS[clip]?.contact ?? 0
   const lastPassTo = new Map<string, number>()
   const out: PlannedCue[] = []
   for (const cue of cues) {
@@ -115,9 +121,9 @@ export function planCues(cues: ActionCue[]): PlannedCue[] {
       clip = 'faceoff_crouch'
       lead = FACEOFF_LEAD_S
     } else if (cue.kind === 'save') {
-      lead = CLIPS.g_glove_save!.contact ?? 0
+      lead = contact('g_glove_save')
     }
-    if (clip && cue.kind !== 'faceoff') lead = CLIPS[clip]?.contact ?? 0
+    if (clip && cue.kind !== 'faceoff') lead = contact(clip)
     out.push({ cue, clip, lead })
   }
   return out
@@ -148,6 +154,10 @@ export interface ChoreoActor {
   stopCooldown: number
   stopAccum: number
   stopFrom: number
+  /** Goalie butterfly blend 0..1 (the code pose) — owner goalie locomotion yields to it. */
+  butterfly?: number
+  /** Animation clock (s), advancing with the game clock. */
+  animTime?: number
 }
 
 export type LocoMode = 'code' | 'clip' | 'hybrid'
@@ -163,18 +173,24 @@ export class Choreographer {
   private faceoffCrouchers: ChoreoActor[] = []
   /** Choreographer clock (sim seconds). */
   clock = 0
+  /** Lateral offset (ft, + = goalie's left) of the last save planned. */
+  private lastLateral = 0
 
   constructor(
     private readonly find: (id: string) => ChoreoActor | null,
     private readonly all: () => ChoreoActor[],
     private readonly goalieDefending: (side: 'left' | 'right') => ChoreoActor | null,
     readonly loco: LocoMode,
-    private readonly locoClips: { skater: Map<string, BakedClip> | null },
-    private readonly baseFollowHL: number
+    private readonly locoClips: { skater: Map<string, BakedClip> | null; goalie?: Map<string, BakedClip> | null },
+    private readonly baseFollowHL: number,
+    /** Owner imports: the authored cycles drive the whole body (torso too), not just the legs. */
+    private readonly ownerLoco = false
   ) {}
 
   setCues(cues: ActionCue[]): void {
-    this.plans = planCues(cues)
+    const sk = this.locoClips.skater
+    const gk = this.locoClips.goalie
+    this.plans = planCues(cues, (c) => (CLIPS[c]?.goalie ? gk : sk)?.get(c)?.contact)
     this.reset()
   }
 
@@ -216,8 +232,10 @@ export class Choreographer {
     if (c.kind === 'save') {
       const g = this.find(c.actorId) ?? this.goalieDefending(c.nx < 0 ? 'left' : 'right')
       if (!g?.layer) return
-      const clip = this.saveClip(g, c)
-      g.layer.play(clip, { at: Math.max(0, (CLIPS[clip]?.contact ?? 0) - p.lead + late) })
+      let clip = this.saveClip(g, c)
+      if (clip === 'g_pad_save' && g.layer.has('g_pad_save_L')) clip = this.lastLateral > 0 ? 'g_pad_save_L' : 'g_pad_save_R'
+      const ct = this.locoClips.goalie?.get(clip)?.contact ?? CLIPS[clip]?.contact ?? 0
+      g.layer.play(clip, { at: Math.max(0, ct - p.lead + late) })
       return
     }
     const a = this.find(c.actorId)
@@ -287,6 +305,7 @@ export class Choreographer {
     // the goalie's left (catching glove) in world space
     const lateral = dx * Math.cos(g.angle) - dz * Math.sin(g.angle)
     const from = c.shotFrom ? Math.hypot(normXtoWorld(c.shotFrom.x) - g.worldX.pos, normYtoWorld(c.shotFrom.y) - g.worldZ.pos) : 25
+    this.lastLateral = lateral
     return saveClipFor(lateral, from, `${c.actorId}@${c.absT.toFixed(2)}`, !!c.rebound)
   }
 
@@ -322,7 +341,13 @@ export class Choreographer {
     // velocities are per wall-second; at 2×/4× playback bring them back to game speed
     const sp = Math.hypot(actor.vx, actor.vz) / Math.max(1, playbackSpeed)
     const decel = (actor.lastSpeedFt - sp) / dt
+    const was = actor.lastSpeedFt
     actor.lastSpeedFt = sp
+    // owner imports: a push-off clip when a skater gets going from a standstill
+    if (actor.stopCooldown === 0 && was < 3 && sp > 7 && actor.layer.has('skate_start') && actor.layer.bodyBusy() === 0) {
+      actor.layer.play('skate_start')
+      actor.stopCooldown = 1.5
+    }
     if (decel > 30) {
       if (actor.stopAccum === 0) actor.stopFrom = sp + decel * dt
       actor.stopAccum += dt
@@ -337,10 +362,13 @@ export class Choreographer {
   /** The PoseOverlay for one actor (built once; closes over the actor). */
   overlayFor(actor: ChoreoActor): PoseOverlay {
     const clips = this.locoClips.skater
+    const gclips = this.locoClips.goalie
     const loco = this.loco
+    const owner = this.ownerLoco
     return {
       body: (B) => {
-        if (clips && !actor.rig.goalie && loco !== 'code') blendLocomotion(B, clips, actor, loco)
+        if (clips && !actor.rig.goalie && loco !== 'code') blendLocomotion(B, clips, actor, loco, owner)
+        if (gclips && actor.rig.goalie && gclips.has('g_stance')) blendGoalieLocomotion(B, gclips, actor)
         actor.layer?.blendBody(B)
       },
       stick: (B) => actor.layer?.blendStick(B),
@@ -356,12 +384,20 @@ export class Choreographer {
  *   'hybrid' — the code keeps the forward stride/glide; the clips add
  *              crossovers and backward skating on top.
  */
-export function blendLocomotion(B: Record<BoneName, THREE.Bone>, clips: Map<string, BakedClip>, a: ChoreoActor, mode: LocoMode): void {
+export function blendLocomotion(B: Record<BoneName, THREE.Bone>, clips: Map<string, BakedClip>, a: ChoreoActor, mode: LocoMode, owner = false): void {
   const facing = a.angle
   const vAng = Math.atan2(a.vx, a.vz)
   const sp = Math.hypot(a.vx, a.vz)
   const back = sp > 1 ? Math.max(0, -Math.cos(wrapAngle(vAng - facing))) : 0
-  const w = locomotionWeights({ speed: a.speedSm, turnRate: a.turnSm, backward: back, decel: 0 })
+  // + = toward the player's left (his +X = (cos θ, −sin θ) in world X/Z)
+  const lateral = owner && sp > 1 ? Math.sin(wrapAngle(vAng - facing)) : 0
+  const w = locomotionWeights({ speed: a.speedSm, turnRate: a.turnSm, backward: back, decel: 0, lateral }) as Record<string, number>
+  if (owner && clips.has('skate_idle')) {
+    // an owner rig idles in its own stance instead of the Blender glide
+    w['skate_idle'] = w['skate_glide']!
+    w['skate_glide'] = 0
+  }
+  const mask = owner ? 'full' : 'lower'
   const phase01 = a.stridePhase / (2 * Math.PI)
   // Sequential slerps as a normalised weighted average: each clip gets
   // w_i / (W + w_i) where W is the weight already in the blend. In 'hybrid'
@@ -373,6 +409,31 @@ export function blendLocomotion(B: Record<BoneName, THREE.Bone>, clips: Map<stri
     if (!clip || weight <= 0.001) continue
     const f = weight / (W + weight)
     W += weight
-    blendClip(B as unknown as Record<string, THREE.Bone>, clip, phase01 * clip.duration, true, f, 'lower', 'body')
+    blendClip(B as unknown as Record<string, THREE.Bone>, clip, phase01 * clip.duration, true, f, mask, 'body')
+  }
+}
+
+/**
+ * Owner goalies: stance loop / forward / backward / lateral shuffle by the
+ * direction of travel relative to his facing; yields to the code butterfly.
+ */
+export function blendGoalieLocomotion(B: Record<BoneName, THREE.Bone>, clips: Map<string, BakedClip>, a: ChoreoActor): void {
+  const sp = Math.hypot(a.vx, a.vz)
+  const vAng = Math.atan2(a.vx, a.vz)
+  const fwd = sp > 0.5 ? Math.cos(wrapAngle(vAng - a.angle)) : 0
+  const lat = sp > 0.5 ? Math.sin(wrapAngle(vAng - a.angle)) : 0
+  const w = goalieLocoWeights(sp, fwd, lat)
+  const k = 1 - (a.butterfly ?? 0)
+  if (k <= 0.001) return
+  let W = 0
+  for (const [name, weight] of Object.entries(w) as Array<[string, number]>) {
+    const clip = clips.get(name)
+    if (!clip || weight <= 0.001) continue
+    const f = weight / (W + weight)
+    W += weight
+    // animTime only runs while the game clock does (a paused game is a frozen frame)
+    const at = a.animTime ?? 0
+    const t = name === 'g_stance' ? at : at * Math.min(1.5, Math.max(0.6, sp / 8))
+    blendClip(B as unknown as Record<string, THREE.Bone>, clip, t, true, f * k, 'full', 'body')
   }
 }

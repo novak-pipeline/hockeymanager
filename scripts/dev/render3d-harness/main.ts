@@ -33,9 +33,9 @@ const colors = { home: Number(q.get('home') ?? 0x1f4fbf), away: Number(q.get('aw
 const oldPath = './old-rink3dRenderer.ts'
 const Impl: typeof Rink3dRenderer =
   q.get('old') === '1' ? ((await import(/* @vite-ignore */ oldPath)).Rink3dRenderer as typeof Rink3dRenderer) : Rink3dRenderer
-// Defaults follow the app (RENDER3D_DEFAULTS): ?model=procedural|blender, &loco=code|clip|hybrid override
+// Defaults follow the app (RENDER3D_DEFAULTS): ?model=owner|blender|procedural|auto, &loco=code|clip|hybrid override
 const r = await Impl.create(host, colors, {
-  ...(q.has('model') ? { athletes: q.get('model') === 'procedural' ? 'procedural' : 'blender' } : {}),
+  ...(q.has('model') ? { athletes: q.get('model') as 'auto' | 'owner' | 'blender' | 'procedural' } : {}),
   ...(q.has('loco') ? { locomotion: q.get('loco') as 'code' | 'clip' | 'hybrid' } : {}),
 })
 r.setEventStream(out.stream)

@@ -33,6 +33,12 @@ export interface ClipMeta {
   /** Chain into this clip when finished (hit_fall → getup). */
   next?: string
   goalie?: boolean
+  /**
+   * Slot only an OWNER import fills (scripts/blender/import_owner_assets.py);
+   * the Blender build doesn't author it. `fallback` plays instead when missing.
+   */
+  ownerOnly?: boolean
+  fallback?: string
 }
 
 const f = (frame: number) => frame / 30
@@ -76,10 +82,21 @@ export const CLIPS: Record<string, ClipMeta> = {
   g_pad_save: { mask: 'full', hands: 'clip', contact: f(4), fadeIn: 0.05, fadeOut: 0.3, goalie: true },
   g_scramble: { mask: 'full', hands: 'clip', contact: f(8), fadeIn: 0.08, fadeOut: 0.3, goalie: true },
   g_dejected: { mask: 'full', hands: 'clip', fadeIn: 0.4, fadeOut: 0.5, hold: 1.5, goalie: true },
+
+  // owner-import slots (the Blender fallback covers them otherwise)
+  skate_idle: { mask: 'lower', hands: 'stick', loop: true, fadeIn: 0.3, fadeOut: 0.3, ownerOnly: true, fallback: 'skate_glide' },
+  skate_start: { mask: 'lower', hands: 'stick', fadeIn: 0.12, fadeOut: 0.3, ownerOnly: true },
+  g_pad_save_L: { mask: 'full', hands: 'clip', contact: f(4), fadeIn: 0.05, fadeOut: 0.3, goalie: true, ownerOnly: true, fallback: 'g_pad_save' },
+  g_pad_save_R: { mask: 'full', hands: 'clip', contact: f(4), fadeIn: 0.05, fadeOut: 0.3, goalie: true, ownerOnly: true, fallback: 'g_pad_save' },
+  g_skate_fwd: { mask: 'lower', hands: 'clip', loop: true, fadeIn: 0.3, fadeOut: 0.3, goalie: true, ownerOnly: true },
+  g_skate_back: { mask: 'lower', hands: 'clip', loop: true, fadeIn: 0.3, fadeOut: 0.3, goalie: true, ownerOnly: true },
+  g_shuffle_L: { mask: 'lower', hands: 'clip', loop: true, fadeIn: 0.25, fadeOut: 0.25, goalie: true, ownerOnly: true },
+  g_shuffle_R: { mask: 'lower', hands: 'clip', loop: true, fadeIn: 0.25, fadeOut: 0.25, goalie: true, ownerOnly: true },
 }
 
-export const SKATER_CLIPS = Object.keys(CLIPS).filter((k) => !CLIPS[k]!.goalie)
-export const GOALIE_CLIPS = Object.keys(CLIPS).filter((k) => CLIPS[k]!.goalie)
+/** Clips the Blender build authors (owner-only slots excluded). */
+export const SKATER_CLIPS = Object.keys(CLIPS).filter((k) => !CLIPS[k]!.goalie && !CLIPS[k]!.ownerOnly)
+export const GOALIE_CLIPS = Object.keys(CLIPS).filter((k) => CLIPS[k]!.goalie && !CLIPS[k]!.ownerOnly)
 
 // ── masks ───────────────────────────────────────────────────────────────────
 
@@ -194,6 +211,8 @@ export function celebrationFor(playerId: string): 'celly_fistpump' | 'celly_arms
 }
 
 export interface LocoState {
+  /** -1..1 sideways share of the velocity relative to facing (+ = toward the player's left). */
+  lateral?: number
   /** 0..1 normalised speed. */
   speed: number
   /** Heading change rate (rad/s, + = turning left). */
@@ -211,15 +230,18 @@ export interface LocoState {
 export function locomotionWeights(s: LocoState): Record<'skate_stride' | 'skate_glide' | 'skate_crossover_L' | 'skate_crossover_R' | 'skate_back', number> {
   const moving = smooth(0.08, 0.35, s.speed)
   const back = s.backward * smooth(0.05, 0.2, s.speed)
-  const turn = smooth(0.9, 1.8, Math.abs(s.turnRate)) * smooth(0.2, 0.45, s.speed) * (1 - back)
+  const lat = s.lateral ?? 0
+  const turnMag = Math.max(smooth(0.9, 1.8, Math.abs(s.turnRate)), smooth(0.35, 0.75, Math.abs(lat)))
+  const turnLeft = Math.abs(lat) > smooth(0.9, 1.8, Math.abs(s.turnRate)) ? lat > 0 : s.turnRate > 0
+  const turn = turnMag * smooth(0.2, 0.45, s.speed) * (1 - back)
   const fwd = 1 - back - turn
   const stride = fwd * moving
   const glide = fwd * (1 - moving)
   return {
     skate_stride: stride,
     skate_glide: glide,
-    skate_crossover_L: s.turnRate > 0 ? turn : 0,
-    skate_crossover_R: s.turnRate > 0 ? 0 : turn,
+    skate_crossover_L: turnLeft ? turn : 0,
+    skate_crossover_R: turnLeft ? 0 : turn,
     skate_back: back,
   }
 }
@@ -227,4 +249,25 @@ export function locomotionWeights(s: LocoState): Record<'skate_stride' | 'skate_
 /** A hard stop: decelerating fast from speed. */
 export function wantsHockeyStop(speedFtS: number, decelFtS2: number): boolean {
   return speedFtS > 16 && decelFtS2 > 30
+}
+
+/**
+ * Goalie locomotion weights for owner imports (sum = 1): the stance loop at
+ * rest, forward / backward skating or a lateral shuffle by the direction of
+ * the velocity relative to his facing. `fwd`/`lat` are -1..1 shares.
+ */
+export function goalieLocoWeights(speedFtS: number, fwd: number, lat: number): Record<'g_stance' | 'g_skate_fwd' | 'g_skate_back' | 'g_shuffle_L' | 'g_shuffle_R', number> {
+  const moving = smooth(1.5, 5, speedFtS)
+  const f = Math.max(0, fwd)
+  const b = Math.max(0, -fwd)
+  const l = Math.max(0, lat)
+  const r = Math.max(0, -lat)
+  const tot = f + b + l + r || 1
+  return {
+    g_stance: 1 - moving,
+    g_skate_fwd: (moving * f) / tot,
+    g_skate_back: (moving * b) / tot,
+    g_shuffle_L: (moving * l) / tot,
+    g_shuffle_R: (moving * r) / tot,
+  }
 }

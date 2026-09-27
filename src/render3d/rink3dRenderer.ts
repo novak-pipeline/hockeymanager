@@ -46,7 +46,14 @@ import {
 import { advanceStridePhase, skaterPose, goaliePose, celebrationWeight, crowdExcitement, facingTarget } from './pose'
 import { Arena, NET_X, REFLECT_LAYER } from './arena'
 import { AthleteBatch, AthleteRig, athleteMaterial, type PoseOverlay } from './athlete'
-import { loadAthleteAssets, type AthleteAssets } from './gltfAthlete'
+import { loadAthleteAssets, loadOwnerAssets, mergeClips, type AthleteAssets, type OwnerAssets, type OwnerTextures } from './gltfAthlete'
+import { OwnerKitPainter, buildOwnerAtlasCanvas, clothesMaterial, gearMaterial, loadTexture, visorMaterial } from './ownerKit'
+
+interface OwnerRoleTex {
+  clothesN: THREE.Texture
+  gearD: THREE.Texture
+  gearN: THREE.Texture
+}
 import { ActionLayer } from './animLayer'
 import { Choreographer, extractActionCues, type LocoMode } from './choreo'
 import { kitFor, type Kit } from './palette'
@@ -58,20 +65,24 @@ import { assignRigs, capStep, type RigMode } from './lineChange'
 const BENCH_GATE = { home: { x: -26, z: RINK_HALF_W - 1.5 }, away: { x: 26, z: RINK_HALF_W - 1.5 } } as const
 
 /**
- * Athlete source: 'blender' = the rigged glTF bodies + authored clips built by
- * scripts/blender (falls back to procedural if the assets fail to load);
- * 'procedural' = athlete.ts's code-built bodies. Locomotion: 'code' = the
- * integrated procedural stride, 'clip' = the authored cycles phase-locked to
- * the sim, 'hybrid' = code stride + authored crossovers / backward skating.
+ * Athlete source: 'owner' = the owner-supplied rigged athletes imported by
+ * `npm run import:owner-assets` (git-ignored; see gltfAthlete loadOwnerAssets),
+ * with the Blender clips filling every action they lack; 'blender' = the rigged
+ * glTF bodies + authored clips built by scripts/blender; 'procedural' =
+ * athlete.ts's code-built bodies; 'auto' = owner if built locally, else
+ * blender (each falls back to the next if loading fails). Locomotion: 'code' =
+ * the integrated procedural stride, 'clip' = the authored cycles phase-locked
+ * to the sim, 'hybrid' = code stride + authored crossovers / backward skating.
+ * Owner athletes default to 'clip' (their own skating cycles).
  */
 export interface Render3dOptions {
-  athletes?: 'blender' | 'procedural'
+  athletes?: 'auto' | 'owner' | 'blender' | 'procedural'
   locomotion?: LocoMode
 }
 // Bake-off verdict (docs/graphics/BLENDER-PIPELINE.md): the Blender body wins;
 // the code stride stays (locked to sim speed), authored cycles add crossovers +
 // backward skating, authored actions ride on top. Procedural is the fallback.
-export const RENDER3D_DEFAULTS: Required<Render3dOptions> = { athletes: 'blender', locomotion: 'hybrid' }
+export const RENDER3D_DEFAULTS: Required<Render3dOptions> = { athletes: 'auto', locomotion: 'hybrid' }
 
 const PUCK_R = 0.36
 const PUCK_H = 0.1
@@ -266,6 +277,14 @@ export class Rink3dRenderer implements MatchRenderer {
   }
 
   private assets: AthleteAssets | null = null
+  /** Owner-supplied athletes (+ their kit painter / materials) when in use. */
+  private owner: OwnerAssets | null = null
+  private ownerPainter: OwnerKitPainter | null = null
+  private ownerTex: { skater: OwnerRoleTex; goalie: OwnerRoleTex | null } | null = null
+  private ownerAtlas: HTMLCanvasElement | null = null
+  private ownerAtlasTex: THREE.CanvasTexture | null = null
+  private ownerAtlasDirty = false
+  private ownerGearMats: THREE.MeshStandardMaterial[] = []
   private locoMode: LocoMode = 'code'
   private choreo: Choreographer | null = null
   private choreoClock = 0
@@ -288,8 +307,9 @@ export class Rink3dRenderer implements MatchRenderer {
 
     const inst = new Rink3dRenderer(renderer)
     if (colors) inst.setKits(colors)
-    inst.assets = o.athletes === 'blender' ? await loadAthleteAssets() : null
-    inst.locoMode = o.locomotion
+    if (o.athletes === 'owner' || o.athletes === 'auto') await inst.loadOwner()
+    inst.assets = o.athletes !== 'procedural' ? await loadAthleteAssets() : null
+    inst.locoMode = inst.owner && !opts.locomotion ? 'clip' : o.locomotion
 
     inst.camera.aspect = w / h
     inst.camera.updateProjectionMatrix()
@@ -307,6 +327,39 @@ export class Rink3dRenderer implements MatchRenderer {
     this.colors = colors
     this.homeKit = kitFor(colors.home, 'home')
     this.awayKit = kitFor(colors.away, 'away')
+    this.updateOwnerAccents()
+  }
+
+  /** Owner athletes: meshes, textures, kit painter. Leaves `owner` null on any failure. */
+  private async loadOwner(): Promise<void> {
+    const own = await loadOwnerAssets()
+    if (!own) return
+    try {
+      const role = async (t: OwnerTextures): Promise<OwnerRoleTex> => {
+        const [clothesN, gearD, gearN] = await Promise.all([loadTexture(t.clothesN, false), loadTexture(t.gearD, true), loadTexture(t.gearN, false)])
+        return { clothesN, gearD, gearN }
+      }
+      const [painter, sk, gk] = await Promise.all([
+        OwnerKitPainter.load(own.tex, own.layout),
+        role(own.tex.skater),
+        own.tex.goalie ? role(own.tex.goalie) : Promise.resolve(null),
+      ])
+      this.ownerPainter = painter
+      this.ownerTex = { skater: sk, goalie: gk }
+      this.owner = own
+    } catch (e) {
+      console.warn('[render3d] owner athlete textures failed, using the Blender athletes', e)
+      this.owner = null
+    }
+  }
+
+  /** The gear accent (yellow in the owner's art) → each team's colour. */
+  private updateOwnerAccents(): void {
+    for (const m of this.ownerGearMats) {
+      const kit = m.userData.team === 'home' ? this.homeKit : this.awayKit
+      const accent = kit.jersey === 0xf4f4f2 ? kit.trim : kit.jersey
+      ;(m.userData.uAccent as { value: THREE.Color }).value.setHex(accent)
+    }
   }
 
   // ── Scene construction ────────────────────────────────────────────────────
@@ -461,9 +514,45 @@ export class Rink3dRenderer implements MatchRenderer {
 
     const rigs: AthleteRig[] = []
     const material = athleteMaterial(this.atlasTex)
+    // owner athletes: kit atlas + clothes / gear / visor materials (gear per team & role)
+    const own = this.owner
+    let ownerMats: ((team: 'home' | 'away', goalie: boolean) => THREE.Material[]) | null = null
+    if (own && this.ownerTex) {
+      this.ownerAtlas = buildOwnerAtlasCanvas()
+      this.ownerAtlasTex = new THREE.CanvasTexture(this.ownerAtlas)
+      this.ownerAtlasTex.colorSpace = THREE.SRGBColorSpace
+      this.ownerAtlasTex.anisotropy = 8
+      const visor = visorMaterial()
+      const T = this.ownerTex
+      const clothes = {
+        skater: clothesMaterial(this.ownerAtlasTex, T.skater.clothesN),
+        goalie: clothesMaterial(this.ownerAtlasTex, (T.goalie ?? T.skater).clothesN),
+      }
+      const gear: Record<string, THREE.MeshStandardMaterial> = {}
+      for (const team of ['home', 'away'] as const) {
+        for (const role of ['skater', 'goalie'] as const) {
+          const t = role === 'goalie' && T.goalie ? T.goalie : T.skater
+          const m = gearMaterial(t.gearD, t.gearN, 0xffffff)
+          m.userData.team = team
+          gear[`${team}:${role}`] = m
+          this.ownerGearMats.push(m)
+        }
+      }
+      this.updateOwnerAccents()
+      ownerMats = (team, goalie) => [clothes[goalie ? 'goalie' : 'skater'], gear[`${team}:${goalie ? 'goalie' : 'skater'}`]!, visor]
+    }
+    const blenderClips = { skater: this.assets?.skater.clips ?? null, goalie: this.assets?.goalie.clips ?? null }
+    const ownClips = own
+      ? {
+          skater: mergeClips(own.skater.clips, blenderClips.skater),
+          goalie: own.goalie ? mergeClips(own.goalie.clips, blenderClips.goalie) : blenderClips.goalie,
+        }
+      : null
     const mk = (team: 'home' | 'away', goalie: boolean, slot: number, wx: number, wz: number): PlayerPose => {
-      const template = this.assets ? (goalie ? this.assets.goalie : this.assets.skater) : null
-      const rig = new AthleteRig(goalie, slot, material, template)
+      const ownT = own ? (goalie ? own.goalie : own.skater) : null
+      const template = ownT ?? (this.assets ? (goalie ? this.assets.goalie : this.assets.skater) : null)
+      const rig = new AthleteRig(goalie, slot, ownT && ownerMats ? ownerMats(team, goalie) : material, template)
+      const clips = ownT && ownClips ? (goalie ? ownClips.goalie : ownClips.skater) : (template?.clips ?? null)
       rig.kit = team === 'home' ? this.homeKit : this.awayKit
       rigs.push(rig)
       return {
@@ -494,7 +583,7 @@ export class Rink3dRenderer implements MatchRenderer {
         labelSprite: this.makeLabelSprite(),
         vx: 0,
         vz: 0,
-        layer: template ? new ActionLayer(template.clips) : null,
+        layer: clips ? new ActionLayer(clips) : null,
         overlay: null,
         faceOverride: null,
         followHL: PLAYER_FOLLOW_HL,
@@ -527,8 +616,9 @@ export class Rink3dRenderer implements MatchRenderer {
         // the left net is defended by whichever goalie stands on the left
         (side) => [this.homeGoaliePose, this.awayGoaliePose].find((g) => g !== null && (side === 'left') === g.worldX.pos < 0) ?? null,
         this.locoMode,
-        { skater: this.assets.skater.clips },
-        PLAYER_FOLLOW_HL
+        ownClips ? { skater: ownClips.skater, goalie: own?.goalie ? ownClips.goalie : null } : { skater: this.assets.skater.clips },
+        PLAYER_FOLLOW_HL,
+        !!own
       )
       for (const p of all()) p.overlay = this.choreo.overlayFor(p)
     }
@@ -563,6 +653,12 @@ export class Rink3dRenderer implements MatchRenderer {
   private paintSlot(p: PlayerPose): void {
     const kit = p.team === 'home' ? this.homeKit : this.awayKit
     const num = p.playerId ? (this.labels[p.playerId]?.number ?? jerseyNumber(p.playerId)) : p.rig.goalie ? 30 : 10 + p.rig.slot
+    if (this.ownerPainter && this.ownerAtlas && this.owner && (!p.rig.goalie || this.owner.goalie)) {
+      const name = p.playerId ? (this.labels[p.playerId]?.lastName ?? '') : ''
+      this.ownerPainter.paint(this.ownerAtlas, p.rig.slot, p.rig.goalie ? 'goalie' : 'skater', kit, num, name)
+      this.ownerAtlasDirty = true
+      return
+    }
     paintJerseySlot(this.atlasCanvas, p.rig.slot, kit, num, p.rig.goalie)
     this.atlasDirty = true
   }
@@ -783,6 +879,8 @@ export class Rink3dRenderer implements MatchRenderer {
     this.batch.dispose()
     this.arena.dispose()
     this.atlasTex.dispose()
+    this.ownerAtlasTex?.dispose()
+    for (const t of [this.ownerTex?.skater, this.ownerTex?.goalie]) if (t) for (const x of Object.values(t)) x.dispose()
     for (const p of this.allPoses()) {
       ;(p.labelSprite.material as THREE.SpriteMaterial).map?.dispose()
       p.labelSprite.material.dispose()
@@ -843,7 +941,7 @@ export class Rink3dRenderer implements MatchRenderer {
 
   debugInfo(): { calls: number; triangles: number; cpuMs: number; athleteDraws: number; quality: number; athletes: string } {
     return {
-      athletes: this.assets ? `blender/${this.locoMode}` : 'procedural',
+      athletes: this.owner ? `owner/${this.locoMode}` : this.assets ? `blender/${this.locoMode}` : 'procedural',
       quality: this.quality,
       calls: this.renderer.info.render.calls,
       triangles: this.renderer.info.render.triangles,
@@ -884,6 +982,10 @@ export class Rink3dRenderer implements MatchRenderer {
     if (this.atlasDirty) {
       this.atlasTex.needsUpdate = true
       this.atlasDirty = false
+    }
+    if (this.ownerAtlasDirty && this.ownerAtlasTex) {
+      this.ownerAtlasTex.needsUpdate = true
+      this.ownerAtlasDirty = false
     }
     this.adaptQuality(dtMs / 1000)
     this.renderer.info.reset()
@@ -1225,6 +1327,9 @@ export class Rink3dRenderer implements MatchRenderer {
     if (dt > 0) {
       pose.worldX = springStep(pose.worldX, wx, dt, PLAYER_FOLLOW_HL)
       pose.worldZ = springStep(pose.worldZ, wz, dt, PLAYER_FOLLOW_HL)
+      // goalie locomotion (owner imports) reads the travel direction
+      pose.vx = pose.worldX.vel
+      pose.vz = pose.worldZ.vel
     } else {
       pose.worldX = snapSpring(wx)
       pose.worldZ = snapSpring(wz)

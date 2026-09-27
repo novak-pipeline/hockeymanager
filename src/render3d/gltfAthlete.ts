@@ -28,6 +28,8 @@ export const CLIP_FPS = 30
 
 export interface BakedClip {
   name: string
+  /** Contact time (s) authored into the clip name (`slot@cN`, owner imports); else the catalogue's. */
+  contact?: number
   /** Number of samples (frames + 1: the last sample is the end pose). */
   samples: number
   duration: number
@@ -51,7 +53,19 @@ export interface AthleteTemplate {
   joints: Partial<Record<BoneName, THREE.Vector3>>
   clips: Map<string, BakedClip>
   triangles: number
+  /**
+   * Owner-supplied athlete (scripts/blender/import_owner_assets.py): the body is
+   * drawn in material GROUPS (clothes → the per-player kit atlas, gear → the
+   * shared gear atlas, visor) instead of one role-coloured atlas material, and
+   * its UVs are the owner's own (uvLocal holds them).
+   */
+  groups?: Array<{ start: number; count: number; group: OwnerGroup }>
+  /** Stick length (ft) — the grips slide along it. */
+  stickLen?: number
 }
+
+export type OwnerGroup = 'clothes' | 'gear' | 'visor'
+const OWNER_GROUPS: OwnerGroup[] = ['clothes', 'gear', 'visor']
 
 const isBone = (n: string): n is BoneName => (BONE_NAMES as readonly string[]).includes(n)
 
@@ -130,6 +144,24 @@ export function templateFromGltf(gltf: GLTF, goalie: boolean): AthleteTemplate {
     else for (let i = 0; i < P.count; i++) indices.push(base + i)
     base += P.count
   }
+  // owner bodies: order the triangles by material group so each group is one draw range
+  const owner = roles.some((r) => r.startsWith('own:'))
+  let groups: AthleteTemplate['groups']
+  if (owner) {
+    const tri = indices.length / 3
+    const byGroup: number[][] = OWNER_GROUPS.map(() => [])
+    for (let t = 0; t < tri; t++) {
+      const g = OWNER_GROUPS.indexOf(roles[indices[t * 3]!]!.slice(4) as OwnerGroup)
+      byGroup[g < 0 ? 1 : g]!.push(indices[t * 3]!, indices[t * 3 + 1]!, indices[t * 3 + 2]!)
+    }
+    indices.length = 0
+    groups = []
+    for (let g = 0; g < OWNER_GROUPS.length; g++) {
+      if (byGroup[g]!.length === 0) continue
+      groups.push({ start: indices.length, count: byGroup[g]!.length, group: OWNER_GROUPS[g]! })
+      for (const i of byGroup[g]!) indices.push(i)
+    }
+  }
   // de-index: the rig geometry is non-indexed (matches the procedural path)
   const n = indices.length
   const dp = new Float32Array(n * 3)
@@ -159,7 +191,21 @@ export function templateFromGltf(gltf: GLTF, goalie: boolean): AthleteTemplate {
     joints,
     clips: bakeClips(gltf.animations, skeleton, armatureNode),
     triangles: n / 3,
+    ...(groups ? { groups } : {}),
+    ...withStick(stickLength(dp, di, dw)),
   }
+}
+
+const withStick = (len: number | undefined) => (len === undefined ? {} : { stickLen: len })
+
+/** Longest reach (ft) of the vertices bound to the stick bone, along its rest shaft (+Y). */
+function stickLength(pos: Float32Array, si: Uint16Array, sw: Float32Array): number | undefined {
+  const stick = BONE_NAMES.indexOf('stick')
+  let top = 0
+  for (let v = 0; v < pos.length / 3; v++) {
+    for (let c = 0; c < 4; c++) if (si[v * 4 + c] === stick && sw[v * 4 + c]! > 0.5) top = Math.max(top, pos[v * 3 + 1]!)
+  }
+  return top > 1 ? top : undefined
 }
 
 /** Retarget + resample every glTF animation onto the renderer's rig convention. */
@@ -177,7 +223,10 @@ export function bakeClips(anims: THREE.AnimationClip[], skeleton: THREE.Skeleton
   const t3 = new THREE.Vector3()
   for (const clip of anims) {
     const samples = Math.max(2, Math.round(clip.duration * CLIP_FPS) + 1)
-    const baked: BakedClip = { name: clip.name, samples, duration: (samples - 1) / CLIP_FPS, rot: {}, pos: {} }
+    // owner imports carry their contact frame in the name: `shot_wrist@c22`
+    const [base, ...tags] = clip.name.split('@')
+    const ct = tags.find((x) => /^c\d+$/.test(x))
+    const baked: BakedClip = { name: base!, samples, duration: (samples - 1) / CLIP_FPS, rot: {}, pos: {}, ...(ct ? { contact: Number(ct.slice(1)) / CLIP_FPS } : {}) }
     for (const track of clip.tracks) {
       const dot = track.name.lastIndexOf('.')
       const node = track.name.slice(0, dot)
@@ -227,7 +276,7 @@ export function bakeClips(anims: THREE.AnimationClip[], skeleton: THREE.Skeleton
       for (let s = 0; s < samples; s++) arr.set([t3.x, t3.y, t3.z], s * 3)
       baked.pos[name] = arr
     }
-    out.set(clip.name, baked)
+    out.set(baked.name, baked)
   }
   return out
 }
@@ -269,4 +318,85 @@ export function loadAthleteAssets(): Promise<AthleteAssets | null> {
     })()
   }
   return cached
+}
+
+// ── owner-supplied athletes ─────────────────────────────────────────────────
+//
+// Built locally by `npm run import:owner-assets` into src/render3d/assets/owner/
+// (git-ignored: the owner's licence allows shipping them in the game but not
+// redistributing them, and the repo is public). Absent → Blender athletes.
+
+export interface OwnerTextures {
+  clothesD: string
+  clothesK: string
+  clothesN: string
+  gearD: string
+  gearN: string
+}
+
+/** Sweater decal boxes (image fractions, top-left origin) + text rotation (deg). */
+export interface OwnerKitLayout {
+  boxes: Partial<Record<'numberBack' | 'numberLeft' | 'numberRight' | 'name' | 'crestFront' | 'crestLeft' | 'crestRight', [number, number, number, number]>>
+  rotation: Partial<Record<string, number>>
+}
+
+export interface OwnerAssets {
+  skater: AthleteTemplate
+  goalie: AthleteTemplate | null
+  tex: { skater: OwnerTextures; goalie: OwnerTextures | null }
+  layout: { skater: OwnerKitLayout; goalie: OwnerKitLayout | null }
+}
+
+// A glob, not an import: the folder is optional (a fresh clone has none).
+const OWNER_FILES = import.meta.glob('./assets/owner/*.{glb,jpg,png,json}', { query: '?url', import: 'default' }) as Record<string, () => Promise<string>>
+
+export function ownerAssetsPresent(): boolean {
+  return './assets/owner/skater.glb' in OWNER_FILES
+}
+
+let ownerCached: Promise<OwnerAssets | null> | null = null
+
+/** Load the owner athletes if they were built locally; null otherwise (or on any failure). */
+export function loadOwnerAssets(): Promise<OwnerAssets | null> {
+  if (!ownerCached) {
+    ownerCached = (async () => {
+      if (!ownerAssetsPresent()) return null
+      try {
+        const url = async (f: string): Promise<string | null> => (OWNER_FILES[`./assets/owner/${f}`] ? await OWNER_FILES[`./assets/owner/${f}`]!() : null)
+        const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js')
+        const loader = new GLTFLoader()
+        const parse = async (u: string): Promise<GLTF> => loader.parseAsync(await (await fetch(u)).arrayBuffer(), '')
+        const texFor = async (role: 'skater' | 'goalie'): Promise<OwnerTextures | null> => {
+          const [clothesD, clothesK, clothesN, gearD, gearN] = await Promise.all(
+            ['clothes_d.jpg', 'clothes_k.png', 'clothes_n.jpg', 'gear_d.jpg', 'gear_n.jpg'].map((f) => url(`${role}_${f}`))
+          )
+          return clothesD && clothesK && clothesN && gearD && gearN ? { clothesD, clothesK, clothesN, gearD, gearN } : null
+        }
+        const layoutUrl = await url('owner_layout.json')
+        const layout = layoutUrl ? ((await (await fetch(layoutUrl)).json()) as Record<string, OwnerKitLayout>) : {}
+        const sk = await url('skater.glb')
+        const gk = await url('goalie.glb')
+        const [s, g, ts, tg] = await Promise.all([parse(sk!), gk ? parse(gk) : Promise.resolve(null), texFor('skater'), texFor('goalie')])
+        if (!ts || !layout['skater']) throw new Error('owner skater textures / layout missing — rerun npm run import:owner-assets')
+        const goalieOk = g && tg && layout['goalie']
+        return {
+          skater: templateFromGltf(s, false),
+          goalie: goalieOk ? templateFromGltf(g, true) : null,
+          tex: { skater: ts, goalie: goalieOk ? tg : null },
+          layout: { skater: layout['skater']!, goalie: goalieOk ? layout['goalie']! : null },
+        }
+      } catch (e) {
+        console.warn('[render3d] owner athletes unavailable, using the Blender athletes', e)
+        return null
+      }
+    })()
+  }
+  return ownerCached
+}
+
+/** A template's clips with every slot it lacks filled from `fallback` (owner clip wins). */
+export function mergeClips(own: Map<string, BakedClip>, fallback: Map<string, BakedClip> | null | undefined): Map<string, BakedClip> {
+  const out = new Map(fallback ?? [])
+  for (const [k, v] of own) out.set(k, v)
+  return out
 }
