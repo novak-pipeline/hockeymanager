@@ -47,7 +47,14 @@ import { advanceStridePhase, skaterPose, goaliePose, celebrationWeight, crowdExc
 import { Arena, NET_X, REFLECT_LAYER } from './arena'
 import { AthleteBatch, AthleteRig, athleteMaterial, type PoseOverlay } from './athlete'
 import { loadAthleteAssets, loadOwnerAssets, mergeClips, type AthleteAssets, type OwnerAssets, type OwnerTextures } from './gltfAthlete'
+import { AtlasUploader, type Rect } from './atlasUpload'
 import { OwnerKitPainter, buildOwnerAtlasCanvas, clothesMaterial, gearMaterial, loadTexture, visorMaterial } from './ownerKit'
+
+/** A player's slot in a jersey atlas (canvas px, top-left origin). */
+function slotRect(atlas: HTMLCanvasElement, slot: number): Rect {
+  const S = atlas.width / ATLAS_GRID
+  return { x: (slot % ATLAS_GRID) * S, y: Math.floor(slot / ATLAS_GRID) * S, w: S, h: S }
+}
 
 interface OwnerRoleTex {
   clothesN: THREE.Texture
@@ -57,7 +64,7 @@ interface OwnerRoleTex {
 import { ActionLayer } from './animLayer'
 import { Choreographer, extractActionCues, type LocoMode } from './choreo'
 import { kitFor, type Kit } from './palette'
-import { buildAtlasCanvas, paintJerseySlot } from './textures'
+import { ATLAS_GRID, buildAtlasCanvas, paintJerseySlot } from './textures'
 import { RINK_HALF_W } from './iceCanvas'
 import { assignRigs, capStep, type RigMode } from './lineChange'
 
@@ -284,6 +291,8 @@ export class Rink3dRenderer implements MatchRenderer {
   private ownerAtlas: HTMLCanvasElement | null = null
   private ownerAtlasTex: THREE.CanvasTexture | null = null
   private ownerAtlasDirty = false
+  private atlasUp: AtlasUploader | null = null
+  private ownerAtlasUp: AtlasUploader | null = null
   private ownerGearMats: THREE.MeshStandardMaterial[] = []
   private locoMode: LocoMode = 'code'
   private choreo: Choreographer | null = null
@@ -316,9 +325,11 @@ export class Rink3dRenderer implements MatchRenderer {
 
     inst.buildScene()
     inst.buildPost(w, h)
-    // Compile every material now (all rigs are visible at creation), so the
-    // first line change / goal never hitches on a shader compile mid-game.
-    renderer.compile(inst.scene, inst.camera)
+    // Compile every program now, so the first line change / goal never hitches
+    // on a shader compile mid-game. compile() skips INVISIBLE objects (bench
+    // rigs start hidden) and never builds the shadow-depth / reflection-pass
+    // variants, so: show every rig and render one real frame of every pass.
+    inst.prewarm()
     renderer.setAnimationLoop((time) => inst.animLoop(time))
     return inst
   }
@@ -328,6 +339,29 @@ export class Rink3dRenderer implements MatchRenderer {
     this.homeKit = kitFor(colors.home, 'home')
     this.awayKit = kitFor(colors.away, 'away')
     this.updateOwnerAccents()
+  }
+
+  /** Render one full frame (reflection, shadows, post) with every rig shown — builds every program up front. */
+  private prewarm(): void {
+    const rigs = this.allPoses().map((p) => [p.rig, p.rig.visible] as const)
+    for (const [r] of rigs) r.visible = true
+    // no frustum culling for the warm-up: an object the camera (or the mirrored
+    // reflection camera) doesn't see now would compile its variant mid-game —
+    // e.g. the goal net's clipped reflection variant cost a 110–130 ms frame
+    const culled: THREE.Object3D[] = []
+    this.scene.traverse((o) => {
+      if (o.frustumCulled) {
+        o.frustumCulled = false
+        culled.push(o)
+      }
+    })
+    this.renderer.compile(this.scene, this.camera)
+    this.scene.updateMatrixWorld()
+    this.renderReflection()
+    this.composer.render(0)
+    this.renderer.info.reset()
+    for (const o of culled) o.frustumCulled = true
+    for (const [r, v] of rigs) r.visible = v
   }
 
   /** Owner athletes: meshes, textures, kit painter. Leaves `owner` null on any failure. */
@@ -511,6 +545,7 @@ export class Rink3dRenderer implements MatchRenderer {
     this.atlasTex = new THREE.CanvasTexture(this.atlasCanvas)
     this.atlasTex.colorSpace = THREE.SRGBColorSpace
     this.atlasTex.anisotropy = 4
+    this.atlasUp = new AtlasUploader(this.renderer, this.atlasTex, this.atlasCanvas)
 
     const rigs: AthleteRig[] = []
     const material = athleteMaterial(this.atlasTex)
@@ -522,6 +557,7 @@ export class Rink3dRenderer implements MatchRenderer {
       this.ownerAtlasTex = new THREE.CanvasTexture(this.ownerAtlas)
       this.ownerAtlasTex.colorSpace = THREE.SRGBColorSpace
       this.ownerAtlasTex.anisotropy = 8
+      this.ownerAtlasUp = new AtlasUploader(this.renderer, this.ownerAtlasTex, this.ownerAtlas)
       const visor = visorMaterial()
       const T = this.ownerTex
       const clothes = {
@@ -656,10 +692,12 @@ export class Rink3dRenderer implements MatchRenderer {
     if (this.ownerPainter && this.ownerAtlas && this.owner && (!p.rig.goalie || this.owner.goalie)) {
       const name = p.playerId ? (this.labels[p.playerId]?.lastName ?? '') : ''
       this.ownerPainter.paint(this.ownerAtlas, p.rig.slot, p.rig.goalie ? 'goalie' : 'skater', kit, num, name)
+      this.ownerAtlasUp?.mark(slotRect(this.ownerAtlas, p.rig.slot))
       this.ownerAtlasDirty = true
       return
     }
     paintJerseySlot(this.atlasCanvas, p.rig.slot, kit, num, p.rig.goalie)
+    this.atlasUp?.mark(slotRect(this.atlasCanvas, p.rig.slot))
     this.atlasDirty = true
   }
 
@@ -979,12 +1017,14 @@ export class Rink3dRenderer implements MatchRenderer {
     this.updateCamera(dt)
     this.updateArena(dt)
     this.emit()
+    // repainted jersey slots go up as sub-images (a full re-upload of the
+    // atlas hitched 58–100 ms on every line change)
     if (this.atlasDirty) {
-      this.atlasTex.needsUpdate = true
+      this.atlasUp?.flush()
       this.atlasDirty = false
     }
-    if (this.ownerAtlasDirty && this.ownerAtlasTex) {
-      this.ownerAtlasTex.needsUpdate = true
+    if (this.ownerAtlasDirty) {
+      this.ownerAtlasUp?.flush()
       this.ownerAtlasDirty = false
     }
     this.adaptQuality(dtMs / 1000)

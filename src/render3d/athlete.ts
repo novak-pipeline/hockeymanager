@@ -597,6 +597,11 @@ export class AthleteRig {
     this.mesh.castShadow = true
     this.mesh.receiveShadow = false
     this.mesh.frustumCulled = false
+    // A fixed bound (root space). Left null, three CPU-skins every vertex the
+    // first time a rig is drawn (render-list sorting calls computeBoundingSphere):
+    // 30–100 ms hitches whenever a line change brings a fresh rig on.
+    this.mesh.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 3.2, 0), 6.5)
+    this.mesh.boundingBox = new THREE.Box3(new THREE.Vector3(-6, -1, -6), new THREE.Vector3(6, 8, 6))
     this.root.add(this.mesh)
     this.root.updateMatrixWorld(true)
     this.mesh.bind(new THREE.Skeleton(BONE_NAMES.map((n) => this.bones[n])))
@@ -757,6 +762,22 @@ export class AthleteRig {
       handR = add3(heel, scale3(shaftDir, topGrip))
       if (!this.goalie) handL = add3(heel, scale3(shaftDir, lowGrip))
     }
+    // Keep both hands ON the shaft: a grip the arm can't reach (short owner
+    // arms, a clip moving the stick) slides along the shaft to the nearest
+    // reachable point; if the shaft is out of reach altogether the stick comes
+    // to the top hand (never the hand off the stick).
+    const reach = (this.dims.upperArm + this.dims.forearm) * 0.985
+    const top = gripOnShaft(heel, shaftDir, shR, topGrip, reach, topGrip * 0.7, topGrip)
+    if (top.shift) {
+      heel = add3(heel, top.shift)
+      B.stick.position.set(heel.x, heel.y, heel.z)
+      B.stick_blade.position.add(_v.set(top.shift.x, top.shift.y, top.shift.z))
+    }
+    handR = add3(heel, scale3(shaftDir, top.t))
+    if (!this.goalie) {
+      const low = gripOnShaft(heel, shaftDir, shL, lowGrip, reach, lowGrip * 0.8, top.t - 0.3)
+      handL = add3(heel, scale3(shaftDir, low.t))
+    }
     B.stick.updateMatrixWorld(true)
     B.stick_blade.updateMatrixWorld(true)
 
@@ -786,6 +807,36 @@ export class AthleteRig {
     bone.quaternion.copy(parentRoot.invert().multiply(desired))
     bone.updateMatrixWorld(true)
   }
+}
+
+/**
+ * The grip parameter (ft along the shaft from the heel) nearest `want` that a
+ * shoulder at `sh` can reach, clamped to [lo, hi]. When no point of the shaft
+ * is in reach, `shift` moves the stick perpendicular to itself just into reach.
+ */
+export function gripOnShaft(heel: V3, dir: V3, sh: V3, want: number, reach: number, lo: number, hi: number): { t: number; shift: V3 | null } {
+  const d = sub3(sh, heel)
+  const tc = d.x * dir.x + d.y * dir.y + d.z * dir.z
+  const perp = sub3(d, scale3(dir, tc))
+  const dist = len3(perp)
+  const clamp = (x: number) => Math.min(hi, Math.max(lo, x))
+  if (dist >= reach) {
+    // no point of the shaft is in reach: bring the grip point to the shoulder
+    const t = clamp(tc)
+    const toSh = sub3(sh, add3(heel, scale3(dir, t)))
+    const L = len3(toSh)
+    return { t, shift: scale3(toSh, (L - reach * 0.98) / (L || 1)) }
+  }
+  const half = Math.sqrt(reach * reach - dist * dist)
+  const t = Math.min(tc + half, Math.max(tc - half, want))
+  const tt = clamp(t)
+  if (Math.abs(tt - tc) <= half + 1e-6) return { t: tt, shift: null }
+  // the clamp pushed the grip out of reach again: bring that point of the
+  // shaft to the edge of the reach sphere (straight toward the shoulder)
+  const p = add3(heel, scale3(dir, tt))
+  const toSh = sub3(sh, p)
+  const L = len3(toSh)
+  return { t: tt, shift: scale3(toSh, (L - reach * 0.98) / (L || 1)) }
 }
 
 const sub3 = (a: V3, b: V3): V3 => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z })

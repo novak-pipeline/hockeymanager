@@ -50,15 +50,15 @@ export const CLIPS: Record<string, ClipMeta> = {
   skate_crossover_L: { mask: 'lower', hands: 'stick', loop: true, fadeIn: 0.2, fadeOut: 0.25 },
   skate_crossover_R: { mask: 'lower', hands: 'stick', loop: true, fadeIn: 0.2, fadeOut: 0.25 },
   skate_back: { mask: 'lower', hands: 'stick', loop: true, fadeIn: 0.25, fadeOut: 0.25 },
-  hockey_stop: { mask: 'full', hands: 'stick', fadeIn: 0.08, fadeOut: 0.2 },
+  hockey_stop: { mask: 'full', hands: 'stick', fadeIn: 0.2, fadeOut: 0.25 },
   stickhandle: { mask: 'upper', hands: 'stick', loop: true, fadeIn: 0.2, fadeOut: 0.2 },
   // ── puck skills ──
-  shot_wrist: { mask: 'upper', hands: 'stick', contact: f(9), fadeIn: 0.08, fadeOut: 0.18 },
+  shot_wrist: { mask: 'upper', hands: 'stick', contact: f(9), fadeIn: 0.12, fadeOut: 0.2 },
   shot_slap: { mask: 'full', hands: 'stick', contact: f(19), fadeIn: 0.1, fadeOut: 0.22 },
-  shot_onetimer: { mask: 'upper', hands: 'stick', contact: f(7), fadeIn: 0.06, fadeOut: 0.18 },
-  pass: { mask: 'upper', hands: 'stick', contact: f(6), fadeIn: 0.06, fadeOut: 0.15 },
+  shot_onetimer: { mask: 'upper', hands: 'stick', contact: f(7), fadeIn: 0.12, fadeOut: 0.2 },
+  pass: { mask: 'upper', hands: 'stick', contact: f(6), fadeIn: 0.15, fadeOut: 0.18 },
   faceoff_crouch: { mask: 'full', hands: 'stick', loop: true, fadeIn: 0.3, fadeOut: 0.15 },
-  faceoff_draw: { mask: 'full', hands: 'stick', contact: f(4), fadeIn: 0.05, fadeOut: 0.2 },
+  faceoff_draw: { mask: 'full', hands: 'stick', contact: f(4), fadeIn: 0.1, fadeOut: 0.2 },
   // ── hitting ──
   check: { mask: 'full', hands: 'stick', contact: f(8), fadeIn: 0.1, fadeOut: 0.2 },
   check_boards: { mask: 'full', hands: 'clip', contact: f(8), fadeIn: 0.1, fadeOut: 0.3 },
@@ -85,7 +85,7 @@ export const CLIPS: Record<string, ClipMeta> = {
 
   // owner-import slots (the Blender fallback covers them otherwise)
   skate_idle: { mask: 'lower', hands: 'stick', loop: true, fadeIn: 0.3, fadeOut: 0.3, ownerOnly: true, fallback: 'skate_glide' },
-  skate_start: { mask: 'lower', hands: 'stick', fadeIn: 0.12, fadeOut: 0.3, ownerOnly: true },
+  skate_start: { mask: 'lower', hands: 'stick', fadeIn: 0.2, fadeOut: 0.3, ownerOnly: true },
   g_pad_save_L: { mask: 'full', hands: 'clip', contact: f(4), fadeIn: 0.05, fadeOut: 0.3, goalie: true, ownerOnly: true, fallback: 'g_pad_save' },
   g_pad_save_R: { mask: 'full', hands: 'clip', contact: f(4), fadeIn: 0.05, fadeOut: 0.3, goalie: true, ownerOnly: true, fallback: 'g_pad_save' },
   g_skate_fwd: { mask: 'lower', hands: 'clip', loop: true, fadeIn: 0.3, fadeOut: 0.3, goalie: true, ownerOnly: true },
