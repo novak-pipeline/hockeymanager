@@ -52,7 +52,7 @@ const r01 = (v: number | undefined): number => clamp((v ?? 50) / 100, 0, 1)
 
 /** Multiplier on the value of shooting (the shot-volume lever). */
 
-export const SHOOT_BIAS = { value: 0.37 }
+export const SHOOT_BIAS = { value: 0.355 }
 /** Seconds after a zone entry that play is still a "rush". */
 const RUSH_WINDOW = 4.5
 /** Stick reach from the body centre, ft. */
@@ -233,8 +233,8 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       const s = clamp(((o.x - c.x) * (nx - c.x) + (o.y - c.y) * -c.y) / (L * L), 0, 1)
       if (s < 0.05 || s > 0.92) continue
       const d = Math.hypot(o.x - (c.x + (nx - c.x) * s), o.y - (c.y - c.y * s))
-      if (d < 3) lane *= 0.55
-      else if (d < 6) lane *= 0.85
+      if (d < 3) lane *= 0.75
+      else if (d < 6) lane *= 0.92
     }
     // A man on him in tight will lift his stick.
     for (const o of opps) if (Math.hypot(o.x - c.x, o.y - c.y) < 3.4) lane *= 0.6
