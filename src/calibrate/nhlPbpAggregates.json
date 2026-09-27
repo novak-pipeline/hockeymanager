@@ -1,0 +1,131 @@
+{
+  "meta": {
+    "source": "NHL API (api-web.nhle.com) play-by-play — local cache re-read, no new fetch",
+    "season": "2023-2024 regular season (evenly spaced sample)",
+    "games": 64,
+    "generated": "2026-09-27T01:12:30.088Z",
+    "note": "Aggregates only. See docs/MATCH-DATA-SOURCES.md for the Terms-of-Service flag on this source."
+  },
+  "hits": {
+    "perTeamGame": 22.484,
+    "boardsShare10ft": 0.9434,
+    "boardDistShare5ftBins": [
+      0.837,
+      0.106,
+      0.0188,
+      0.0118,
+      0.0076,
+      0.0056,
+      0.0049,
+      0.0035,
+      0.0049
+    ],
+    "byDShare": 0.345,
+    "zoneShareHitterPerspective": {
+      "D": 0.451,
+      "O": 0.443,
+      "N": 0.106
+    }
+  },
+  "penalties": {
+    "perTeamGame": 3.703,
+    "distinctTypes": 27,
+    "typeShare": {
+      "tripping": 0.1899,
+      "hooking": 0.1139,
+      "roughing": 0.1076,
+      "slashing": 0.0844,
+      "high-sticking": 0.0823,
+      "interference": 0.0802,
+      "holding": 0.0633,
+      "fighting": 0.0633,
+      "delaying-game-puck-over-glass": 0.0359,
+      "too-many-men-on-the-ice": 0.0338,
+      "cross-checking": 0.0316,
+      "game-misconduct": 0.019,
+      "boarding": 0.0148,
+      "delaying-game-unsuccessful-challenge": 0.0105,
+      "holding-the-stick": 0.0105,
+      "high-sticking-double-minor": 0.0084,
+      "instigator": 0.0084,
+      "misconduct": 0.0084,
+      "unsportsmanlike-conduct": 0.0084,
+      "interference-goalkeeper": 0.0063,
+      "instigator-misconduct": 0.0063,
+      "ps-holding-on-breakaway": 0.0021,
+      "match-penalty": 0.0021,
+      "goalie-participation-beyond-center": 0.0021,
+      "charging": 0.0021,
+      "clipping": 0.0021,
+      "ps-hooking-on-breakaway": 0.0021
+    },
+    "fightsPerGame": 0.234
+  },
+  "shots": {
+    "missedPerTeamGame": 13.898,
+    "missedShareOfUnblocked": 0.3173,
+    "typeShare": {
+      "wrist": 0.553,
+      "snap": 0.1349,
+      "slap": 0.1211,
+      "tip-in": 0.0808,
+      "backhand": 0.0715,
+      "deflected": 0.0225,
+      "wrap-around": 0.0075,
+      "poke": 0.0046,
+      "bat": 0.0036,
+      "between-legs": 0.0004,
+      "cradle": 0.0002
+    },
+    "missedReasonShare": {
+      "wide-left": 0.3834,
+      "wide-right": 0.3687,
+      "above-crossbar": 0.068,
+      "high-and-wide-right": 0.0528,
+      "high-and-wide-left": 0.045,
+      "short": 0.0253,
+      "hit-right-post": 0.0247,
+      "hit-left-post": 0.018,
+      "hit-crossbar": 0.0141
+    }
+  },
+  "faceoffs": {
+    "perGame": 54.94,
+    "winnerAttemptWithin10s": 0.1431
+  },
+  "flow": {
+    "locatedEventGapShare1s": [
+      0.067,
+      0.0438,
+      0.0548,
+      0.0483,
+      0.0452,
+      0.0424,
+      0.0449,
+      0.0421,
+      0.0419,
+      0.0379,
+      0.035,
+      0.031,
+      0.0271,
+      0.0269,
+      0.0241,
+      0.0226,
+      0.0221,
+      0.0222,
+      0.0208,
+      0.0186,
+      0.0182,
+      0.0173,
+      0.0172,
+      0.0125,
+      0.0136,
+      0.0116,
+      0.0127,
+      0.0122,
+      0.0104,
+      0.0108,
+      0.145
+    ]
+  }
+}
