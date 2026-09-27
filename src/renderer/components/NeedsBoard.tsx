@@ -26,6 +26,12 @@ const SEVERITY: Record<1 | 2 | 3, { label: string; color: string }> = {
   1: { label: 'Worth a look', color: 'var(--muted)' },
 }
 
+const STANDING: Record<'leading' | 'competitive' | 'trailing', { label: string; color: string }> = {
+  leading: { label: 'You lead', color: 'var(--success, #4caf7d)' },
+  competitive: { label: 'Neck and neck', color: 'var(--amber, #d6a056)' },
+  trailing: { label: 'Trailing', color: 'var(--danger, #e0575b)' },
+}
+
 const KIND: Record<NeedCandidateView['kind'], { label: string; cls: string }> = {
   fa: { label: 'Free agent', cls: 'chip-accent' },
   trade: { label: 'Trade', cls: 'chip-violet' },
@@ -123,16 +129,24 @@ function CandidateRow(props: { c: NeedCandidateView; marketOpen: boolean; onChan
           <span className="muted small">{c.position}{c.position === 'D' || c.position === 'G' ? ` · ${c.hand}` : ''} · {c.age}</span>
           <span className={`chip ${kind.cls}`} style={{ fontSize: 9 }}>{kind.label}{c.teamAbbr ? ` · ${c.teamAbbr}` : ''}</span>
         </div>
-        <div className="small" style={{ marginTop: 2, color: 'rgb(var(--accent-rgb, 108,92,231))', fontWeight: 600 }}>{c.fit}</div>
+        <div className="small" style={{ marginTop: 2, color: 'var(--text)', fontWeight: 600, display: 'flex', gap: 4, alignItems: 'center' }}>
+          <Icon size={14} color={c.kind === 'move' ? 'var(--amber, #d6a056)' : 'var(--success, #4caf7d)'}>{c.kind === 'move' ? <Icons.Money /> : <Icons.Up />}</Icon>
+          {c.fit}
+        </div>
         <div className="small muted" style={{ lineHeight: 1.4 }}>
           <span className="mono" style={{ color: 'var(--text)' }}>{fmtMoney(c.capHit)} × {c.years}</span> · {c.cost}
+          {c.yourOffer && <div style={{ color: STANDING[c.yourOffer.standing].color }}>Your offer: {c.yourOffer.note}</div>}
         </div>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
         {c.kind === 'fa' && (
           <>
             <button className="btn btn-sm btn-primary" onClick={() => nav.navigate('negotiation', { playerId: c.playerId })}>Talks</button>
-            {props.marketOpen && (
+            {c.yourOffer ? (
+              <span className="chip" style={{ fontSize: 9, color: STANDING[c.yourOffer.standing].color, borderColor: STANDING[c.yourOffer.standing].color }} title={c.yourOffer.note}>
+                {STANDING[c.yourOffer.standing].label} · {fmtMoney(c.yourOffer.salary)}×{c.yourOffer.years}
+              </span>
+            ) : props.marketOpen && (
               <button className="btn btn-sm btn-ghost" disabled={busy} title="Table a standing offer at his ask — it goes into the same pile as the real bids" onClick={() => void tableOffer()}>Offer his ask</button>
             )}
           </>

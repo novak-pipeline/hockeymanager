@@ -160,4 +160,21 @@ describe('the July market — real bids, a July 1 frenzy', () => {
     expect(won).toBeDefined()
     if (low) expect(inbox.some((n) => n.headline === `${low.name} passes on your offer` && /holding out/.test(n.body))).toBe(true)
   }, 60_000)
+
+  it('losing a man names the club that won him, its money and his reason — in YOUR inbox', () => {
+    const c = julyCareer()
+    const hub = c.getFaHub()
+    let target: (typeof hub.rows)[number] | undefined
+    for (const r of hub.rows.filter((x) => (x.bids ?? []).length >= 2 && x.decidesInDays <= 1 && x.askSalary < hub.capSpace)) {
+      c.submitFaOffer(r.playerId, r.askSalary, r.askYears)
+      if (c.getFaHub().rows.find((x) => x.playerId === r.playerId)!.pendingOffer!.standing === 'trailing') { target = r; break }
+    }
+    if (!target) return // every contested man would pick us today: nothing to lose
+    c.advanceOffseason()
+    const inbox = c.getInbox().items
+    const loss = inbox.find((n) => n.headline.startsWith(`You lose ${target!.name} to `))
+    const won = inbox.find((n) => n.headline === `${target!.name} signs with you!`)
+    expect(loss ?? won).toBeDefined()
+    if (loss) expect(loss.body).toMatch(/against your \$[\d.]+M × \d+\. His camp says it came down to (the money|the term|a chance to win|the role)\./)
+  }, 60_000)
 })

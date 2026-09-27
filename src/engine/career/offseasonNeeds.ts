@@ -64,6 +64,8 @@ interface Role {
   weight: number
   /** Defense only: the hand this role most wants. */
   hand?: 'L' | 'R'
+  /** A top six short of centres wants a natural centre. */
+  position?: 'C'
 }
 
 function roles(depth: DepthEntry[]): Role[] {
@@ -83,6 +85,7 @@ function roles(depth: DepthEntry[]): Role[] {
   if (f.length >= 6 && topCs < 2) {
     const top = out.find((r) => r.key === 'F-top')!
     top.label = 'a top-six centre'
+    top.position = 'C'
   }
   // Defense pairs want one left shot and one right shot.
   const d = depth.filter((x) => x.group === 'D').sort((a, b) => b.ovr - a.ovr)
@@ -137,8 +140,13 @@ function findGaps(input: NeedsInput): Gap[] {
       const gap = bench - occ.ovr
       if (gap > worst || (benchAt === 0 && gap >= worst)) { worst = gap; weakest = occ; slot = i; benchAt = bench }
     }
-    // A pair with no man of the hand it needs is a need even at par.
+    // A pair with no man of the hand it needs is a need even at par; the man
+    // to replace is the weaker of the pair.
     const handNeed = role.hand && role.group === 'D' ? 1.5 : 0
+    if (handNeed > 0 && !weakest) {
+      const pair = role.slots.map((i) => list[i]).filter((x): x is DepthEntry => !!x).sort((a, b) => a.ovr - b.ovr)
+      if (pair[0]) { weakest = pair[0]; slot = list.indexOf(pair[0]); benchAt = input.benchmark[role.group][slot] ?? benchAt }
+    }
     const score = (Math.max(0, worst) + handNeed + empty * 6) * role.weight
     // A pair without the hand it needs is a need unless it is clearly better
     // than the league there anyway.
@@ -151,6 +159,9 @@ function findGaps(input: NeedsInput): Gap[] {
 
 function fitLine(c: NeedsCandidate, gap: Gap): string {
   const where = gap.role.label.replace(/^an? /, '')
+  if (gap.role.hand && gap.weakest && gap.gap < GAP_NEED && gap.empty === 0) {
+    return `A ${gap.role.hand === 'L' ? 'left' : 'right'} shot for the pair: ${Math.round(c.overall)} against ${gap.weakest.name}'s ${Math.round(gap.weakest.ovr)}`
+  }
   if (gap.weakest) {
     const plus = Math.round(c.overall - gap.weakest.ovr)
     return `Slots in as your ${where}: ${plus >= 0 ? `+${plus}` : `−${-plus}`} over ${gap.weakest.name}`
@@ -162,11 +173,15 @@ function fitLine(c: NeedsCandidate, gap: Gap): string {
  *  group (and hand, when a pair lacks one), ranked by what they add per
  *  dollar with a mix of kinds so the answer is never one list. */
 function candidatesFor(gap: Gap, pool: NeedsCandidate[], used: Set<string>, capRoom: number): NeedCandidateView[] {
-  const bar = gap.weakest ? gap.weakest.ovr + 1 : 0
+  // A hand need is about the shot, so a man at the pair's level will do; any
+  // other need wants a real upgrade on the man there now.
+  const handOnly = !!gap.role.hand && gap.gap < GAP_NEED && gap.empty === 0
+  const bar = gap.weakest ? gap.weakest.ovr + (handOnly ? -1 : 1) : 0
   const fits = pool.filter((c) =>
     c.group === gap.role.group &&
     !used.has(c.playerId) &&
     c.overall >= bar &&
+    (!gap.role.position || c.position === gap.role.position) &&
     (!gap.role.hand || c.hand === gap.role.hand || gap.role.group !== 'D'))
   // Value for money: the upgrade, discounted when he doesn't fit the room.
   const rank = (c: NeedsCandidate): number => {
@@ -209,7 +224,14 @@ export function buildNeeds(input: NeedsInput): { needs: OffseasonNeedView[]; hea
     fillCost += cheapest
     const groupWord = g.role.group === 'F' ? 'forward' : g.role.group === 'D' ? 'defenseman' : 'goalie'
     const ord = (n: number): string => `${n}${n % 10 === 1 && n !== 11 ? 'st' : n % 10 === 2 && n !== 12 ? 'nd' : n % 10 === 3 && n !== 13 ? 'rd' : 'th'}`
-    const why = g.empty > 0
+    const pairOf = (r: Role): DepthEntry[] => {
+      const list = input.depth.filter((x) => x.group === r.group).sort((a, b) => b.ovr - a.ovr)
+      return r.slots.map((i) => list[i]).filter((x): x is DepthEntry => !!x)
+    }
+    const handOnly = g.role.hand && g.gap < GAP_NEED && g.empty === 0
+    const why = handOnly
+      ? `The pair has no ${g.role.hand === 'L' ? 'left' : 'right'} shot: ${pairOf(g.role).map((x) => x.name).join(' and ')} both shoot ${g.role.hand === 'L' ? 'right' : 'left'}, so one plays his off side.`
+      : g.empty > 0
       ? `You have ${g.empty} empty ${g.empty === 1 ? 'spot' : 'spots'} there for next season.`
       : g.weakest
         ? `Your ${ord(g.slot + 1)} ${groupWord} is ${g.weakest.name} (${Math.round(g.weakest.ovr)}); a normal club dresses a ${Math.round(g.bench)} there.` +

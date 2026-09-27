@@ -167,8 +167,8 @@ const numWord = (n: number): string => NUM_WORDS[n] ?? String(n)
 /** "3 forwards for the last 2 spots" / "Backup goalie" / "The 7th D". */
 export function battleLabel(group: CampGroup, contenders: number, slots: number, firstRank: number, target: number): string {
   if (group === 'G') {
-    if (firstRank <= 1) return 'The starting job'
-    return slots === 1 ? 'Backup goalie' : `${contenders} goalies for ${slots} spots`
+    if (slots === 1) return firstRank <= 1 ? 'The starting job' : 'Backup goalie'
+    return `The crease: ${contenders} goalies, ${slots} spots`
   }
   if (group === 'D') {
     if (slots === 1 && firstRank === target) return `The 7th D: ${contenders} men, one spot`
@@ -305,13 +305,17 @@ export function battleRead(b: CampBattle, coachName: string): string {
     // Did CAMP decide it, or the coach's read? Compare what the games showed.
     const campEdge = chaser ? top.evidence - chaser.evidence : top.evidence
     if (upsets.length > 0) {
-      parts.push(campEdge >= 1
+      parts.push(campEdge >= 1 && top.evidence > 0
         ? `${top.name} is taking it from the outside: he ${top.cite ?? 'has earned it'}.`
-        : `${top.name} gets the nod from the outside on the coach's read — camp has not separated them. He ${top.cite ?? 'has held his own'}.`)
+        : campEdge >= 1
+          ? `${top.name} leads from the outside, though nobody has seized the job: he ${top.cite ?? 'has held his own'}.`
+          : `${top.name} gets the nod from the outside on the coach's read — camp has not separated them. He ${top.cite ?? 'has held his own'}.`)
     } else {
-      parts.push(campEdge >= 0
+      parts.push(campEdge >= 0 && top.evidence >= 0
         ? `${top.name} is holding on: he ${top.cite ?? 'has done enough'}.`
-        : `${top.name} is holding on, but not because of camp: he ${top.cite ?? 'has been quiet'}.`)
+        : campEdge >= 0
+          ? `${top.name} is holding on, though nobody has seized the job: he ${top.cite ?? 'has been quiet'}.`
+          : `${top.name} is holding on, but not because of camp: he ${top.cite ?? 'has been quiet'}.`)
     }
   }
   if (chaser) {

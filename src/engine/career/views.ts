@@ -571,6 +571,9 @@ export interface DashboardView {
   devCampPending?: boolean
   /** M3: cut day — training camp decisions await before opening night. Optional/additive. */
   campPending?: boolean
+  /** Camp Battles (additive): the camp beat — 1 open, 3 after the Blue-Red
+   *  games, 8 cut day — so the dashboard banner names where camp stands. */
+  campDay?: number
   /** True when the End-of-Season Review is staged (Season Rhythm M4). */
   reviewPending?: boolean
   /** True while the sim is held on deadline day (last chance to trade). */
@@ -2000,6 +2003,8 @@ export interface NeedCandidateView {
   assetTier: string
   /** FA: how many real offers are on the table. */
   bids?: number
+  /** FA: your standing offer and where it sits against the real field. */
+  yourOffer?: { salary: number; years: number; standing: 'leading' | 'competitive' | 'trailing'; note: string }
 }
 
 /** A hole in next season's roster, in hockey words, with its answers. */

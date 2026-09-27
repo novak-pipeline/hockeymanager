@@ -14964,6 +14964,18 @@ export class Career {
       queue = next
       if (stuck) break
     }
+    // A like-for-like swap the roster rules refuse one move at a time (the
+    // backup goalie battle: neither club may drop to one goalie, even for a
+    // moment) goes through as ONE swap — waivers and all for the man going down.
+    for (;;) {
+      const up = queue.find((m) => !m.d.tryout && m.want === 'nhl')
+      const down = up && queue.find((m) => !m.d.tryout && m.want === 'ahl' && this.posGroup(this.resolve(asPlayerId(m.d.playerId)).position) === this.posGroup(this.resolve(asPlayerId(up.d.playerId)).position))
+      if (!up || !down) break
+      const res = this.campSwap(up.d.playerId, down.d.playerId)
+      queue = queue.filter((m) => m !== up && m !== down)
+      notes.push(...res.notes)
+      if (!res.ok) { const reason = res.reason ?? 'roster rules'; queue.push({ ...up, reason }, { ...down, reason }); break }
+    }
     for (const { d, want, reason } of queue) {
       notes.push(d.tryout
         ? `${d.name}'s tryout ends without a deal: ${reason ?? 'no room'}.`
@@ -15004,7 +15016,9 @@ export class Career {
           const made = onNhl.has(c.playerId)
           if (made && c.current === 'ahl') {
             p.morale = Math.min(100, p.morale + 6)
-            notes.push(`${c.name} won “${b.label}” — he ${c.cite ?? 'earned it'}.`)
+            notes.push(c.evidence > 0
+              ? `${c.name} won “${b.label}” — he ${c.cite ?? 'earned it'}.`
+              : `${c.name} won “${b.label}” on the coach's read — he ${c.cite ?? 'held his own'}.`)
           } else if (!made && c.current === 'nhl') {
             p.morale = Math.max(0, p.morale - 5)
           }
@@ -15020,6 +15034,37 @@ export class Career {
       { teamId: this.userTeamId as string }
     )
     camp.resolved = true
+    return { ok: true, notes }
+  }
+
+  /** Cut day: move one man up and one down in the same position group as a
+   *  single transaction. The man going down still faces real waivers. */
+  private campSwap(upId: string, downId: string): { ok: boolean; notes: string[]; reason?: string } {
+    const nhl = this.userTeam
+    const ahl = nhl.affiliateId ? this.data.teams.get(nhl.affiliateId) : undefined
+    const up = this.data.players.get(asPlayerId(upId))
+    const down = this.data.players.get(asPlayerId(downId))
+    if (!ahl || !up || !down) return { ok: false, notes: [], reason: 'roster rules' }
+    if (!ahl.roster.includes(up.id) || !nhl.roster.includes(down.id)) return { ok: false, notes: [], reason: 'roster rules' }
+    const capAfter = this.userCapUsed() - down.contract.salary + up.contract.salary
+    if (capAfter + this.userDeadCap > nhl.finances.salaryCap) return { ok: false, notes: [], reason: `No cap room to swap ${up.name} in for ${down.name}.` }
+    const notes: string[] = []
+    nhl.roster = nhl.roster.filter((id) => id !== down.id)
+    const claimant = this.requiresWaivers(down) ? this.processWaivers(down, nhl.id) : null
+    if (claimant) {
+      notes.push(`${down.name} was claimed off waivers by ${claimant.name}.`)
+      this.pushNews('contract', `${down.name} CLAIMED off waivers by ${claimant.abbreviation}`,
+        `You sent ${down.name} (${down.position}, ${down.age}) down out of camp, but he needed waivers — ${claimant.name} claimed him and his contract.`,
+        { playerId: downId, teamId: this.userTeamId as string })
+    } else {
+      ahl.roster.push(down.id)
+      notes.push(this.requiresWaivers(down) ? `${down.name} cleared waivers.` : `${down.name} is assigned to the farm.`)
+    }
+    ahl.roster = ahl.roster.filter((id) => id !== up.id)
+    nhl.roster.push(up.id)
+    notes.push(`${up.name} makes the team out of camp.`)
+    repairLines(nhl, this.data.players)
+    repairLines(ahl, this.data.players)
     return { ok: true, notes }
   }
 
@@ -15080,7 +15125,10 @@ export class Career {
     const habits = (((p.personality?.professionalism ?? 10.5) - 10.5) / 19) * 1.5
     const waiver = !tryout && this.requiresWaivers(p)
     const claimants = current === 'nhl' && waiver ? this.waiverClaimantsFor(p, this.userTeamId) : []
-    const waiverLean = claimants.length > 0 ? 2 : 0
+    // The coach will not hand a proven pro to a rival for nothing on a hunch:
+    // a man who WOULD be claimed carries a real lean (a delegating GM must not
+    // bleed veterans). Camp can still overturn it — that is the waiver trap.
+    const waiverLean = claimants.length > 0 ? 5 : 0
     const coachEye = Math.round((eye + habits + waiverLean) * 10) / 10
     // A proven one-way pro gets a modest lean on the opening chart — no longer
     // the old wall that kept any veteran up regardless of camp.
@@ -17315,6 +17363,10 @@ export class Career {
     const FLOOR = 20 // never strip a club below this
     const POOL_FLOOR = 45 // aim for a market of at least this many names
     const inPool = new Set(this.faPool.map((id) => id as string))
+    // A man a club signed THIS summer is not surplus it would cut: the July
+    // market signs more on day one now (the frenzy), and without this a view
+    // that tops the market up could release a player the day after he signed.
+    for (const w of this.offseason?.faWire ?? []) inPool.add(w.playerId)
     let added = 0
     // Weakest-first across the league so the floor is filled with true depth.
     const clubs = [...this.data.teams.values()].filter(
@@ -17571,11 +17623,13 @@ export class Career {
         continue
       }
       const winner = o.winnerTeamId ? this.data.teams.get(o.winnerTeamId) : undefined
-      this.pushNews('contract', `${player.name} signs with ${winner?.abbreviation ?? 'a rival'}`,
+      // Your mail (teamId = your club): a loss is a receipt about YOUR offer,
+      // not league churn, so it must survive the inbox's churn filter.
+      this.pushNews('contract', `You lose ${player.name} to ${winner?.abbreviation ?? 'a rival'}`,
         `${player.name} chose ${winner?.name ?? 'another club'}: $${((o.winnerSalary ?? 0) / 1e6).toFixed(2)}M × ${o.winnerYears ?? 1} ` +
         `against your $${(o.salary / 1e6).toFixed(2)}M × ${o.years}. His camp says it came down to ${o.reason}.` +
         (o.suitors > 1 ? ` ${o.suitors} clubs bid for him.` : ''),
-        { playerId: pid, ...(winner ? { teamId: winner.id as string } : {}) })
+        { playerId: pid, teamId: this.userTeamId as string })
     }
   }
 
@@ -17767,7 +17821,10 @@ export class Career {
       const lead = offers[0]
       const leadAbbr = lead ? this.data.teams.get(lead.bid.teamId)?.abbreviation ?? '?' : ''
       const v = playerValue(p)
+      const pending = this.faPendingOffers.find((o) => o.playerId === (id as string))
+      const standing = pending ? this.faOfferStanding(p, pending, { salary: ask, years: raw.years }, book) : undefined
       pool.push({
+        ...(pending && standing ? { yourOffer: { salary: pending.salary, years: pending.years, standing: standing.standing, note: standing.note } } : {}),
         kind: 'fa', group: grpOf(p), playerId: id as string, name: p.name, position: p.position, age: p.age,
         overall: ratedOverall(p), ...(p.faceId !== undefined ? { faceId: p.faceId } : {}), hand: p.handedness,
         capHit: ask, years: raw.years,
@@ -22279,6 +22336,7 @@ export class Career {
           }
         : {}),
       campPending: this.trainingCamp !== null && !this.trainingCamp.resolved,
+      ...(this.trainingCamp && !this.trainingCamp.resolved ? { campDay: this.trainingCamp.campDay ?? 8 } : {}),
       reviewPending: this.reviewFacts !== null,
       deadlinePending: this.deadlineHold,
       ...(lineupGate !== null ? { lineupShortfall: lineupGate } : {}),

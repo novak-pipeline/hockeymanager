@@ -21,7 +21,7 @@ import { PlayerLink, useNav } from '../components/NavContext'
 import { Icon } from '../components/primitives'
 import { Icons } from '../components/icons'
 import { Notice } from '../components/ui'
-import { toast } from '../components/store'
+import { bumpRefresh, toast } from '../components/store'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
 import type {
@@ -131,7 +131,7 @@ export function TrainingCampScreen(): JSX.Element {
     const res = await client.submitTrainingCamp(Object.entries(placements).map(([playerId, place]) => ({ playerId, place })))
     setBusy(false)
     if (res.type === 'error') { toast(res.message ?? 'Could not break camp.', 'error'); return }
-    if (res.type === 'trainingCamp' && res.notes) setNotes(res.notes)
+    if (res.type === 'trainingCamp' && res.notes) { setNotes(res.notes); bumpRefresh() }
   }
 
   async function delegate(): Promise<void> {
@@ -140,7 +140,7 @@ export function TrainingCampScreen(): JSX.Element {
     const res = await client.delegateTrainingCamp()
     setBusy(false)
     if (res.type === 'error') { toast(res.message ?? 'The coach could not take over.', 'error'); return }
-    if (res.type === 'trainingCamp' && res.notes) setNotes(res.notes)
+    if (res.type === 'trainingCamp' && res.notes) { setNotes(res.notes); bumpRefresh() }
   }
 
   async function toggleLook(playerId: string): Promise<void> {

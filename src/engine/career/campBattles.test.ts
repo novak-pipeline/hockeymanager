@@ -70,6 +70,7 @@ describe('camp battles — detection', () => {
     expect(battleLabel('F', 3, 2, 13, 14)).toBe('3 forwards for the last 2 spots')
     expect(battleLabel('G', 2, 1, 2, 2)).toBe('Backup goalie')
     expect(battleLabel('D', 2, 1, 7, 7)).toBe('The 7th D: 2 men, one spot')
+    expect(battleLabel('G', 3, 2, 1, 2)).toBe('The crease: 3 goalies, 2 spots')
   })
 })
 
@@ -179,6 +180,29 @@ describe('camp battles — the career camp', () => {
     expect(res.ok).toBe(true)
     expect((c as unknown as { userTeam: { roster: string[] } }).userTeam.roster.length).toBeLessThanOrEqual(23)
     expect(c.getTrainingCamp()).toBeNull()
+  }, 120_000)
+
+  it('a goalie swap the roster rules refuse one move at a time goes through as one swap', () => {
+    const c = stagedCamp()
+    const cc = c as unknown as { trainingCamp: { decisions: unknown[]; resolved: boolean; campDay?: number }; userTeam: { roster: string[]; affiliateId: string }; data: { teams: Map<string, { roster: string[] }>; players: Map<string, { position: string; name: string; age: number }> } }
+    const farm = cc.data.teams.get(cc.userTeam.affiliateId)!
+    const nhlG = cc.userTeam.roster.filter((id) => cc.data.players.get(id)!.position === 'G')
+    const ahlG = farm.roster.filter((id) => cc.data.players.get(id)!.position === 'G')
+    expect(nhlG.length).toBeGreaterThanOrEqual(2)
+    expect(ahlG.length).toBeGreaterThanOrEqual(1)
+    // Keep exactly the roster minimum in both places, so neither single move is legal.
+    const upId = ahlG[0]!
+    const downId = nhlG[nhlG.length - 1]!
+    const mk = (id: string, current: 'nhl' | 'ahl', plan: 'nhl' | 'ahl') => {
+      const p = cc.data.players.get(id)!
+      return { playerId: id, name: p.name, position: 'G', age: p.age, current, coachPlan: plan, waiverRequired: false, line: 'x' }
+    }
+    cc.trainingCamp = { decisions: [mk(upId, 'ahl', 'nhl'), mk(downId, 'nhl', 'ahl')], resolved: false, campDay: 8 }
+    const res = c.submitTrainingCamp([])
+    expect(res.ok).toBe(true)
+    expect(cc.userTeam.roster).toContain(upId)
+    expect(cc.userTeam.roster).not.toContain(downId)
+    expect(res.notes.some((n) => /could not be sent down|stays with the farm club/.test(n))).toBe(false)
   }, 120_000)
 
   it('the GM can overrule a battle, and give a contender the look', () => {
