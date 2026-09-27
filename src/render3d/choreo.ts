@@ -261,6 +261,29 @@ export class Choreographer {
     }
   }
 
+  /**
+   * Who is mid-swing at game time `t` — a shot or pass whose clip has started
+   * (`lead` before the event) but whose stick hasn't met the puck yet. The
+   * renderer keeps the puck on HIS blade until contact, so the wind-up visibly
+   * carries the puck and the release lands on the swing (it used to leave first).
+   */
+  windupActor(t: number): string | null {
+    const ps = this.plans
+    let lo = 0
+    let hi = ps.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (ps[mid]!.cue.absT < t) lo = mid + 1
+      else hi = mid
+    }
+    for (let i = lo; i < ps.length; i++) {
+      const p = ps[i]!
+      if (p.cue.absT - 0.9 > t) break
+      if ((p.cue.kind === 'shot' || p.cue.kind === 'pass') && p.clip && p.cue.absT - p.lead <= t) return p.cue.actorId
+    }
+    return null
+  }
+
   /** Advance from game clock `prev` to `now` (seconds of game time). */
   tick(prev: number, now: number): void {
     if (now < prev) return

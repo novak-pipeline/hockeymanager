@@ -1390,8 +1390,10 @@ export class Rink3dRenderer implements MatchRenderer {
 
     // Carrier pose (resolved AFTER the slots updated their ids this frame)
     let carrierPose: PlayerPose | null = null
-    if (snap.carrier !== null) {
-      carrierPose = this.allPoses().find((p) => p.playerId === snap.carrier && p.rig.visible) ?? null
+    // a shooter / passer mid-swing keeps the puck on his blade until contact
+    const carrierId = this.choreo?.windupActor(absT) ?? snap.carrier
+    if (carrierId !== null) {
+      carrierPose = this.allPoses().find((p) => p.playerId === carrierId && p.rig.visible) ?? null
     }
 
     // Puck position: if carried, sits on the carrier's blade
@@ -1402,6 +1404,13 @@ export class Rink3dRenderer implements MatchRenderer {
       // on the posed blade (C3): wherever the clip / IK actually put the stick
       pTargetX = blade.x
       pTargetZ = blade.z
+      this.carrierWx = carrierPose.worldX.pos
+      this.carrierWz = carrierPose.worldZ.pos
+    } else if (carrierPose !== null && carrierId !== snap.carrier) {
+      // wind-up with the blade in the air: the puck waits on the ice where the
+      // stick will come down on it (it doesn't jump to a body offset)
+      pTargetX = this.puck.x
+      pTargetZ = this.puck.z
       this.carrierWx = carrierPose.worldX.pos
       this.carrierWz = carrierPose.worldZ.pos
     } else if (carrierPose !== null) {
