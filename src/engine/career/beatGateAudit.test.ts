@@ -68,7 +68,14 @@ function walkPressingContinue(c: Career, presses: number): WalkResult {
       screen = dec.screen
       // The escape each hard gate carries on its own screen.
       if (dec.screen === 'draft') c.autoDraft()
-      else if (dec.screen === 'squad') {
+      else if (dec.screen === 'gmCareer') {
+        // E3: dismissed — the escape is a real vacancy on the job market.
+        const m = c.getGMJobMarket()
+        const pick = m.openings.find((o) => o.interest !== 'longshot') ?? m.openings[0]
+        if (!pick) throw new Error('HARD GATE with no escape (fired): no openings')
+        const r = c.acceptGMJob(pick.teamId)
+        if (!r.ok) throw new Error(`HARD GATE with no escape (fired): ${r.message ?? ''}`)
+      } else if (dec.screen === 'squad') {
         const r = c.signEmergencyCover()
         if (!r.ok) throw new Error(`HARD GATE with no escape (lineup): ${r.message}`)
       } else {

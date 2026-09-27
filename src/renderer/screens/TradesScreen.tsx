@@ -13,6 +13,7 @@ import type {
 } from '../../engine/career/views'
 import { assetValueTier } from '../../engine/league/trades'
 import { PlayerLink, useNav } from '../components/NavContext'
+import { NeedsBoard } from '../components/NeedsBoard'
 import { PlayerFace } from '../components/PlayerFace'
 import { TeamCrest } from '../components/Crest'
 import { OverallStars } from '../components/Stars'
@@ -1809,7 +1810,7 @@ function DeadlineRecapCard(props: {
 
 // ─── main screen ──────────────────────────────────────────────────────────────
 
-type Tab = 'offers' | 'build' | 'block'
+type Tab = 'needs' | 'offers' | 'build' | 'block'
 
 export function TradesScreen(): JSX.Element {
   const client = useClient()
@@ -1825,6 +1826,28 @@ export function TradesScreen(): JSX.Element {
 
   const [tab, setTab] = useState<Tab>('offers')
   const [seed, setSeed] = useState<TradeSeed | null>(null)
+  const nav = useNav()
+
+  // Offseason 3.0: open on the NEEDS unless offers are waiting on the desk.
+  const [tabChosen, setTabChosen] = useState(false)
+  useEffect(() => {
+    if (!data || tabChosen) return
+    setTabChosen(true)
+    if (nav.params.playerId) return // a deep link below picks the tab
+    setTab(data.incoming.length > 0 ? 'offers' : 'needs')
+  }, [data, tabChosen, nav.params.playerId])
+
+  // Deep link from the needs board: "Enquire" opens the builder on his club
+  // with him asked for; "Shop him" opens it with your man on the table.
+  useEffect(() => {
+    const pid = nav.params.playerId
+    if (!pid || !data?.tradingOpen) return
+    const tid = nav.params.teamId
+    setSeed(tid
+      ? { reason: 'enquiry', partnerId: tid, myPlayerIds: [], myPickIds: [], theirPlayerIds: [pid], theirPickIds: [], nonce: Date.now() }
+      : { reason: 'enquiry', partnerId: data.partners[0]?.teamId ?? '', myPlayerIds: [pid], myPickIds: [], theirPlayerIds: [], theirPickIds: [], nonce: Date.now() })
+    setTab('build')
+  }, [nav.params.playerId, nav.params.teamId, data?.tradingOpen])
 
   /** Counter an incoming offer: preload the builder with its players + partner,
    *  switch to the build tab, and clear the original offer off the desk. */
@@ -1895,6 +1918,9 @@ export function TradesScreen(): JSX.Element {
         <>
           {/* segmented tab bar */}
           <div className="tabs">
+            <button className={`tab${tab === 'needs' ? ' active' : ''}`} onClick={() => setTab('needs')} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} title="What next season's roster is missing, and who could fill it">
+              <Icon size={14}><Icons.Squad /></Icon> Your needs
+            </button>
             <button className={`tab${tab === 'offers' ? ' active' : ''}`} onClick={() => setTab('offers')} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <Icon size={14}><Icons.Mail /></Icon> Offers{incomingCount > 0 && <span className="badge" style={{ marginLeft: 6 }}>{incomingCount}</span>}
             </button>
@@ -1911,6 +1937,10 @@ export function TradesScreen(): JSX.Element {
               <Icon size={14}><Icons.Hot /></Icon> Trade Block{rumorCount > 0 && <span className="badge" style={{ marginLeft: 6 }}>{rumorCount}</span>}
             </button>
           </div>
+
+          {tab === 'needs' && (
+            <NeedsBoard focus="trade" onBrowse={() => setTab('block')} browseLabel="Browse the whole trade block" />
+          )}
 
           {tab === 'offers' && (
             <div className="stack">

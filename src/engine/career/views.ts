@@ -28,6 +28,7 @@ export type { ScoutPanel, ScoutRead, NhlComp, BoomBustRisk, RiskBand } from '@en
 export type { RosterProjection, CoachReport } from '@engine/career/playerProjection'
 export type { OpinionSnapshot } from '@engine/career/opinionTracker'
 import type { ScoutAssignment, ScoutingState } from '@domain/scouting'
+import type { FaWireEntry } from '@domain/draft'
 export type { ScoutTarget } from '@domain/scouting'
 export type { StaffMember, AgmReport, AgmRankedPlayer } from '@engine/league/staff'
 import type { ValueDriver } from '@engine/league/trades'
@@ -136,8 +137,22 @@ export interface TrainingCampState {
     /** PTO invitee: unsigned, on a tryout. 'nhl' = sign him to a deal, 'ahl' =
      *  release him back to the market (there's no farm assignment for a tryout). */
     tryout?: boolean
+    /** Camp Battles (additive): the battle this call belongs to, if any. A
+     *  decision without one is a clear call outside the contested slots. */
+    battleId?: string
+    /** Abbreviation of the club first in line to claim him on waivers (a real
+     *  dry run of the claim logic). Absent = he would clear. */
+    claimedBy?: string
   }>
   resolved: boolean
+  /* ── Camp Battles (depth audit §5), all additive/optional ── */
+  /** The contested roster spots, re-ranked after every camp game. */
+  battles?: CampBattle[]
+  /** "Give him the look": up to two contenders the GM wants skated in the top
+   *  six (or starting in goal) in the next games. More ice, more variance. */
+  look?: string[]
+  /** The camp games actually played by the sim, in order. */
+  games?: CampGameResult[]
   /* ── Training Camp v2 (EHM-style), all additive/optional ── */
   /** Which day of the camp week we're on (1..8); 8 = final cuts. */
   campDay?: number
@@ -179,6 +194,80 @@ export interface TrainingCampView {
   schedule?: TrainingCampState['schedule']
   scrimmage?: TrainingCampState['scrimmage']
   reports?: CampReport[]
+  /* ── Camp Battles (additive) ── */
+  battles?: CampBattle[]
+  look?: string[]
+  games?: CampGameResult[]
+  /** The coach's one-line read on each battle, keyed by battle id. */
+  reads?: Record<string, string>
+  /** Bodies on the NHL roster right now, per group — the base the cut-day
+   *  screen projects the opening-night 23 from. */
+  nhlNow?: { F: number; D: number; G: number }
+}
+
+/** One camp game in one player's camp log (scrimmage or preseason). */
+export interface CampGameLine {
+  /** How the verdicts name the game: "in the Blue-Red game", "against BOS". */
+  game: string
+  kind: 'scrimmage' | 'preseason'
+  g: number
+  a: number
+  pm: number
+  sog: number
+  toiSec: number
+  /** Goalies: shots against and goals against. */
+  sa?: number
+  ga?: number
+}
+
+/** A contender in a camp battle: the coach's prior, what camp showed, and
+ *  where that leaves him. */
+export interface CampBattleContender {
+  playerId: string
+  name: string
+  position: string
+  age: number
+  faceId?: string
+  current: 'nhl' | 'ahl'
+  tryout?: boolean
+  waiverRequired: boolean
+  /** First club in line to claim him if he is sent down (dry run). */
+  claimedBy?: string
+  claimants?: number
+  /** The coach's read before camp (ability + his eye), overall scale. */
+  prior: number
+  /** Camp evidence swing, bounded (see campBattles.EVIDENCE_CAP). */
+  evidence: number
+  score: number
+  /** Inside the slots on the current ranking. */
+  winning: boolean
+  lines: CampGameLine[]
+  /** What camp showed, as one clause ("scored twice in the Blue-Red game"). */
+  cite?: string
+}
+
+/** A named, contested roster spot at camp. */
+export interface CampBattle {
+  id: string
+  group: 'F' | 'D' | 'G'
+  /** "3 forwards for the last 2 spots", "Backup goalie", "The 7th D: …". */
+  label: string
+  /** How many of the contenders make the team. */
+  slots: number
+  /** A waiver-bound incumbent against a waiver-exempt challenger. */
+  waiverTrap?: boolean
+  contenders: CampBattleContender[]
+}
+
+/** A camp game the sim played. */
+export interface CampGameResult {
+  label: string
+  kind: 'scrimmage' | 'preseason'
+  /** Camp day it was played (1–8). */
+  day: number
+  /** "Team Blue 4, Team Red 3" / "BOS 2, PIT 3". */
+  result: string
+  opponentAbbr?: string
 }
 
 /** Dev camp is a WEEK, not a click: arrival -> scrimmage -> wrap. Persisted. */
@@ -482,6 +571,9 @@ export interface DashboardView {
   devCampPending?: boolean
   /** M3: cut day — training camp decisions await before opening night. Optional/additive. */
   campPending?: boolean
+  /** Camp Battles (additive): the camp beat — 1 open, 3 after the Blue-Red
+   *  games, 8 cut day — so the dashboard banner names where camp stands. */
+  campDay?: number
   /** True when the End-of-Season Review is staged (Season Rhythm M4). */
   reviewPending?: boolean
   /** True while the sim is held on deadline day (last chance to trade). */
@@ -1866,6 +1958,12 @@ export interface FaHubRowView extends PlayerBadge {
   /** Rival clubs known to be circling (abbreviations) — the competition you're
    *  bidding against. Fog-limited to a handful; longer lists read as "+N more". */
   rivals?: string[]
+  /** Offseason 3.0 (additive): the REAL offers on the table today — each an
+   *  AI club's actual market bid, in the order HE ranks them, with the reason
+   *  he'd give. Money is rounded the way an agent would say it. */
+  bids?: FaBidView[]
+  /** Who he is leaning to and why ("Leaning TOR: a chance to win."). */
+  lean?: string
   /** #167/#164: a standing offer you've tabled him, awaiting his decision, with
    *  an honest read on where it sits vs the rival field. */
   pendingOffer?: {
@@ -1876,6 +1974,75 @@ export interface FaHubRowView extends PlayerBadge {
     standing: 'leading' | 'competitive' | 'trailing'
     standingNote: string
   }
+}
+
+/* ─────────────── Offseason 3.0: needs first (additive) ─────────────── */
+
+/** One real answer to a need: a free agent, a trade target, your own
+ *  expiring man, or (for a cap need) one of your contracts to move. */
+export interface NeedCandidateView {
+  kind: 'fa' | 'trade' | 'resign' | 'move'
+  playerId: string
+  name: string
+  position: string
+  age: number
+  overall: number
+  faceId?: string
+  hand: 'L' | 'R'
+  /** Trade targets: the club that holds him. */
+  teamId?: string
+  teamAbbr?: string
+  capHit: number
+  years: number
+  /** How he fits the hole ("Slots in as your 2nd-pair LHD: +5 over X"). */
+  fit: string
+  /** What it takes: the real bids against you, the seller's stance, his ask. */
+  cost: string
+  /** Market asset value (the trade currency) and its tier label. */
+  assetValue: number
+  assetTier: string
+  /** FA: how many real offers are on the table. */
+  bids?: number
+  /** FA: your standing offer and where it sits against the real field. */
+  yourOffer?: { salary: number; years: number; standing: 'leading' | 'competitive' | 'trailing'; note: string }
+}
+
+/** A hole in next season's roster, in hockey words, with its answers. */
+export interface OffseasonNeedView {
+  id: string
+  kind: 'slot' | 'cap'
+  /** "a 2nd-pair LHD", "a backup G", "$6.2M of cap space". */
+  label: string
+  /** Why it is a need, from the numbers. */
+  why: string
+  severity: 1 | 2 | 3
+  group?: 'F' | 'D' | 'G'
+  /** Cap need: dollars to clear. */
+  amount?: number
+  candidates: NeedCandidateView[]
+}
+
+export interface OffseasonNeedsView {
+  /** "You need: a 2nd-pair LHD, a backup G, $6.2M of cap space". */
+  headline: string
+  needs: OffseasonNeedView[]
+  capCeiling: number
+  committed: number
+  /** True while the July market is open (FA answers can take standing offers). */
+  marketOpen: boolean
+}
+
+/** One real offer on the table for a free agent. */
+export interface FaBidView {
+  teamId: string
+  teamAbbr: string
+  /** Rounded to $0.1M. */
+  salary: number
+  years: number
+  /** What pulls him toward this offer: the money, the term, a chance to win, the role. */
+  reason: string
+  /** The offer he'd take if he decided today. */
+  leading?: boolean
 }
 
 export interface FaHubView {
@@ -2185,8 +2352,25 @@ export interface OffseasonView {
   resignWindowDays?: number
   /** Free-agency stage. */
   freeAgents: FreeAgentRowView[]
+  /** Free-agency stage (additive): the market day. 0 = the morning of July 1,
+   *  before the phones open at noon; 1 = July 1 itself, the frenzy. */
+  faDay?: number
+  /** Free-agency stage (additive): the July wire, newest first — every
+   *  signing this summer with the bidding behind it. */
+  faWire?: FaWireEntry[]
   /** Pending arbitration awards — accept or walk (M2). Optional/additive. */
-  arbitration?: Array<{ playerId: string; name: string; position: string; age: number; salary: number; years: number }>
+  arbitration?: Array<{
+    playerId: string; name: string; position: string; age: number; salary: number; years: number
+    /** Offseason 3.0 (additive): false = filed, hearing still to come (the
+     *  award is sealed; `salary` then shows the settlement figure). */
+    heard?: boolean
+    clubFiling?: number
+    playerFiling?: number
+    /** Settle at the door: the midpoint of the filings. */
+    settleAt?: number
+    /** Market day of the hearing (July N). */
+    hearingDay?: number
+  }>
   capUsed: number
   salaryCap: number
 }
@@ -2674,7 +2858,7 @@ export interface CareerSnapshot {
   /** Per-game box scores for the user's played games this season. Optional/additive. */
   boxScoreHistory?: Array<[string, BoxScoreView]>
   /** Pending arbitration awards for the user's RFAs (M2). Optional/additive. */
-  arbitrationCases?: Array<{ playerId: string; salary: number; years: number }>
+  arbitrationCases?: Array<{ playerId: string; salary: number; years: number; clubFiling?: number; playerFiling?: number; hearingDay?: number; heard?: boolean }>
   /** Deadline-day hold state. Optional/additive. */
   deadlineHold?: boolean
   deadlineHoldDone?: boolean

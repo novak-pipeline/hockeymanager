@@ -207,6 +207,17 @@ function handle(req: WorkerRequest): WorkerResponse {
       const res = must().submitTrainingCamp(req.placements)
       return { id: req.id, type: 'trainingCamp', camp: null, notes: res.notes }
     }
+    case 'setCampLook': {
+      const res = must().setCampLook(req.playerIds)
+      if (!res.ok) throw new Error(res.message ?? 'Could not set the look.')
+      return { id: req.id, type: 'trainingCamp', camp: must().getTrainingCamp() }
+    }
+    case 'getOffseasonNeeds':
+      return { id: req.id, type: 'offseasonNeeds', needs: must().getOffseasonNeeds() }
+    case 'delegateTrainingCamp': {
+      const res = must().delegateTrainingCamp()
+      return { id: req.id, type: 'trainingCamp', camp: null, notes: res.notes }
+    }
     case 'getFeed':
       return { id: req.id, type: 'feed', feed: must().getFeed() }
     case 'toggleFollowAuthor': {
@@ -544,6 +555,11 @@ function handle(req: WorkerRequest): WorkerResponse {
       return { id: req.id, type: 'boxScore', boxScore: must().getBoxScoreFor(req.gameId) }
     case 'acceptArbitration': {
       const res = must().acceptArbitration(req.playerId)
+      if (!res.ok) return { id: req.id, type: 'error', message: res.message }
+      return { id: req.id, type: 'ok', note: res.message }
+    }
+    case 'settleArbitration': {
+      const res = must().settleArbitration(req.playerId, req.years)
       if (!res.ok) return { id: req.id, type: 'error', message: res.message }
       return { id: req.id, type: 'ok', note: res.message }
     }

@@ -174,6 +174,40 @@ interface Ctx {
   payroll: Map<number, ReturnType<typeof samplePayroll>>
 }
 
+/**
+ * Training camp (Camp Battles): the GM walks his camp like a player would —
+ * gives the first chaser in the headline battle the look, lets the games
+ * play, and on cut day takes the coach's calls. Logs every battle's verdict
+ * with the evidence it cites, and checks the camp left a legal opening-night
+ * roster. Returns true when it acted (the main loop then re-reads state).
+ */
+function doCamp(ctx: Ctx): boolean {
+  const camp = guarded(ctx, 'getTrainingCamp', () => ctx.career.getTrainingCamp())
+  if (!camp) return false
+  const day = camp.campDay ?? 8
+  if (day < 8) {
+    if (day === 1 && (camp.look ?? []).length === 0) {
+      const chaser = camp.battles?.[0]?.contenders.find((c) => !c.winning)
+      if (chaser) guarded(ctx, 'setCampLook', () => ctx.career.setCampLook([chaser.playerId]))
+    }
+    return false // the ordinary Continue plays the next camp beat
+  }
+  const verdicts = (camp.battles ?? []).map((b) => `${b.label}: ${b.contenders.filter((c) => c.winning).map((c) => `${c.name} (${c.cite ?? 'no games'})`).join(', ')}`)
+  const res = guarded(ctx, 'submitTrainingCamp', () => ctx.career.submitTrainingCamp([]))
+  const claimed = (res?.notes ?? []).filter((n) => /claimed off waivers/.test(n)).length
+  log(ctx, {
+    kind: 'camp',
+    summary: `Broke camp: ${(camp.battles ?? []).length} battle${(camp.battles ?? []).length === 1 ? '' : 's'}, ${(camp.games ?? []).length} camp games played${claimed > 0 ? `, ${claimed} lost on waivers` : ''}`,
+    drivers: verdicts.length > 0 ? verdicts : ['no contested spots this year'],
+    result: res?.ok ? 'camp broken' : 'failed',
+    ok: !!res?.ok,
+  })
+  const d = guarded(ctx, 'getDashboard', () => ctx.career.getDashboard())
+  if (d?.campPending) issue(ctx, 'critical', 'softlock', 'training camp still pending after cut day was submitted')
+  if ((camp.games ?? []).length === 0) issue(ctx, 'major', 'camp', 'a camp broke without playing a single game')
+  return true
+}
+
 function log(ctx: Ctx, d: Omit<DecisionRecord, 'seq' | 'season' | 'day' | 'phase'>): void {
   const rec: DecisionRecord = { seq: ctx.seq++, season: ctx.career.year, day: safeDay(ctx), phase: phaseLabel(ctx), ...d }
   ctx.trace.decisions.push(rec)
@@ -852,7 +886,7 @@ function doFreeAgency(ctx: Ctx): void {
   if (!hub) return
   const squad = guarded(ctx, 'getSquad', () => ctx.career.getSquad())
   if (squad && squad.rosterCount >= 23) return
-  noteFeature(ctx, 'free-agency', `The FA hub shows each UFA's ask, his camp's read on us (keen/warm/cold), rival clubs circling, a "decides in N days" market clock, and whether his ask has softened as summer drags — legible two-way market. ${hub.rows.length} names, ${money(hub.capSpace)} to spend.`)
+  noteFeature(ctx, 'free-agency', `The FA hub shows each UFA's ask, his camp's read on us (keen/warm/cold), the REAL offers on the table from AI clubs (and who he leans to, and why), a "decides in N days" market clock, and whether his ask has softened as summer drags — legible two-way market. ${hub.rows.length} names, ${money(hub.capSpace)} to spend.`)
   const plan = getPlan(ctx)
   // Money already on the table is spoken for (the camps answer days later),
   // and a sane GM keeps a cushion for the recalls an injury run forces.
@@ -1116,6 +1150,7 @@ export function runAutopilot(career: Career, opts: { seasons: number; source: st
       continue
     }
     if (dash.captainsPending) { doCaptain(ctx); continue }
+    if (dash.campPending && doCamp(ctx)) continue
 
     const phase: CareerPhase = career.seasonPhase
     if (phase === 'offseason' && guarded(ctx, 'getOffseason', () => ctx.career.getOffseason())?.stage !== 'awards') captureReview(ctx)

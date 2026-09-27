@@ -186,7 +186,13 @@ export function DashboardScreen(): JSX.Element {
           onClick={() => nav.navigate('trainingCamp')}
         >
           <Icon size={18}><Icons.Cut /></Icon>
-          <span>CUT DAY — camp verdicts are in. Pick your 23 before the opener, or the coach picks for you.</span>
+          <span>
+            {(d.campDay ?? 8) >= 8
+              ? 'CUT DAY — the battles have verdicts. Make the calls before the opener, or the coach makes them for you.'
+              : (d.campDay ?? 1) >= 3
+                ? 'TRAINING CAMP — the Blue-Red games are in. The preseason games settle the battles.'
+                : 'TRAINING CAMP — the battles are named. Give a contender the look, then play the Blue-Red games.'}
+          </span>
         </button>
       )}
 
