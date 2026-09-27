@@ -247,6 +247,10 @@ export class SimClient {
     return this.send({ type: 'setLineManagementMode', mode })
   }
 
+  setMatchEngine(engine: 'classic' | 'agent'): Promise<WorkerResponse> {
+    return this.send({ type: 'setMatchEngine', engine })
+  }
+
   markNewsRead(ids: string[]): Promise<WorkerResponse> {
     return this.send({ type: 'markNewsRead', ids })
   }

@@ -3,7 +3,7 @@
  * boards, center-hung video board, overhead light rig, and the image-based
  * lighting environment. All procedural (no model files).
  *
- * Draw-call budget (static): ~30. The crowd is 2 instanced draws.
+ * Draw-call budget (static): ~31. The crowd is 3 instanced draws.
  */
 
 import * as THREE from 'three'
@@ -445,6 +445,9 @@ export class Arena {
     }
     fans.castShadow = true
     this.benchFans = fans
+    // the real rigs stand on the benches now (rink3dRenderer parks idle skaters
+    // there); these block figures stay built for the colour API but are hidden
+    fans.visible = false
     this.group.add(fans)
   }
 
@@ -515,7 +518,7 @@ export class Arena {
     const ribbonMat = new THREE.MeshBasicMaterial({ map: ribbonTex, side: THREE.DoubleSide, toneMapped: true, color: new THREE.Color(1.6, 1.6, 1.6) })
     this.group.add(sweptMesh([{ o: 70.8, y: 34 }, { o: 70.8, y: 37.4 }], ribbonMat, 0, 64))
 
-    // crowd: 2 instanced draws (bodies, heads) sharing one motion shader
+    // crowd: 3 instanced draws (bodies, faces, hair/caps) sharing one motion shader
     // Tapered 6-sided torso (shoulders narrower than a box, rounded silhouette)
     // + low-poly head: ~44 tris a fan, reads as people rather than blocks.
     const body = new THREE.CylinderGeometry(0.5, 0.64, 1.75, 6, 1)
@@ -525,9 +528,15 @@ export class Arena {
     const head = new THREE.IcosahedronGeometry(0.33, 0)
     head.scale(0.9, 1.1, 0.95)
     head.translate(0, 2.05, 0.15)
+    // hair / a cap: a flattened cap over the back and top of the head, so the
+    // face toward the ice reads as skin (all-hair heads read as dark blobs)
+    const hairGeo = new THREE.IcosahedronGeometry(0.35, 0)
+    hairGeo.scale(0.95, 0.55, 0.95)
+    hairGeo.translate(0, 2.27, 0.04)
     const bodyMat = new THREE.MeshLambertMaterial({ color: 0xffffff })
     const headMat = new THREE.MeshLambertMaterial({ color: 0xffffff })
-    for (const mat of [bodyMat, headMat]) {
+    const hairMat = new THREE.MeshLambertMaterial({ color: 0xffffff })
+    for (const mat of [bodyMat, headMat, hairMat]) {
       mat.onBeforeCompile = (shader) => {
         shader.uniforms.uTime = this.crowdUniforms.uTime
         shader.uniforms.uExcite = this.crowdUniforms.uExcite
@@ -551,8 +560,11 @@ export class Arena {
     }
     const bodies = new THREE.InstancedMesh(body, bodyMat, fans.length)
     const heads = new THREE.InstancedMesh(head, headMat, fans.length)
-    const shirts = [0x1c1f26, 0xeeeeee, 0x2b3a55, 0x6b6f76, 0x8b1e2d, 0x3d5a40, 0x1f2f4f, 0x7a5c3a, 0xb8b8b0]
-    const hair = [0x2a1d14, 0x121212, 0x5a3b22, 0x8a6a45, 0xbfae95, 0x3b2a1f]
+    const hairs = new THREE.InstancedMesh(hairGeo, hairMat, fans.length)
+    // winter-coat darks dominate a real crowd; a few whites / brights for texture
+    const shirts = [0x1c1f26, 0x16181d, 0x2b3a55, 0x4d5159, 0x6b6f76, 0x8b1e2d, 0x3d5a40, 0x1f2f4f, 0x5c4630, 0xd8d8d2, 0x9aa0a8]
+    const hair = [0x2a1d14, 0x121212, 0x5a3b22, 0x8a6a45, 0xbfae95, 0x3b2a1f, 0x6d6d6d]
+    const skin = [0xe0b89a, 0xc99a78, 0xa87555, 0x8a5a3c, 0x5e3b27, 0xf0cdb4]
     const homeKit = kitFor(this.homeColor, 'home')
     const awayKit = kitFor(this.awayColor, 'away')
     const m = new THREE.Matrix4()
@@ -566,17 +578,23 @@ export class Arena {
       m.compose(new THREE.Vector3(f.x, f.y, f.z), q, new THREE.Vector3(s, s, s))
       bodies.setMatrixAt(i, m)
       heads.setMatrixAt(i, m)
+      hairs.setMatrixAt(i, m)
       const roll = rng()
-      const shirt = roll < 0.3 ? homeKit.jersey : roll < 0.36 ? homeKit.trim : roll < 0.41 ? awayKit.trim : shirts[Math.floor(rng() * shirts.length)]!
+      const shirt = roll < 0.26 ? homeKit.jersey : roll < 0.3 ? homeKit.trim : roll < 0.34 ? awayKit.jersey : shirts[Math.floor(rng() * shirts.length)]!
       // desaturate a touch — a real crowd is a textured mid-tone, not a flag
-      c.setHex(shirt).lerp(grey.setScalar(0.12), 0.3).multiplyScalar(f.light * (0.8 + rng() * 0.25))
+      c.setHex(shirt).lerp(grey.setScalar(0.12), 0.38).multiplyScalar(f.light * (0.72 + rng() * 0.3))
       bodies.setColorAt(i, c)
-      c.setHex(hair[Math.floor(rng() * hair.length)]!).multiplyScalar(f.light)
+      c.setHex(skin[Math.floor(rng() * skin.length)]!).multiplyScalar(f.light * 0.9)
       heads.setColorAt(i, c)
+      // one in five wears a cap (mostly the home colour)
+      const cap = rng()
+      c.setHex(cap < 0.14 ? homeKit.jersey : cap < 0.2 ? 0x1a1a1a : hair[Math.floor(rng() * hair.length)]!).multiplyScalar(f.light)
+      hairs.setColorAt(i, c)
     })
     bodies.frustumCulled = false
     heads.frustumCulled = false
-    this.group.add(bodies, heads)
+    hairs.frustumCulled = false
+    this.group.add(bodies, heads, hairs)
 
     // roof
     const roof = new THREE.Mesh(new THREE.PlaneGeometry(700, 500), new THREE.MeshBasicMaterial({ color: 0x030406 }))

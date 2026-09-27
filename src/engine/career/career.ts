@@ -49,6 +49,7 @@ import {
 import { computeComposites, overall, ratedOverall, ratedPotential, overallToStars, agedPotential } from '@engine/ratings/composites'
 import { quickSimGame } from '@engine/quick/quickSim'
 import { fullSimGame } from '@engine/full/fullSim'
+import { agentSimGame } from '@engine/agent/agentSim'
 import type { GameOutcome, GamePlayerStat } from '@engine/shared/outcome'
 import {
   applyGameResult as applyStandingsResult,
@@ -8751,6 +8752,11 @@ export class Career {
   /** How the user's lines are managed each matchday: 'coach' auto-adjusts to
    *  dress the best available; 'fillGaps' only fills holes (GM keeps control). */
   private lineManagementMode: 'coach' | 'fillGaps' = 'coach'
+  /** Which engine plays the user's games: the calibrated director, or the agent engine (beta, opt-in). An app preference, not saved. */
+  private matchEngine: 'classic' | 'agent' = 'classic'
+  getMatchEngine(): 'classic' | 'agent' { return this.matchEngine }
+  setMatchEngine(engine: 'classic' | 'agent'): void { this.matchEngine = engine }
+  private watchSim(): typeof fullSimGame { return this.matchEngine === 'agent' ? agentSimGame : fullSimGame }
   getLineManagementMode(): 'coach' | 'fillGaps' { return this.lineManagementMode }
   setLineManagementMode(mode: 'coach' | 'fillGaps'): void { this.lineManagementMode = mode }
 
@@ -10640,7 +10646,7 @@ export class Career {
       const isUser = game.homeTeamId === this.userTeamId || game.awayTeamId === this.userTeamId
       // Broadcast context BEFORE the sim, so every count is "before tonight".
       if (isUser) this.lastBroadcast = this.buildBroadcastContext(game.homeTeamId, game.awayTeamId, nextDay, false)
-      const sim = isUser ? fullSimGame : quickSimGame
+      const sim = isUser ? this.watchSim() : quickSimGame
       const res = sim(home, away, this.storyResolve(), {
         seed: this.gameSeedFor(game),
         intensity: gameIntensity(this.rivalriesState, game.homeTeamId as string, game.awayTeamId as string).factor,
@@ -10877,7 +10883,7 @@ export class Career {
       const isUser = g.homeTeamId === this.userTeamId || g.awayTeamId === this.userTeamId
       const seed = gameSeed(this.seed, this.year, `${g.seriesId}-g${g.gameNumber}`)
       if (isUser && watchUser) this.lastBroadcast = this.buildBroadcastContext(g.homeTeamId, g.awayTeamId, day, true)
-      const sim = isUser && watchUser ? fullSimGame : quickSimGame
+      const sim = isUser && watchUser ? this.watchSim() : quickSimGame
       const res = sim(home, away, this.storyResolve(), {
         seed,
         rules: 'playoff',

@@ -597,13 +597,15 @@ export function broadcastFraming(focusX: number, focusZ: number, leadX: number, 
   const width = B.widthNeutralFt + (B.widthZoneFt - B.widthNeutralFt) * kk
   const halfH = Math.atan(width / 2 / D)
   const vfov = Math.max(B.minVfovDeg, (2 * Math.atan(Math.tan(halfH) / Math.max(0.5, aspect)) * 180) / Math.PI)
-  // Across the ice: follow the play half-way, but never so far toward the
+  // Across the ice: follow the play all the way (perspective squeezes the far
+  // 20 ft into the top of the frame, so anything less leaves far-boards play
+  // on the top edge), but never so far toward the
   // near boards that the bottom of the frame fills with the near crowd — the
   // frame's bottom edge stays at or inside z = NEAR_EDGE_Z (just past the
   // near boards, so skaters on the near wall are still in).
   const bottomRay = pitch + (vfov * Math.PI) / 360
   const lzMin = B.nearEdgeZ + back - py / Math.tan(bottomRay)
-  const lz = Math.max(lzMin, -5 + 0.5 * Math.max(-38, Math.min(38, focusZ)))
+  const lz = Math.max(lzMin, Math.max(-38, Math.min(38, focusZ)))
   const pz = lz - back
   return { px, py, pz, lx, ly: 0, lz, fov: vfov }
 }

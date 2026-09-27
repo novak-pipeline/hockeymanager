@@ -19,7 +19,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
-import type { MatchTimeline } from '@render2d/timeline'
+import { absTime, type MatchTimeline } from '@render2d/timeline'
 import type { MatchRenderer, MatchView, RinkColors, PlayerLabels } from '@render2d/rendererContract'
 import type { GameStream, PlayerId } from '@domain'
 import {
@@ -74,6 +74,7 @@ import { ATLAS_GRID, buildAtlasCanvas, paintJerseySlot } from './textures'
 import { RINK_HALF_W } from './iceCanvas'
 import { assignRigs, capStep, type RigMode } from './lineChange'
 import { layoutLabels, type LabelRequest, type PlacedLabel } from '@render2d/labelLayout'
+import { MOMENT_CHOREOGRAPHY, type MomentCue, type ShotCue } from '@render2d/broadcast/types'
 
 // ── Name labels (screen space, E1 / F-18) ──────────────────────────────────
 // Only the carrier and the players near the puck get a name — like FM — at a
@@ -84,6 +85,8 @@ const LABEL_MAX = 5
 
 /** Bench gates on the far boards (home bench at x = -26, away at +26, matching arena.ts). */
 const BENCH_GATE = { home: { x: -26, z: RINK_HALF_W - 1.5 }, away: { x: 26, z: RINK_HALF_W - 1.5 } } as const
+/** Standing spots along each bench (arena.ts: 30 ft benches centred on the gates). */
+const BENCH_SLOTS = 9
 
 /**
  * Athlete source: 'owner' = the owner-supplied rigged athletes imported by
@@ -105,8 +108,9 @@ export interface Render3dOptions {
 // backward skating, authored actions ride on top. Procedural is the fallback.
 export const RENDER3D_DEFAULTS: Required<Render3dOptions> = { athletes: 'auto', locomotion: 'hybrid' }
 
-const PUCK_R = 0.36
-const PUCK_H = 0.1
+// Near regulation (3" across, 1" thick) — a touch big so it reads; the halo does the rest at distance.
+const PUCK_R = 0.14
+const PUCK_H = 0.09
 
 // ── Spring half-lives ───────────────────────────────────────────────────────
 const PLAYER_FOLLOW_HL = 0.08
@@ -142,14 +146,16 @@ const PLAY_FOCUS_DEADZONE_Z = 5.0   // ft on the width axis
 const MAX_TURN_RATE_RAD_PER_SEC = (Math.PI * 200) / 180
 // Facing follows a SMOOTHED direction of travel, not the per-frame velocity.
 const FACING_VEL_TAU = 0.3
+// Action clips that are really locomotion: the stick stays on the ice through them (groundStick).
+const GROUNDED_CLIPS = new Set(['hockey_stop', 'skate_start', 'stickhandle'])
 
 // ── Movement limits ─────────────────────────────────────────────────────────
 // Nothing on the ice moves faster than an elite skater: a residual teleport in
 // the stream (faceoff resets, a stoppage) becomes a skate, never a snap.
 const MAX_RENDER_SPEED = 40   // ft/s
 const ARRIVE_SPEED = 30       // skating out from the bench gate
-const DEPART_SPEED = 22       // coasting off to the bench
-const DEPART_TIMEOUT_S = 5    // a departing player steps off the ice after this
+const DEPART_SPEED = 30       // heading off to the bench
+const DEPART_TIMEOUT_S = 2.2  // a departing player is off the ice by this (a change is quick)
 // Rigs per team: up to 6 skaters on the ice + 6 skating off during a full change.
 const SKATER_RIGS_PER_TEAM = 12
 // Body yaw eases toward its target on a critically damped spring (no chasing a
@@ -161,6 +167,12 @@ const SPEED_TAU = 0.18        // stride-amplitude smoothing (s) — no leg flick
 const TURN_TAU = 0.25         // bank-into-turn smoothing (s)
 const SHOT_SWING_S = 0.32     // stick swing duration on a shot cue
 const GOAL_CUE_S = 4.2        // lifetime of the goal cue (celebration cam)
+/** Post-goal sequence timing (s of game time from the goal). */
+const GOAL_SEQ = { celly: 1.1, bench: 4.6, crowd: 6.4, back: 8.0, end: 8.0 } as const
+type GoalPhase = 'hold' | 'celly' | 'bench' | 'crowd' | 'done'
+function goalPhaseAt(t: number): GoalPhase {
+  return t < GOAL_SEQ.celly ? 'hold' : t < GOAL_SEQ.bench ? 'celly' : t < GOAL_SEQ.crowd ? 'bench' : t < GOAL_SEQ.back ? 'crowd' : 'done'
+}
 
 // Atlas cells (6×6): home rigs 0-11 + G 12, away rigs 13-24 + G 25, 26-35 spare
 // — same-team neighbours, so mip bleed between cells rarely mixes teams.
@@ -282,6 +294,26 @@ export class Rink3dRenderer implements MatchRenderer {
   private activeCues: ActiveCue[] = []
   private sinceGoal = Infinity
   private celebration: { elapsed: number; x: number; z: number } | null = null
+  /**
+   * The post-goal TV sequence (broadcast camera, when no director shot is
+   * running): hold on the goal → cut to the scorer's celebration → the
+   * scoring bench → the crowd → cut back to the game. Every change is a CUT.
+   */
+  private deadTimes: Array<{ from: number; to: number; x: number; z: number }> = []
+  /** The faceoff that ends the stoppage in progress at time t (null in live play). */
+  private deadAt(t: number): { x: number; z: number } | null {
+    const d = this.deadTimes
+    let lo = 0
+    let hi = d.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (d[mid]!.from <= t) lo = mid + 1
+      else hi = mid
+    }
+    const w = d[lo - 1]
+    return w && t < w.to ? w : null
+  }
+  private goalSeq: { t: number; scorer: string; side: 'home' | 'away'; phase: GoalPhase } | null = null
 
   // ── Play-focus smoother ────────────────────────────────────────────────────
   // Two-layer approach: raw puck → play-focus EMA (long tau, deadzone) → camera spring.
@@ -593,7 +625,7 @@ export class Rink3dRenderer implements MatchRenderer {
         color: 0xffd24a, transparent: true, opacity, depthWrite: false, toneMapped: false,
         polygonOffset: true, polygonOffsetFactor: -3,
       })
-    this.puckGlowRing = new THREE.Mesh(flat(0.68), markMat(0.6))
+    this.puckGlowRing = new THREE.Mesh(flat(0.58), markMat(0.75))
     this.puckGlowRing.renderOrder = 2
     this.scene.add(this.puckGlowRing)
     this.carrierRing = new THREE.Mesh(flat(0.8), markMat(0.85))
@@ -625,7 +657,8 @@ export class Rink3dRenderer implements MatchRenderer {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
     ctx.clearRect(0, 0, W, H)
     this.labelRects = []
-    if (!this.timeline) return
+    // TV shows no name plates on a replay or a cut-in (the overlays carry names)
+    if (!this.timeline || this.shot || (this.goalSeq && this.goalSeq.phase !== 'hold')) return
 
     const carrier = this.carrierMarkPose
     const cands: Array<{ p: PlayerPose; pri: number }> = []
@@ -699,10 +732,14 @@ export class Rink3dRenderer implements MatchRenderer {
     const pz = this.puck.z
     const carried = this.carrierMarkPose !== null
     // halo: ≥ 7 px radius; quieter while the carrier ring already marks the play
-    const haloR = Math.max(PUCK_R + 0.45, 7 * wpp(px, pz))
+    const w = wpp(px, pz)
+    const haloR = Math.max(PUCK_R + 0.45, 8 * w)
     this.puckGlowRing.position.set(px, 0.05, pz)
     this.puckGlowRing.scale.setScalar(haloR)
-    ;(this.puckGlowRing.material as THREE.MeshBasicMaterial).opacity = carried ? 0.35 : 0.6
+    ;(this.puckGlowRing.material as THREE.MeshBasicMaterial).opacity = carried ? 0.45 : 0.75
+    // the puck itself never shrinks below ~3.5 px radius on screen (real size up close)
+    const ps = Math.max(1, (3.5 * w) / PUCK_R)
+    this.puckMesh.scale.set(ps, Math.min(ps, 2), ps)
     const c = this.carrierMarkPose
     this.carrierRing.visible = c !== null && c.rig.visible
     if (c) {
@@ -907,6 +944,7 @@ export class Rink3dRenderer implements MatchRenderer {
     this.lastEvaluatedClock = -1
     this.activeCues = []
     this.celebration = null
+    this.goalSeq = null
     this.sinceGoal = Infinity
 
     this.choreo?.reset()
@@ -969,6 +1007,7 @@ export class Rink3dRenderer implements MatchRenderer {
     this.lastEvaluatedClock = this.clockPos
     this.activeCues = []
     this.celebration = null
+    this.goalSeq = null
     this.sinceGoal = Infinity
     for (const p of this.allPoses()) {
       p.butterflyTimer = p.armsTimer = p.staggerTimer = 0
@@ -995,6 +1034,12 @@ export class Rink3dRenderer implements MatchRenderer {
   }
 
   private currentTarget(): ReturnType<typeof broadcastFraming> {
+    if (this.shot) {
+      const t = this.shotTarget(this.shot.cue)
+      if (t) return t
+    }
+    const gs = this.goalSeq && this.camPreset === 'broadcast' ? this.goalSeqTarget() : null
+    if (gs) return gs
     if (this.camPreset === 'broadcast') return broadcastFraming(this.playFocusX, this.playFocusZ, this.leadX, this.camera.aspect)
     const t = cameraTargetFor(this.camPreset, this.playFocusX, {
       endzoneActiveSide: this.endzoneActiveSide,
@@ -1085,6 +1130,20 @@ export class Rink3dRenderer implements MatchRenderer {
 
   setEventStream(stream: GameStream): void {
     this.cues = extractCues(stream)
+    // stoppages (goal / whistle) and the faceoffs that end them: during the dead
+    // time the game camera frames the NEXT faceoff, not the dead puck in the net
+    this.deadTimes = []
+    let pending: number | null = null
+    for (const ev of stream) {
+      const e = ev as { type: string; period?: number; t?: number; pos?: { x: number; y: number } }
+      if (e.period === undefined || e.t === undefined) continue
+      const at = absTime(e.period, e.t)
+      if (e.type === 'goal' || e.type === 'whistle') pending ??= at
+      else if (e.type === 'faceoff' && pending !== null && e.pos) {
+        this.deadTimes.push({ from: pending, to: at, x: normXtoWorld(e.pos.x), z: normYtoWorld(e.pos.y) })
+        pending = null
+      }
+    }
     this.choreo?.setCues(extractActionCues(stream))
   }
 
@@ -1101,7 +1160,122 @@ export class Rink3dRenderer implements MatchRenderer {
     this.playFocusX = puckWx
     this.playFocusZ = puckWz
     this.celebration = null
+    this.goalSeq = null
     this.snapCameraToTarget()
+  }
+
+  // ── Broadcast hand-off (render2d/broadcast/types: BroadcastShotConsumer + BroadcastProjector) ──
+  // The director's camera requests. Every shot is a CUT in and a cut back out,
+  // then a locked-off (steady) frame — impact comes from the overlays, never shake.
+  private shot: { cue: ShotCue; until: number } | null = null
+  private readonly projTmp = new THREE.Vector3()
+
+  requestShot(cue: ShotCue): boolean {
+    if (cue.shot === 'broadcast') {
+      if (this.shot) {
+        this.shot = null
+        this.snapCameraSprings()
+      }
+      return true
+    }
+    if (!this.shotTarget(cue)) return false
+    this.shot = { cue, until: performance.now() + cue.holdMs }
+    this.snapCameraSprings()
+    return true
+  }
+
+  private moment: { until: number; crowd: number } | null = null
+  /**
+   * Ceremonies through the arena: the crowd rises (standing ovation, banner,
+   * tribute) or cheers, and the honoured player raises his stick. The rookie
+   * lap needs a skated path — declined for now (the caption overlay runs).
+   */
+  playMoment(cue: MomentCue): boolean {
+    const ch = MOMENT_CHOREOGRAPHY[cue.moment]
+    if (!ch || cue.moment === 'rookieLap') return false
+    this.moment = { until: performance.now() + cue.holdMs, crowd: ch.crowd === 'standing' ? 0.8 : ch.crowd === 'cheer' ? 0.5 : 0 }
+    if (cue.playerId && ch.poses.includes('stickRaise')) {
+      const p = this.allPoses().find((q) => q.playerId === cue.playerId && q.rig.visible)
+      if (p) p.armsTimer = Math.max(p.armsTimer, Math.min(6, cue.holdMs / 1000))
+    }
+    return true
+  }
+
+  /** A player's head in CSS px on the host (for the on-ice goal / assist tag); null when off the ice or off camera. */
+  projectPlayer(playerId: string): { x: number; y: number } | null {
+    const p = this.allPoses().find((q) => q.playerId === playerId && q.rig.visible && q.mode !== 'idle')
+    if (!p) return null
+    const v = this.projTmp.set(p.worldX.pos, p.labelY || 6.5, p.worldZ.pos).project(this.camera)
+    if (v.z > 1 || Math.abs(v.x) > 1.05 || Math.abs(v.y) > 1.05) return null
+    const el = this.renderer.domElement
+    return { x: ((v.x + 1) / 2) * el.clientWidth, y: ((1 - v.y) / 2) * el.clientHeight }
+  }
+
+  /** Where each director shot stands (world ft; +z = the benches' side, the main camera looks toward +z). */
+  private shotTarget(cue: ShotCue): { px: number; py: number; pz: number; lx: number; ly: number; lz: number; fov: number } | null {
+    const end = this.playFocusX >= 0 ? 1 : -1
+    const side = cue.side ?? 'home'
+    switch (cue.shot) {
+      case 'goalReplay':
+        // high in the corner behind the goal line, looking out at the play
+        return { px: end * 96, py: 12, pz: -16, lx: end * 72, ly: 1, lz: this.playFocusZ * 0.5, fov: 34 }
+      case 'saveReplay': {
+        // the goalie at the end the play is in
+        const gs = [this.homeGoaliePose, this.awayGoaliePose].filter((q): q is PlayerPose => !!q && q.rig.visible)
+        const g = gs.sort((a, b) => Math.abs(a.worldX.pos - this.playFocusX) - Math.abs(b.worldX.pos - this.playFocusX))[0]
+        const gx = g?.worldX.pos ?? end * 86
+        const gz = g?.worldZ.pos ?? 0
+        const ge = gx >= 0 ? 1 : -1
+        return { px: gx - ge * 26, py: 7, pz: gz - 12, lx: gx, ly: 2.2, lz: gz, fov: 26 }
+      }
+      case 'benchReaction':
+      case 'coachCloseup': {
+        const bx = BENCH_GATE[side].x
+        const coach = cue.shot === 'coachCloseup'
+        return { px: bx + (coach ? 4 : 0), py: coach ? 6.5 : 7, pz: RINK_HALF_W - 22, lx: bx, ly: coach ? 5.8 : 4.6, lz: RINK_HALF_W + (coach ? 6.5 : 4.9), fov: coach ? 14 : 24 }
+      }
+      case 'crowd':
+        return { px: this.playFocusX * 0.3, py: 10, pz: -4, lx: this.playFocusX * 0.3 + (side === 'home' ? -18 : 18), ly: 22, lz: RINK_HALF_W + 40, fov: 30 }
+      case 'jumbotron':
+        return { px: 0, py: 42, pz: -78, lx: 0, ly: 60, lz: 0, fov: 20 }
+      case 'faceoffClose':
+        return { px: 0, py: 5.5, pz: -21, lx: 0, ly: 1.4, lz: 0, fov: 22 }
+      case 'lineups':
+      case 'anthem': {
+        const bl = side === 'home' ? -25 : 25
+        return { px: bl, py: 6, pz: -36, lx: bl, ly: 3.2, lz: 6, fov: cue.shot === 'anthem' ? 35 : 28 }
+      }
+      case 'establishing':
+        return { px: 0, py: 78, pz: -150, lx: 0, ly: 4, lz: 0, fov: 55 }
+      case 'penaltyBox':
+        // the arena has no penalty-box set yet: decline, the host keeps the game camera
+        return null
+      default:
+        return null
+    }
+  }
+
+  /** Camera for the current post-goal phase (null = the normal game camera). */
+  private goalSeqTarget(): ReturnType<typeof broadcastFraming> | null {
+    const g = this.goalSeq!
+    switch (goalPhaseAt(g.t)) {
+      case 'celly': {
+        // tight on the scorer, from the centre-ice side (boards and glass behind him), following him
+        const p = this.allPoses().find((q) => q.playerId === g.scorer && q.rig.visible)
+        if (!p) return null
+        const ax = -Math.sign(p.worldX.pos || 1)
+        const len = Math.hypot(ax * 0.85, -0.5)
+        const dx = (ax * 0.85) / len
+        const dz = -0.5 / len
+        return { px: p.worldX.pos + dx * 17, py: 5.5, pz: p.worldZ.pos + dz * 17, lx: p.worldX.pos, ly: 3.4, lz: p.worldZ.pos, fov: 30 }
+      }
+      case 'bench':
+        return this.shotTarget({ channel: 'shot', id: 'goal-bench', clock: 'game', at: 0, holdMs: 0, shot: 'benchReaction', side: g.side })
+      case 'crowd':
+        return this.shotTarget({ channel: 'shot', id: 'goal-crowd', clock: 'game', at: 0, holdMs: 0, shot: 'crowd', side: g.side })
+      default:
+        return null
+    }
   }
 
   /** Dev harness only: pin the camera to a fixed pose (null = normal presets). */
@@ -1243,7 +1417,7 @@ export class Rink3dRenderer implements MatchRenderer {
       awayScore: score.away,
       period: clock.period,
       clock: clock.text,
-      excite: crowdExcitement(this.sinceGoal),
+      excite: Math.max(crowdExcitement(this.sinceGoal), this.moment && performance.now() < this.moment.until ? this.moment.crowd : 0),
       goalFlash,
     })
   }
@@ -1264,8 +1438,8 @@ export class Rink3dRenderer implements MatchRenderer {
     const puckWz = normYtoWorld(snap.puck.y)
 
     // Skaters: rigs are bound to PLAYERS, not timeline slots (see lineChange.ts)
-    this.syncSide('home', this.homePoses, snap.home, snap.homeIds, dt, simDt, puckWx, puckWz)
-    this.syncSide('away', this.awayPoses, snap.away, snap.awayIds, dt, simDt, puckWx, puckWz)
+    this.syncSide('home', this.homePoses, snap.home, snap.homeIds, dt, simDt, puckWx, puckWz, snap.homeFacing)
+    this.syncSide('away', this.awayPoses, snap.away, snap.awayIds, dt, simDt, puckWx, puckWz, snap.awayFacing)
 
     // Goalies
     if (this.homeGoaliePose) {
@@ -1277,11 +1451,20 @@ export class Rink3dRenderer implements MatchRenderer {
       this.updateGoaliePose(this.awayGoaliePose, snap.awayGoalie.x, snap.awayGoalie.y, snap.puck, dt, simDt)
     }
 
+    // Sticks on the ice: skating poses float the blade (up to ~0.6 ft on the
+    // owner clips), which puts a carried puck visibly off the blade
+    for (const p of this.homePoses) this.groundStick(p, dt)
+    for (const p of this.awayPoses) this.groundStick(p, dt)
+
     // Carrier pose (resolved AFTER the slots updated their ids this frame)
     let carrierPose: PlayerPose | null = null
-    if (snap.carrier !== null) {
-      carrierPose = this.allPoses().find((p) => p.playerId === snap.carrier && p.rig.visible) ?? null
+    // a shooter / passer mid-swing keeps the puck on his blade until contact
+    const carrierId = this.choreo?.windupActor(absT) ?? snap.carrier
+    if (carrierId !== null) {
+      carrierPose = this.allPoses().find((p) => p.playerId === carrierId && p.rig.visible) ?? null
     }
+
+    this.updateStickhandling(carrierPose, carrierId === snap.carrier)
 
     // Puck position: if carried, sits on the carrier's blade
     let pTargetX: number
@@ -1291,6 +1474,13 @@ export class Rink3dRenderer implements MatchRenderer {
       // on the posed blade (C3): wherever the clip / IK actually put the stick
       pTargetX = blade.x
       pTargetZ = blade.z
+      this.carrierWx = carrierPose.worldX.pos
+      this.carrierWz = carrierPose.worldZ.pos
+    } else if (carrierPose !== null && carrierId !== snap.carrier) {
+      // wind-up with the blade in the air: the puck waits on the ice where the
+      // stick will come down on it (it doesn't jump to a body offset)
+      pTargetX = this.puck.x
+      pTargetZ = this.puck.z
       this.carrierWx = carrierPose.worldX.pos
       this.carrierWz = carrierPose.worldZ.pos
     } else if (carrierPose !== null) {
@@ -1310,11 +1500,94 @@ export class Rink3dRenderer implements MatchRenderer {
     // carried↔loose handoff blends, over a few frames (math.ts puckTrackStep).
     this.puck = puckTrackStep(this.puck, pTargetX, pTargetZ, carrierPose?.playerId ?? '', dt)
 
-    this.puckMesh.position.set(this.puck.x, PUCK_H / 2, this.puck.z)
+    // a loose puck rides the engine's height (agent engine: chips, saucers, clears; absent = on the ice)
+    const puckY = carrierPose === null ? Math.max(0, snap.puckZ ?? 0) : 0
+    this.puckMesh.position.set(this.puck.x, PUCK_H / 2 + puckY, this.puck.z)
     this.carrierMarkPose = carrierPose
 
     this.batch.sync()
     this.syncBlobs()
+  }
+
+  private readonly gPivot = new THREE.Vector3()
+  private readonly gV = new THREE.Vector3()
+  private readonly gAxis = new THREE.Vector3()
+  private readonly gQ = new THREE.Quaternion()
+  private readonly gM = new THREE.Matrix4()
+  private readonly gM2 = new THREE.Matrix4()
+  private readonly gM3 = new THREE.Matrix4()
+  /**
+   * Swing a skater's stick about his top hand until the blade's low edge sits on
+   * the ice. Only for a blade hovering a little (≤ 0.8 ft, full correction up to
+   * 0.6) and no action clip playing — a shot, pass or hit lifts it on purpose.
+   */
+  /** Who is stickhandling now (at most one: the carrier). */
+  private handler: PlayerPose | null = null
+  /**
+   * The puck carrier handles the puck (the looping stickhandle clip) while a
+   * checker closes within ~11 ft, and settles back to the carry when he's in
+   * open ice — the puck rides the blade through it. Never over an action clip.
+   */
+  private updateStickhandling(carrier: PlayerPose | null, carrying: boolean): void {
+    let want: PlayerPose | null = null
+    if (carrier && carrying && carrier.layer && !carrier.rig.goalie) {
+      const mine = this.homePoses.includes(carrier) ? this.awayPoses : this.homePoses
+      let near = Infinity
+      for (const o of mine) {
+        if (!o.rig.visible || o.mode === 'idle') continue
+        near = Math.min(near, Math.hypot(o.worldX.pos - carrier.worldX.pos, o.worldZ.pos - carrier.worldZ.pos))
+      }
+      const busy = carrier.layer.playing.some((n) => n !== 'stickhandle' && n !== 'hockey_stop' && n !== 'skate_start')
+      // hysteresis: start inside 11 ft, keep going until 15 ft
+      const range = this.handler === carrier ? 15 : 11
+      if (near < range && !busy) want = carrier
+    }
+    if (this.handler && this.handler !== want) this.handler.layer?.stop('stickhandle')
+    if (want && this.handler !== want) want.layer?.play('stickhandle')
+    this.handler = want
+  }
+
+  private readonly groundW = new WeakMap<PlayerPose, number>()
+  private groundStick(pose: PlayerPose, dt: number): void {
+    const rig = pose.rig
+    // (not on the bench: his stick would go through the dasher)
+    if (!rig.visible || rig.goalie || pose.mode === 'idle') { this.groundW.delete(pose); return }
+    const w = rig.bladeWorld()
+    if (!w) return
+    const lift = w.y - 0.02
+    const playing = pose.layer?.playing
+    // the puck carrier keeps his blade down harder (the puck rides it)
+    const full = pose.playerId !== null && pose.playerId === this.lastCarrier ? 1.1 : 0.6
+    const eligible = !(playing && playing.some((n) => !GROUNDED_CLIPS.has(n))) && lift <= full + 0.2
+    // eased in / out (~0.1 s half-life) so a clip starting or ending doesn't pop the stick
+    const prev = this.groundW.get(pose) ?? (eligible ? 1 : 0)
+    const k = dt > 0 ? 1 - Math.pow(0.5, dt / 0.1) : 0
+    const gw = prev + ((eligible ? (lift <= full ? 1 : 1 - (lift - full) / 0.2) : 0) - prev) * k
+    this.groundW.set(pose, gw)
+    if (gw < 0.01 || lift < 0.02) return
+    const weight = gw
+    const hand = rig.bones.hand_R
+    hand.updateWorldMatrix(true, false)
+    this.gPivot.setFromMatrixPosition(hand.matrixWorld)
+    const v = this.gV.copy(w).sub(this.gPivot)
+    const r = v.length()
+    const hLen = Math.hypot(v.x, v.z)
+    if (r < 1 || hLen < 0.2) return
+    const want = (0.02 - this.gPivot.y) / r
+    if (want < -1 || want > 1) return
+    // elevation change (negative = down); positive rotation about (h × up) raises h
+    const delta = (Math.asin(want) - Math.asin(v.y / r)) * weight
+    this.gAxis.set(-v.z / hLen, 0, v.x / hLen) // h × up
+    this.gQ.setFromAxisAngle(this.gAxis, delta)
+    // world' = T(pivot) · R · T(−pivot) · world
+    this.gM.makeTranslation(this.gPivot.x, this.gPivot.y, this.gPivot.z).multiply(this.gM2.makeRotationFromQuaternion(this.gQ)).multiply(this.gM2.makeTranslation(-this.gPivot.x, -this.gPivot.y, -this.gPivot.z))
+    for (const b of [rig.bones.stick, rig.bones.stick_blade]) {
+      b.updateWorldMatrix(true, false)
+      const world = this.gM2.multiplyMatrices(this.gM, b.matrixWorld)
+      const local = world.premultiply(this.gM3.copy(b.parent!.matrixWorld).invert())
+      local.decompose(b.position, b.quaternion, b.scale)
+      b.updateMatrixWorld(true)
+    }
   }
 
   private readonly bladeTmp = new THREE.Vector3()
@@ -1328,6 +1601,14 @@ export class Rink3dRenderer implements MatchRenderer {
    * far from the body (a clip mid-swing, a missing bone binding).
    */
   private bladePoint(pose: PlayerPose): { x: number; z: number } | null {
+    // the drawn blade's centre, measured from the stick geometry (athlete.ts bladeAnchor)
+    const w = pose.rig.bladeWorld?.()
+    if (w) {
+      const d = Math.hypot(w.x - pose.worldX.pos, w.z - pose.worldZ.pos)
+      // blade lifted (a shot follow-through) or implausibly far: fall through
+      if (Number.isFinite(d) && d <= 7 && w.y < 0.6) return { x: w.x, z: w.z }
+      if (Number.isFinite(d) && d <= 7) return null
+    }
     const b = pose.rig.bones?.stick_blade
     if (!b) return null
     b.updateWorldMatrix(true, false)
@@ -1372,6 +1653,7 @@ export class Rink3dRenderer implements MatchRenderer {
     pos: ReadonlyArray<{ x: number; y: number } | undefined>,
     ids: ReadonlyArray<PlayerId | undefined> | undefined,
     dt: number, simDt: number, puckWx: number, puckWz: number,
+    facing?: ReadonlyArray<number | undefined>,
   ): void {
     const gate = BENCH_GATE[team]
     const idList = (ids ?? []).map((id) => (id as string | undefined))
@@ -1382,28 +1664,36 @@ export class Rink3dRenderer implements MatchRenderer {
       poses[r]!.departSeq = ++this.departSeq
       poses[r]!.labelOn = false
     }
+    let benchSlot = 0
     poses.forEach((pose, r) => {
       const slot = slots[r]!
       pose.mode = slot.mode
       if (slot.id !== (pose.playerId as string | null)) this.updatePoseLabelForPlayer(pose, slot.id as PlayerId | null)
       const k = follow[r]!
       if (pose.mode === 'idle' || (pose.mode === 'departing' && dt === 0)) {
-        // idle, or a seek landed mid-change: nobody is skating off
+        // idle, or a seek landed mid-change: nobody is skating off — he's on
+        // the bench, standing at the boards and watching the play
         pose.mode = 'idle'
         pose.playerId = null
-        pose.rig.visible = false
         pose.labelOn = false
+        const slot = benchSlot++
+        const b = BENCH_GATE[team]
+        pose.rig.visible = slot < BENCH_SLOTS
+        if (pose.rig.visible) this.updatePose(pose, b.x - 12 + slot * 3 + (slot % 2) * 0.4, RINK_HALF_W + 4.9, dt, simDt, puckWx, puckWz, 10)
         return
       }
       pose.rig.visible = true
       if (pose.mode === 'departing') {
         pose.departT += dt
-        this.updatePose(pose, gate.x, gate.z, dt, simDt, puckWx, puckWz, DEPART_SPEED)
-        const home = Math.hypot(pose.worldX.pos - gate.x, pose.worldZ.pos - gate.z)
-        if (home < 2 || pose.departT > DEPART_TIMEOUT_S) {
+        // spread along the bench front (5 men don't all hop the boards at one spot)
+        const exitX = gate.x + ((pose.departSeq % 5) - 2) * 2.6
+        this.updatePose(pose, exitX, gate.z, dt, simDt, puckWx, puckWz, DEPART_SPEED)
+        const home = Math.hypot(pose.worldX.pos - exitX, pose.worldZ.pos - gate.z)
+        // he hops the boards once he is close to the bench (not skating up to a point)
+        if (home < 7 || pose.departT > DEPART_TIMEOUT_S) {
+          // through the gate: from next frame he stands on the bench (idle)
           pose.mode = 'idle'
           pose.playerId = null
-          pose.rig.visible = false
         }
         return
       }
@@ -1413,14 +1703,17 @@ export class Rink3dRenderer implements MatchRenderer {
       if (entered.includes(r)) {
         if (dt === 0) pose.mode = 'play'
         else {
-          // enter from the bench gate, not from wherever this rig last was
-          pose.worldX = snapSpring(gate.x)
+          // over the boards from where he stood on the bench (else the gate),
+          // not from wherever this rig last was — and not all from one spot
+          const onBench = pose.rig.visible && Math.abs(pose.worldZ.pos - (RINK_HALF_W + 4.9)) < 1.5 && Math.abs(pose.worldX.pos - gate.x) < 16
+          const ex = onBench ? pose.worldX.pos : gate.x
+          pose.worldX = snapSpring(ex)
           pose.worldZ = snapSpring(gate.z)
-          pose.prevWx = gate.x
+          pose.prevWx = ex
           pose.prevWz = gate.z
           pose.velSmX = 0
           pose.velSmZ = 0
-          pose.angle = Math.atan2(tx - gate.x, tz - gate.z)
+          pose.angle = Math.atan2(tx - ex, tz - gate.z)
         }
       }
       if (pose.mode === 'arriving') {
@@ -1428,11 +1721,26 @@ export class Rink3dRenderer implements MatchRenderer {
         if (Math.hypot(pose.worldX.pos - tx, pose.worldZ.pos - tz) < 1.5) pose.mode = 'play'
         return
       }
-      this.updatePose(pose, tx, tz, dt, simDt, puckWx, puckWz, MAX_RENDER_SPEED)
+      this.updatePose(pose, tx, tz, dt, simDt, puckWx, puckWz, MAX_RENDER_SPEED, facing?.[k])
     })
+    // Never too many men: at most one departing skater may still be on the
+    // ice alongside the full unit (the real change rule is within ~5 ft of the
+    // bench). Extras hop off — the ones nearest the bench first.
+    const onIce = poses.filter((p) => p.rig.visible && (p.mode === 'play' || p.mode === 'arriving')).length
+    const leaving = poses
+      .filter((p) => p.rig.visible && p.mode === 'departing')
+      .sort((a, b) => Math.hypot(a.worldX.pos - gate.x, a.worldZ.pos - gate.z) - Math.hypot(b.worldX.pos - gate.x, b.worldZ.pos - gate.z))
+    const allowed = Math.max(0, Math.min(1, 6 - onIce))
+    for (const p of leaving.slice(0, Math.max(0, leaving.length - allowed))) {
+      p.mode = 'idle'
+      p.playerId = null
+      p.labelOn = false
+    }
   }
 
-  private updatePose(pose: PlayerPose, wx: number, wz: number, dt: number, simDt: number, puckWx: number, puckWz: number, maxSpeed = MAX_RENDER_SPEED): void {
+  private updatePose(pose: PlayerPose, wx: number, wz: number, dt: number, simDt: number, puckWx: number, puckWz: number, maxSpeed = MAX_RENDER_SPEED, simFacing?: number): void {
+    // the engine's own body facing (agent engine: backward-skating D, pivots) → renderer yaw
+    const simAngle = simFacing !== undefined ? Math.atan2(Math.cos(simFacing), Math.sin(simFacing)) : null
     if (dt > 0) {
       const px = pose.worldX.pos
       const pz = pose.worldZ.pos
@@ -1480,7 +1788,7 @@ export class Rink3dRenderer implements MatchRenderer {
       pose.velSmX = emaStep(pose.velSmX, vx / dt, dt, FACING_VEL_TAU)
       pose.velSmZ = emaStep(pose.velSmZ, vz / dt, dt, FACING_VEL_TAU)
       const smSpeed = Math.hypot(pose.velSmX, pose.velSmZ)
-      let target = facingTarget(Math.atan2(pose.velSmX, pose.velSmZ), smSpeed, Math.atan2(puckWx - pose.worldX.pos, puckWz - pose.worldZ.pos), pose.playerId !== null && pose.playerId === this.lastCarrier)
+      let target = simAngle ?? facingTarget(Math.atan2(pose.velSmX, pose.velSmZ), smSpeed, Math.atan2(puckWx - pose.worldX.pos, puckWz - pose.worldZ.pos), pose.playerId !== null && pose.playerId === this.lastCarrier)
       // a hit reaction / check faces the other man (choreo.ts) — through the same spring, never a snap
       const fo = pose.faceOverride
       if (fo && this.choreo && this.choreo.clock < fo.until) target = fo.angle
@@ -1494,7 +1802,7 @@ export class Rink3dRenderer implements MatchRenderer {
       }
     } else {
       // seek/load: no velocity yet — start squared up to the puck
-      pose.angle = Math.atan2(puckWx - wx, puckWz - wz)
+      pose.angle = simAngle ?? Math.atan2(puckWx - wx, puckWz - wz)
       pose.angVel = 0
       pose.velSmX = 0
       pose.velSmZ = 0
@@ -1606,6 +1914,10 @@ export class Rink3dRenderer implements MatchRenderer {
       ac.elapsed += cueDt
       return ac.elapsed < this.cueLifetime(ac.cue.kind)
     })
+    if (this.goalSeq) {
+      this.goalSeq.t += cueDt
+      if (this.goalSeq.t >= GOAL_SEQ.end) this.goalSeq = null
+    }
     if (this.celebration) {
       this.celebration.elapsed += cueDt
       if (this.celebration.elapsed >= GOAL_CUE_S) this.celebration = null
@@ -1651,6 +1963,8 @@ export class Rink3dRenderer implements MatchRenderer {
       const gz = normYtoWorld(cue.ny)
       const netX = Math.sign(gx || 1) * NET_X
       this.celebration = { elapsed: 0, x: gx + (netX - gx) * 0.35, z: gz * 0.6 }
+      const scorer = this.allPoses().find((p) => p.playerId === cue.actorId)
+      if (scorer) this.goalSeq = { t: 0, scorer: cue.actorId, side: this.homePoses.includes(scorer) ? 'home' : 'away', phase: 'hold' }
     } else if (this.choreo) {
       // authored clips (shots, saves, hits) are started by the choreographer
     } else if (cue.kind === 'save') {
@@ -1690,6 +2004,11 @@ export class Rink3dRenderer implements MatchRenderer {
   // ── Camera ────────────────────────────────────────────────────────────────
 
   private updateCamera(dt: number): void {
+    // a director's shot ran its course: CUT back to the game camera (never fly)
+    if (this.shot && performance.now() >= this.shot.until) {
+      this.shot = null
+      this.snapCameraSprings()
+    }
     // A calm TV follow. Every layer only SMOOTHS; nothing here can add wobble.
     const tune = CAMERA_TUNING[this.camPreset]
 
@@ -1697,8 +2016,11 @@ export class Rink3dRenderer implements MatchRenderer {
     // The focus trails the puck by up to a few feet, so stick-handling and
     // rebounds don't move the shot, and a real rush eases the pan in from zero
     // (the old hard deadzone stepped the target → stop/start pans).
-    const rawX = this.puck.x
-    const rawZ = this.puck.z
+    // a stoppage: frame where the next faceoff will be (players gather there);
+    // after a goal, only once the celebration sequence has run
+    const dead = this.goalSeq && goalPhaseAt(this.goalSeq.t) !== 'done' ? null : this.deadAt(this.clockPos)
+    const rawX = dead ? dead.x : this.puck.x
+    const rawZ = dead ? dead.z : this.puck.z
     // the zone-framed broadcast shot keeps a tighter band (its frame is ~80 ft)
     const committedX = softDeadzone(rawX, this.playFocusX, this.camPreset === 'broadcast' ? 4 : PLAY_FOCUS_DEADZONE_X)
     const committedZ = softDeadzone(rawZ, this.playFocusZ, PLAY_FOCUS_DEADZONE_Z)
@@ -1756,6 +2078,18 @@ export class Rink3dRenderer implements MatchRenderer {
     // endzone: the play changed ends → CUT to the other end (it used to fly
     // ~220 ft through the rink at head height, audit D2)
     if (this.camPreset === 'endzone' && this.endzoneActiveSide !== prevSide) cut = true
+    if (this.goalSeq && this.camPreset === 'broadcast' && !this.shot) {
+      const ph = goalPhaseAt(this.goalSeq.t)
+      if (ph !== this.goalSeq.phase) {
+        this.goalSeq.phase = ph
+        cut = true
+        const fo = ph === 'done' ? this.deadAt(this.clockPos) : null
+        if (fo) {
+          this.playFocusX = fo.x
+          this.playFocusZ = fo.z
+        }
+      }
+    }
     if (cut) this.snapCameraSprings()
     const target = this.currentTarget()
     let fovTarget = target.fov
@@ -1763,7 +2097,7 @@ export class Rink3dRenderer implements MatchRenderer {
     // Goal: a slow push-in toward where the goal was scored, held, then eased
     // back. The framing point is FIXED at the moment of the goal (it does not
     // chase the celebrating scorer — that tracking was a wobble source).
-    if (this.celebration && this.camPreset === 'broadcast') {
+    if (this.celebration && this.camPreset === 'broadcast' && !this.goalSeq) {
       const w = celebrationWeight(this.celebration.elapsed, GOAL_CUE_S)
       if (w > 0) {
         const c = celebrationTarget(this.celebration.x, this.celebration.z)

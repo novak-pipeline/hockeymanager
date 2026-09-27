@@ -162,6 +162,41 @@ def skater_clips(arm):
         (9, P(yaw=-0.22, stick=dict(blade=(-0.05, 0.45, 3.1), top=top(-0.45, 0.6, 0.9), yaw=-0.8, open=0.25))),
         (14, P(stick=carry(0.0))),
     ])
+    # ── dekes (upper body; hands re-gripped on the stick at runtime) ──
+    # Film-study targets: the puck comes in to ~1 ft under pressure, the shoulder
+    # sells the move, the blade crosses the body in ~0.3 s.
+    dk = lambda f, bx, bz, byaw, yaw, lean=0.7, look=(0.2, 0.0), hip=0.0: (
+        f, P(yaw=yaw, lean=lean, look=look, hip=(hip, None, 0.0), stick=dict(blade=(bx, 0.02, bz), yaw=byaw)))
+    # forehand → backhand: show it wide on the forehand, pull it across the body
+    A('deke_fb', [
+        (0, P(stick=carry(0.0))),
+        dk(4, 2.1, 2.6, -0.45, 0.28, look=(0.35, 0.0), hip=0.12),
+        dk(9, -0.9, 2.3, 0.35, -0.32, lean=0.78, look=(-0.3, 0.0), hip=-0.15),
+        dk(13, -1.2, 2.8, 0.45, -0.25, look=(-0.2, 0.0), hip=-0.12),
+        (19, P(stick=carry(0.0))),
+    ])
+    # toe drag: reach wide, roll the blade over, drag the puck back in past the stick-check
+    A('deke_toedrag', [
+        (0, P(stick=carry(0.0))),
+        dk(5, 2.4, 3.3, -0.7, 0.3, lean=0.74, look=(0.4, 0.0), hip=0.14),
+        dk(10, 0.5, 1.5, 0.95, -0.12, lean=0.8, look=(0.0, 0.0)),
+        dk(15, 0.9, 2.9, -0.2, 0.0, lean=0.7),
+        (21, P(stick=carry(0.0))),
+    ])
+    # shot fake: load like a wrist shot, then pull it across instead of releasing
+    A('deke_fake', [
+        (0, P(stick=carry(0.0))),
+        (5, P(yaw=0.42, lean=0.62, stick=dict(blade=(1.75, 0.02, 0.6), top=top(0.05, 0.62, 0.95), lowGrip=0.5, yaw=-0.1))),
+        dk(10, -0.8, 2.4, 0.35, -0.3, lean=0.75, look=(-0.25, 0.0), hip=-0.12),
+        (16, P(stick=carry(0.0))),
+    ])
+    # wide: drop the shoulder, push the puck out wide on the forehand and lean around the man
+    A('deke_wide', [
+        (0, P(stick=carry(0.0))),
+        dk(5, 2.6, 2.4, -0.55, 0.35, lean=0.8, look=(0.45, 0.0), hip=0.18),
+        dk(11, 2.3, 3.4, -0.3, 0.25, lean=0.75, look=(0.3, 0.0), hip=0.12),
+        (17, P(stick=carry(0.0))),
+    ])
     fo = lambda f, bob: (f, P(lean=1.0, look=(-0.55, 0.0), hip=(0, None, -0.1), L=leg(0.95, 0.34, 1.55 + bob), R=leg(0.95, 0.34, 1.55 + bob),
                               stick=dict(blade=(0.35, 0.02, 2.3), top=top(-0.35, -0.2, 1.25), lowGrip=0.32, yaw=-0.25)))
     A('faceoff_crouch', [fo(0, 0.0), fo(15, 0.05), fo(30, 0.0)])

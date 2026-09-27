@@ -39,7 +39,7 @@ import {
 import type { BoneName, PoseOverlay } from './athlete'
 import type * as THREE from 'three'
 
-export type ActionKind = 'shot' | 'save' | 'goal' | 'hit' | 'pass' | 'faceoff'
+export type ActionKind = 'shot' | 'save' | 'goal' | 'hit' | 'pass' | 'faceoff' | 'deke'
 
 export interface ActionCue {
   kind: ActionKind
@@ -55,6 +55,21 @@ export interface ActionCue {
   shotFrom?: { x: number; y: number }
   shotTarget?: { x: number; y: number }
   rebound?: boolean
+  /** hit (agent engine): impact 0..1 and where it happened */
+  force?: number
+  hitKind?: 'boards' | 'openIce' | 'finish' | 'battle'
+  /** shot (agent engine): the release type */
+  shotType?: string
+  /** deke (agent engine): which move */
+  dekeKind?: string
+}
+
+/** The deke clip for each move the engine names (additive 'deke' event). */
+export const DEKE_CLIP: Readonly<Record<string, string>> = {
+  forehandBackhand: 'deke_fb',
+  toeDrag: 'deke_toedrag',
+  shoulderFake: 'deke_fake',
+  wide: 'deke_wide',
 }
 
 /** Every cue the choreographer can act on (a superset of math.extractCues). */
@@ -64,7 +79,7 @@ export function extractActionCues(stream: GameStream): ActionCue[] {
   for (const ev of stream) {
     if (isEvent(ev, 'shot')) {
       lastShot = { x: ev.from.x, y: ev.from.y, tx: ev.target.x, ty: ev.target.y }
-      out.push({ kind: 'shot', absT: absTime(ev.period, ev.t), nx: ev.from.x, ny: ev.from.y, actorId: ev.shooter })
+      out.push({ kind: 'shot', absT: absTime(ev.period, ev.t), nx: ev.from.x, ny: ev.from.y, actorId: ev.shooter, ...(ev.shotType ? { shotType: ev.shotType } : {}) })
     } else if (isEvent(ev, 'save')) {
       out.push({
         kind: 'save', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.goalie, rebound: ev.rebound,
@@ -73,9 +88,13 @@ export function extractActionCues(stream: GameStream): ActionCue[] {
     } else if (isEvent(ev, 'goal')) {
       out.push({ kind: 'goal', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.scorer, assists: [...ev.assists] })
     } else if (isEvent(ev, 'hit')) {
-      out.push({ kind: 'hit', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.by, targetId: ev.on })
+      out.push({ kind: 'hit', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.by, targetId: ev.on, ...(ev.force !== undefined ? { force: ev.force } : {}), ...(ev.kind ? { hitKind: ev.kind } : {}) })
     } else if (isEvent(ev, 'pass') && ev.completed) {
       out.push({ kind: 'pass', absT: absTime(ev.period, ev.t), nx: ev.a.x, ny: ev.a.y, actorId: ev.from, targetId: ev.to })
+    } else if ((ev as { type: string }).type === 'deke') {
+      // additive agent-engine event: { by, on?, kind, success, pos } (tolerant read)
+      const d = ev as unknown as { period: number; t: number; by: string; on?: string; kind?: string; pos?: { x: number; y: number } }
+      out.push({ kind: 'deke', absT: absTime(d.period, d.t), nx: d.pos?.x ?? 0, ny: d.pos?.y ?? 0, actorId: d.by, ...(d.on ? { targetId: d.on } : {}), dekeKind: d.kind ?? 'forehandBackhand' })
     } else if (isEvent(ev, 'faceoff')) {
       out.push({ kind: 'faceoff', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.winner })
     }
@@ -114,9 +133,11 @@ export function planCues(cues: ActionCue[], contactOf: (clip: string) => number 
       const wz = normYtoWorld(cue.ny)
       const dist = Math.hypot(wx - Math.sign(wx || 1) * NET_X, wz)
       const pt = lastPassTo.get(cue.actorId)
-      clip = shotClipFor(dist, pt === undefined ? null : cue.absT - pt)
+      clip = shotClipFor(dist, pt === undefined ? null : cue.absT - pt, undefined, cue.shotType)
     } else if (cue.kind === 'hit') {
-      clip = distToBoards(normXtoWorld(cue.nx), normYtoWorld(cue.ny)) <= 6 ? 'check_boards' : 'check'
+      clip = hitPlan(12, distToBoards(normXtoWorld(cue.nx), normYtoWorld(cue.ny)), cue.force, cue.hitKind).hitter
+    } else if (cue.kind === 'deke') {
+      clip = DEKE_CLIP[cue.dekeKind ?? ''] ?? 'deke_fb'
     } else if (cue.kind === 'faceoff') {
       clip = 'faceoff_crouch'
       lead = FACEOFF_LEAD_S
@@ -256,6 +277,29 @@ export class Choreographer {
     }
   }
 
+  /**
+   * Who is mid-swing at game time `t` — a shot or pass whose clip has started
+   * (`lead` before the event) but whose stick hasn't met the puck yet. The
+   * renderer keeps the puck on HIS blade until contact, so the wind-up visibly
+   * carries the puck and the release lands on the swing (it used to leave first).
+   */
+  windupActor(t: number): string | null {
+    const ps = this.plans
+    let lo = 0
+    let hi = ps.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (ps[mid]!.cue.absT < t) lo = mid + 1
+      else hi = mid
+    }
+    for (let i = lo; i < ps.length; i++) {
+      const p = ps[i]!
+      if (p.cue.absT - 0.9 > t) break
+      if ((p.cue.kind === 'shot' || p.cue.kind === 'pass') && p.clip && p.cue.absT - p.lead <= t) return p.cue.actorId
+    }
+    return null
+  }
+
   /** Advance from game clock `prev` to `now` (seconds of game time). */
   tick(prev: number, now: number): void {
     if (now < prev) return
@@ -315,7 +359,8 @@ export class Choreographer {
     const rel = hitter ? Math.hypot(hitter.vx - target.vx, hitter.vz - target.vz) : 12
     const wx = normXtoWorld(c.nx)
     const wz = normYtoWorld(c.ny)
-    const plan = hitPlan(rel, distToBoards(wx, wz))
+    // the engine's own impact + kind when it has them (agent engine), else read it from the closing speed
+    const plan = hitPlan(rel, distToBoards(wx, wz), c.force, c.hitKind)
     target.layer.play(plan.target, { weight: plan.target === 'hit_stagger' ? 0.55 + 0.45 * plan.hardness : 1 })
     const meta = CLIPS[plan.target]!
     const len = (meta.hold ?? 0) + 1.2 + (meta.next ? 1.4 : 0)
@@ -334,7 +379,15 @@ export class Choreographer {
 
   private celebrate(c: ActionCue): void {
     const scorer = this.find(c.actorId)
-    if (scorer?.layer) scorer.layer.play(celebrationFor(c.actorId))
+    if (scorer?.layer) {
+      // the shot's follow-through ends here: its IK re-grip would pin the arms to the stick
+      for (const n of scorer.layer.playing) if (n.startsWith('shot_') || n === 'pass') scorer.layer.stop(n)
+      // Owner rigs: the retargeted fist pump reads as a clench at the chest and
+      // full-weight arms-up puts the gloves on the helmet — arms-up at partial
+      // weight (the skating arms still blend under it) is a real arms-raised celebration
+      if (this.ownerLoco) scorer.layer.play('celly_armsup', { weight: celebrationFor(c.actorId) === 'celly_armsup' ? 0.92 : 0.85 })
+      else scorer.layer.play(celebrationFor(c.actorId))
+    }
     if (scorer) {
       // linemates who are close join in for a hug a beat later
       for (const a of this.all()) {
