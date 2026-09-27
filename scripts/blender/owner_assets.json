@@ -1,0 +1,46 @@
+{
+  "//": "Owner-supplied athlete import (scripts/blender/import_owner_assets.py + owner_textures.py). Paths are relative to the incoming folder (default assets/3d/incoming). Everything here is a DEFAULT: the importer auto-detects bone and clip names and this file only pins what detection can't know.",
+  "skater": {
+    "dir": "skater/Hockey_Player_FAB",
+    "mesh": "FBX/SK_Hockey_Player_T-Pose.FBX",
+    "stick": "FBX/SK_Stick.FBX",
+    "animDir": "FBX/With_Hockey_Stick",
+    "drop": ["Eyes_Glass"],
+    "materials": { "M_Clothes": "clothes", "M_Accessories": "gear:0", "M_Head": "gear:1", "M_Eyes": "gear:2", "M_Helmet_Visor": "visor" },
+    "gear": {
+      "diffuse": ["Textures/T_Accessories_D.tga", "Textures/T_Head_D.tga", "Textures/T_Eyes_D.tga"],
+      "normal": ["Textures/T_Accessories_N.tga", "Textures/T_Head_N.tga", "Textures/T_Eyes_N.tga"]
+    },
+    "clothes": {
+      "diffuse": "Textures/T_Clothes_D.tga",
+      "normal": "Textures/T_Clothes_N.tga",
+      "psd": "Textures/T_Clothes.psd"
+    },
+    "clipMap": {},
+    "contact": {},
+    "boneMap": {}
+  },
+  "goalie": {
+    "dir": "goalie/Hockey_Goalie_FAB",
+    "mesh": "Fbx/SK_Hockey_Goalie_T-Pose.FBX",
+    "stick": "Fbx/SK_Stick.FBX",
+    "animDir": "Fbx/With_Stick",
+    "drop": ["Eyes_Glass", "Nets"],
+    "decimate": { "Mask": 0.6 },
+    "materials": { "M_Clothes": "clothes", "M_Accessories_1": "gear:0", "M_Accessories_2": "gear:1", "M_Male_Head": "gear:2", "M_Eyes": "gear:3", "M_Accessories": "gear:0" },
+    "gear": {
+      "diffuse": ["Textures/T_Accessories_1_D.tga", "Textures/T_Accessories_2_D.tga", "Textures/T_Male_Head_D.tga", "Textures/T_Eyes_D.tga"],
+      "normal": ["Textures/T_Accessories_1_N.tga", "Textures/T_Accessories_2_N.tga", "Textures/T_Male_Head_N.tga", "Textures/T_Eyes_N.tga"]
+    },
+    "clothes": {
+      "diffuse": "Textures/T_Clothes_D.tga",
+      "normal": "Textures/T_Clothes_N.tga",
+      "psd": "../../skater/Hockey_Player_FAB/Textures/T_Clothes.psd",
+      "//psd": "the goalie sweater shares the skater's UV layout, so the skater PSD's region masks apply"
+    },
+    "clipMap": {},
+    "contact": {},
+    "boneMap": {}
+  },
+  "texture": { "clothes": 1024, "gear": 2048, "normal": 1024 }
+}

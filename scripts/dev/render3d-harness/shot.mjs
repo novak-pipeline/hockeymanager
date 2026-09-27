@@ -13,6 +13,8 @@ const browser = await chromium.launch({
   headless: false,
   args: [
     '--window-size=1960,1180',
+    '--window-position=-4000,-4000', // off-screen: never pops over the desktop (real GPU still used)
+    '--disable-backgrounding-occluded-windows',
     '--disable-background-timer-throttling',
     '--disable-renderer-backgrounding',
     // --perf: uncap the frame rate so avgMs is the real cost, not the vsync interval
@@ -24,7 +26,7 @@ const page = await browser.newPage({ viewport: big ? { width: 1920, height: 1080
 const errors = []
 page.on('pageerror', (e) => errors.push(String(e)))
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()) })
-await page.goto(`http://localhost:5175/?hud=0&${query}`)
+await page.goto(`http://localhost:${process.env.R3D_PORT ?? 5175}/?hud=0&${query}`)
 try {
   await page.waitForFunction(() => '__r3d' in window, null, { timeout: 60000 })
 } catch (e) {

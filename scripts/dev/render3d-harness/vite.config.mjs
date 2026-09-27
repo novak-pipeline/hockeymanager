@@ -27,5 +27,6 @@ export default defineConfig({
       '@renderer': resolve(root, 'src/renderer'),
     },
   },
+  assetsInclude: ['**/*.glb'],
   server: { fs: { allow: [root] } },
 })

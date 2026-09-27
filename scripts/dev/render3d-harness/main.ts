@@ -33,7 +33,11 @@ const colors = { home: Number(q.get('home') ?? 0x1f4fbf), away: Number(q.get('aw
 const oldPath = './old-rink3dRenderer.ts'
 const Impl: typeof Rink3dRenderer =
   q.get('old') === '1' ? ((await import(/* @vite-ignore */ oldPath)).Rink3dRenderer as typeof Rink3dRenderer) : Rink3dRenderer
-const r = await Impl.create(host, colors)
+// Defaults follow the app (RENDER3D_DEFAULTS): ?model=owner|blender|procedural|auto, &loco=code|clip|hybrid override
+const r = await Impl.create(host, colors, {
+  ...(q.has('model') ? { athletes: q.get('model') as 'auto' | 'owner' | 'blender' | 'procedural' } : {}),
+  ...(q.has('loco') ? { locomotion: q.get('loco') as 'code' | 'clip' | 'hybrid' } : {}),
+})
 r.setEventStream(out.stream)
 r.setCamera((q.get('cam') ?? 'broadcast') as CameraPreset)
 let last = ''
@@ -44,6 +48,7 @@ r.onUpdate((v) => {
 r.load(tl, colors, labels)
 r.setSpeed(Number(q.get('speed') ?? 1))
 if (q.has('t')) r.seekFraction(Number(q.get('t')))
+let actorId: string | null = null
 // ?goal=N&lead=3 → start playing `lead` seconds before the Nth goal
 // (&ev=save|shot|hit picks another event type)
 if (q.has('goal')) {
@@ -55,6 +60,9 @@ if (q.has('goal')) {
       return (g.period - 1) * 1200 + g.t
     })
   const at = goals[Number(q.get('goal'))] ?? 0
+  const evObj = out.stream.filter((e) => e.type === kind)[Number(q.get('goal'))] as unknown as Record<string, unknown> | undefined
+  // the event's main actor (for ?closeup=actor,…)
+  actorId = (evObj?.['by'] ?? evObj?.['shooter'] ?? evObj?.['scorer'] ?? evObj?.['goalie'] ?? evObj?.['from'] ?? evObj?.['winner'] ?? null) as string | null
   r.seekFraction(Math.max(0, at - Number(q.get('lead') ?? 3)) / tl.duration)
   r.play()
 }
@@ -66,6 +74,45 @@ if (q.get('fly') === '1') {
   g.awayGoaliePose.butterflyTimer = 1e6
   r.setSpeed(0.05)
   r.play()
+}
+// ?closeup=home:0,14,35[,h] pins a debug camera `dist` ft from one player at azimuth `az`° (0 = his front)
+if (q.has('closeup')) {
+  const [who, dist, az, hgt] = q.get('closeup')!.split(',')
+  const [team, idx] = who!.split(':')
+  void team
+  const R = r as unknown as {
+    homePoses: Array<{ worldX: { pos: number }; worldZ: { pos: number }; angle: number; rig: { visible: boolean } }>
+    awayPoses: Array<{ worldX: { pos: number }; worldZ: { pos: number }; angle: number; rig: { visible: boolean } }>
+    homeGoaliePose: { worldX: { pos: number }; worldZ: { pos: number }; angle: number }
+    awayGoaliePose: { worldX: { pos: number }; worldZ: { pos: number }; angle: number }
+    setDebugCamera: (p: { px: number; py: number; pz: number; lx: number; ly: number; lz: number; fov?: number }) => void
+  }
+  const all = () => [...R.homePoses, ...R.awayPoses, R.homeGoaliePose, R.awayGoaliePose] as unknown as Array<{ playerId: string | null; rig: { visible: boolean }; worldX: { pos: number }; worldZ: { pos: number }; angle: number }>
+  const pick = () =>
+    who === 'actor' ? all().find((p) => p.playerId === actorId && p.rig.visible)! : idx === 'g' ? (team === 'home' ? R.homeGoaliePose : R.awayGoaliePose) : (team === 'home' ? R.homePoses : R.awayPoses).filter((p) => p.rig.visible)[Number(idx)]!
+  const aim = () => {
+    const p = pick()
+    if (!p) return
+    const a = p.angle + (Number(az ?? 30) * Math.PI) / 180
+    const d = Number(dist ?? 14)
+    const h = Number(hgt ?? 4.5)
+    R.setDebugCamera({ px: p.worldX.pos + Math.sin(a) * d, py: h, pz: p.worldZ.pos + Math.cos(a) * d, lx: p.worldX.pos, ly: 3, lz: p.worldZ.pos, fov: 30 })
+    requestAnimationFrame(aim)
+  }
+  aim()
+}
+// ?clip=shot_slap&who=home:2&at=0.5&freeze=1 plays (or freezes) one authored clip on one
+// player (index among the VISIBLE rigs, like ?closeup; 'g' = goalie)
+if (q.has('clip')) {
+  const [team, idx] = (q.get('who') ?? 'home:0').split(':')
+  const R = r as unknown as {
+    homePoses: Array<{ rig: { visible: boolean } }>
+    awayPoses: Array<{ rig: { visible: boolean } }>
+    debugClip?: (t: 'home' | 'away', i: number, n: string, at: number, f: boolean) => boolean
+  }
+  const list = team === 'home' ? R.homePoses : R.awayPoses
+  const raw = idx === 'g' ? 99 : list.indexOf(list.filter((p) => p.rig.visible)[Number(idx)]!)
+  R.debugClip?.(team as 'home' | 'away', raw, q.get('clip')!, Number(q.get('at') ?? 0), q.get('freeze') === '1')
 }
 if (q.get('hud') === '0') hud.style.display = 'none'
 // ?look=px,py,pz,lx,ly,lz[,fov] pins a debug camera (close-ups of the athletes)

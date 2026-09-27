@@ -9,7 +9,7 @@ const browser = await chromium.launch({
   args: ['--window-size=1320,820', '--disable-gpu-vsync', '--disable-frame-rate-limit'],
 })
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } })
-await page.goto(`http://localhost:5175/?hud=0&${query}`)
+await page.goto(`http://localhost:${process.env.R3D_PORT ?? 5175}/?hud=0&${query}`)
 await page.waitForFunction(() => '__r3d' in window, null, { timeout: 60000 })
 await page.waitForTimeout(1500)
 const cdp = await page.context().newCDPSession(page)

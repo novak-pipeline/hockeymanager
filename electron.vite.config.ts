@@ -35,6 +35,8 @@ export default defineConfig({
   },
   renderer: {
     root: 'src/renderer',
+    // Blender-built athletes (src/render3d/assets/*.glb) load as inlined data: URLs
+    assetsInclude: ['**/*.glb'],
     resolve: {
       alias: {
         '@domain': resolve('src/domain'),
