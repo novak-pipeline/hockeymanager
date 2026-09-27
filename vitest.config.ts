@@ -28,6 +28,8 @@ export default defineConfig({
       // Playback profiler (playtest C2) — replays whole games and prints timings.
       // Run on demand: npx vitest run --config vitest.profile.config.ts
       'src/render2d/playbackProfile.test.ts',
+      // M0 realism scorecard (sims N full games): `npm run scorecard`.
+      'src/engine/analysis/scorecard.harness.test.ts',
     ],
     environment: 'node',
     // Fixed-seed full/quick-sim and full-season tests run several seconds each;
