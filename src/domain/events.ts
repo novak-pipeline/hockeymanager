@@ -37,6 +37,8 @@ export type FaceoffEvent = GameEventBase & {
   zone: Zone
   winner: PlayerRef
   pos: XY
+  /** Additive (agent engine): the centre who lost the draw. */
+  loser?: PlayerRef
 }
 
 export type CarryEvent = GameEventBase & {
@@ -46,6 +48,9 @@ export type CarryEvent = GameEventBase & {
   to: XY
 }
 
+/** How a pass was played (additive; agent engine). */
+export type PassKind = 'tape' | 'saucer' | 'stretch' | 'dToD' | 'drop' | 'rim' | 'oneTimerFeed'
+
 export type PassEvent = GameEventBase & {
   type: 'pass'
   from: PlayerRef
@@ -53,7 +58,19 @@ export type PassEvent = GameEventBase & {
   a: XY
   b: XY
   completed: boolean
+  /** Additive (agent engine): release speed in mph. */
+  speedMph?: number
+  /** Additive (agent engine): what kind of pass it was. */
+  kind?: PassKind
+  /** Additive (agent engine): the opponent who picked it off, when not completed. */
+  interceptedBy?: PlayerRef
 }
+
+/** How a shot was released (additive; agent engine). */
+export type ShotType = 'wrist' | 'snap' | 'slap' | 'backhand' | 'oneTimer' | 'tip'
+
+/** Where a shot came from, as the engine decided it (additive; agent engine). */
+export type ShotOrigin = 'rush' | 'cycle' | 'point' | 'rebound' | 'oneTimer' | 'scramble'
 
 export type ShotEvent = GameEventBase & {
   type: 'shot'
@@ -62,6 +79,41 @@ export type ShotEvent = GameEventBase & {
   target: XY
   /** 0..1 shot quality; drives sim outcome AND renderer drama cues. */
   danger: number
+  /** Additive (agent engine): release type, speed in mph, origin, odd-man count. */
+  shotType?: ShotType
+  speedMph?: number
+  origin?: ShotOrigin
+  oddMan?: { attackers: number; defenders: number }
+}
+
+/**
+ * Additive variant (agent engine): an unblocked attempt that MISSED the net —
+ * wide, high, or off the iron. Not a shot on goal (box scores ignore it; the
+ * NHL records ~14 per team-game).
+ */
+export type MissedShotEvent = GameEventBase & {
+  type: 'missedShot'
+  shooter: PlayerRef
+  from: XY
+  /** Where it went by the net (goal-line coordinates). */
+  target: XY
+  result: 'wide' | 'high' | 'post'
+  shotType?: ShotType
+  speedMph?: number
+}
+
+/**
+ * Additive variant (agent engine): a contested puck — along the boards, in
+ * front of the net, or loose — fought over by both teams, and who came out
+ * with it (null when the whistle went first).
+ */
+export type BattleEvent = GameEventBase & {
+  type: 'battle'
+  kind: 'boards' | 'netFront' | 'loosePuck'
+  pos: XY
+  players: PlayerRef[]
+  winner: PlayerRef | null
+  durationS: number
 }
 
 export type SaveEvent = GameEventBase & {
@@ -79,11 +131,20 @@ export type GoalEvent = GameEventBase & {
   pos: XY
 }
 
+/** What kind of check it was (additive; agent engine). */
+export type HitKind = 'boards' | 'openIce' | 'finish' | 'battle'
+
 export type HitEvent = GameEventBase & {
   type: 'hit'
   by: PlayerRef
   on: PlayerRef
   pos: XY
+  /** Additive (agent engine): impact 0 (a bump) … 1 (a thunderous hit). */
+  force?: number
+  /** Additive (agent engine): boards pin / open ice / finishing a check / a battle collision. */
+  kind?: HitKind
+  /** Additive (agent engine): the target had the puck (or had just moved it). */
+  targetHadPuck?: boolean
 }
 
 export type PenaltyEvent = GameEventBase & {
@@ -91,6 +152,8 @@ export type PenaltyEvent = GameEventBase & {
   player: PlayerRef
   infraction: string
   minutes: number
+  /** Additive (agent engine): the player who drew the penalty. */
+  drawnBy?: PlayerRef
 }
 
 export type TakeawayEvent = GameEventBase & {
@@ -117,6 +180,8 @@ export type LineChangeEvent = GameEventBase & {
   type: 'lineChange'
   team: TeamRef
   onIce: PlayerRef[]
+  /** Additive (agent engine): changed during live play (true) vs at a whistle. */
+  onTheFly?: boolean
 }
 
 /** Why play stopped — additive optional field; consumers must tolerate absence. */
@@ -132,6 +197,12 @@ export type StoppageEvent = GameEventBase & {
 export interface SkaterSnapshot {
   player: PlayerRef
   pos: XY
+  /**
+   * Additive (agent engine): body facing in radians (atan2 in rink feet; 0 =
+   * toward +x). Differs from the direction of travel when a defenceman skates
+   * backward or a player pivots — renderers may use it to orient the rig.
+   */
+  facing?: number
 }
 
 /**
@@ -148,6 +219,8 @@ export type FrameEvent = GameEventBase & {
   awayGoalie: SkaterSnapshot
   puck: XY
   puckCarrier: PlayerRef | null
+  /** Additive (agent engine): puck height above the ice in feet (chips, saucers, clears). */
+  puckZ?: number
 }
 
 export type GameEvent =
@@ -165,6 +238,8 @@ export type GameEvent =
   | LineChangeEvent
   | StoppageEvent
   | FrameEvent
+  | MissedShotEvent
+  | BattleEvent
 
 export type GameEventType = GameEvent['type']
 

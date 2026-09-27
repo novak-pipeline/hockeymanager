@@ -198,10 +198,10 @@ export interface TeamTactics {
   /** DEAD — unread. Defensive-zone structure. Default: 'contain'. */
   dZoneStructure?: DZoneStructure
 
-  /** DEAD — unread. Offensive-zone faceoff play. Default: 'standard'. */
+  /** Offensive-zone faceoff play. Default: 'standard'. Read only by the flagged agent engine (directed draws). */
   offensiveFaceoff?: FaceoffPlay
 
-  /** DEAD — unread. Defensive-zone faceoff play. Default: 'standard'. */
+  /** Defensive-zone faceoff play. Default: 'standard'. Read only by the flagged agent engine (directed draws). */
   defensiveFaceoff?: FaceoffPlay
 
   /** DEAD — unread. Shot targeting. Default: 'mixed'. */

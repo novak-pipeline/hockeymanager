@@ -2,7 +2,7 @@
 // Runs the real full-fidelity engine in the page on a generated league and
 // mounts Rink3dRenderer on the resulting GameStream.
 //   npx vite --config scripts/dev/render3d-harness/vite.config.mjs --port 5175
-// Query params: ?t=0.35 (seek fraction) &cam=broadcast|overhead|endzone|follow
+// Query params: ?engine=agent (agent engine) ?t=0.35 (seek fraction) &cam=broadcast|overhead|endzone|follow
 //               &play=1 &speed=2 &seed=3 &w=1280&h=720
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
