@@ -35,6 +35,7 @@ import {
   puckCarriedOffset,
   puckTrackStep,
   capLookYaw,
+  broadcastFraming,
   followHeadingStep,
   type FollowHeading,
   type PuckTrack,
@@ -107,7 +108,8 @@ const PLAYER_FOLLOW_HL = 0.08
 // damped spring. The broadcast shot is deliberately slow and heavy, like a
 // real operator on a fluid head; the tighter presets stay more responsive.
 const CAMERA_TUNING: Record<CameraPreset, { tauX: number; tauZ: number; maxFocusSpeed: number; springHL: number }> = {
-  broadcast: { tauX: 0.9, tauZ: 1.2, maxFocusSpeed: 40, springHL: 0.6 },
+  // tighter zone framing (D3) needs a little less lag than the old wide shot
+  broadcast: { tauX: 0.4, tauZ: 1.0, maxFocusSpeed: 60, springHL: 0.45 },
   overhead: { tauX: 1.2, tauZ: 1.2, maxFocusSpeed: 30, springHL: 1.5 },
   endzone: { tauX: 0.6, tauZ: 0.6, maxFocusSpeed: 80, springHL: 0.5 },
   follow: { tauX: 0.45, tauZ: 0.45, maxFocusSpeed: 90, springHL: 0.45 },
@@ -250,6 +252,9 @@ export class Rink3dRenderer implements MatchRenderer {
   // ── Puck ───────────────────────────────────────────────────────────────────
   private puckMesh!: THREE.Mesh
   private puckGlowRing!: THREE.Mesh
+  /** Ring on the ice under the puck carrier's skates (FM-style ball-carrier mark). */
+  private carrierRing!: THREE.Mesh
+  private carrierMarkPose: PlayerPose | null = null
   private puck: PuckTrack = { x: 0, z: 0, cx: 0, cz: 0, key: '' }
 
   // ── Goal lights ────────────────────────────────────────────────────────────
@@ -282,6 +287,8 @@ export class Rink3dRenderer implements MatchRenderer {
   private puckVelSmX = 0
   private puckVelSmZ = 0
   private prevPuckX: number | null = null
+  /** Broadcast: a small, slow lead in the direction of play (ft). */
+  private leadX = 0
   private prevPuckZ = 0
   /** Last rendered look yaw (null after a cut) — for the angular-speed cap. */
   private lastCamYaw: number | null = null
@@ -292,7 +299,6 @@ export class Rink3dRenderer implements MatchRenderer {
   private cpuMsAvg = 0
 
   // ── Carrier tracking for follow camera ────────────────────────────────────
-  private carrierAngle = 0
   private carrierWx = 0
   private carrierWz = 0
   private lastCarrier: PlayerId | null = null
@@ -552,13 +558,54 @@ export class Rink3dRenderer implements MatchRenderer {
     this.puckMesh.castShadow = true
     this.scene.add(this.puckMesh)
 
-    // Carrier ring: a thin broadcast-style halo so the puck stays readable
-    const ringGeo = new THREE.TorusGeometry(PUCK_R + 0.75, 0.07, 6, 40)
-    const ringMat = new THREE.MeshBasicMaterial({ color: 0xffd24a, transparent: true, opacity: 0.7, depthWrite: false })
-    this.puckGlowRing = new THREE.Mesh(ringGeo, ringMat)
-    this.puckGlowRing.rotation.x = Math.PI / 2
-    this.puckGlowRing.visible = false
+    // Readability at broadcast distance (F-17): the real puck is ~3 px there.
+    // A subtle gold halo on the ice around the puck, kept at a minimum SCREEN
+    // size (updateMarkers), plus a clearer ring under the carrier's skates.
+    const flat = (inner: number): THREE.RingGeometry => {
+      const g = new THREE.RingGeometry(inner, 1, 48)
+      g.rotateX(-Math.PI / 2)
+      return g
+    }
+    const markMat = (opacity: number): THREE.MeshBasicMaterial =>
+      new THREE.MeshBasicMaterial({
+        color: 0xffd24a, transparent: true, opacity, depthWrite: false, toneMapped: false,
+        polygonOffset: true, polygonOffsetFactor: -3,
+      })
+    this.puckGlowRing = new THREE.Mesh(flat(0.68), markMat(0.6))
+    this.puckGlowRing.renderOrder = 2
     this.scene.add(this.puckGlowRing)
+    this.carrierRing = new THREE.Mesh(flat(0.8), markMat(0.85))
+    ;(this.carrierRing.material as THREE.MeshBasicMaterial).color.setHex(0xffbf1f)
+    this.carrierRing.renderOrder = 2
+    this.carrierRing.visible = false
+    this.scene.add(this.carrierRing)
+  }
+
+  /**
+   * Size the puck halo / carrier ring for the CURRENT camera: never smaller
+   * on screen than a readable minimum (px), never smaller than real scale.
+   * Runs after the camera moved this frame.
+   */
+  private updateMarkers(): void {
+    const H = this.renderer.domElement.clientHeight || 400
+    const tanHalf = Math.tan((this.camera.fov * Math.PI) / 360)
+    const wpp = (x: number, z: number): number => (2 * this.camera.position.distanceTo(new THREE.Vector3(x, 0, z)) * tanHalf) / H
+    const px = this.puck.x
+    const pz = this.puck.z
+    const carried = this.carrierMarkPose !== null
+    // halo: ≥ 7 px radius; quieter while the carrier ring already marks the play
+    const haloR = Math.max(PUCK_R + 0.45, 7 * wpp(px, pz))
+    this.puckGlowRing.position.set(px, 0.05, pz)
+    this.puckGlowRing.scale.setScalar(haloR)
+    ;(this.puckGlowRing.material as THREE.MeshBasicMaterial).opacity = carried ? 0.35 : 0.6
+    const c = this.carrierMarkPose
+    this.carrierRing.visible = c !== null && c.rig.visible
+    if (c) {
+      const cx = c.worldX.pos
+      const cz = c.worldZ.pos
+      this.carrierRing.position.set(cx, 0.045, cz)
+      this.carrierRing.scale.setScalar(Math.max(2.4, 15 * wpp(cx, cz)))
+    }
   }
 
   private buildAthletes(): void {
@@ -880,14 +927,16 @@ export class Rink3dRenderer implements MatchRenderer {
     this.puck = { x: this.puckMesh.position.x, z: this.puckMesh.position.z, cx: 0, cz: 0, key: this.puck.key }
   }
 
-  private currentTarget() {
-    return cameraTargetFor(this.camPreset, this.playFocusX, {
+  private currentTarget(): ReturnType<typeof broadcastFraming> {
+    if (this.camPreset === 'broadcast') return broadcastFraming(this.playFocusX, this.playFocusZ, this.leadX, this.camera.aspect)
+    const t = cameraTargetFor(this.camPreset, this.playFocusX, {
       endzoneActiveSide: this.endzoneActiveSide,
       carrierAngle: this.followHead.yaw,
       carrierWx: this.carrierWx,
       carrierWz: this.carrierWz,
       puckWz: this.playFocusZ,
     })
+    return { ...t, fov: cameraFovFor(this.camPreset) }
   }
 
   /**
@@ -900,6 +949,7 @@ export class Rink3dRenderer implements MatchRenderer {
     this.followHead = { yaw: this.playFocusX >= 0 ? Math.PI / 2 : -Math.PI / 2, reversedFor: 0 }
     this.puckVelSmX = this.puckVelSmZ = 0
     this.prevPuckX = null
+    this.leadX = 0
     this.lastCamYaw = null
     this.snapCameraSprings()
   }
@@ -914,7 +964,7 @@ export class Rink3dRenderer implements MatchRenderer {
     this.lookX = snapSpring(target.lx)
     this.lookY = snapSpring(target.ly)
     this.lookZ = snapSpring(target.lz)
-    this.fov = snapSpring(cameraFovFor(this.camPreset))
+    this.fov = snapSpring(target.fov)
     this.arena.setCeilingVisible(this.camPreset !== 'overhead')
     this.applyFov(this.fov.pos)
     this.camera.position.set(target.px, target.py, target.pz)
@@ -1046,6 +1096,7 @@ export class Rink3dRenderer implements MatchRenderer {
     this.renderAt(this.clockPos, dt, simDt)
     this.updateCues(this.clockPos, dt)
     this.updateCamera(dt)
+    this.updateMarkers()
     this.updateArena(dt)
     this.emit()
     // repainted jersey slots go up as sub-images (a full re-upload of the
@@ -1174,7 +1225,6 @@ export class Rink3dRenderer implements MatchRenderer {
       const offset = puckCarriedOffset(carrierPose.angle)
       pTargetX = carrierPose.worldX.pos + offset.dx
       pTargetZ = carrierPose.worldZ.pos + offset.dz
-      this.carrierAngle = carrierPose.angle
       this.carrierWx = carrierPose.worldX.pos
       this.carrierWz = carrierPose.worldZ.pos
     } else {
@@ -1189,8 +1239,7 @@ export class Rink3dRenderer implements MatchRenderer {
     this.puck = puckTrackStep(this.puck, pTargetX, pTargetZ, carrierPose?.playerId ?? '', dt)
 
     this.puckMesh.position.set(this.puck.x, PUCK_H / 2, this.puck.z)
-    this.puckGlowRing.position.set(this.puck.x, 0.06, this.puck.z)
-    this.puckGlowRing.visible = snap.carrier !== null
+    this.carrierMarkPose = carrierPose
 
     this.batch.sync()
     this.syncBlobs()
@@ -1554,7 +1603,8 @@ export class Rink3dRenderer implements MatchRenderer {
     // (the old hard deadzone stepped the target → stop/start pans).
     const rawX = this.puck.x
     const rawZ = this.puck.z
-    const committedX = softDeadzone(rawX, this.playFocusX, PLAY_FOCUS_DEADZONE_X)
+    // the zone-framed broadcast shot keeps a tighter band (its frame is ~80 ft)
+    const committedX = softDeadzone(rawX, this.playFocusX, this.camPreset === 'broadcast' ? 4 : PLAY_FOCUS_DEADZONE_X)
     const committedZ = softDeadzone(rawZ, this.playFocusZ, PLAY_FOCUS_DEADZONE_Z)
 
     // ── Layer 2: slow EMA toward the committed point ─────────────────────────
@@ -1578,8 +1628,15 @@ export class Rink3dRenderer implements MatchRenderer {
       if (this.prevPuckX !== null) {
         const vx = (rawX - this.prevPuckX) / dt
         const vz = (rawZ - this.prevPuckZ) / dt
-        // a teleport (stoppage reset) is not travel
-        if (Math.hypot(vx, vz) < 200) {
+        // A puck teleport (the stoppage reset to the next faceoff dot) is a CUT
+        // to the new faceoff, like TV — not a long pan across empty ice.
+        if (Math.hypot(rawX - this.prevPuckX, rawZ - this.prevPuckZ) > 25 && this.camPreset !== 'overhead') {
+          this.playFocusX = rawX
+          this.playFocusZ = rawZ
+          this.puckVelSmX = this.puckVelSmZ = 0
+          this.leadX = 0
+          cut = true
+        } else if (Math.hypot(vx, vz) < 200) {
           this.puckVelSmX = emaStep(this.puckVelSmX, vx, dt, 0.5)
           this.puckVelSmZ = emaStep(this.puckVelSmZ, vz, dt, 0.5)
         }
@@ -1587,6 +1644,11 @@ export class Rink3dRenderer implements MatchRenderer {
       this.prevPuckX = rawX
       this.prevPuckZ = rawZ
     }
+    // Broadcast lead: the focus → spring chain trails steady play by ~0.9 s,
+    // so aim that far ahead along the play's SMOOTHED velocity (≤ 24 ft). In
+    // steady play this cancels the lag (the carrier stays mid-frame); when play
+    // stops the lead bleeds off over ~1 s — an easy settle, never a snap.
+    this.leadX = emaStep(this.leadX, Math.max(-24, Math.min(24, this.puckVelSmX * 0.9)), dt, 0.6)
     if (this.camPreset === 'follow') {
       const sp = Math.hypot(this.puckVelSmX, this.puckVelSmZ)
       const h = followHeadingStep(this.followHead, sp > 10 ? Math.atan2(this.puckVelSmX, this.puckVelSmZ) : null, dt)
@@ -1600,7 +1662,7 @@ export class Rink3dRenderer implements MatchRenderer {
     if (this.camPreset === 'endzone' && this.endzoneActiveSide !== prevSide) cut = true
     if (cut) this.snapCameraSprings()
     const target = this.currentTarget()
-    let fovTarget = cameraFovFor(this.camPreset)
+    let fovTarget = target.fov
 
     // Goal: a slow push-in toward where the goal was scored, held, then eased
     // back. The framing point is FIXED at the moment of the goal (it does not

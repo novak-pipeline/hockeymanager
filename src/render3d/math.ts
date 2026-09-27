@@ -245,15 +245,10 @@ export function cameraTargetFor(
 ): CameraTarget {
   switch (preset) {
     case 'broadcast': {
-      // The real "high home" game camera: mounted high in the stands at
-      // centre ice, well back from the glass, and it mostly PANS (the look-at
-      // tracks the play at 80%) while the body only trucks a little (30%).
-      // Paired with a long lens (cameraFovFor → 30°) this keeps the players
-      // big and the perspective honest instead of a wide, distorted shot.
-      // Geometry: near boards sit just above the bottom edge (no near-side
-      // crowd in frame), far boards ~quarter-height from the top.
-      const lz = 2 + (opts.puckWz ?? 0) * 0.25
-      return { px: puckWx * 0.3, py: 50, pz: -100, lx: puckWx * 0.8, ly: 0, lz }
+      // Zone framing (audit D3, FILM-STUDY B1) — see broadcastFraming. The
+      // lens is aspect-dependent; this returns the pose only.
+      const { fov: _fov, ...pose } = broadcastFraming(puckWx, opts.puckWz ?? 0, 0, 16 / 9)
+      return pose
     }
 
     case 'overhead': {
@@ -304,7 +299,7 @@ export function cameraTargetFor(
 /** Vertical field of view (degrees) per camera preset — broadcast is a long lens. */
 export function cameraFovFor(preset: CameraPreset): number {
   switch (preset) {
-    case 'broadcast': return 30
+    case 'broadcast': return 25 // nominal (16:9); the live lens comes from broadcastFraming
     case 'overhead': return 45
     case 'endzone': return 55
     case 'follow': return 55
@@ -540,4 +535,54 @@ export function followHeadingStep(
   const want = d * (1 - Math.exp(-dt / 1.0))
   const max = maxRate * dt
   return { yaw: wrapAngle(h.yaw + Math.max(-max, Math.min(max, want))), reversedFor: 0, cut: false }
+}
+
+// ── broadcast zone framing ───────────────────────────────────────────────────
+
+/**
+ * The main game camera, framed the way the TV "high home" camera frames hockey
+ * (FILM-STUDY B1): a high side angle ~24° down, ONE ZONE of ice across the
+ * frame (~80 ft in a zone, ~92 ft through the neutral zone) rather than the
+ * whole rink, the play kept in the middle of the frame and the frame kept
+ * inside the rink (it never looks past the end boards at the crowd).
+ *
+ * It used to be a fixed 30° lens from (0.3x, 50, −100) panning to 0.8x: the
+ * action sat small in a corner, 30–45% of the frame was crowd, skaters were
+ * ~50–60 px tall and the puck left the frame 6–7% of the time (audit D3,
+ * F-16).
+ *
+ * `leadX` is a small, pre-smoothed lead in the direction of play (ft).
+ * `aspect` is the viewport's width/height: the lens is chosen for the WIDTH
+ * of ice, then widened if needed so the near boards stay in frame.
+ */
+export const BROADCAST_FRAME = {
+  pitchDeg: 24,
+  dist: 100,
+  widthZoneFt: 80,
+  widthNeutralFt: 92,
+  minVfovDeg: 23.5,
+  /** |look x| limit: the frame's far edge stops just past the end boards. */
+  lookClampX: 76,
+  /** How much the camera body trucks with the play (the rest is pan). */
+  truck: 0.6,
+} as const
+
+export function broadcastFraming(focusX: number, focusZ: number, leadX: number, aspect: number): CameraTarget & { fov: number } {
+  const B = BROADCAST_FRAME
+  const lx = Math.max(-B.lookClampX, Math.min(B.lookClampX, focusX + leadX))
+  // across the ice: lean toward the near boards so skaters on the near wall
+  // stay in frame (the far boards have the stands behind them to spare)
+  const lz = -5 + 0.5 * Math.max(-38, Math.min(38, focusZ))
+  const pitch = (B.pitchDeg * Math.PI) / 180
+  const px = lx * B.truck
+  const py = B.dist * Math.sin(pitch)
+  const pz = lz - B.dist * Math.cos(pitch)
+  const D = Math.hypot(lx - px, py, lz - pz)
+  // zone play frames tighter than neutral-zone play (smooth in between)
+  const k = Math.max(0, Math.min(1, (Math.abs(lx) - 25) / 20))
+  const kk = k * k * (3 - 2 * k)
+  const width = B.widthNeutralFt + (B.widthZoneFt - B.widthNeutralFt) * kk
+  const halfH = Math.atan(width / 2 / D)
+  const vfov = Math.max(B.minVfovDeg, (2 * Math.atan(Math.tan(halfH) / Math.max(0.5, aspect)) * 180) / Math.PI)
+  return { px, py, pz, lx, ly: 0, lz, fov: vfov }
 }
