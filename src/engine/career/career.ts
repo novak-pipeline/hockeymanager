@@ -1115,6 +1115,10 @@ const PICK_YEARS_AHEAD = 3
  *  (the NHL rule is 10 games / 24 days; we key off the games estimate). */
 const LTIR_MIN_GAMES = 10
 const FA_WINDOW_DAYS = 8
+/** Offseason 3.0: the market day arbitration hearings are held (July 6).
+ *  Real hearings run late July; the summer's compressed calendar keeps the
+ *  hearing inside the July window so the award is a decision, not a surprise. */
+const ARB_HEARING_DAY = 6
 /** Inclusive integer range [a..b] — used for jersey-number preference pools. */
 function range(a: number, b: number): number[] {
   const out: number[] = []
@@ -1464,7 +1468,11 @@ export class Career {
   private buyoutFas: PlayerId[] = []
   /** Pending arbitration awards for the user's unsigned RFAs (M2). Each is an
    *  ultimatum: accept the award or walk away and lose him to the open market. */
-  private arbitrationCases: Array<{ playerId: string; salary: number; years: number }> = []
+  /** Arbitration cases. `salary` is the arbitrator's award; before the
+   *  hearing (`heard === false`) it is sealed — the GM sees only the two
+   *  filings and can settle at the door. Older saves carry no hearing fields
+   *  and read as already heard. */
+  private arbitrationCases: Array<{ playerId: string; salary: number; years: number; clubFiling?: number; playerFiling?: number; hearingDay?: number; heard?: boolean }> = []
   /** True while the sim is held on deadline day (one continue's grace). */
   private deadlineHold = false
   /** The deadline hold already happened this season. */
@@ -11947,6 +11955,8 @@ export class Career {
         if (rDay < RESIGN_WINDOW_DAYS) {
           os.resignDay = rDay + 1
           this.tickResignWindow(os.resignDay)
+          // Offseason 3.0: June 30 is the QO deadline — its own dated beat.
+          if (os.resignDay === RESIGN_WINDOW_DAYS - 1) this.qoDeadlineBeat()
           return true
         }
         // Offers still sitting on a desk when the window shuts simply lapse.
@@ -11993,16 +12003,23 @@ export class Career {
           const fileChance = ratedOverall(p) >= 70 ? 0.65 : 0.3
           if (!this.rngFor(8010, Career.pidNum(e.playerId as string)).chance(fileChance)) continue
           const ask = askTerms(p, this.year)
-          const award = Math.round(ask.salary * this.rngFor(8009, Career.pidNum(e.playerId as string)).float(0.98, 1.12) / 25000) * 25000
-          this.arbitrationCases.push({ playerId: e.playerId as string, salary: award, years: 1 })
+          // Both sides file a number; the award lands between them (sealed
+          // until the hearing). Settling at the door splits the difference.
+          const r25 = (n: number): number => Math.round(n / 25000) * 25000
+          const clubFiling = r25(Math.max(qualifyingOffer(p), ask.salary * 0.85))
+          const playerFiling = r25(Math.max(clubFiling + 100_000, ask.salary * 1.15))
+          const lean = this.rngFor(8009, Career.pidNum(e.playerId as string)).float(0.3, 0.7)
+          const award = r25(clubFiling + (playerFiling - clubFiling) * lean)
+          this.arbitrationCases.push({ playerId: e.playerId as string, salary: award, years: 1, clubFiling, playerFiling, hearingDay: ARB_HEARING_DAY, heard: false })
           arbFiled.add(e.playerId as string)
           this.pushNews(
             'contract',
-            `${p.name} files for arbitration`,
-            `Unsigned and restricted, ${p.name} has taken the club to arbitration. The arbitrator's award: ` +
-            `$${(award / 1e6).toFixed(2)}M × 1 year. Accept it and he's signed at that number — or walk away and he ` +
-            `becomes an unrestricted free agent. Decide before free agency closes; an unanswered award binds the club.`,
-            { playerId: e.playerId as string }
+            `${p.name} files for arbitration — hearing July ${ARB_HEARING_DAY}`,
+            `Unsigned and restricted, ${p.name} has filed. His camp's number: $${(playerFiling / 1e6).toFixed(2)}M. ` +
+            `The club's: $${(clubFiling / 1e6).toFixed(2)}M. The hearing is July ${ARB_HEARING_DAY}; the arbitrator's award will land somewhere between.\n\n` +
+            `Settle at the door — $${(r25((clubFiling + playerFiling) / 2) / 1e6).toFixed(2)}M, one or two years — and nobody has to hear the club argue his case down. ` +
+            `Go to the hearing and you get the arbitrator's number, and the room remembers what was said about him. After the award you may still walk away.`,
+            { playerId: e.playerId as string, teamId: this.userTeamId as string }
           )
         }
         // Expiries + buyouts JOIN the standing market (which was stocked when
@@ -12076,6 +12093,8 @@ export class Career {
         this.runVoices(os.faDay)
         // Offers on men who are gone (signed in the world sweep, retired) lapse.
         this.sweepLapsedFaOffers()
+        // Arbitration hearings on their day: the sealed award is read out.
+        this.holdArbitrationHearings(os.faDay)
         // #183: offer sheets whose 7-day match window has elapsed resolve here.
         this.resolveOfferSheets()
         // July 1 is a FRENZY: the AI market moves on day one (the big contracts
@@ -14007,14 +14026,77 @@ export class Career {
   }
 
   /** Pending arbitration cases (for the offseason screen). */
-  getArbitrationCases(): Array<{ playerId: string; name: string; position: string; age: number; salary: number; years: number }> {
+  getArbitrationCases(): Array<{ playerId: string; name: string; position: string; age: number; salary: number; years: number; heard?: boolean; clubFiling?: number; playerFiling?: number; settleAt?: number; hearingDay?: number }> {
     return this.arbitrationCases.map((c) => {
       const p = this.data.players.get(asPlayerId(c.playerId))
+      const sealed = c.heard === false
       return {
         playerId: c.playerId, name: p?.name ?? '—', position: p?.position ?? '?',
-        age: p?.age ?? 0, salary: c.salary, years: c.years,
+        age: p?.age ?? 0,
+        // Before the hearing the award is sealed: show the settlement figure.
+        salary: sealed ? this.arbSettleFigure(c) : c.salary,
+        years: c.years,
+        ...(c.heard !== undefined ? { heard: c.heard } : {}),
+        ...(c.clubFiling !== undefined ? { clubFiling: c.clubFiling } : {}),
+        ...(c.playerFiling !== undefined ? { playerFiling: c.playerFiling } : {}),
+        ...(sealed ? { settleAt: this.arbSettleFigure(c) } : {}),
+        ...(c.hearingDay !== undefined ? { hearingDay: c.hearingDay } : {}),
       }
     })
+  }
+
+  /** The number both sides can live with before the hearing: the midpoint. */
+  private arbSettleFigure(c: { clubFiling?: number; playerFiling?: number; salary: number }): number {
+    if (c.clubFiling === undefined || c.playerFiling === undefined) return c.salary
+    return Math.round(((c.clubFiling + c.playerFiling) / 2) / 25000) * 25000
+  }
+
+  /** Settle at the door: sign him at the midpoint of the filings for one or
+   *  two years, before the hearing — no award, no bad blood. */
+  settleArbitration(playerId: string, years: 1 | 2): { ok: boolean; message: string } {
+    const c = this.arbitrationCases.find((x) => x.playerId === playerId)
+    if (!c) return { ok: false, message: 'No arbitration case for that player.' }
+    if (c.heard !== false) return { ok: false, message: 'The hearing has been held — accept the award or walk away.' }
+    const p = this.data.players.get(asPlayerId(playerId))
+    if (!p) return { ok: false, message: 'Player not found.' }
+    const salary = this.arbSettleFigure(c)
+    if (this.userCapUsed() + this.userDeadCap + salary > this.userTeam.finances.salaryCap) {
+      return { ok: false, message: 'A settlement at that number does not fit under your cap.' }
+    }
+    if (!this.userTeam.roster.includes(asPlayerId(playerId)) && this.userTeam.roster.length >= MAX_ROSTER_SIZE) {
+      return { ok: false, message: `Your roster is full at ${MAX_ROSTER_SIZE} — clear a spot first.` }
+    }
+    const term = years === 2 ? 2 : 1
+    signPlayer({ team: this.userTeam, player: p, salary, years: term, year: this.year, players: this.data.players })
+    this.faPool = this.faPool.filter((id) => (id as string) !== playerId)
+    this.arbitrationCases = this.arbitrationCases.filter((x) => x.playerId !== playerId)
+    this.lockerArrival(this.userTeamId, asPlayerId(playerId))
+    repairLines(this.userTeam, this.data.players)
+    p.morale = Math.min(100, p.morale + 2)
+    this.pushNews('contract', `${p.name} settles before his hearing`,
+      `The sides met in the middle: $${(salary / 1e6).toFixed(2)}M × ${term} year${term === 1 ? '' : 's'}. No arbitrator, no case argued against him — he walks into camp without a grudge.`,
+      { playerId, teamId: this.userTeamId as string })
+    return { ok: true, message: `${p.name} settled at $${(salary / 1e6).toFixed(2)}M × ${term}.` }
+  }
+
+  /** Hearing day: the arbitrator reads the sealed award, and the club's case
+   *  (arguing his value down) leaves a mark on the man. */
+  private holdArbitrationHearings(faDay: number): void {
+    for (const c of this.arbitrationCases) {
+      if (c.heard !== false || (c.hearingDay ?? 0) > faDay) continue
+      c.heard = true
+      const p = this.data.players.get(asPlayerId(c.playerId))
+      if (!p) continue
+      p.morale = Math.max(0, p.morale - 4)
+      const mid = this.arbSettleFigure(c)
+      const lean = c.salary > mid
+        ? `a win for his camp — above the midpoint of $${(mid / 1e6).toFixed(2)}M`
+        : c.salary < mid ? `a win for the club — below the midpoint of $${(mid / 1e6).toFixed(2)}M` : 'right down the middle'
+      this.pushNews('contract', `Arbitration: ${p.name} is awarded $${(c.salary / 1e6).toFixed(2)}M`,
+        `The arbitrator has ruled on ${p.name}: $${(c.salary / 1e6).toFixed(2)}M × ${c.years} — ${lean}. ` +
+        `He sat through the club's case against him, and it stung.\n\nAccept the award, or walk away and he is an unrestricted free agent. An unanswered award binds the club when the window closes.`,
+        { playerId: c.playerId, teamId: this.userTeamId as string })
+    }
   }
 
   /** Accept the arbitrator's award: he signs at that number, like it or not. */
@@ -14023,6 +14105,8 @@ export class Career {
     if (!c) return { ok: false, message: 'No arbitration case for that player.' }
     const p = this.data.players.get(asPlayerId(playerId))
     if (!p) return { ok: false, message: 'Player not found.' }
+    // No award exists before the hearing: accepting now means going to it.
+    if (c.heard === false) this.holdArbitrationHearings(Number.MAX_SAFE_INTEGER)
     const capUsed = this.userCapUsed()
     if (capUsed + this.userDeadCap + c.salary > this.userTeam.finances.salaryCap) {
       return { ok: false, message: 'The award does not fit under your cap — clear space or walk away.' }
@@ -16631,6 +16715,28 @@ export class Career {
       `A qualifying offer keeps his restricted rights: he can accept it as a one-year deal, file for arbitration, ` +
       `or be offer-sheeted by a rival. Decline to tender and he simply becomes an unrestricted free agent — for nothing.`
     this.pushNews('contract', `Qualifying offers due: ${rfas.length} restricted free agent${rfas.length > 1 ? 's' : ''}`, body, {})
+  }
+
+  /** RFAs whose qualifying offer is still undecided. */
+  private undecidedRfas(): PlayerId[] {
+    return this.expiringRfas().filter((id) => !this.qualifyingOffers.has(id as string))
+  }
+
+  /** June 30, the QO deadline: tender or walk. One mail naming each undecided
+   *  RFA with what qualifying him costs and what walking means, the day it
+   *  matters (the press after this one closes the window). */
+  private qoDeadlineBeat(): void {
+    const open = this.undecidedRfas()
+    if (open.length === 0) return
+    const lines = open.map((id) => {
+      const p = this.resolve(id)
+      const ask = askTerms(p, this.year)
+      return `• ${p.name} (${p.position}, ${p.age}, ${ratedOverall(p)} OVR): qualify at $${(qualifyingOffer(p) / 1e6).toFixed(2)}M — his ask is $${(ask.salary / 1e6).toFixed(2)}M × ${ask.years}`
+    })
+    this.pushNews('contract', `QO deadline tonight: ${open.length} RFA${open.length === 1 ? '' : 's'} still undecided`,
+      `Tender or walk. A qualifying offer keeps his rights — he can take it, file for arbitration, or draw an offer sheet you can match. ` +
+      `Let the deadline pass and he is an unrestricted free agent at noon tomorrow, for nothing.\n\n${lines.join('\n')}`,
+      { teamId: this.userTeamId as string })
   }
 
   /** §B2: tender the qualifying offer, keeping his restricted rights. */
@@ -22219,12 +22325,16 @@ export class Career {
         awards: ['Continue to the draft lottery', 'Continue to the combine', 'Continue to awards night', 'Continue to the entry draft'][Math.min(3, beat)]!,
         draft: 'Continue — open free agency',
         resign:
-          (this.offseason?.resignDay ?? 0) < RESIGN_WINDOW_DAYS
-            ? `Continue — re-signing window, day ${(this.offseason?.resignDay ?? 0) + 1}`
-            : 'Continue — open free agency',
+          (this.offseason?.resignDay ?? 0) === RESIGN_WINDOW_DAYS - 1 && this.undecidedRfas().length > 0
+            ? `Continue — the QO deadline passes (${this.undecidedRfas().length} undecided)`
+            : (this.offseason?.resignDay ?? 0) < RESIGN_WINDOW_DAYS
+              ? `Continue — re-signing window, day ${(this.offseason?.resignDay ?? 0) + 1}`
+              : 'Continue — open free agency',
         freeAgency: (this.offseason?.faDay ?? 0) === 0
           ? 'Continue — noon, July 1: the market opens'
-          : `Continue — free agency day ${(this.offseason?.faDay ?? 0) + 1}`,
+          : (this.offseason?.faDay ?? 0) + 1 === ARB_HEARING_DAY && this.arbitrationCases.some((c) => c.heard === false)
+            ? `Continue — arbitration hearing${this.arbitrationCases.filter((c) => c.heard === false).length === 1 ? '' : 's'}, July ${ARB_HEARING_DAY}`
+            : `Continue — free agency day ${(this.offseason?.faDay ?? 0) + 1}`,
         preseason: this.captainsPending() ? 'Name your captain to start the season' : 'Continue — start the new season',
       }
       return labels[stage]

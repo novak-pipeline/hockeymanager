@@ -497,6 +497,9 @@ export type WorkerRequestBody =
   /** Arbitration ultimatum: accept the award or walk away (M2). */
   | { type: 'acceptArbitration'; playerId: string }
   | { type: 'walkArbitration'; playerId: string }
+  /** Offseason 3.0 (additive): settle an arbitration case at the door, before
+   *  the hearing, at the midpoint of the filings. */
+  | { type: 'settleArbitration'; playerId: string; years: 1 | 2 }
   /** Box score of a specific played user game (calendar/schedule click-through). */
   | { type: 'getBoxScoreFor'; gameId: string }
   /* ── season rhythm: meetings (M1) ── */

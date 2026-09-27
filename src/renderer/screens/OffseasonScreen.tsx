@@ -98,44 +98,54 @@ function ArbitrationPanel({ view, onRefetch }: { view: OffseasonView; onRefetch:
   const client = useClient()
   const [busy, setBusy] = useState(false)
   const cases = view.arbitration ?? NO_ARBITRATION
-  const { sorted, sortKey, dir, sortBy } = useTableSort(cases, ARBITRATION_COLS, { key: null })
+  const { sorted } = useTableSort(cases, ARBITRATION_COLS, { key: null })
   if (cases.length === 0) return null
 
-  const act = async (kind: 'accept' | 'walk', playerId: string, name: string): Promise<void> => {
+  const act = async (kind: 'accept' | 'walk' | 'settle1' | 'settle2', playerId: string, name: string): Promise<void> => {
     if (kind === 'walk' && !window.confirm(`Walk away from ${name}'s award? He becomes an unrestricted free agent immediately.`)) return
     setBusy(true)
-    const res = kind === 'accept' ? await client.acceptArbitration(playerId) : await client.walkArbitration(playerId)
+    const res = kind === 'accept' ? await client.acceptArbitration(playerId)
+      : kind === 'walk' ? await client.walkArbitration(playerId)
+      : await client.settleArbitration(playerId, kind === 'settle2' ? 2 : 1)
     setBusy(false)
     if (res.type === 'error') toast(res.message, 'error')
     else { toast(res.type === 'ok' && res.note ? res.note : 'Done', 'success'); onRefetch() }
   }
 
   return (
-    <Panel title={`Arbitration hearings (${cases.length})`}>
+    <Panel title={`Arbitration (${cases.length})`}>
       <p className="muted small" style={{ marginTop: -4, marginBottom: 8 }}>
-        The arbitrator has ruled. Accept the award and he's signed at that number —
-        or walk away and he hits the open market. Unanswered awards bind the club when free agency closes.
+        Both sides have filed a number and the award lands between them. Before the hearing you can settle at the door;
+        after it, accept the award or walk away. Unanswered awards bind the club when free agency closes.
       </p>
-      <div className="table-wrap">
-        <table className="table">
-          <thead>
-            <tr><SortHeaders columns={ARBITRATION_COLS} sortKey={sortKey} dir={dir} onSort={sortBy} /></tr>
-          </thead>
-          <tbody>
-            {sorted.map((c) => (
-              <tr key={c.playerId}>
-                <td><PlayerLink playerId={c.playerId} name={c.name} /> <span className="muted small">{c.position}</span></td>
-                <td className="num muted">{c.age}</td>
-                <td className="num" style={{ fontWeight: 700 }}>{fmtMoney(c.salary)}</td>
-                <td className="num muted">{c.years}y</td>
-                <td className="num" style={{ whiteSpace: 'nowrap' }}>
-                  <button className="btn btn-ghost small" disabled={busy} onClick={() => { void act('accept', c.playerId, c.name) }}>Accept award</button>
-                  <button className="btn btn-ghost small" style={{ color: 'var(--danger)', marginLeft: 4 }} disabled={busy} onClick={() => { void act('walk', c.playerId, c.name) }}>Walk away</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="stack" style={{ gap: 8 }}>
+        {sorted.map((c) => {
+          const sealed = c.heard === false
+          return (
+            <div key={c.playerId} className="row" style={{ gap: 12, alignItems: 'center', padding: '8px 10px', background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)', flexWrap: 'wrap' }}>
+              <div style={{ flex: '1 1 220px', minWidth: 0 }}>
+                <PlayerLink playerId={c.playerId} name={c.name} /> <span className="muted small">{c.position} · {c.age}</span>
+                <div className="small muted">
+                  {sealed
+                    ? <>Hearing <b style={{ color: 'var(--text)' }}>July {c.hearingDay ?? 6}</b> · his camp filed <span className="mono">{fmtMoney(c.playerFiling ?? 0)}</span>, the club <span className="mono">{fmtMoney(c.clubFiling ?? 0)}</span></>
+                    : <>The arbitrator awarded <b className="mono" style={{ color: 'var(--text)' }}>{fmtMoney(c.salary)}</b> × {c.years}{c.clubFiling !== undefined ? <> (filings: {fmtMoney(c.clubFiling)} – {fmtMoney(c.playerFiling ?? 0)})</> : null}</>}
+                </div>
+              </div>
+              {sealed ? (
+                <div className="row" style={{ gap: 6 }}>
+                  <button className="btn btn-sm btn-primary" disabled={busy} title="Sign him at the midpoint of the filings, one year — no hearing, no bad blood" onClick={() => { void act('settle1', c.playerId, c.name) }}>Settle {fmtMoney(c.settleAt ?? c.salary)} × 1</button>
+                  <button className="btn btn-sm" disabled={busy} title="The midpoint, two years" onClick={() => { void act('settle2', c.playerId, c.name) }}>× 2</button>
+                  <span className="small muted" title="Let it go to the arbitrator: his number, and the room remembers the case the club argued">or go to the hearing</span>
+                </div>
+              ) : (
+                <div className="row" style={{ gap: 6 }}>
+                  <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => { void act('accept', c.playerId, c.name) }}>Accept award</button>
+                  <button className="btn btn-sm" style={{ color: 'var(--danger)' }} disabled={busy} onClick={() => { void act('walk', c.playerId, c.name) }}>Walk away</button>
+                </div>
+              )}
+            </div>
+          )
+        })}
       </div>
     </Panel>
   )

@@ -731,6 +731,10 @@ export class SimClient {
     return this.send({ type: 'acceptArbitration', playerId })
   }
 
+  settleArbitration(playerId: string, years: 1 | 2): Promise<WorkerResponse> {
+    return this.send({ type: 'settleArbitration', playerId, years })
+  }
+
   walkArbitration(playerId: string): Promise<WorkerResponse> {
     return this.send({ type: 'walkArbitration', playerId })
   }

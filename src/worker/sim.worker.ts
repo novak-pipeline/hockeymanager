@@ -558,6 +558,11 @@ function handle(req: WorkerRequest): WorkerResponse {
       if (!res.ok) return { id: req.id, type: 'error', message: res.message }
       return { id: req.id, type: 'ok', note: res.message }
     }
+    case 'settleArbitration': {
+      const res = must().settleArbitration(req.playerId, req.years)
+      if (!res.ok) return { id: req.id, type: 'error', message: res.message }
+      return { id: req.id, type: 'ok', note: res.message }
+    }
     case 'walkArbitration': {
       const res = must().walkAwayArbitration(req.playerId)
       if (!res.ok) return { id: req.id, type: 'error', message: res.message }

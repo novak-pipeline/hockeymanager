@@ -2359,7 +2359,18 @@ export interface OffseasonView {
    *  signing this summer with the bidding behind it. */
   faWire?: FaWireEntry[]
   /** Pending arbitration awards — accept or walk (M2). Optional/additive. */
-  arbitration?: Array<{ playerId: string; name: string; position: string; age: number; salary: number; years: number }>
+  arbitration?: Array<{
+    playerId: string; name: string; position: string; age: number; salary: number; years: number
+    /** Offseason 3.0 (additive): false = filed, hearing still to come (the
+     *  award is sealed; `salary` then shows the settlement figure). */
+    heard?: boolean
+    clubFiling?: number
+    playerFiling?: number
+    /** Settle at the door: the midpoint of the filings. */
+    settleAt?: number
+    /** Market day of the hearing (July N). */
+    hearingDay?: number
+  }>
   capUsed: number
   salaryCap: number
 }
@@ -2847,7 +2858,7 @@ export interface CareerSnapshot {
   /** Per-game box scores for the user's played games this season. Optional/additive. */
   boxScoreHistory?: Array<[string, BoxScoreView]>
   /** Pending arbitration awards for the user's RFAs (M2). Optional/additive. */
-  arbitrationCases?: Array<{ playerId: string; salary: number; years: number }>
+  arbitrationCases?: Array<{ playerId: string; salary: number; years: number; clubFiling?: number; playerFiling?: number; hearingDay?: number; heard?: boolean }>
   /** Deadline-day hold state. Optional/additive. */
   deadlineHold?: boolean
   deadlineHoldDone?: boolean
