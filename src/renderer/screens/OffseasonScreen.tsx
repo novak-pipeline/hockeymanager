@@ -9,6 +9,7 @@ import { fmtMoney } from '../components/format'
 import { OverallStars } from '../components/Stars'
 import { PlayerFace } from '../components/PlayerFace'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { NeedsBoard } from '../components/NeedsBoard'
 import { toast } from '../components/store'
 import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
 
@@ -763,13 +764,33 @@ function FreeAgencyPanel(props: { view: OffseasonView; onRefetch: () => void }):
       <CapBar used={view.capUsed} cap={view.salaryCap} />
       <Panel title="The open market">
         <p className="small" style={{ margin: '0 0 8px', lineHeight: 1.5 }}>
-          Free agency is open. The full market — filters, shortlists, agent reads,
-          decision clocks — runs from the <strong>Free Agents</strong> desk.
+          {(view.faDay ?? 0) === 0
+            ? <>It is the morning of <strong>July 1</strong>. The phones open at noon: the top of the class decides TODAY, against the real bids AI clubs have on the table. Table your offers now — they go into the same pile.</>
+            : <>Free agency is open. Each man decides on his own day between the real offers on the table; the full market runs from the <strong>Free Agents</strong> desk.</>}
         </p>
         <button className="btn btn-primary" onClick={() => nav.navigate('faMarket')}>
-          Open the market →
+          Open the market
         </button>
       </Panel>
+      {(view.faWire ?? []).length > 0 && (
+        <Panel title={`The July wire — ${view.faWire!.length} signing${view.faWire!.length === 1 ? '' : 's'}`}>
+          <div className="stack" style={{ gap: 4, maxHeight: 340, overflowY: 'auto' }}>
+            {view.faWire!.map((w, i) => (
+              <div key={`${w.playerId}-${i}`} className="row small" style={{ gap: 10, alignItems: 'baseline', padding: '3px 0', borderBottom: '1px solid var(--line)', background: w.yours ? 'rgba(var(--accent-rgb, 108,92,231), 0.08)' : undefined }}>
+                <span className="muted mono" style={{ width: 44 }}>Jul {Math.max(1, w.day)}</span>
+                <span style={{ fontWeight: 700, width: 40 }}>{w.teamAbbr}</span>
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <PlayerLink playerId={w.playerId} name={w.name} /> <span className="muted">{w.position}</span>
+                </span>
+                <span className="mono">{fmtMoney(w.salary)} × {w.years}</span>
+                <span className="muted" style={{ width: 210, textAlign: 'right' }}>
+                  {w.suitors !== undefined ? `${w.suitors} bid${w.suitors === 1 ? '' : 's'}` : ''}{w.reason ? ` · ${w.reason}` : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      )}
     </div>
   )
 }
@@ -838,6 +859,12 @@ export function OffseasonScreen(): JSX.Element {
                 </button>
               </div>
             </Panel>
+          )}
+
+          {/* Offseason 3.0: the summer opens on what next season's roster is
+              MISSING, each hole with real answers — not on a list of names. */}
+          {(data.stage === 'resign' || data.stage === 'freeAgency') && (
+            <NeedsBoard compact onBrowse={() => nav.navigate('faMarket')} browseLabel="Browse all free agents" />
           )}
 
           {data.stage === 'resign' && data.offerSheets && data.offerSheets.length > 0 && (

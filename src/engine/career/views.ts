@@ -28,6 +28,7 @@ export type { ScoutPanel, ScoutRead, NhlComp, BoomBustRisk, RiskBand } from '@en
 export type { RosterProjection, CoachReport } from '@engine/career/playerProjection'
 export type { OpinionSnapshot } from '@engine/career/opinionTracker'
 import type { ScoutAssignment, ScoutingState } from '@domain/scouting'
+import type { FaWireEntry } from '@domain/draft'
 export type { ScoutTarget } from '@domain/scouting'
 export type { StaffMember, AgmReport, AgmRankedPlayer } from '@engine/league/staff'
 import type { ValueDriver } from '@engine/league/trades'
@@ -1954,6 +1955,12 @@ export interface FaHubRowView extends PlayerBadge {
   /** Rival clubs known to be circling (abbreviations) — the competition you're
    *  bidding against. Fog-limited to a handful; longer lists read as "+N more". */
   rivals?: string[]
+  /** Offseason 3.0 (additive): the REAL offers on the table today — each an
+   *  AI club's actual market bid, in the order HE ranks them, with the reason
+   *  he'd give. Money is rounded the way an agent would say it. */
+  bids?: FaBidView[]
+  /** Who he is leaning to and why ("Leaning TOR: a chance to win."). */
+  lean?: string
   /** #167/#164: a standing offer you've tabled him, awaiting his decision, with
    *  an honest read on where it sits vs the rival field. */
   pendingOffer?: {
@@ -1964,6 +1971,73 @@ export interface FaHubRowView extends PlayerBadge {
     standing: 'leading' | 'competitive' | 'trailing'
     standingNote: string
   }
+}
+
+/* ─────────────── Offseason 3.0: needs first (additive) ─────────────── */
+
+/** One real answer to a need: a free agent, a trade target, your own
+ *  expiring man, or (for a cap need) one of your contracts to move. */
+export interface NeedCandidateView {
+  kind: 'fa' | 'trade' | 'resign' | 'move'
+  playerId: string
+  name: string
+  position: string
+  age: number
+  overall: number
+  faceId?: string
+  hand: 'L' | 'R'
+  /** Trade targets: the club that holds him. */
+  teamId?: string
+  teamAbbr?: string
+  capHit: number
+  years: number
+  /** How he fits the hole ("Slots in as your 2nd-pair LHD: +5 over X"). */
+  fit: string
+  /** What it takes: the real bids against you, the seller's stance, his ask. */
+  cost: string
+  /** Market asset value (the trade currency) and its tier label. */
+  assetValue: number
+  assetTier: string
+  /** FA: how many real offers are on the table. */
+  bids?: number
+}
+
+/** A hole in next season's roster, in hockey words, with its answers. */
+export interface OffseasonNeedView {
+  id: string
+  kind: 'slot' | 'cap'
+  /** "a 2nd-pair LHD", "a backup G", "$6.2M of cap space". */
+  label: string
+  /** Why it is a need, from the numbers. */
+  why: string
+  severity: 1 | 2 | 3
+  group?: 'F' | 'D' | 'G'
+  /** Cap need: dollars to clear. */
+  amount?: number
+  candidates: NeedCandidateView[]
+}
+
+export interface OffseasonNeedsView {
+  /** "You need: a 2nd-pair LHD, a backup G, $6.2M of cap space". */
+  headline: string
+  needs: OffseasonNeedView[]
+  capCeiling: number
+  committed: number
+  /** True while the July market is open (FA answers can take standing offers). */
+  marketOpen: boolean
+}
+
+/** One real offer on the table for a free agent. */
+export interface FaBidView {
+  teamId: string
+  teamAbbr: string
+  /** Rounded to $0.1M. */
+  salary: number
+  years: number
+  /** What pulls him toward this offer: the money, the term, a chance to win, the role. */
+  reason: string
+  /** The offer he'd take if he decided today. */
+  leading?: boolean
 }
 
 export interface FaHubView {
@@ -2273,6 +2347,12 @@ export interface OffseasonView {
   resignWindowDays?: number
   /** Free-agency stage. */
   freeAgents: FreeAgentRowView[]
+  /** Free-agency stage (additive): the market day. 0 = the morning of July 1,
+   *  before the phones open at noon; 1 = July 1 itself, the frenzy. */
+  faDay?: number
+  /** Free-agency stage (additive): the July wire, newest first — every
+   *  signing this summer with the bidding behind it. */
+  faWire?: FaWireEntry[]
   /** Pending arbitration awards — accept or walk (M2). Optional/additive. */
   arbitration?: Array<{ playerId: string; name: string; position: string; age: number; salary: number; years: number }>
   capUsed: number

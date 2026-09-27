@@ -212,6 +212,8 @@ function handle(req: WorkerRequest): WorkerResponse {
       if (!res.ok) throw new Error(res.message ?? 'Could not set the look.')
       return { id: req.id, type: 'trainingCamp', camp: must().getTrainingCamp() }
     }
+    case 'getOffseasonNeeds':
+      return { id: req.id, type: 'offseasonNeeds', needs: must().getOffseasonNeeds() }
     case 'delegateTrainingCamp': {
       const res = must().delegateTrainingCamp()
       return { id: req.id, type: 'trainingCamp', camp: null, notes: res.notes }

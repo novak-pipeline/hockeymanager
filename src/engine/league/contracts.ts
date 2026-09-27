@@ -546,7 +546,11 @@ export function aiFreeAgencyDay(args: {
    *  posture x their GM, and each player CHOOSES between competing offers
    *  (money, term, a contender, a role). Absent -> the original deficit rule. */
   market?: FaMarketContext
-}): { signings: FaSigning[] } {
+  /** The user's standing offers, entered into the same market (market only). */
+  userBids?: Map<string, FaUserBid>
+  /** Each man's decision day (market only); default {@link faDecisionDay}. */
+  decisionDayOf?: (p: Player) => number
+}): { signings: FaSigning[]; userOutcomes?: FaUserOutcome[] } {
   if (args.market) return marketFreeAgencyDay({ ...args, market: args.market })
   const { teams, players, freeAgentIds, userTeamId, year, rng, faDay } = args
   const postureOf = args.postureOf ?? ((): 'retool' => 'retool')
@@ -663,8 +667,6 @@ export interface FaSigning {
   reason?: string
 }
 
-interface FaBid { team: Team; salary: number; years: number; upgrade: number; score: number }
-
 /** The weakest regular at a group, among players under contract beyond now. */
 function marketReplacementLevel(team: Team, players: Map<PlayerId, Player>, group: PositionGroup): number {
   const n = group === 'G' ? 2 : group === 'D' ? 6 : 12
@@ -676,16 +678,232 @@ function marketReplacementLevel(team: Team, players: Map<PlayerId, Player>, grou
   return ovrs[n - 1] ?? 0
 }
 
+/** What a club brings to the July market, read once and refreshed when it
+ *  signs someone — the inputs every one of its bids is built from. */
+export interface ClubMarketState {
+  team: Team
+  gm: { aggression: number; capDiscipline: number; name: string }
+  posture: 'contend' | 'retool' | 'rebuild'
+  room: number
+  underFloor: boolean
+  deficit: Record<PositionGroup, number>
+  replacement: Record<PositionGroup, number>
+}
+
+export function clubMarketState(team: Team, players: Map<PlayerId, Player>, market: FaMarketContext): ClubMarketState {
+  const used = capUsedFor(team, players)
+  const groups: PositionGroup[] = ['F', 'D', 'G']
+  return {
+    team,
+    gm: market.personaOf(team.id),
+    posture: market.postureOf(team.id),
+    room: team.finances.salaryCap - used,
+    underFloor: used < market.floorOf(team),
+    deficit: Object.fromEntries(groups.map((g) => [g, ROSTER_TARGETS[g] - secureCount(team, players, g)])) as Record<PositionGroup, number>,
+    replacement: Object.fromEntries(groups.map((g) => [g, marketReplacementLevel(team, players, g)])) as Record<PositionGroup, number>,
+  }
+}
+
+/** Every AI club's market state, in the market's own (stable) order. */
+export function marketClubs(teams: Map<TeamId, Team>, players: Map<PlayerId, Player>, userTeamId: TeamId, market: FaMarketContext): ClubMarketState[] {
+  return [...teams.values()]
+    .filter((t) => t.id !== userTeamId && t.tier !== 'ahl' && t.tier !== 'world')
+    .sort(byId)
+    .map((t) => clubMarketState(t, players, market))
+}
+
+/**
+ * The day a free agent makes his decision. July 1 is the FRENZY: the big
+ * contracts (an ask of 2.5% of the ceiling or more) are all decided on day 1,
+ * the way the real market moves at noon ET. The middle class follows over the
+ * next two days, and the depth market trickles through the rest of the week.
+ * Keyed to the ask (economy-scaled), not the day's pool rank, so the day is
+ * stable as the pool thins.
+ */
+export function faDecisionDay(player: Player, year: number, salaryCap: number): number {
+  const share = askTerms(player, year).salary / Math.max(1, salaryCap)
+  if (share >= 0.025) return 1
+  if (share >= 0.015) return 2
+  if (share >= 0.011) return 3
+  return 4 + (hashId(player.id as string) % 4)
+}
+
+/** How many of the class decide on July 1 itself — the frenzy — and how
+ *  many a day after that. */
+export const FRENZY_SHARE = 0.25
+export const FRENZY_MIN = 12
+export const FRENZY_MAX = 40
+const AFTER_FRENZY_PER_DAY = 6
+
+/**
+ * Decision day from a man's place in the class as it stood at the open (see
+ * OffseasonState.faClassOrder): the top quarter of the class (12–40 men) on
+ * day 1, then six a day. A man who joined the market later decides on the day
+ * he is asked (`today`).
+ */
+export function faClassDecisionDay(rank: number, classSize: number, today: number): number {
+  if (rank < 0) return Math.max(1, today)
+  const frenzy = Math.max(FRENZY_MIN, Math.min(FRENZY_MAX, Math.round(classSize * FRENZY_SHARE)))
+  if (rank < frenzy) return 1
+  return 2 + Math.floor((rank - frenzy) / AFTER_FRENZY_PER_DAY)
+}
+
+/** How much a club wants a free agent: what he adds over its weakest
+ *  regular at his position, weighed by its window, plus an empty roster slot
+ *  or a payroll under the floor. The same rule for every club, the GM's too
+ *  (it is also the pitch: the club that wants him most sells hardest). */
+export function clubWant(c: ClubMarketState, player: Player): number {
+  const group = groupOf(player)
+  const upgrade = playerOverall(player) - c.replacement[group]
+  const deficit = c.deficit[group]
+  const postureW = c.posture === 'contend' ? 1.35 : c.posture === 'retool' ? 1 : player.age <= 25 ? 0.9 : 0.45
+  return Math.max(0, upgrade) * postureW + (deficit > 0 ? 2 + deficit : 0) + (c.underFloor ? 4 : 0)
+}
+
+/** One club's offer to one free agent, as the market builds it. */
+export interface FaMarketBid {
+  teamId: TeamId
+  salary: number
+  years: number
+  /** His overall over the club's weakest regular at his position. */
+  upgrade: number
+  /** How much the club wants him (its bid's priority on the day). */
+  want: number
+  /** The user's own standing offer, entered into the same choice. */
+  user?: boolean
+}
+
+/**
+ * The bids a free agent draws TODAY, each club's own: wanting him is about
+ * what he adds (his overall over the club's weakest regular), weighed by the
+ * club's window, an empty roster slot or a payroll under the floor; the GM
+ * shapes the money (aggression pays over for a real upgrade, a disciplined GM
+ * keeps a cushion). Pure — the July market, the needs board and the agent's
+ * "who has called" all read this one function. `rng` only adds the daily
+ * jitter to how keen each club is; the offers themselves don't depend on it.
+ */
+export function marketBidsFor(args: {
+  player: Player
+  clubs: ClubMarketState[]
+  year: number
+  faDay: number
+  decisionDay: number
+  rng?: Rng
+}): FaMarketBid[] {
+  const { player, clubs, year, faDay, decisionDay, rng } = args
+  const ask = askTerms(player, year)
+  const discount = Math.max(0.7, 1 - 0.05 * Math.max(0, faDay - decisionDay))
+  const base = Math.max(leagueMinSalary(), roundTo25k(ask.salary * discount))
+  const group = groupOf(player)
+  const ovr = playerOverall(player)
+  const bids: FaMarketBid[] = []
+  for (const c of clubs) {
+    if (c.team.roster.length >= MAX_ROSTER_SIZE) continue
+    const { gm, posture, room, underFloor } = c
+    const upgrade = ovr - c.replacement[group]
+    if (posture === 'rebuild' && player.age >= 30 && ask.years >= 2 && !underFloor) continue
+    if (posture === 'rebuild' && base >= indexed(REBUILD_MAX_UFA_AAV) && player.age > 25) continue
+    let want = clubWant(c, player)
+    if (want <= 0.5) continue
+    const over = 0.1 * gm.aggression * Math.min(1, Math.max(0, upgrade) / 6) + (underFloor ? 0.05 : 0)
+    const salary = roundTo25k(base * (1 + over))
+    const cushion = underFloor ? 0 : c.team.finances.salaryCap * 0.02 * gm.capDiscipline
+    if (salary > room - cushion) continue
+    const years = posture === 'rebuild' && player.age >= 30 ? 1 : ask.years
+    if (rng) want += rng.float(0, 0.5)
+    bids.push({ teamId: c.team.id, salary, years, upgrade, want })
+  }
+  return bids
+}
+
+/** Why a player picks an offer, in his words. */
+export type FaReason = 'the money' | 'the term' | 'a chance to win' | 'the role'
+
+export interface FaChoice {
+  bid: FaMarketBid
+  utility: number
+  reason: FaReason
+}
+
+/**
+ * The PLAYER's choice among offers, weighted by his personality and age:
+ * money (ambitious players), term (veterans), a contender (ring-chasers), a
+ * role (young players want ice). Returns every offer scored, best first, each
+ * with the factor that counts most for it — the reason he'd give.
+ */
+export function rankOffers(args: {
+  player: Player
+  bids: FaMarketBid[]
+  year: number
+  strengthRankOf: (teamId: TeamId) => number
+  nTeams: number
+  rng?: Rng
+}): FaChoice[] {
+  const { player, bids, year, strengthRankOf, nTeams, rng } = args
+  const ask = askTerms(player, year)
+  const pers = player.personality
+  const wMoney = 0.45 + ((pers.ambition - 10.5) / 19) * 0.4
+  const wTerm = 0.2 + (player.age >= 30 ? 0.2 : 0) - ((pers.determination - 10.5) / 19) * 0.1
+  const wWin = 0.15 + (player.age >= 30 ? 0.2 : 0) + ((pers.ambition - 10.5) / 19) * 0.1
+  const wRole = player.age <= 27 ? 0.2 : 0.08
+  const REASONS: FaReason[] = ['the money', 'the term', 'a chance to win', 'the role']
+  const scored = bids.map((b) => {
+    const money = b.salary / Math.max(1, ask.salary)
+    const term = termSecurityScore(player, ask.years, b.years)
+    const win = 1 - (strengthRankOf(b.teamId) - 1) / Math.max(1, nTeams - 1)
+    const role = b.upgrade >= 4 ? 1 : b.upgrade >= 0 ? 0.6 : 0.25
+    const parts = [wMoney * money, wTerm * term, wWin * win, wRole * role]
+    // Clubs that want him most also sell hardest — a SMALL pitch term. Capped:
+    // on July 1 a club with half its roster unsigned "wants" everyone ~100,
+    // and an uncapped pitch outweighed every offer's money, term and role.
+    const u = parts[0]! + parts[1]! + parts[2]! + parts[3]! + 0.01 * Math.min(12, b.want) + (rng ? rng.float(0, 0.03) : 0.015)
+    return { b, parts, u }
+  })
+  // The reason he'd give is what sets an offer APART from the field — the
+  // part where it beats the other offers most — not the part every offer
+  // shares (money is always the biggest term, so it would win every time).
+  const avg = [0, 1, 2, 3].map((i) => scored.reduce((s, x) => s + x.parts[i]!, 0) / Math.max(1, scored.length))
+  const out: FaChoice[] = scored.map((x) => {
+    const edge = scored.length > 1 ? x.parts.map((v, i) => v - avg[i]!) : x.parts
+    let bi = 0
+    for (let i = 1; i < 4; i++) if (edge[i]! > edge[bi]!) bi = i
+    return { bid: x.b, utility: x.u, reason: REASONS[bi]! }
+  })
+  // Stable: the first offer at the top score wins ties (the market's order).
+  return out
+    .map((c, i) => ({ c, i }))
+    .sort((x, y) => y.c.utility - x.c.utility || x.i - y.i)
+    .map((x) => x.c)
+}
+
+/** The user's standing offer, entered into the July market. */
+export interface FaUserBid {
+  salary: number
+  years: number
+}
+
+/** What became of a user's standing offer on the day the player decided. */
+export interface FaUserOutcome {
+  playerId: PlayerId
+  won: boolean
+  salary: number
+  years: number
+  /** Why he chose the winner (you, or the club that beat you). */
+  reason: FaReason | 'holdout'
+  /** The club that won him when it wasn't you. */
+  winnerTeamId?: TeamId
+  winnerSalary?: number
+  winnerYears?: number
+  suitors: number
+}
+
 /**
  * July, alive. Each deciding free agent draws BIDS from every AI club that
- * wants him — and wanting him is about what he adds: his overall over the
- * club's weakest regular at his position, weighed by the club's window (a
- * contender pays for the upgrade, a rebuilder only for youth or a stopgap), an
- * empty roster slot, or a payroll under the floor. The GM shapes the bid: an
- * aggressive one pays over the ask for a real upgrade, a disciplined one keeps
- * a cushion under the ceiling. Then the PLAYER chooses — money (ambitious
- * players), term (veterans), a contender (ring-chasers), a role (young players
- * want ice time) — so the best offer on paper doesn't always win.
+ * wants him ({@link marketBidsFor}), and the user's standing offer goes into
+ * the same pile. Then the PLAYER chooses ({@link rankOffers}), so the best
+ * offer on paper doesn't always win. A user offer below his floor is a
+ * holdout. The user's wins are returned for the career to sign (cap and
+ * roster checks are the career's); every AI win is signed here.
  */
 function marketFreeAgencyDay(args: {
   teams: Map<TeamId, Team>
@@ -696,86 +914,63 @@ function marketFreeAgencyDay(args: {
   rng: Rng
   faDay: number
   market: FaMarketContext
-}): { signings: FaSigning[] } {
+  userBids?: Map<string, FaUserBid>
+  decisionDayOf?: (p: Player) => number
+}): { signings: FaSigning[]; userOutcomes: FaUserOutcome[] } {
   const { teams, players, freeAgentIds, userTeamId, year, rng, faDay, market } = args
   const signings: FaSigning[] = []
+  const userOutcomes: FaUserOutcome[] = []
   const rostered = new Set<PlayerId>()
   for (const team of teams.values()) for (const id of team.roster) rostered.add(id)
   const pool = freeAgentIds
     .map((id) => players.get(id))
     .filter((p): p is Player => p !== undefined && !rostered.has(p.id))
     .sort(byOverallDesc)
-  const aiTeams = [...teams.values()].filter((t) => t.id !== userTeamId && t.tier !== 'ahl' && t.tier !== 'world').sort(byId)
-  const nTeams = Math.max(2, aiTeams.length + 1)
+  const clubs = marketClubs(teams, players, userTeamId, market)
+  const nTeams = Math.max(2, clubs.length + 1)
+  const userTeam = teams.get(userTeamId)
+  const userState = userTeam ? clubMarketState(userTeam, players, market) : undefined
 
-  for (let rank = 0; rank < pool.length; rank++) {
-    const player = pool[rank]!
-    const decisionDay = 1 + Math.floor(rank / FA_DECISIONS_PER_DAY)
+  for (const player of pool) {
+    const decisionDay = args.decisionDayOf ? args.decisionDayOf(player) : faDecisionDay(player, year, userTeam?.finances.salaryCap ?? 88e6)
     if (decisionDay > faDay) continue
-    const ask = askTerms(player, year)
-    const discount = Math.max(0.7, 1 - 0.05 * (faDay - decisionDay))
-    const base = Math.max(leagueMinSalary(), roundTo25k(ask.salary * discount))
-    const group = groupOf(player)
-    const ovr = playerOverall(player)
-
-    const bids: FaBid[] = []
-    for (const team of aiTeams) {
-      if (team.roster.length >= MAX_ROSTER_SIZE) continue
-      const gm = market.personaOf(team.id)
-      const posture = market.postureOf(team.id)
-      const used = capUsedFor(team, players)
-      const room = team.finances.salaryCap - used
-      const underFloor = used < market.floorOf(team)
-      const deficit = ROSTER_TARGETS[group] - secureCount(team, players, group)
-      const upgrade = ovr - marketReplacementLevel(team, players, group)
-      if (posture === 'rebuild' && player.age >= 30 && ask.years >= 2 && !underFloor) continue
-      if (posture === 'rebuild' && base >= indexed(REBUILD_MAX_UFA_AAV) && player.age > 25) continue
-      const postureW = posture === 'contend' ? 1.35 : posture === 'retool' ? 1 : player.age <= 25 ? 0.9 : 0.45
-      let want = Math.max(0, upgrade) * postureW + (deficit > 0 ? 2 + deficit : 0) + (underFloor ? 4 : 0)
-      if (want <= 0.5) continue
-      // The bid: aggression pays over for a real upgrade; the floor pays to get there.
-      const over = 0.1 * gm.aggression * Math.min(1, Math.max(0, upgrade) / 6) + (underFloor ? 0.05 : 0)
-      const salary = roundTo25k(base * (1 + over))
-      // A disciplined GM keeps a cushion under the ceiling (never when under the floor).
-      const cushion = underFloor ? 0 : team.finances.salaryCap * 0.02 * gm.capDiscipline
-      if (salary > room - cushion) continue
-      const years = posture === 'rebuild' && player.age >= 30 ? 1 : ask.years
-      want += rng.float(0, 0.5)
-      bids.push({ team, salary, years, upgrade, score: want })
-    }
-    if (bids.length === 0) continue
-    // The player's choice, weighted by his personality and age.
-    const pers = player.personality
-    const wMoney = 0.45 + ((pers.ambition - 10.5) / 19) * 0.4
-    const wTerm = 0.2 + (player.age >= 30 ? 0.2 : 0) - ((pers.determination - 10.5) / 19) * 0.1
-    const wWin = 0.15 + (player.age >= 30 ? 0.2 : 0) + ((pers.ambition - 10.5) / 19) * 0.1
-    const wRole = player.age <= 27 ? 0.2 : 0.08
-    let best: FaBid | null = null
-    let bestU = -Infinity
-    let reason = 'the money'
-    for (const b of bids) {
-      const money = b.salary / Math.max(1, ask.salary)
-      const term = termSecurityScore(player, ask.years, b.years)
-      const win = 1 - (market.strengthRankOf(b.team.id) - 1) / (nTeams - 1)
-      const role = b.upgrade >= 4 ? 1 : b.upgrade >= 0 ? 0.6 : 0.25
-      // Clubs that want him most also sell hardest (a small pitch term).
-      const u = wMoney * money + wTerm * term + wWin * win + wRole * role + 0.01 * b.score + rng.float(0, 0.03)
-      if (u > bestU) {
-        bestU = u
-        best = b
-        const parts: Array<[number, string]> = [[wMoney * money, 'the money'], [wTerm * term, 'the term'], [wWin * win, 'a chance to win'], [wRole * role, 'the role']]
-        reason = parts.sort((x, y) => y[0] - x[0])[0]![1]
+    const bids = marketBidsFor({ player, clubs, year, faDay, decisionDay, rng })
+    const ub = args.userBids?.get(player.id as string)
+    if (ub && userState) {
+      const ask = askTerms(player, year)
+      const discount = Math.max(0.7, 1 - 0.05 * Math.max(0, faDay - decisionDay))
+      const floor = 0.9 * Math.max(leagueMinSalary(), roundTo25k(ask.salary * discount))
+      if (ub.salary < floor) {
+        userOutcomes.push({ playerId: player.id, won: false, salary: ub.salary, years: ub.years, reason: 'holdout', suitors: bids.length })
+      } else {
+        bids.push({ teamId: userTeamId, salary: ub.salary, years: ub.years, upgrade: playerOverall(player) - userState.replacement[groupOf(player)], want: clubWant(userState, player), user: true })
       }
     }
-    if (!best) continue
+    if (bids.length === 0) continue
+    const ranked = rankOffers({ player, bids, year, strengthRankOf: market.strengthRankOf, nTeams, rng })
+    const best = ranked[0]!
+    const suitors = bids.filter((b) => !b.user).length
+    if (best.bid.user) {
+      userOutcomes.push({ playerId: player.id, won: true, salary: best.bid.salary, years: best.bid.years, reason: best.reason, suitors })
+      continue
+    }
+    const winner = clubs.find((c) => c.team.id === best.bid.teamId)!
     try {
-      signPlayer({ team: best.team, player, salary: best.salary, years: best.years, year, players })
+      signPlayer({ team: winner.team, player, salary: best.bid.salary, years: best.bid.years, year, players })
     } catch {
       continue
     }
-    signings.push({ playerId: player.id, teamId: best.team.id, salary: best.salary, years: best.years, suitors: bids.length, reason })
+    // The winner's books and depth changed: refresh its market state.
+    Object.assign(winner, clubMarketState(winner.team, players, market))
+    if (ub && bids.some((b) => b.user)) {
+      userOutcomes.push({
+        playerId: player.id, won: false, salary: ub.salary, years: ub.years, reason: best.reason,
+        winnerTeamId: best.bid.teamId, winnerSalary: best.bid.salary, winnerYears: best.bid.years, suitors,
+      })
+    }
+    signings.push({ playerId: player.id, teamId: best.bid.teamId, salary: best.bid.salary, years: best.bid.years, suitors, reason: best.reason })
   }
-  return { signings }
+  return { signings, userOutcomes }
 }
 
 /**

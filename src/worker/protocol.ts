@@ -126,8 +126,8 @@ export type { TeamDynamicsView, DynamicsPlayerView, DynamicsBar, DynamicsSocialG
 import type { TeamDynamicsView } from '@engine/career/views'
 export type { FeedView, FeedAuthor } from '@engine/career/views'
 import type { FeedView } from '@engine/career/views'
-export type { DevCampView, DevCampInvitesView, CampInvitesView, TrainingCampView, TrainingCampState } from '@engine/career/views'
-import type { DevCampView, DevCampInvitesView, CampInvitesView, TrainingCampView } from '@engine/career/views'
+export type { DevCampView, DevCampInvitesView, CampInvitesView, TrainingCampView, TrainingCampState, OffseasonNeedsView } from '@engine/career/views'
+import type { DevCampView, DevCampInvitesView, CampInvitesView, TrainingCampView, OffseasonNeedsView } from '@engine/career/views'
 export type { NegotiationView, NegotiationRoundView, ContractOffer, ClauseLevel } from '@engine/career/views'
 import type { NegotiationView, ContractOffer } from '@engine/career/views'
 // Renderer screens already import these from the protocol barrel, but they were
@@ -318,6 +318,8 @@ export type WorkerRequestBody =
   /** Camp Battles (additive): let the coach run the rest of camp — the
    *  remaining games are played and his calls applied. Returns the cut notes. */
   | { type: 'delegateTrainingCamp' }
+  /** Offseason 3.0 (additive): next season's needs, each with real answers. */
+  | { type: 'getOffseasonNeeds' }
   | { type: 'getFeed' }
   | { type: 'toggleFollowAuthor'; authorId: string }
   | { type: 'getNegotiation'; playerId: string }
@@ -665,6 +667,7 @@ export type WorkerResponse = { id: number } & (
   | { type: 'campInvites'; invites: CampInvitesView }
   | { type: 'campInviteResult'; ok: boolean; invited: boolean; message?: string; invites: CampInvitesView }
   | { type: 'trainingCamp'; camp: TrainingCampView | null; notes?: string[] }
+  | { type: 'offseasonNeeds'; needs: OffseasonNeedsView }
   | { type: 'medical'; medical: MedicalView; ok?: boolean; message?: string }
   | { type: 'development'; development: DevelopmentCenterView }
   | { type: 'squadPlanner'; squadPlanner: SquadPlannerView }

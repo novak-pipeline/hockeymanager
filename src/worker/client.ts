@@ -328,6 +328,10 @@ export class SimClient {
     return this.send({ type: 'delegateTrainingCamp' })
   }
 
+  getOffseasonNeeds(): Promise<WorkerResponse> {
+    return this.send({ type: 'getOffseasonNeeds' })
+  }
+
   getFeed(): Promise<WorkerResponse> {
     return this.send({ type: 'getFeed' })
   }
