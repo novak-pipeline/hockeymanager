@@ -2,6 +2,7 @@ import * as THREE from 'three'
 import { generateLeague } from '@data/generate'
 import type { Player, PlayerId } from '@domain'
 import { fullSimGame } from '@engine/full/fullSim'
+import { agentSimGame } from '@engine/agent/agentSim'
 import { MatchTimeline } from '@render2d/timeline'
 import { Rink3dRenderer, type CameraPreset } from '@render3d'
 
@@ -19,7 +20,9 @@ const data = generateLeague({ seed })
 const resolve = (id: PlayerId): Player => data.players.get(id)!
 const home = data.teams.get(data.league.teams[0]!)!
 const away = data.teams.get(data.league.teams[1]!)!
-const out = fullSimGame(home, away, resolve, { seed: seed * 7 })
+// ?engine=agent plays the game with the agent engine (src/engine/agent).
+const sim = q.get('engine') === 'agent' ? agentSimGame : fullSimGame
+const out = sim(home, away, resolve, { seed: seed * 7 })
 const homeIds = new Set<PlayerId>(home.roster)
 const tl = new MatchTimeline(out.stream, (id) => homeIds.has(id))
 const labels: Record<string, { lastName: string }> = {}

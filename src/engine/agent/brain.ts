@@ -50,7 +50,8 @@ const r01 = (v: number | undefined): number => clamp((v ?? 50) / 100, 0, 1)
 // ---------------------------------------------------------------------------
 
 /** Multiplier on the value of shooting (the shot-volume lever). */
-export const SHOOT_BIAS = { value: 0.75 }
+
+export const SHOOT_BIAS = { value: 0.32 }
 /** Seconds after a zone entry that play is still a "rush". */
 const RUSH_WINDOW = 4.5
 /** Stick reach from the body centre, ft. */
@@ -67,11 +68,15 @@ export function xgAt(x: number, y: number, a: number): number {
 /** Expected value of having the puck at (x,y) for the side attacking `a`. */
 export function posValue(x: number, y: number, a: number): number {
   const adv = x * a
+  // In the zone: the possession is worth a base (a chance will come) plus
+  // part of what a shot from here is worth — holding a spot is worth LESS
+  // than shooting from it once the spot is dangerous enough, which is what
+  // makes carriers shoot from range instead of skating everyone to the crease.
   if (adv >= BLUE_X) {
-    if (adv > GOAL_X) return 0.024
-    return 0.02 + xgAt(x, y, a)
+    if (adv > GOAL_X) return 0.014
+    return 0.012 + 0.6 * xgAt(x, y, a)
   }
-  return 0.004 + (0.016 * (adv + 100)) / 125
+  return 0.004 + (0.009 * (adv + 100)) / 125
 }
 
 /** Rough seconds for a body to reach a point (current momentum + thrust). */
@@ -150,7 +155,7 @@ function retention(c: Body, q: XY, tc: number, opps: readonly Body[]): number {
   for (const o of opps) {
     const to = reachTime(o, q.x, q.y) - REACH / Math.max(o.caps.top, 1) + 0.2
     const margin = to - tc + (skill - 0.5) * 0.5
-    r *= 1 - 0.85 * sigmoid(-margin * 4)
+    r *= 1 - 0.93 * sigmoid(-margin * 3.5)
   }
   return r
 }
@@ -229,7 +234,8 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       else if (d < 6) lane *= 0.85
     }
     const shooter = (r01(c.player.ratings.technical.wristShot) + r01(c.player.composites.scoring)) / 2
-    const ev = (xg * lane * (0.7 + shooter * 0.6) * eager + 0.004) * SHOOT_BIAS.value
+    // A shot also keeps some of the possession (rebounds, retrievals).
+    const ev = (xg * lane * (0.7 + shooter * 0.6) * eager + 0.005) * SHOOT_BIAS.value
     opts.push({ ev, act: { kind: 'shoot' } })
   }
 
@@ -264,7 +270,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
           cmd: {
             tx: qx,
             ty: qy,
-            speed: protect ? 8 : c.caps.top * clamp(0.55 + urg * 0.45, 0.5, 1),
+            speed: protect ? 8 : c.caps.top * clamp(0.5 + urg * 0.4, 0.5, 0.9),
             arrive: false,
             urgency: clamp(urg, 0.3, 1),
             ...(protect ? { faceX: c.x - Math.cos(ang) * 10, faceY: c.y - Math.sin(ang) * 10 } : {})
@@ -291,9 +297,22 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       return { r, speed, R, back, open, d0 }
     })
     const hasForward = infos.some((f) => !f.back && f.open > 6)
-    const backOk = backOkBase || (pressed && !hasForward)
+    // Transition: we won it < 8 s ago and haven't set up in their zone yet —
+    // the play goes forward (a back pass is only the pressured bail-out).
+    const transition = w.t - w.possSince < 8 && adv < BLUE_X + 25
+    // In alone / numbers: nobody (or fewer of them) goal-side of the carrier.
+    let goalSide = 0
+    for (const o of opps) if (o.x * a > c.x * a) goalSide++
+    const breakaway = goalSide === 0 && adv > -BLUE_X
+    // Settled in their zone (not a rush), low-to-high to an open point man is
+    // a real play (the scorecard's OZ back-pass band is 12–40%); on the rush
+    // and in transition it is only the pressured bail-out.
+    const settledOz = adv > BLUE_X && !transition
+    const backOk = (backOkBase && !transition) || settledOz || (pressed && !hasForward && !breakaway)
     for (const f of infos) {
       if (f.back && !backOk) continue
+      // On a breakaway only a clearly forward pass (the 2-on-0 feed) is a play.
+      if (breakaway && (f.R.x - c.x) * a < 4) continue
       // Offside: never feed a man already over the line ahead of the puck.
       if (f.R.x * a > BLUE_X && adv < BLUE_X - 0.5) continue
       if (f.d0 < 7) continue
@@ -345,7 +364,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
   }
 
   // Decision quality: good readers take the best option nearly every time.
-  const T = 0.0012 + (1 - reading) * 0.006 + pressure * 0.002 * (1 - r01(m.composure))
+  const T = 0.0004 + (1 - reading) * 0.0022 + pressure * 0.0012 * (1 - r01(m.composure))
   let best = opts[0]
   for (const o of opts) if (o.ev > best.ev) best = o
   let sum = 0
@@ -357,7 +376,9 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
   let r = w.rng.next() * sum
   for (let i = 0; i < opts.length; i++) {
     r -= ws[i]
-    if (r <= 0) return opts[i].act
+    if (r <= 0) {
+      return opts[i].act
+    }
   }
   void cur
   return best.act
@@ -468,7 +489,8 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
     }
     for (const b of chasers) {
       const h = boardsClamp(tx, ty, 1.5)
-      cmds.set(b, { tx: h.x, ty: h.y, speed: b.caps.top, arrive: false, urgency: 1 })
+      const far = Math.hypot(h.x - b.x, h.y - b.y) > 45
+      cmds.set(b, { tx: h.x, ty: h.y, speed: b.caps.top * (far ? 1 : 0.85), arrive: false, urgency: 1 })
       me.roles.set(b, 'CHASE')
     }
   }
@@ -595,8 +617,12 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
       faceX = puck.x
       faceY = puck.y
     } else if (b === laneMan && carrier) {
-      t = { x: carrier.x + (ownNetX - carrier.x) * 0.3, y: carrier.y * 0.7 }
-      urgency = 0.85
+      // Take away the lane — and inside 35 ft, collapse ONTO the carrier:
+      // a body goal-side of him, a stride in front, the second man on the puck.
+      const dN = Math.hypot(ownNetX - carrier.x, carrier.y)
+      const f = dN < 35 ? clamp(5 / Math.max(dN, 1), 0.1, 0.5) : 0.3
+      t = { x: carrier.x + (ownNetX - carrier.x) * f, y: carrier.y + (0 - carrier.y) * f }
+      urgency = dN < 35 ? 1 : 0.85
       faceX = carrier.x
       faceY = carrier.y
     } else {
@@ -627,10 +653,18 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
       faceX = puck.x
       faceY = puck.y
     }
+    // Caught up ice when they have it: BACKCHECK — sprint back goal-side.
+    let backcheck = false
+    if (theyHaveIt && carrier && (b.x - carrier.x) * a > 6) {
+      backcheck = true
+      urgency = 1
+    }
+    // Any stick within reach of their puck can go for it.
+    if (theyHaveIt && Math.hypot(b.x - puck.x, b.y - puck.y) < REACH) out.pokes.push(b)
     const h = boardsClamp(t.x, t.y, 2)
     const dist = Math.hypot(h.x - b.x, h.y - b.y)
     // Far from the spot → skate; close → drift calmly into it.
-    const speed = b.caps.top * clamp(0.35 + urgency * 0.55 + dist / 120, 0.3, 1)
+    const speed = b.caps.top * (backcheck ? 0.95 : clamp(0.35 + urgency * 0.5 + dist / 150, 0.3, 0.85))
     cmds.set(b, {
       tx: h.x,
       ty: h.y,

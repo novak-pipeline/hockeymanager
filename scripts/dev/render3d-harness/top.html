@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Top-down playback</title>
+<style>
+  body { margin: 0; background: #14171b; color: #e8eaed; font: 13px system-ui, sans-serif; }
+  #bar { padding: 6px 10px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  #seek { flex: 1; min-width: 200px; }
+  canvas { display: block; margin: 0 auto; width: 100%; height: auto; background: #f7f9fb; border-radius: 10px; }
+  #log { padding: 4px 10px; height: 110px; overflow: hidden; color: #9aa4b0; font: 12px ui-monospace, monospace; white-space: pre; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <button id="play">Play</button>
+  <select id="speed"><option>0.5</option><option selected>1</option><option>2</option><option>4</option></select>
+  <input id="seek" type="range" min="0" max="1" step="0.0001" value="0" />
+  <span id="clock"></span>
+</div>
+<canvas id="c" width="1200" height="520"></canvas>
+<div id="log"></div>
+<script type="module" src="./top.ts"></script>
+</body>
+</html>

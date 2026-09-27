@@ -89,15 +89,15 @@ export const AGENT_TUNING = {
   /** Reconciles the empirical xG with this engine's shot mix → goals/game. */
   finishK: 0.5,
   /** Base share of unblocked attempts that miss the net. */
-  missBase: 0.24,
+  missBase: 0.3,
   /** Base per-contact shot-block chance for a body square in the lane. */
-  blockBase: 0.9,
+  blockBase: 1.25,
   /** Poke-check success scale (takeaways). */
-  pokeK: 0.35,
+  pokeK: 0.15,
   /** Unforced fumble rate under pressure (giveaways). */
   fumbleK: 1.0,
   /** Per-think stick-foul chance when beaten (penalties). */
-  stickFoulK: 0.35,
+  stickFoulK: 0.6,
   /** Misc stoppages per second of live play ("other": net off, high stick…). */
   miscStopPerSec: 0.0028
 }
@@ -200,7 +200,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     flightSide: null,
     oneTimerFor: null,
     lastHad: new Map(),
-    delayedOffside: null
+    delayedOffside: null,
+    possSince: 0
   }
   let flight = null as Flight | null
   let now = 0
@@ -220,6 +221,10 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   let prevAdv = 0 // puck x in the controlling side's frame, last substep
   let lastCarrierAdvSide: Side | null = null
   const hitIntent = new Map<Body, HitIntent>()
+  let gotAt = 0
+  let gotHow = 'faceoff'
+  let flightKindAtGain = 'faceoff'
+  let gotPos: XY = { x: 0, y: 0 }
 
   const tries = (...bs: Body[]): Map<Body, number> => new Map(bs.map((b) => [b, now] as [Body, number]))
   const ev = (e: GameEvent): void => {
@@ -255,12 +260,25 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   }
 
   /** Re-read the side's on-ice bodies after a deploy. */
-  const bindSide = (s: Side, inheritFrom?: Body[]): void => {
+  /** Shift energy of skaters on the bench (recovers while sitting). */
+  const benchEnergy = new Map<PlayerId, { e: number; at: number }>()
+  const BENCH_RECOVER_PER_S = 0.012
+
+  /**
+   * Re-read the side's on-ice bodies after a deploy. A player who stays on
+   * keeps his body (no jump); a new man takes the place of a departing
+   * teammate of the same position (the renderers walk rigs through the bench
+   * gate), keeping his momentum so the change is seamless.
+   */
+  const bindSide = (s: Side, departing: Body[] = []): void => {
     const unit = s.sim.unit
-    s.skaters = unit.skaters.map((r, i) => {
+    const free = departing.filter((b) => !unit.skaters.some((r) => r.player.id === b.player.id))
+    s.skaters = unit.skaters.map((r) => {
       const had = bodies.get(r.player.id)
       if (had) return had
-      const src = inheritFrom?.[i]
+      const isD = r.player.position === 'D'
+      const src = free.find((b) => (b.player.position === 'D') === isD) ?? free[0]
+      if (src) free.splice(free.indexOf(src), 1)
       const b = makeBody(r.player, src ? src.x : r.pos.x * HALF_X, src ? src.y : r.pos.y * HALF_Y, s.a)
       if (src) {
         b.vx = src.vx
@@ -268,6 +286,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         b.hx = src.hx
         b.hy = src.hy
       }
+      const rest = benchEnergy.get(r.player.id)
+      if (rest) b.energy = clamp(rest.e + (now - rest.at) * BENCH_RECOVER_PER_S, 0, 1)
       bodies.set(r.player.id, b)
       return b
     })
@@ -280,11 +300,14 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const d = desiredFor(s.sim, opp.sim)
     const tilt = benchTilt(s.sim.goals - opp.sim.goals, (period - 1 + now / lengthSeconds) / 3)
     const old = s.skaters.slice()
-    // The incoming skaters take the outgoing skaters' spots (seamless on screen;
-    // the 3D renderer walks the rigs through the bench gate).
     const inherit = old.map((b) => ({ x: b.x / HALF_X, y: b.y / HALF_Y }))
-    for (const b of old) bodies.delete(b.player.id)
     s.sim.deploy(rng, d.kind, d.count, inherit.length ? inherit : undefined, opp.sim, tilt)
+    const staying = new Set(s.sim.unit.skaters.map((r) => r.player.id))
+    for (const b of old) {
+      if (staying.has(b.player.id)) continue
+      bodies.delete(b.player.id)
+      benchEnergy.set(b.player.id, { e: b.energy, at: now })
+    }
     bindSide(s, old)
     if (w.carrier && !s.skaters.includes(w.carrier) && old.includes(w.carrier)) {
       w.carrier = null
@@ -452,6 +475,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   // -------------------------------------------------------------------------
   const gainControl = (b: Body, s: Side): void => {
     const prevSide = w.control ?? w.lastTouch
+    flightKindAtGain = flight ? (flight.kind === 'pass' && flight.side === s ? 'pass' : flight.kind === 'shot' ? 'shotDeflect' : flight.side === s ? 'ownLoose' : 'oppLoose') : 'none'
     w.carrier = b
     puck.carrier = b
     w.control = s
@@ -492,8 +516,14 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     w.passTo = null
     w.flightSide = null
     w.oneTimerFor = null
-    if (prevSide !== s) touches.length = 0
+    if (prevSide !== s) {
+      touches.length = 0
+      w.possSince = now
+    }
     touches.push({ b, side: s, t: now })
+    gotAt = now
+    gotHow = flightKindAtGain
+    gotPos = { x: puck.x, y: puck.y }
     if (touches.length > 6) touches.shift()
     // Delayed offside: an offside attacker's team plays the puck in the zone.
     if (w.delayedOffside === s && puck.x * s.a > BLUE_X) {
@@ -598,7 +628,16 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const slap = !oneTimer && dist > 45 && pressure < 0.3 && rng.chance(0.45 * r01(tech.slapShot) + 0.1)
     const acc = slap ? r01(tech.slapShot) : r01(tech.wristShot)
     const speed = (slap ? 118 : 96) + acc * 30 + (oneTimer ? 8 : 0)
-    if (tm) tm.shotAttempts++
+    if (tm) {
+      tm.shotAttempts++
+      let nearest = 99
+      let house = 0
+      for (const o of opp.skaters) {
+        nearest = Math.min(nearest, Math.hypot(o.x - from.x, o.y - from.y))
+        if (Math.hypot(o.x - netX, o.y) < 25) house++
+      }
+      tm.shotLog.push({ dist, nearest, house, poss: now - w.possSince, sinceEntry: now - s.entryAt, held: now - gotAt, carried: Math.hypot(from.x - gotPos.x, from.y - gotPos.y), src: now - lastSaveAt < 2.5 ? 'rebound' : gotHow })
+    }
 
     // 1. Bodies in the lane.
     let blocker: Body | undefined
@@ -609,7 +648,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       const s1 = (o.x - from.x) * ux + (o.y - from.y) * uy
       if (s1 < 3 || s1 > L - 5) continue
       const d = Math.abs(-(o.x - from.x) * uy + (o.y - from.y) * ux)
-      const base = d < 1.6 ? 1 : d < 3.2 ? 0.45 : 0
+      const base = d < 2 ? 1 : d < 4 ? 0.5 : d < 6 ? 0.18 : 0
       if (base === 0) continue
       const pB = AGENT_TUNING.blockBase * base * (0.55 + r01(o.player.ratings.defensive.shotBlocking) * 0.8) * (slap ? 1.1 : 1)
       if (rng.chance(clamp(pB, 0, 0.9))) {
@@ -818,7 +857,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const rc = r01(g.player.ratings.goalie?.reboundControl ?? g.player.composites.goaltending)
     let traffic = 0
     for (const b of s.skaters) if (Math.hypot(b.x - a * GOAL_X, b.y) < 13) traffic++
-    const pFreeze = clamp(0.1 + rc * 0.14 - traffic * 0.03 + (sp.rebound ? 0.08 : 0), 0.05, 0.45)
+    const pFreeze = clamp(0.14 + rc * 0.16 - traffic * 0.03 + (sp.rebound ? 0.08 : 0), 0.06, 0.5)
     const freeze = rng.chance(pFreeze)
     ev({ t: T(), period, type: 'save', goalie: g.player.id, rebound: !freeze, pos: { x: g.x / HALF_X, y: g.y / HALF_Y } })
     if (tm) tm.saves++
@@ -829,12 +868,12 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       return
     }
     // Rebound: into the slot (a poor rebound) or steered to a corner.
-    const poor = rng.chance(0.55 - rc * 0.3)
+    const poor = rng.chance(0.4 - rc * 0.28)
     const out = -a
     puck.x = g.x + out * 1.5
     puck.y = g.y
     if (poor) {
-      loosen(out * rng.float(12, 28), rng.float(-10, 10), null)
+      loosen(out * rng.float(16, 34), rng.float(-14, 14), null)
     } else {
       const side = rng.chance(0.5) ? 1 : -1
       loosen(out * rng.float(2, 8), side * rng.float(18, 32), null)
@@ -917,7 +956,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const shift = now - (lastShift.get(s) ?? 0)
         const avgE = s.skaters.reduce((q, b) => q + b.energy, 0) / Math.max(1, s.skaters.length)
         const safe = (w.control === s && puck.x * s.a > -10) || puck.x * s.a > BLUE_X
-        if (safe && (shift > SHIFT_TARGET || (shift > 30 && avgE < 0.55)) && flight?.kind !== 'shot' && w.carrier?.player && !s.skaters.includes(w.carrier)) {
+        const due = shift > SHIFT_TARGET + 12 || (safe && (shift > SHIFT_TARGET || (shift > 30 && avgE < 0.55)))
+        if (due && flight?.kind !== 'shot' && !(w.carrier && s.skaters.includes(w.carrier))) {
           creditShift(s, now)
           deploySide(s, true)
         }
@@ -1084,7 +1124,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           const disc = 1.4 - r01(d.player.ratings.mental.discipline) * 0.8
           const aggr = sliderMult(opp.tactics.aggressiveness, 0.6, 1.5) * (1 + (ctx.intensity ?? 0) * 0.3)
           if (rng.chance(0.03 * AGENT_TUNING.stickFoulK * prone * disc * aggr)) {
-            const inf = rng.pick(['hooking', 'tripping', 'holding', 'slashing', 'hooking', 'tripping'])
+            const inf = rng.pick(['hooking', 'tripping', 'holding', 'slashing', 'hooking', 'tripping', 'high-sticking', 'holding the stick', 'interference', 'hooking', 'tripping', 'cross-checking'])
             callPenalty(d, opp, inf)
             break
           }
@@ -1121,6 +1161,17 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           // target glides (≈0.45 s lag) instead of jumping every think — no
           // twitch. Racing/pressing/carrying men react at once.
           let cmd = raw
+          // Tied up: a defender goal-side and on him slows the carrier down.
+          if (b === w.carrier && w.control) {
+            const cs = w.control
+            for (const o of oppOf(cs).skaters) {
+              if ((o.x - b.x) * cs.a > 0 && Math.hypot(o.x - b.x, o.y - b.y) < 4.2) {
+                const str = r01(b.player.ratings.physical.strength) - r01(o.player.ratings.physical.strength)
+                cmd = { ...raw, speed: raw.speed * clamp(0.45 + str * 0.4, 0.25, 0.75) }
+                break
+              }
+            }
+          }
           const sm = smooth.get(b)
           if (raw.urgency < 0.85 && b !== w.carrier && sm && !pending) {
             const f = DT / 0.45
@@ -1199,6 +1250,12 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const res = stepPuck(puck, DT)
         if (res === 'outOfPlay') {
           if (tm) tm.overGlass++
+          // Shot over the glass from your own zone: delay of game.
+          const fs0 = flight?.side
+          if (fs0 && flight?.from && flight.releaseAdv < -BLUE_X && !delayed) {
+            callPenalty(flight.from, fs0, 'delay of game')
+            if (pending) continue
+          }
           const dot = nearestDot({ x: puck.x, y: puck.y })
           stopPlay(dot, 'neutral', null, 'other')
           if (pending) pending.zone = Math.abs(dot.x) <= 25 ? 'neutral' : 'defensive'
@@ -1229,6 +1286,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           flight.untouched = false
         }
         // Pickups and interceptions.
+        // A loose puck at the goalie's pads: he smothers it (whistle) unless
+        // an attacker gets a stick on it first.
+        if (coverByGoalie()) continue
         pickup()
         // Puck pinned on the boards in a scrum: whistle.
         if (!w.carrier && Math.hypot(puck.vx, puck.vy) < 3 && distToBoards(puck.x, puck.y) < 3.5) {
@@ -1294,6 +1354,25 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     return false
   }
 
+  function coverByGoalie(): boolean {
+    if (puck.z > 1 || Math.hypot(puck.vx, puck.vy) > 7) return false
+    for (const s of sides) {
+      if (s.sim.pulled) continue
+      const g = s.goalie
+      if (Math.hypot(g.x - puck.x, g.y - puck.y) > 2.8) continue
+      if (!rng.chance(0.07)) continue
+      // An attacker's stick right there keeps it alive.
+      const opp = oppOf(s)
+      let jam = false
+      for (const b of opp.skaters) if (Math.hypot(b.x - puck.x, b.y - puck.y) < 2.2) jam = true
+      if (jam && rng.chance(0.5)) return false
+      const dot = dzDot(s, puck.y)
+      stopPlay(dot, zoneOf(dot, opp), s, 'goalieFreeze')
+      return true
+    }
+    return false
+  }
+
   function pickup(): void {
     if (!flight) return
     const f = flight
@@ -1326,11 +1405,12 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       const reachF = d < 2.8 ? 1 : 1 - ((d - 2.8) / (REACH - 2.8)) * 0.55
       let p: number
       const mine = f.side === s
+      const dStick = d < 2.6 ? 1 : 0.45
       if (f.kind === 'pass' && b === f.to) p = clamp(0.94 - Math.max(0, rel - 55) / 140 + (hands - 0.5) * 0.12, 0.55, 0.99)
       else if (f.kind === 'pass' && mine) p = clamp(0.8 - Math.max(0, rel - 45) / 120, 0.4, 0.95)
       else if (f.kind === 'pass') {
         const read = (r01(b.player.ratings.mental.anticipation) + r01(b.player.ratings.defensive.stickChecking)) / 2
-        p = clamp(0.12 + read * 0.4 - Math.max(0, rel - 40) / 160, 0.04, 0.6)
+        p = clamp((0.08 + read * 0.3) * dStick - Math.max(0, rel - 40) / 200, 0.02, 0.5)
       } else {
         // Loose or dumped puck: speed makes it hard, hands make it easy; a
         // contested puck is a battle.
@@ -1347,7 +1427,11 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         gainControl(b, s)
         return
       }
-      // Got a piece of it: the puck changes course.
+      // Missed it clean (the puck went by the stick) — or got a piece of it
+      // and it changes course; the closer the stick, the likelier a touch.
+      // The intended receiver who bobbles it keeps it near him.
+      const touch = b === f.to ? 0.7 : d < 2.6 ? 0.45 : 0.15
+      if (!rng.chance(touch)) continue
       f.untouched = false
       puck.vx = pvx * 0.6 + rng.float(-6, 6)
       puck.vy = pvy * 0.6 + rng.float(-6, 6)

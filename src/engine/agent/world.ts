@@ -52,6 +52,8 @@ export interface World {
   lastHad: Map<Body, number>
   /** Delayed offside against this side: its men in the zone must tag up. */
   delayedOffside: Side | null
+  /** Clock time the side in control won the puck (transition detection). */
+  possSince: number
 }
 
 export type CarrierAction =

@@ -113,7 +113,9 @@ export function decideHit(w: World, s: Side, b: Body, intents: Map<Body, HitInte
   const uy = (target.y - b.y) / d
   const closing = (b.vx - target.vx) * ux + (b.vy - target.vy) * uy
   if (closing < -2) return null
-  const boards = distToBoards(target.x, target.y) < 9 ? 1.8 : 1
+  // Body checks happen along the walls (94% of NHL hits are within 10 ft of
+  // the boards): open-ice hits are rare, pins on the wall are the staple.
+  const boards = distToBoards(target.x, target.y) < 10 ? 2.2 : 0.12
   const withPuck = w.carrier === target ? 1 : 0.55
   const p = HIT_TUNING.intentK * hitAppetite(b, s, intensity) * boards * withPuck
   if (!w.rng.chance(clamp(p, 0, 0.8))) return null
@@ -150,6 +152,8 @@ export function resolveHit(w: World, ct: Contact, intents: Map<Body, HitIntent>,
     // brushing in open ice away from the play.
     const battling = (b: Body): boolean => w.carrier === b || w.t - (w.lastHad.get(b) ?? -99) < 0.6
     if (!battling(ct.a) && !battling(ct.b)) return null
+    // A board battle is a hit; bumping in open ice isn't scored as one.
+    if (distToBoards(ct.a.x, ct.a.y) > 12 && distToBoards(ct.b.x, ct.b.y) > 12) return null
     // Incidental: the faster-moving body into the other.
     const fa = speedOf(ct.a) * ct.a.mass
     const fb = speedOf(ct.b) * ct.b.mass
