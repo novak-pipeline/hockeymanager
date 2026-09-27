@@ -270,8 +270,8 @@ updated; if a wired lever loses its last consumer, the test says so.
 | `tactics.ozEntry` | **DEAD** — unread |
 | `tactics.forecheckVariant` | **DEAD** — unread |
 | `tactics.dZoneStructure` | **DEAD** — unread |
-| `tactics.offensiveFaceoff` | **DEAD** — unread |
-| `tactics.defensiveFaceoff` | **DEAD** — unread |
+| `tactics.offensiveFaceoff` | **AGENT ENGINE ONLY** — read by the flagged agent engine's directed draws (standard → back to a D, wheel → to the wall, tie-up → scrum, quick-strike → at the net); the default director engine ignores it; not yet priced |
+| `tactics.defensiveFaceoff` | **AGENT ENGINE ONLY** — as above, for defensive-zone draws; not yet priced |
 | `tactics.shotTargeting` | **DEAD** — unread |
 | `tactics.personalTactics` (all 5 sub-fields) | **DEAD** — unread |
 

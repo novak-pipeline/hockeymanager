@@ -38,6 +38,10 @@ export const WIRED_TACTICS = [
   'passing',
   'shooting',
   'dumping',
+  // Read by the flagged agent engine only (src/engine/agent): directed faceoff
+  // draws. Not yet priced by the lever harness (it runs the default engines).
+  'offensiveFaceoff',
+  'defensiveFaceoff',
 ] as const
 
 /**
@@ -56,8 +60,6 @@ export const UNREAD_TACTICS = [
   'ozEntry',
   'forecheckVariant',
   'dZoneStructure',
-  'offensiveFaceoff',
-  'defensiveFaceoff',
   'shotTargeting',
   'personalTactics',
 ] as const
