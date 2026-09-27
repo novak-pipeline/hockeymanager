@@ -303,7 +303,7 @@ export function dekeChance(c: Body, o: Body, goalie: boolean): number {
     const g = 0.6 * r01(o.player.ratings.goalie?.positioningG ?? o.player.composites.goaltending) + 0.4 * r01(o.player.ratings.mental.anticipation)
     return sigmoid((atk - g) * DEKE.k + DEKE.baseG)
   }
-  const d = 0.3 * rDef(o.player.ratings.mental.positioning) + 0.3 * rDef(o.player.ratings.defensive.stickChecking) + 0.2 * r01(o.player.ratings.mental.defensiveIQ) + 0.2 * r01(o.player.composites.takeaway)
+  const d = 0.25 * rDef(o.player.ratings.mental.positioning) + 0.2 * rDef(o.player.ratings.defensive.stickChecking) + 0.15 * r01(o.player.ratings.mental.defensiveIQ) + 0.4 * r01(o.player.composites.takeaway)
   // A defender who is lunging at you (closing fast) is easier to beat.
   const ux = (c.x - o.x) / Math.max(Math.hypot(c.x - o.x, c.y - o.y), 0.1)
   const uy = (c.y - o.y) / Math.max(Math.hypot(c.x - o.x, c.y - o.y), 0.1)
