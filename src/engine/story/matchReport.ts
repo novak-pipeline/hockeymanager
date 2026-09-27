@@ -78,6 +78,8 @@ interface Shape {
   margin: number
   ledFromFirstGoal: boolean
   neverTrailed: boolean
+  /** Led after EVERY goal: scored first and never even tied again. */
+  wireToWire: boolean
 }
 
 function readShape(inp: MatchReportInput): Shape {
@@ -86,11 +88,14 @@ function readShape(inp: MatchReportInput): Shape {
   let maxDeficit = 0
   let maxLead = 0
   let neverTrailed = true
+  let wireToWire = inp.goals.length > 0
   for (const g of inp.goals) {
     if (g.byUser) us++
     else them++
     if (them - us > maxDeficit) maxDeficit = them - us
     if (them > us) neverTrailed = false
+    // "wire-to-wire" is a lie the moment the game is level again (F-30)
+    if (us <= them) wireToWire = false
     if (us - them > maxLead) maxLead = us - them
   }
   return {
@@ -99,22 +104,27 @@ function readShape(inp: MatchReportInput): Shape {
     margin: Math.abs(inp.userGoals - inp.oppGoals),
     ledFromFirstGoal: inp.goals.length > 0 && inp.goals[0]!.byUser,
     neverTrailed,
+    wireToWire,
   }
 }
 
-/** The last goal that changed the lead — the man who actually decided it. */
-function decisiveScorer(inp: MatchReportInput): MatchReportGoal | null {
-  let us = 0
-  let them = 0
-  let winner: MatchReportGoal | null = null
+/**
+ * The game-winning goal by the NHL rule: the winner's goal that put them one
+ * ahead of the LOSER'S FINAL total (in a 4-3 game, the winner's 4th goal).
+ * The old "last go-ahead goal" named the wrong man whenever the winner went
+ * ahead, was caught, and pulled away again (F-30). A shootout decider is not
+ * a stream goal, so a shootout game has no GWG here (null → first star).
+ */
+export function decisiveScorer(inp: MatchReportInput): MatchReportGoal | null {
   const userWon = inp.userGoals > inp.oppGoals
+  const loserFinal = userWon ? inp.oppGoals : inp.userGoals
+  let n = 0
   for (const g of inp.goals) {
-    if (g.byUser) us++
-    else them++
-    // The goal that put the eventual winner ahead for the last time.
-    if (userWon ? us === them + 1 && g.byUser : them === us + 1 && !g.byUser) winner = g
+    if (g.byUser !== userWon) continue
+    n++
+    if (n === loserFinal + 1) return g
   }
-  return winner
+  return null
 }
 
 function clockOf(g: MatchReportGoal): string {
@@ -176,11 +186,11 @@ const SHAPE_POOL: ContentVariant[] = [
     text: `A point salvaged, a point lost. The {us} fall in overtime, and open ice at three-on-three is a cruel way to end a night this even.` },
   { id: 'mr.playoff.tight', conditions: { playoff: true, maxMargin: 1 },
     text: `Playoff hockey, which is to say two hours of very little space and one mistake. {ourGoals}-{theirGoals}.` },
-  { id: 'mr.wire', conditions: { won: true, neverTrailed: true, ledFromFirstGoal: true },
+  { id: 'mr.wire', conditions: { won: true, neverTrailed: true, wireToWire: true },
     text: `The {us} scored first and never once had to chase it. A wire-to-wire {ourGoals}-{theirGoals} is the least dramatic way to take two points and the most comfortable.` },
-  { id: 'mr.wire.b', conditions: { won: true, neverTrailed: true, ledFromFirstGoal: true },
+  { id: 'mr.wire.b', conditions: { won: true, neverTrailed: true, wireToWire: true },
     text: `Front-running, and no apologies for it. The {us} opened the scoring, held the lead the whole way and closed it out {ourGoals}-{theirGoals}.` },
-  { id: 'mr.wire.c', conditions: { won: true, neverTrailed: true, ledFromFirstGoal: true },
+  { id: 'mr.wire.c', conditions: { won: true, neverTrailed: true, wireToWire: true },
     text: `Not once behind. The {us} took the lead early, made the {them} play the game they wanted, and won it {ourGoals}-{theirGoals}.` },
   /* ── generic fallbacks ── */
   { id: 'mr.win.a', conditions: { won: true },
@@ -369,6 +379,7 @@ export function buildMatchReport(inp: MatchReportInput): string {
     blanked: inp.userGoals === 0,
     neverTrailed: shape.neverTrailed,
     ledFromFirstGoal: shape.ledFromFirstGoal,
+    wireToWire: shape.wireToWire,
     goalieSteal: goalieSteal ? 1 : 0,
     oppGoalieSteal: oppSteal ? 1 : 0,
   }

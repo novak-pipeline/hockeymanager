@@ -2315,7 +2315,7 @@ export class Career {
     const beatISO = this.phase === 'offseason' ? this.offseasonDateISO() : this.preseasonDateISO()
     const item: NewsItem = {
       id: `n${this.newsCounter++}`,
-      day: this.currentDay,
+      day: this.newsDayOverride ?? this.currentDay,
       year: this.year,
       ...(beatISO !== null ? { dateISO: beatISO } : {}),
       category,
@@ -8174,7 +8174,26 @@ export class Career {
     return null
   }
 
+  /** While set, pushNews stamps items with this day instead of currentDay. */
+  private newsDayOverride: number | null = null
+
+  /**
+   * The game is played on `day`, but currentDay only moves on after the whole
+   * slate is simmed — so the result mail (and the beats written with it) was
+   * dated the day BEFORE the game (a 2 Oct game's report read 1 Oct). Stamp
+   * everything this writes with the game's own day.
+   */
   private recordUserResultNews(day: number, res: GameOutcome, gameId = '', playoff = false): void {
+    const prev = this.newsDayOverride
+    this.newsDayOverride = day
+    try {
+      this.writeUserResultNews(day, res, gameId, playoff)
+    } finally {
+      this.newsDayOverride = prev
+    }
+  }
+
+  private writeUserResultNews(day: number, res: GameOutcome, gameId = '', playoff = false): void {
     const home = this.data.teams.get(res.homeTeamId)!
     const away = this.data.teams.get(res.awayTeamId)!
     const userIsHome = res.homeTeamId === this.userTeamId

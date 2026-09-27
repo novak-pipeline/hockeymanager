@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { GameStream, GoalEvent, ShotEvent, SaveEvent, PenaltyEvent, HitEvent, StoppageEvent, FaceoffEvent } from '@domain'
-import { generateCommentary } from './commentary'
+import { generateCommentary, clockStr, shotOutcome } from './commentary'
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -369,5 +369,54 @@ describe('output ordering', () => {
     for (let i = 1; i < lines.length; i++) {
       expect(lines[i].absT).toBeGreaterThanOrEqual(lines[i - 1].absT)
     }
+  })
+})
+
+// ── outcome-aware shot lines (F-27) + clock strings (F-28) ────────────────────
+
+describe('shot lines never contradict what the shot became', () => {
+  const WIDE = /wide|no real threat|needed watching/i
+  const SAVED = /right to the goalie|easy work|tracks it|has to work|stays big|not much danger/i
+  // many shots at different times/shooters so every template in each bank gets picked
+  const shots = (outcome: 'goal' | 'save' | 'miss'): GameStream => {
+    const s: GameStream = []
+    for (let k = 0; k < 60; k++) {
+      const t = 20 + k * 15
+      const danger = [0.1, 0.5, 0.8][k % 3]!
+      s.push(shotEvent(1, t, k % 2 ? 'p1' : 'p2', danger))
+      if (outcome === 'goal') s.push(goalEvent(1, t + 0.4, k % 2 ? 'p1' : 'p2', []))
+      if (outcome === 'save') s.push(saveEvent(1, t + 0.4, 'g2'))
+      if (outcome === 'miss') s.push(faceoffEvent(1, t + 6, 'p3'))
+    }
+    return s
+  }
+  const shotLines = (s: GameStream) => generateCommentary(s, names, isHome, abbrs).filter((l) => /Smith|Dupont/.test(l.text) && !l.text.startsWith('GOAL'))
+
+  it('a shot that scores is never "wide" or an "easy save"', () => {
+    const lines = shotLines(shots('goal'))
+    expect(lines.length).toBeGreaterThan(20)
+    for (const l of lines) {
+      expect(l.text).not.toMatch(WIDE)
+      expect(l.text).not.toMatch(SAVED)
+    }
+  })
+  it('a saved shot is never "wide"; a missed shot never "right to the goalie"', () => {
+    for (const l of shotLines(shots('save'))) expect(l.text).not.toMatch(WIDE)
+    for (const l of shotLines(shots('miss'))) expect(l.text).not.toMatch(SAVED)
+  })
+  it('shotOutcome reads ahead to the settling event', () => {
+    const s: GameStream = [shotEvent(1, 10, 'p1', 0.2), saveEvent(1, 10.4, 'g2'), shotEvent(1, 30, 'p1', 0.2), goalEvent(1, 30.5, 'p1', []), shotEvent(1, 50, 'p1', 0.2), faceoffEvent(1, 58, 'p3')]
+    expect([shotOutcome(s, 0), shotOutcome(s, 2), shotOutcome(s, 4)]).toEqual(['save', 'goal', 'miss'])
+  })
+})
+
+describe('clockStr', () => {
+  it('whole seconds, zero-padded, never "0:9.5"', () => {
+    expect(clockStr(1, 1190.5)).toBe('0:10')
+    expect(clockStr(1, 1191)).toBe('0:09')
+    expect(clockStr(1, 63.25)).toBe('18:57')
+    expect(clockStr(1, 1198.75)).toBe('0:02')
+    expect(clockStr(1, 0)).toBe('20:00')
+    expect(clockStr(1, 1200)).toBe('0:00')
   })
 })
