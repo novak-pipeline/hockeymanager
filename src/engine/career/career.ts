@@ -11831,20 +11831,32 @@ export class Career {
       if (!ahlTeam) continue // no affiliate — skip
 
       // ── Step 1: send excess NHL players to AHL ───────────────────────────
-      if (nhlTeam.roster.length > NHL_TARGET) {
+      // Worst-first, but never taking a position group below its legal
+      // minimum. A position-blind trim (five goalies, eight forwards → the worst
+      // forwards go down) is undone by Step 2's pull-ups and leaves the club at
+      // 27–28, over the 26-man limit (autopilot, season 9 of a renewed world).
+      const trimToTarget = (): void => {
+        if (nhlTeam.roster.length <= NHL_TARGET) return
         const nhlPlayers = nhlTeam.roster.map((id) => {
           const p = this.data.players.get(id)
-          return p ? { id, ovr: overall(p.composites, p.position) } : null
-        }).filter((x): x is { id: PlayerId; ovr: number } => x !== null)
-
-        // Sort worst-first so we send the lowest-rated extras to AHL.
+          return p ? { id, ovr: overall(p.composites, p.position), k: p.position === 'G' ? 'g' as const : p.position === 'D' ? 'd' as const : 'f' as const } : null
+        }).filter((x): x is { id: PlayerId; ovr: number; k: 'f' | 'd' | 'g' } => x !== null)
         nhlPlayers.sort((a, b) => a.ovr - b.ovr || (a.id < b.id ? -1 : 1))
         const excess = nhlTeam.roster.length - NHL_TARGET
-        const toSend = nhlPlayers.slice(0, excess).map((p) => p.id)
+        const counts = this.rosterCounts(nhlTeam)
+        const floor = { f: Career.ROSTER_MIN_F, d: Career.ROSTER_MIN_D, g: Career.ROSTER_MIN_G }
+        const toSend: PlayerId[] = []
+        for (const cand of nhlPlayers) {
+          if (toSend.length >= excess) break
+          if (counts[cand.k] <= floor[cand.k]) continue
+          counts[cand.k]--
+          toSend.push(cand.id)
+        }
         const toSendSet = new Set(toSend)
         nhlTeam.roster = nhlTeam.roster.filter((id) => !toSendSet.has(id))
         for (const id of toSend) ahlTeam.roster.push(id)
       }
+      trimToTarget()
 
       // ── Step 2: pull AHL players up if NHL team below position minimums ──
       // This handles post-offseason scenarios where contract expiries left gaps.
@@ -11879,6 +11891,9 @@ export class Career {
           if (deficit.G === 0 && deficit.D === 0 && deficit.F === 0) break
         }
       }
+      // Pull-ups can push a lopsided roster back over the target (23 with four
+      // forwards short → 27): shed the surplus at the over-stocked positions.
+      trimToTarget()
 
       repairLines(nhlTeam, this.data.players)
       repairLines(ahlTeam, this.data.players)
