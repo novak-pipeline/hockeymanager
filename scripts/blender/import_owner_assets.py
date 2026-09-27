@@ -484,7 +484,15 @@ def uv_islands_vote(polys):
 # ── 5: stick ────────────────────────────────────────────────────────────────
 
 def stick_frame(stick_mesh, stick_arm):
-    """Heel point + shaft / blade directions of the stick in WORLD rest space."""
+    """Heel point + shaft / blade directions of the stick in WORLD rest space.
+
+    Sticks come in any orientation: the FAB sticks are authored UPSIDE DOWN
+    (knob at the pivot = the top-hand grip bone, blade at the far end). So the
+    shaft axis is the longest bounding-box axis, and the BLADE END is the end
+    whose cross-section is widest; the heel sits on the shaft axis at the blade
+    end's extreme, the shaft direction points heel -> knob and the blade
+    direction points heel -> toe (the renderer's stick / stick_blade semantics).
+    """
     stick_arm.data.pose_position = 'REST'
     bpy.context.view_layer.update()
     dg = bpy.context.evaluated_depsgraph_get()
@@ -493,29 +501,48 @@ def stick_frame(stick_mesh, stick_arm):
     P = [stick_mesh.matrix_world @ v.co for v in m.vertices]
     ev.to_mesh_clear()
     stick_arm.data.pose_position = 'POSE'
-    zs = [p.z for p in P]
-    z0, z1 = min(zs), max(zs)
-    L = z1 - z0
-    mid = [p for p in P if z0 + 0.3 * L < p.z < z0 + 0.8 * L]
-    ax = sum((Vector((p.x, p.y, 0)) for p in mid), Vector()) / max(1, len(mid))
-    low = [p for p in P if p.z < z0 + 0.08 * L]
-    far = max(low, key=lambda p: (Vector((p.x, p.y, 0)) - ax).length)
-    blade = (Vector((far.x, far.y, 0)) - ax)
-    blade.z = 0
+    ext = [max(p[i] for p in P) - min(p[i] for p in P) for i in range(3)]
+    k = ext.index(max(ext))  # shaft axis
+    o = [i for i in range(3) if i != k]
+    c0, c1 = min(p[k] for p in P), max(p[k] for p in P)
+    L = c1 - c0
+
+    def spread(lo, hi):
+        S = [p for p in P if lo <= p[k] <= hi]
+        return max((max(p[i] for p in S) - min(p[i] for p in S)) for i in o) if S else 0.0
+    top = spread(c1 - 0.12 * L, c1) > spread(c0, c0 + 0.12 * L)
+    end = c1 if top else c0
+    sgn = 1.0 if top else -1.0  # knob -> blade along axis k
+    mid = [p for p in P if c0 + 0.35 * L < p[k] < c0 + 0.65 * L]
+    ax = sum(mid, Vector()) / max(1, len(mid))
+    axis_pt = lambda p: Vector([ax[i] if i != k else p[k] for i in range(3)])  # noqa: E731
+    near = [p for p in P if abs(p[k] - end) < 0.12 * L]
+    far = max(near, key=lambda p: (p - axis_pt(p)).length)
+    blade = far - axis_pt(far)
+    blade[k] = 0.0
     blade.normalize()
-    heel = Vector((ax.x, ax.y, z0))
-    return {'heel': heel, 'shaft': Vector((0, 0, 1)), 'blade': blade, 'length': L, 'low': z0 + 0.1 * L, 'axis': ax}
+    shaft = Vector((0, 0, 0))
+    shaft[k] = -sgn
+    heel = axis_pt(far)
+    heel[k] = end
+    REPORT['stickAuthored'] = {'axis': 'xyz'[k], 'bladeEnd': 'max' if top else 'min', 'flipped': bool(top)}
+    return {'heel': heel, 'shaft': shaft, 'blade': blade, 'length': L, 'k': k, 'end': end, 'axis': ax}
 
 
 def stick_to_rest(stick_mesh, sf, s):
-    """Copy of the stick mesh placed in the renderer's stick rest frame, weighted stick/stick_blade."""
+    """Copy of the stick mesh placed in the renderer's stick rest frame (heel at
+    the origin, shaft up +Z, blade along +X — Blender space), weighted stick/stick_blade."""
     ob = stick_mesh.copy()
     ob.data = stick_mesh.data.copy()
     bpy.context.scene.collection.objects.link(ob)
     ob.parent = None
     ob.modifiers.clear()
-    yaw = math.atan2(sf['blade'].y, sf['blade'].x)
-    M = Matrix.Scale(s, 4) @ Matrix.Rotation(-yaw, 4, 'Z') @ Matrix.Translation(-sf['heel'])
+    # rotation taking (blade, shaft) -> (+X, +Z)
+    bx = sf['blade'].normalized()
+    bz = sf['shaft'].normalized()
+    by = bz.cross(bx)
+    R = Matrix((bx, by, bz))  # rows: world -> stick frame
+    M = Matrix.Scale(s, 4) @ R.to_4x4() @ Matrix.Translation(-sf['heel'])
     world = [stick_mesh.matrix_world @ v.co for v in stick_mesh.data.vertices]
     ob.data.transform(M @ stick_mesh.matrix_world)
     ob.matrix_world = Matrix.Identity(4)
@@ -523,9 +550,12 @@ def stick_to_rest(stick_mesh, sf, s):
         ob.vertex_groups.remove(g)
     gs = ob.vertex_groups.new(name='__stick__')
     gb = ob.vertex_groups.new(name='__blade__')
+    k = sf['k']
     for i, p in enumerate(world):
-        r = (Vector((p.x, p.y, 0)) - sf['axis']).length
-        if p.z < sf['low'] and r > 0.04:
+        q = p.copy()
+        q[k] = sf['axis'][k]
+        r = (q - sf['axis']).length
+        if abs(p[k] - sf['end']) < 0.1 * sf['length'] and r > 0.04:
             gb.add([i], 1.0, 'REPLACE')
         else:
             gs.add([i], 1.0, 'REPLACE')
@@ -549,8 +579,9 @@ SLOT_RULES = {
         (('skating', 'r', 'stop'), []),
         (('skating', 'l'), ['skate_crossover_L']),
         (('skating', 'r'), ['skate_crossover_R']),
-        (('shooting',), ['shot_wrist', 'shot_slap', 'shot_onetimer']),
-        (('shot',), ['shot_wrist', 'shot_slap', 'shot_onetimer']),
+        # shot type decided from the clip itself (shot_kind): a big wind-up is a slapshot
+        (('shooting',), ['shot*']),
+        (('shot',), ['shot*']),
         (('pass',), ['pass']),
         (('faceoff',), ['faceoff_draw']),
         (('check',), ['check']),
@@ -670,12 +701,26 @@ def evaluate_clip(path, prim_rot, prim_pos, K, G_rot, s, ground, sf):
     return {'frames': out, 'travelFt': round(travel * s, 2), 'yawDeg': round(math.degrees(dy), 1), 'fps': sc.render.fps}
 
 
+def heel_heights(tr):
+    return [fr['stick'][0].z if fr['stick'] else 0.0 for fr in tr['frames']]
+
+
+def shot_kind(tr):
+    """'shot_slap' when the blade is wound up above the shoulders, else wrist / one-timer."""
+    if not tr['frames'][0]['stick']:
+        return ['shot_wrist', 'shot_onetimer']
+    return ['shot_slap'] if max(heel_heights(tr)) > 3.5 else ['shot_wrist', 'shot_onetimer']
+
+
 def detect_contact(tr, slot):
-    """Frame of the sharpest motion: stick heel for shots, hands/feet for saves."""
+    """Contact frame. Shots: the fastest blade frame NEAR THE ICE (the release,
+    not the wind-up's peak speed); saves: the sharpest hand / foot motion."""
     fr = tr['frames']
     best, bi = -1.0, 0
     for i in range(1, len(fr)):
         if fr[i]['stick'] and slot.startswith('shot'):
+            if fr[i]['stick'][0].z > 0.9:
+                continue
             v = (fr[i]['stick'][0] - fr[i - 1]['stick'][0]).length
         else:
             v = max((a - b).length for a, b in zip(fr[i]['probe'], fr[i - 1]['probe']))
@@ -716,7 +761,12 @@ def key_clip(arm, name, tr, rest_b):
                 pb.location = R.inverted() @ (heel - rest_b[bn])
                 pb.keyframe_insert('location', frame=f)
             # renderer semantics: stick = fromUnitVectors(UP, shaft); blade = yaw only
-            qs = Vector((0, 0, 1)).rotation_difference(shaft)
+            # full frame (shaft + blade), not the shortest arc from +Z: a raised
+            # stick (shaft pointing down in a wind-up) has no stable shortest arc
+            # and flipped ~145° between frames
+            _bx = (blade - shaft * blade.dot(shaft)).normalized()
+            _bz = shaft.normalized()
+            qs = Matrix((_bx, _bz.cross(_bx), _bz)).transposed().to_quaternion()
             pb = arm.pose.bones['stick']
             R = pb.bone.matrix_local.to_3x3()
             q = (R.inverted() @ qs.to_matrix() @ R).to_quaternion()
@@ -725,8 +775,11 @@ def key_clip(arm, name, tr, rest_b):
             prev['stick'] = q
             pb.rotation_quaternion = q
             pb.keyframe_insert('rotation_quaternion', frame=f)
-            yaw = math.atan2(blade.y, blade.x)  # Blender: +X right, blade dir in the ground plane
-            qb = Quaternion((0, 0, 1), yaw)
+            # full blade orientation (it follows the shaft through a wind-up):
+            # rest frame = blade +X, shaft +Z
+            bx = (blade - shaft * blade.dot(shaft)).normalized()
+            bz = shaft.normalized()
+            qb = Matrix((bx, bz.cross(bx), bz)).transposed().to_quaternion()
             pb = arm.pose.bones['stick_blade']
             R = pb.bone.matrix_local.to_3x3()
             q = (R.inverted() @ qb.to_matrix() @ R).to_quaternion()
@@ -878,6 +931,8 @@ def main():
         if tr is None:
             clips_rep[stem] = {'slots': [], 'note': 'no animation found'}
             continue
+        if slots == ['shot*']:
+            slots = shot_kind(tr)
         rep = {'slots': slots, 'frames': len(tr['frames']), 'rootTravelStrippedFt': tr['travelFt'], 'netYawStrippedDeg': tr['yawDeg'],
                'stick': tr['frames'][0]['stick'] is not None}
         for slot in slots:

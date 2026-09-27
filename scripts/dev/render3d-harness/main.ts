@@ -75,9 +75,9 @@ if (q.get('fly') === '1') {
   r.setSpeed(0.05)
   r.play()
 }
-// ?closeup=home:0,14,35[,h] pins a debug camera `dist` ft from one player at azimuth `az`° (0 = his front)
+// ?closeup=home:0,14,35[,h[,lookY]] pins a debug camera `dist` ft from one player at azimuth `az`° (0 = his front)
 if (q.has('closeup')) {
-  const [who, dist, az, hgt] = q.get('closeup')!.split(',')
+  const [who, dist, az, hgt, lookY] = q.get('closeup')!.split(',')
   const [team, idx] = who!.split(':')
   void team
   const R = r as unknown as {
@@ -96,7 +96,7 @@ if (q.has('closeup')) {
     const a = p.angle + (Number(az ?? 30) * Math.PI) / 180
     const d = Number(dist ?? 14)
     const h = Number(hgt ?? 4.5)
-    R.setDebugCamera({ px: p.worldX.pos + Math.sin(a) * d, py: h, pz: p.worldZ.pos + Math.cos(a) * d, lx: p.worldX.pos, ly: 3, lz: p.worldZ.pos, fov: 30 })
+    R.setDebugCamera({ px: p.worldX.pos + Math.sin(a) * d, py: h, pz: p.worldZ.pos + Math.cos(a) * d, lx: p.worldX.pos, ly: Number(lookY ?? 3), lz: p.worldZ.pos, fov: 30 })
     requestAnimationFrame(aim)
   }
   aim()

@@ -30,6 +30,12 @@ export interface BakedClip {
   name: string
   /** Contact time (s) authored into the clip name (`slot@cN`, owner imports); else the catalogue's. */
   contact?: number
+  /**
+   * The clip's own arm motion holds its own stick (owner imports: arms and
+   * stick were retargeted together from the source, on the same skeleton), so
+   * it drives the arms instead of the renderer re-gripping the hands by IK.
+   */
+  ownArms?: boolean
   /** Number of samples (frames + 1: the last sample is the end pose). */
   samples: number
   duration: number
@@ -379,9 +385,13 @@ export function loadOwnerAssets(): Promise<OwnerAssets | null> {
         const [s, g, ts, tg] = await Promise.all([parse(sk!), gk ? parse(gk) : Promise.resolve(null), texFor('skater'), texFor('goalie')])
         if (!ts || !layout['skater']) throw new Error('owner skater textures / layout missing — rerun npm run import:owner-assets')
         const goalieOk = g && tg && layout['goalie']
+        const own = (t: AthleteTemplate) => {
+          for (const c of t.clips.values()) c.ownArms = true
+          return t
+        }
         return {
-          skater: templateFromGltf(s, false),
-          goalie: goalieOk ? templateFromGltf(g, true) : null,
+          skater: own(templateFromGltf(s, false)),
+          goalie: goalieOk ? own(templateFromGltf(g, true)) : null,
           tex: { skater: ts, goalie: goalieOk ? tg : null },
           layout: { skater: layout['skater']!, goalie: goalieOk ? layout['goalie']! : null },
         }

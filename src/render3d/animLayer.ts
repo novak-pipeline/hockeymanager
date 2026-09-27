@@ -205,13 +205,13 @@ export class ActionLayer {
   }
 
   blendArms(bones: Bones): void {
-    for (const a of this.active) if (a.meta.hands === 'clip') blendClip(bones, a.clip, this.time(a), !!a.meta.loop, this.weight(a), a.meta.mask, 'arms')
+    for (const a of this.active) if (a.meta.hands === 'clip' || a.clip.ownArms) blendClip(bones, a.clip, this.time(a), !!a.meta.loop, this.weight(a), a.meta.mask, 'arms')
   }
 
   /** Does any active clip drive the arms directly? (skip nothing — IK still runs first) */
   armsWeight(): number {
     let w = 0
-    for (const a of this.active) if (a.meta.hands === 'clip' && a.meta.mask !== 'lower') w = Math.max(w, this.weight(a))
+    for (const a of this.active) if ((a.meta.hands === 'clip' || a.clip.ownArms) && a.meta.mask !== 'lower') w = Math.max(w, this.weight(a))
     return w
   }
 }

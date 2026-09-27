@@ -262,6 +262,42 @@ def save_normal(src, dst, size):
 
 # ── gear atlas ─────────────────────────────────────────────────────────────
 
+GEAR_REPORT = {}
+
+
+def number_boxes(diffuse_path, rcfg, index):
+    """Source-pixel boxes of baked-in player numbers on a gear texture: every
+    all-digit layer of the matching PSD (e.g. the '53' on the skater helmet) plus
+    any `paintOut` boxes pinned in owner_assets.json ("<gear index>": [[x0,y0,x1,y1],…])."""
+    boxes = [list(b) for b in (rcfg.get('paintOut') or {}).get(str(index), [])]
+    stem = os.path.splitext(os.path.basename(diffuse_path))[0]
+    psd = os.path.join(os.path.dirname(diffuse_path), (stem[:-2] if stem.endswith('_D') else stem) + '.psd')
+    if os.path.exists(psd):
+        seen = set()
+        for name, _m, bb, _t in Image.open(psd).layers:
+            if name.strip().isdigit() and 0 < bb[2] - bb[0] < 300 and 0 < bb[3] - bb[1] < 300 and tuple(bb) not in seen:
+                seen.add(tuple(bb))
+                boxes.append(list(bb))
+    return boxes
+
+
+def paint_out(img, boxes, pad=6):
+    """Fill each box with the median colour of the ring around it (a flat
+    patch of the part's base colour — the renderer paints no helmet numbers)."""
+    a = np.asarray(img).copy()
+    H, W = a.shape[:2]
+    for x0, y0, x1, y1 in boxes:
+        x0, y0, x1, y1 = max(0, x0 - pad), max(0, y0 - pad), min(W, x1 + pad), min(H, y1 + pad)
+        r = 8
+        ring = np.concatenate([
+            a[max(0, y0 - r):y0, x0:x1].reshape(-1, 3), a[y1:min(H, y1 + r), x0:x1].reshape(-1, 3),
+            a[y0:y1, max(0, x0 - r):x0].reshape(-1, 3), a[y0:y1, x1:min(W, x1 + r)].reshape(-1, 3),
+        ])
+        if len(ring):
+            a[y0:y1, x0:x1] = np.median(ring, axis=0).astype(np.uint8)
+    return Image.fromarray(a, 'RGB')
+
+
 def bake_gear(role, rcfg):
     base = os.path.join(SRC, rcfg['dir'])
     for kind, size, fill in (('diffuse', GEAR, (0, 0, 0)), ('normal', NRM, (128, 128, 255))):
@@ -276,7 +312,12 @@ def bake_gear(role, rcfg):
                 img.load()
                 os.remove(tmp)
             else:
-                img = Image.open(p).convert('RGB').resize((q, q), Image.LANCZOS)
+                src = Image.open(p).convert('RGB')
+                boxes = number_boxes(p, rcfg, i)
+                if boxes:
+                    src = paint_out(src, boxes)
+                    GEAR_REPORT.setdefault(role, []).append({'texture': rel, 'paintedOut': boxes})
+                img = src.resize((q, q), Image.LANCZOS)
             atlas.paste(img, ((i % 2) * q, (i // 2) * q))
         atlas.save(os.path.join(OUT, f'{role}_gear_{"d" if kind == "diffuse" else "n"}.jpg'), quality=90)
 
@@ -291,6 +332,9 @@ def main():
         bake_clothes(role, rcfg, layout)
         bake_gear(role, rcfg)
         print('TEXTURES OK', role)
+    for role, rep in GEAR_REPORT.items():
+        if role in layout:
+            layout[role]['report']['gearPaintedOut'] = rep
     with open(os.path.join(OUT, 'owner_layout.json'), 'w', encoding='utf-8') as fh:
         json.dump(layout, fh, indent=1)
 
