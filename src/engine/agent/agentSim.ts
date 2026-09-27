@@ -90,13 +90,22 @@ const DT = FRAME_DT / SUBSTEPS
 // ---------------------------------------------------------------------------
 export const AGENT_TUNING = {
   /** Reconciles the empirical xG with this engine's shot mix → goals/game. */
-  finishK: 0.86,
+  finishK: 0.8,
   /** Base share of unblocked attempts that miss the net. */
   missBase: 0.3,
   /** Poke-check success scale (takeaways). */
   pokeK: 0.065,
+  /** Stick-check success multiplier on a carrier who is standing still. */
+  pokeStill: 2.2,
+  /** Chance per ready think that a defender stabs at a MOVING carrier in reach. */
+  pokeTry: 0.08,
+  pokeTryStill: 0.6,
+  /** Below this speed (ft/s) a carrier counts as standing still for stick checks. */
+  pokeStillV: 4.5,
+  /** Success scale per real attempt (attempts are rarer than thinks). */
+  pokeAttemptK: 6.5,
   /** Unforced fumble rate under pressure (giveaways). */
-  fumbleK: 4.3,
+  fumbleK: 7.5,
   /** Per-think stick-foul chance when beaten (penalties). */
   stickFoulK: 2.5,
   /** Misc stoppages per second of live play ("other": net off, high stick…). */
@@ -117,6 +126,8 @@ const BENCH_GATE = { x: 22, y: -41 }
 const GOAL_CELEBRATION_S = 4
 const FACEOFF_MIN_WAIT = 1.5
 const FACEOFF_MAX_WAIT = 12
+/** Seconds a defender needs between two real stick checks. */
+const POKE_RELOAD_S = 1.4
 /** A skater who fumbles a touch gets another try this much later. */
 const RETRY_S = 0.3
 
@@ -217,7 +228,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     lastHad: new Map(),
     delayedOffside: null,
     possSince: 0,
-    possStartAdv: 0
+    possStartAdv: 0,
+    nearSince: -1,
+    nearBy: null
   }
   let flight = null as Flight | null
   let now = 0
@@ -250,6 +263,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   let bite = null as { side: Side; dy: number; until: number } | null
   let prevPoss: { side: Side; since: number; adv: number } | null = null
 
+  const pokeReady = new Map<Body, number>()
   const tries = (...bs: Body[]): Map<Body, number> => new Map(bs.map((b) => [b, now] as [Body, number]))
   const ev = (e: GameEvent): void => {
     ctx.stream.push(e)
@@ -1314,6 +1328,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         }
       } else if (!d.success) {
         // The defender reads it and takes it off him.
+        ev({ t: T(), period, type: 'pokeCheck', by: d.on.player.id, on: c.player.id, success: true, pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y } })
         poke = { by: d.on, from: c, side: oppOf(s), t: now }
         const ang = Math.atan2(c.y - d.on.y, c.x - d.on.x) + rng.float(-0.8, 0.8)
         loosen(Math.cos(ang) * rng.float(6, 12), Math.sin(ang) * rng.float(6, 12), null)
@@ -1503,19 +1518,32 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           }
         }
       }
-      // Stick checks.
+      // Stick checks: a defender with the puck in reach makes a real attempt
+      // (poke, lift, sweep), then needs a moment to reload. A carrier who is
+      // standing still in front of him is easy pickings — nobody stands off
+      // a slow carrier in stick reach for long.
       for (const pk of out.pokes) {
         const c = w.carrier
         if (!c || !w.control) break
         if (pk.stun > 0) continue // beaten on the deke: no stick on it
         const dp = Math.hypot(pk.x - puck.x, pk.y - puck.y)
         if (dp > REACH) continue
+        if (now < (pokeReady.get(pk) ?? 0)) continue
+        // He picks his moment: a carrier standing still gets the stick at once;
+        // one skating with it only now and then (a stab at a moving puck is how
+        // you get beaten).
+        const stillC = speedOf(c) < AGENT_TUNING.pokeStillV
+        if (!rng.chance(stillC ? AGENT_TUNING.pokeTryStill : AGENT_TUNING.pokeTry)) continue
+        pokeReady.set(pk, now + POKE_RELOAD_S * rng.float(0.8, 1.3))
         const sc = (rDef(pk.player.ratings.defensive.stickChecking) + r01(pk.player.composites.takeaway)) / 2
         const pc = r01(c.player.composites.puckControl)
         const protect = (c.hx * (pk.x - c.x) + c.hy * (pk.y - c.y)) < 0 ? 0.6 : 1 // body between
-        const pSucc = clamp((0.004 + sc * sc * sc * 0.45 + (sc - pc) * 0.1) * protect * AGENT_TUNING.pokeK, 0.001, 0.35)
+        const still = stillC ? AGENT_TUNING.pokeStill : 1
+        const pSucc = clamp((0.004 + sc * sc * sc * 0.45 + (sc - pc) * 0.1) * protect * still * AGENT_TUNING.pokeK * AGENT_TUNING.pokeAttemptK, 0.001, 0.6)
         if (tm) tm.pokeAttempts++
-        if (rng.chance(pSucc)) {
+        const won = rng.chance(pSucc)
+        ev({ t: T(), period, type: 'pokeCheck', by: pk.player.id, on: c.player.id, success: won, pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y } })
+        if (won) {
           const s = w.control
           const ang = Math.atan2(puck.y - pk.y, puck.x - pk.x) + rng.float(-0.8, 0.8)
           const sp = rng.float(6, 14)
@@ -1695,6 +1723,15 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       if (w.carrier) {
         const c = w.carrier
         w.lastHad.set(c, now)
+        {
+          const cs = w.control!
+          const inClose = Math.hypot(cs.a * GOAL_X - c.x, c.y) < 30
+          if (!inClose) w.nearSince = -1
+          else if (w.nearBy !== c || w.nearSince < 0) {
+            w.nearBy = c
+            w.nearSince = now
+          }
+        }
         const bp = bladePoint(c, now, speedOf(c) < 6 ? 1.3 : 0.8)
         puck.x = bp.x
         puck.y = bp.y

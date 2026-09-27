@@ -135,6 +135,19 @@ export type DekeEvent = GameEventBase & {
   pos: XY
 }
 
+/**
+ * Additive variant (agent engine): a defender's stick-reach attempt to take
+ * the puck off a carrier (poke / stick lift / sweep), whether it worked or
+ * not. A successful one is usually followed by a takeaway.
+ */
+export type PokeCheckEvent = GameEventBase & {
+  type: 'pokeCheck'
+  by: PlayerRef
+  on: PlayerRef
+  success: boolean
+  pos: XY
+}
+
 export type SaveEvent = GameEventBase & {
   type: 'save'
   goalie: PlayerRef
@@ -260,6 +273,7 @@ export type GameEvent =
   | MissedShotEvent
   | BattleEvent
   | DekeEvent
+  | PokeCheckEvent
 
 export type GameEventType = GameEvent['type']
 

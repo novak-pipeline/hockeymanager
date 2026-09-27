@@ -56,6 +56,9 @@ export interface World {
   possSince: number
   /** Where (x in the controlling side's attack frame, ft) that possession began. */
   possStartAdv: number
+  /** Since when the current carrier has had the puck within 30 ft of the net he attacks (-1: not in close). */
+  nearSince: number
+  nearBy: Body | null
 }
 
 export type CarrierAction =

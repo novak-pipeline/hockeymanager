@@ -28,7 +28,7 @@ const r01 = rLevel
 
 export const HIT_TUNING = {
   /** Per-think chance scale that a willing defender commits to a check. */
-  intentK: 0.008,
+  intentK: 0.0095,
   /** Contact closing speed (ft/s) needed for a collision to count as a hit when unplanned. */
   incidentalClosing: 19,
   /** Minimum closing speed for a planned hit to land as a hit. */

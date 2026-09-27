@@ -67,7 +67,7 @@ const r01 = rLevel
  * a carrier who drives into a crowded house risks the whole continuation
  * value on a low-retention carry. That is what brings shots out to range.
  */
-export const VAL = { oz: 0.09, kPos: 0.15, shoot: 1.1, keep: 0.25, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 2, laneRead: 0.75, angleZero: 90, transMaxX: 70, transBack: 0.003, rushNoBackX: 0, regroupMaxX: 20, ozBack: 0.008 }
+export const VAL = { oz: 0.09, kPos: 0.15, shoot: 0.95, keep: 0.25, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 2, laneRead: 0.75, angleZero: 90, transMaxX: 70, transBack: 0.003, rushNoBackX: 0, regroupMaxX: 20, ozBack: 0.008 }
 /**
  * D safety (gap discipline): how far ahead a defenceman reads an attacker
  * coming at him (s), the base gap (ft) plus gap per ft/s of the attacker's
@@ -77,6 +77,12 @@ export const VAL = { oz: 0.09, kPos: 0.15, shoot: 1.1, keep: 0.25, noise: 0.5, n
 export const D_SAFETY = { look: 2, gap: 12, gapPerV: 0.5, stepUpMargin: 1.3, pinchMaxX: 55, gapLead: 0.5, looseGuard: 1 }
 /** Support-skater motion loops around a spot: radius (ft) and angular speed (rad/s). */
 export const DRIFT = { rAtk: 12, rDef: 5, omAtk: 1.1, omDef: 0.9 }
+/**
+ * In close: the radius (ft) around their net where a carrier may not dawdle,
+ * the seconds he may hold it there before he must act, the per-second cost of
+ * holding, and his minimum carry speed there (share of top speed).
+ */
+export const INCLOSE = { radius: 30, deadline: 1.0, holdCost: 0.02, minSpeed: 0.8, protectSpeed: 0.55 }
 /** Defending the house: the on-puck man engages (no containing) inside this radius of our net (ft). */
 export const DZ = { engageFt: 30 }
 /** Seconds after a zone entry that play is still a "rush". */
@@ -306,7 +312,7 @@ export function dekeChance(c: Body, o: Body, goalie: boolean): number {
 }
 
 /** Shot blocking: per-body chance scale for a body square in the lane. */
-export const SHOT_BLOCK = { base: 2.0 }
+export const SHOT_BLOCK = { base: 1.85 }
 
 /** Chance a body `d` ft off the shot line (between shooter and net) blocks it. */
 export function blockChance(o: Body, d: number, slap: boolean): number {
@@ -380,6 +386,14 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
     const angs = [0, 0.5, -0.5, 1.05, -1.05, 1.7, -1.7, Math.PI]
     const look = clamp(sp * 0.9 + 8, 10, 22)
     const puckSkill = r01(c.player.composites.puckControl)
+    // In close (within 30 ft of their net) there is no dawdling: he keeps his
+    // feet moving, and once he has had it there for INCLOSE.deadline seconds he
+    // must shoot, deke, pass — or curl back out high with speed (the cycle),
+    // never a slow circle in front of the goalie.
+    const dNetC = Math.hypot(a * GOAL_X - c.x, c.y)
+    const inClose = dNetC < INCLOSE.radius && !opp.pulled
+    const heldClose = inClose && w.nearBy === c && w.nearSince >= 0 ? w.t - w.nearSince : 0
+    const mustAct = heldClose > INCLOSE.deadline
     for (const da of angs) {
       const ang = baseAng + da
       let qx = c.x + Math.cos(ang) * look
@@ -391,14 +405,17 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       const tc = Math.hypot(qx - c.x, qy - c.y) / Math.max(sp * 0.5 + c.caps.top * 0.45, 10)
       const ret = retention(c, { x: qx, y: qy }, tc, opps)
       const protect = da === Math.PI
+      const qClose = Math.hypot(a * GOAL_X - qx, qy) < INCLOSE.radius
+      if (mustAct && (protect || qClose)) continue
       let retEff = protect ? clamp(ret + 0.25 * puckSkill, 0, 0.97) : ret
       // Skating the puck into the crease is skating it into the goalie: he
       // pokes it or smothers it. In close you deke him or you shoot.
       if (!opp.pulled && Math.hypot(a * GOAL_X - qx, qy) < 9) retEff *= DEKE.creaseRet
       const v = posValue(qx, qy, a)
       const cost = posValue(qx, qy, -a)
-      const ev = retEff * v - (1 - retEff) * cost * 0.9
-      const urg = me.tactics.tempo.pace * 0.4 + (adv < BLUE_X ? 0.55 : 0.35) + (pressure > 0.5 ? 0.2 : 0)
+      // Holding it in close costs a little more every moment (the box closes).
+      const ev = retEff * v - (1 - retEff) * cost * 0.9 - (inClose && qClose ? INCLOSE.holdCost * heldClose : 0)
+      const urg = me.tactics.tempo.pace * 0.4 + (adv < BLUE_X ? 0.55 : 0.35) + (pressure > 0.5 ? 0.2 : 0) + (inClose ? 0.3 : 0)
       opts.push({
         ev: ev + (protect ? -0.002 : 0),
         act: {
@@ -407,7 +424,8 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
           cmd: {
             tx: qx,
             ty: qy,
-            speed: protect ? 8 : c.caps.top * clamp(0.55 + urg * 0.4, 0.55, 0.95),
+            // Protecting is skating AWAY with the body between, not standing on it.
+            speed: protect ? c.caps.top * INCLOSE.protectSpeed : c.caps.top * clamp(0.55 + urg * 0.4, inClose ? INCLOSE.minSpeed : 0.55, 0.95),
             // Holding up at the line for a mate to tag up: stop short of it.
             arrive: offsideMate && qx * a >= capX - 1,
             urgency: clamp(urg, 0.3, 1),
@@ -580,6 +598,10 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
     }
   }
 
+  // Nothing left (in close past his deadline, behind the net): curl out high.
+  if (opts.length === 0) {
+    return { kind: 'carry', protect: false, cmd: { tx: a * 50, ty: clamp(c.y * 0.6, -30, 30), speed: c.caps.top * 0.9, arrive: false, urgency: 0.9 } }
+  }
   // Decision quality: good readers take the best option nearly every time.
   const T = (0.0004 + (1 - reading) * 0.0022 + pressure * 0.0012 * (1 - r01(m.composure))) * VAL.noise
   let best = opts[0]
@@ -861,7 +883,7 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
         // the puck closes and takes the body/stick before the carrier can
         // walk in or circle the net for seconds.
         const inHouse = Math.hypot(ownNetX - cx, cy) < DZ.engageFt
-        const vulnerable = onWall || csp < 4 || turnedAway || inHouse
+        const vulnerable = onWall || csp < 7 || turnedAway || inHouse
         const inside = vulnerable ? 3.2 : clamp(10 - pp * 4, 6, 10)
         cmds.set(presser, {
           tx: cx + ux * inside + carrier.vx * 0.25,
@@ -1029,7 +1051,8 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
       urgency = 1
     }
     // Any stick within reach of their puck can go for it.
-    if (theyHaveIt && Math.hypot(b.x - puck.x, b.y - puck.y) < REACH && out.pokes.length < 2) out.pokes.push(b)
+    // (A second stick joins in on a carrier who is standing still.)
+    if (theyHaveIt && carrier && speedOf(carrier) < 7 && Math.hypot(b.x - puck.x, b.y - puck.y) < REACH && out.pokes.length < 2) out.pokes.push(b)
     const h = boardsClamp(t.x, t.y, 2)
     const dist = Math.hypot(h.x - b.x, h.y - b.y)
     // Far from the spot → skate; close → drift calmly into it.
