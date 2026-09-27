@@ -511,6 +511,13 @@ export function MatchViewer(props: {
       home: darkJersey(game.homeColors.primary, game.homeColors.secondary),
       away: AWAY_WHITE,
     }
+    // 3D dresses the away side itself (white sweater, team-colour stripes and
+    // numbers — palette.kitFor): it needs the away CLUB's colour, not white,
+    // or away kits came out all-white with no team colour at all.
+    const colors3d: RinkColors = {
+      home: colors.home,
+      away: darkJersey(game.awayColors.primary, game.awayColors.secondary),
+    }
 
     prevScoreRef.current      = { home: 0, away: 0 }
     lastAbsTRef.current       = -1
@@ -537,7 +544,7 @@ export function MatchViewer(props: {
 
     const promise =
       rendererMode === '3d'
-        ? Rink3dRenderer.create(host, colors)
+        ? Rink3dRenderer.create(host, colors3d)
         : RinkRenderer.create(host, colors)
 
     promise
@@ -566,7 +573,7 @@ export function MatchViewer(props: {
           playerLabels[id] = { lastName: parts[parts.length - 1] ?? fullName }
         }
         // Start paused at speed=2; will play when user picks a mode
-        r.load(timeline, colors, playerLabels)
+        r.load(timeline, r instanceof Rink3dRenderer ? colors3d : colors, playerLabels)
         r.setSpeed(2)
 
         // Resume where the previous view left off (renderer switch / Sim view).
