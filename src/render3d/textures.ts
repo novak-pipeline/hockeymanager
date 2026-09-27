@@ -135,7 +135,11 @@ export const SLEEVE_STRIPE_T = [0.27, 0.4] as const
 export const SOCK_STRIPE_T = [0.45, 0.68] as const
 
 export function buildAtlasCanvas(): HTMLCanvasElement {
-  const [c] = canvas(ATLAS_GRID * ATLAS_SLOT_PX, ATLAS_GRID * ATLAS_SLOT_PX)
+  const c = document.createElement('canvas')
+  c.width = c.height = ATLAS_GRID * ATLAS_SLOT_PX
+  // CPU-backed: it is uploaded to WebGL on every repaint, and a GPU canvas
+  // makes each upload a synchronous readback (a frame stall on line changes)
+  c.getContext('2d', { willReadFrequently: true })
   return c
 }
 

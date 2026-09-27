@@ -158,6 +158,56 @@ export interface ChoreoActor {
   butterfly?: number
   /** Animation clock (s), advancing with the game clock. */
   animTime?: number
+  /** Smoothed locomotion state (choreo-owned; see smoothLoco). */
+  loco?: LocoSmooth
+}
+
+/**
+ * Per-actor locomotion smoothing. Every clip switch the velocity direction
+ * drives (stride ↔ crossover L/R ↔ back, stance ↔ shuffle) is a CROSSFADE:
+ * the target weights are low-passed (LOCO_TAU) and the velocity feeding them
+ * is smoothed first (the sim's positions arrive in steps, so the raw velocity
+ * direction flickers). Clip phases are integrated, never recomputed from a
+ * time × speed product (that jumped whenever the speed changed).
+ */
+export interface LocoSmooth {
+  t: number
+  w: Record<string, number>
+  vx: number
+  vz: number
+  phase: number
+  still: number
+}
+export const LOCO_TAU = 0.2
+const VEL_TAU = 0.25
+
+function locoState(a: ChoreoActor): { st: LocoSmooth; dt: number } {
+  const now = a.animTime ?? 0
+  let st = a.loco
+  if (!st) {
+    st = { t: now, w: {}, vx: a.vx, vz: a.vz, phase: 0, still: 0 }
+    a.loco = st
+  }
+  const dt = Math.min(0.1, Math.max(0, now - st.t))
+  st.t = now
+  const kv = dt > 0 ? 1 - Math.exp(-dt / VEL_TAU) : 0
+  st.vx += (a.vx - st.vx) * kv
+  st.vz += (a.vz - st.vz) * kv
+  return { st, dt }
+}
+
+/** Low-pass the target weights into the actor's current weights (sum stays 1). */
+export function smoothWeights(cur: Record<string, number>, target: Record<string, number>, dt: number, tau = LOCO_TAU): Record<string, number> {
+  const first = Object.keys(cur).length === 0
+  const k = first ? 1 : 1 - Math.exp(-dt / tau)
+  let tot = 0
+  for (const n of new Set([...Object.keys(cur), ...Object.keys(target)])) {
+    const v = (cur[n] ?? 0) + ((target[n] ?? 0) - (cur[n] ?? 0)) * k
+    cur[n] = v < 1e-4 ? 0 : v
+    tot += cur[n]!
+  }
+  if (tot > 0) for (const n in cur) cur[n] = cur[n]! / tot
+  return cur
 }
 
 export type LocoMode = 'code' | 'clip' | 'hybrid'
@@ -343,17 +393,29 @@ export class Choreographer {
     const decel = (actor.lastSpeedFt - sp) / dt
     const was = actor.lastSpeedFt
     actor.lastSpeedFt = sp
-    // owner imports: a push-off clip when a skater gets going from a standstill
-    if (actor.stopCooldown === 0 && was < 3 && sp > 7 && actor.layer.has('skate_start') && actor.layer.bodyBusy() === 0) {
-      actor.layer.play('skate_start')
-      actor.stopCooldown = 1.5
+    void was
+    // owner imports: a push-off clip when a skater gets going from a REAL
+    // standstill (≥ 0.5 s below 2 ft/s on the smoothed speed — raw per-frame
+    // speed spikes fired it every second or two)
+    const ls = actor.loco
+    if (ls) {
+      const smooth = Math.hypot(ls.vx, ls.vz) / Math.max(1, playbackSpeed)
+      if (smooth < 2) ls.still += dt
+      else if (smooth > 6) {
+        if (ls.still >= 0.5 && actor.stopCooldown === 0 && actor.layer.has('skate_start') && actor.layer.bodyBusy() === 0) {
+          actor.layer.play('skate_start')
+          actor.stopCooldown = 1.5
+        }
+        ls.still = 0
+      }
     }
     if (decel > 30) {
       if (actor.stopAccum === 0) actor.stopFrom = sp + decel * dt
       actor.stopAccum += dt
     } else actor.stopAccum = 0
     if (actor.stopCooldown === 0 && actor.stopAccum >= 0.12 && wantsHockeyStop(actor.stopFrom, decel) && actor.layer.bodyBusy() === 0) {
-      actor.layer.play('hockey_stop')
+      // a touch slower than authored: the Blender stop swings the hips ~19°/frame
+      actor.layer.play('hockey_stop', { speed: 0.8 })
       actor.stopCooldown = 3
       actor.stopAccum = 0
     }
@@ -386,8 +448,9 @@ export class Choreographer {
  */
 export function blendLocomotion(B: Record<BoneName, THREE.Bone>, clips: Map<string, BakedClip>, a: ChoreoActor, mode: LocoMode, owner = false): void {
   const facing = a.angle
-  const vAng = Math.atan2(a.vx, a.vz)
-  const sp = Math.hypot(a.vx, a.vz)
+  const { st, dt } = locoState(a)
+  const vAng = Math.atan2(st.vx, st.vz)
+  const sp = Math.hypot(st.vx, st.vz)
   const back = sp > 1 ? Math.max(0, -Math.cos(wrapAngle(vAng - facing))) : 0
   // + = toward the player's left (his +X = (cos θ, −sin θ) in world X/Z)
   const lateral = owner && sp > 1 ? Math.sin(wrapAngle(vAng - facing)) : 0
@@ -397,13 +460,15 @@ export function blendLocomotion(B: Record<BoneName, THREE.Bone>, clips: Map<stri
     w['skate_idle'] = w['skate_glide']!
     w['skate_glide'] = 0
   }
+  smoothWeights(st.w, w, dt)
+  const ws = st.w as typeof w
   const mask = owner ? 'full' : 'lower'
   const phase01 = a.stridePhase / (2 * Math.PI)
   // Sequential slerps as a normalised weighted average: each clip gets
   // w_i / (W + w_i) where W is the weight already in the blend. In 'hybrid'
   // the code's own stride/glide is the starting W; in 'clip' it is 0 (fully replaced).
-  let W = mode === 'hybrid' ? w.skate_stride + w.skate_glide : 0
-  for (const [name, weight] of Object.entries(w) as Array<[string, number]>) {
+  let W = mode === 'hybrid' ? (ws.skate_stride ?? 0) + (ws.skate_glide ?? 0) : 0
+  for (const [name, weight] of Object.entries(ws) as Array<[string, number]>) {
     if (mode === 'hybrid' && (name === 'skate_stride' || name === 'skate_glide')) continue
     const clip = clips.get(name)
     if (!clip || weight <= 0.001) continue
@@ -418,11 +483,14 @@ export function blendLocomotion(B: Record<BoneName, THREE.Bone>, clips: Map<stri
  * direction of travel relative to his facing; yields to the code butterfly.
  */
 export function blendGoalieLocomotion(B: Record<BoneName, THREE.Bone>, clips: Map<string, BakedClip>, a: ChoreoActor): void {
-  const sp = Math.hypot(a.vx, a.vz)
-  const vAng = Math.atan2(a.vx, a.vz)
+  const { st, dt } = locoState(a)
+  const sp = Math.hypot(st.vx, st.vz)
+  const vAng = Math.atan2(st.vx, st.vz)
   const fwd = sp > 0.5 ? Math.cos(wrapAngle(vAng - a.angle)) : 0
   const lat = sp > 0.5 ? Math.sin(wrapAngle(vAng - a.angle)) : 0
-  const w = goalieLocoWeights(sp, fwd, lat)
+  const w = smoothWeights(st.w, goalieLocoWeights(sp, fwd, lat), dt)
+  // one integrated cycle phase (s) for the travel clips — cadence follows speed
+  st.phase += dt * Math.min(1.5, Math.max(0.6, sp / 8))
   const k = 1 - (a.butterfly ?? 0)
   if (k <= 0.001) return
   let W = 0
@@ -432,8 +500,7 @@ export function blendGoalieLocomotion(B: Record<BoneName, THREE.Bone>, clips: Ma
     const f = weight / (W + weight)
     W += weight
     // animTime only runs while the game clock does (a paused game is a frozen frame)
-    const at = a.animTime ?? 0
-    const t = name === 'g_stance' ? at : at * Math.min(1.5, Math.max(0.6, sp / 8))
+    const t = name === 'g_stance' ? (a.animTime ?? 0) : st.phase
     blendClip(B as unknown as Record<string, THREE.Bone>, clip, t, true, f * k, 'full', 'body')
   }
 }

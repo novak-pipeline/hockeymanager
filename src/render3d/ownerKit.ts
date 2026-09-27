@@ -72,7 +72,7 @@ export class OwnerKitPainter {
     const s = this.src[role] ?? this.src.skater!
     const c = document.createElement('canvas')
     c.width = c.height = s.size
-    const ctx = c.getContext('2d')!
+    const ctx = c.getContext('2d', { willReadFrequently: true })!
     const out = ctx.createImageData(s.size, s.size)
     const o = out.data
     const pal: number[][] = [[0, 0, 0], ...[kit.jersey, kit.trim, kit.trim2, kit.pants, kit.socks].map((h) => [(h >> 16) & 255, (h >> 8) & 255, h & 255])]
@@ -170,6 +170,8 @@ export class OwnerKitPainter {
 export function buildOwnerAtlasCanvas(): HTMLCanvasElement {
   const c = document.createElement('canvas')
   c.width = c.height = OWNER_SLOT_PX * ATLAS_GRID
+  // CPU-backed (see textures.ts buildAtlasCanvas): uploads never read back from the GPU
+  c.getContext('2d', { willReadFrequently: true })
   return c
 }
 
