@@ -61,6 +61,8 @@ export interface AgentTelemetry {
   infractions: Record<string, number>
   fights: number
   battles: number
+  /** Dirty/star hits answered at the next whistle (fight or roughing). */
+  codeAnswers: number
   /** Per-attempt diagnostics: distance, nearest defender, defenders in the house, seconds since the side won the puck. */
   shotLog: { dist: number; nearest: number; house: number; poss: number; sinceEntry: number; held: number; carried: number; src: string }[]
   noteAccel(acc: number, speed: number): void
@@ -122,6 +124,7 @@ export function emptyAgentTelemetry(): AgentTelemetry {
     infractions: {},
     fights: 0,
     battles: 0,
+    codeAnswers: 0,
     shotLog: [],
     noteAccel(acc, speed) {
       this.accelHist[Math.min(40, Math.floor(acc))]++

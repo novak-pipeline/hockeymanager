@@ -457,8 +457,8 @@ function drift(b: Body, t: number, withPuck: boolean): XY {
   // Hockey players never stand still: support skaters keep their feet moving
   // in loops around their spot (getting open, timing their route), defenders
   // shuffle and re-set. Weaker positional players also wander off the spot.
-  const R = withPuck ? 7 : 3.5
-  const om = withPuck ? 1.4 : 1.0
+  const R = withPuck ? 9 : 5
+  const om = withPuck ? 1.5 : 1.2
   const err = (1 - pos) * 5
   return {
     x: Math.cos(t * om + ph) * R + Math.sin(t * 0.31 + ph) * err,
@@ -561,11 +561,11 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
         // stick-and-a-half gap, and only close to engage when the carrier is
         // vulnerable — pinned on the wall, slow, or turned away from our net
         // (the moment to strip him or finish him).
-        const onWall = distToBoards(cx, cy) < 8
+        const onWall = distToBoards(cx, cy) < 5
         const csp = speedOf(carrier)
         const turnedAway = carrier.hx * ux + carrier.hy * uy < -0.2
-        const vulnerable = onWall || csp < 6 || turnedAway
-        const inside = vulnerable ? 3.2 : clamp(8.5 - pp * 4, 4.5, 8.5)
+        const vulnerable = onWall || csp < 4 || turnedAway
+        const inside = vulnerable ? 3.2 : clamp(10 - pp * 4, 6, 10)
         cmds.set(presser, {
           tx: cx + ux * inside + carrier.vx * 0.25,
           ty: cy + uy * inside + carrier.vy * 0.25,

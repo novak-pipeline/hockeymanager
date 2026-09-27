@@ -100,7 +100,7 @@ export const AGENT_TUNING = {
   /** Unforced fumble rate under pressure (giveaways). */
   fumbleK: 0.6,
   /** Per-think stick-foul chance when beaten (penalties). */
-  stickFoulK: 0.6,
+  stickFoulK: 0.45,
   /** Misc stoppages per second of live play ("other": net off, high stick…). */
   miscStopPerSec: 0.0028
 }
@@ -223,9 +223,11 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   const lastShift = new Map<Side, number>([[H, 0], [A, 0]])
   const cmds = new Map<Body, MoveCmd>()
   const smooth = new Map<Body, { x: number; y: number }>()
+  const shaping = new Map<Body, { ox: number; oy: number; sf: number }>()
   let prevAdv = 0 // puck x in the controlling side's frame, last substep
   let lastCarrierAdvSide: Side | null = null
   const hitIntent = new Map<Body, HitIntent>()
+  let codeDue: { answerer: Body; hitter: Body; side: Side } | null = null
   let battle: { start: number; x: number; y: number; kind: 'boards' | 'netFront' | 'loosePuck'; players: Set<Body>; last: number } | null = null
   let gotAt = 0
   let gotHow = 'faceoff'
@@ -374,10 +376,12 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     hitIntent.clear()
     // A delayed penalty is assessed at the whistle.
     if (delayed) assessDelayed()
+    // THE CODE: somebody answers for the dirty hit at this whistle.
+    const answered = settleTheCode()
     // Tired lines change at the whistle.
     for (const s of sides) {
       const shift = now - (lastShift.get(s) ?? 0)
-      if (shift > 28) {
+      if (shift > 28 || answered) {
         creditShift(s, now)
         deploySide(s, true)
       }
@@ -1247,6 +1251,40 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       }
     }
 
+    // ---- Command shaping (once per frame). ----
+    // Personal space: steer around teammates instead of bumping into them
+    // (hard separation in physics made clustered men jitter). Tied up: a
+    // defender goal-side and on the carrier slows him down.
+    shaping.clear()
+    for (const s of sides) {
+      for (const b of s.skaters) {
+        let ox = 0
+        let oy = 0
+        for (const o of s.skaters) {
+          if (o === b) continue
+          const dx = b.x - o.x
+          const dy = b.y - o.y
+          const d = Math.hypot(dx, dy)
+          if (d < 7 && d > 0.01) {
+            ox += (dx / d) * (7 - d) * 1.2
+            oy += (dy / d) * (7 - d) * 1.2
+          }
+        }
+        let sf = 1
+        if (b === w.carrier && w.control) {
+          const cs = w.control
+          for (const o of oppOf(cs).skaters) {
+            if ((o.x - b.x) * cs.a > 0 && Math.hypot(o.x - b.x, o.y - b.y) < 4.2) {
+              const str = r01(b.player.ratings.physical.strength) - r01(o.player.ratings.physical.strength)
+              sf = clamp(0.45 + str * 0.4, 0.25, 0.75)
+              break
+            }
+          }
+        }
+        shaping.set(b, { ox, oy, sf })
+      }
+    }
+
     // ---- Physics substeps. ----
     for (let k = 0; k < SUBSTEPS && !ended; k++) {
       const all: Body[] = []
@@ -1256,43 +1294,24 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           // A player drifting into shape reads the play continuously: his
           // target glides (≈0.45 s lag) instead of jumping every think — no
           // twitch. Racing/pressing/carrying men react at once.
-          let cmd = raw
-          // Personal space: steer around teammates instead of bumping into
-          // them (hard separation in physics made clustered men jitter).
-          {
-            let ox = 0
-            let oy = 0
-            for (const o of s.skaters) {
-              if (o === b) continue
-              const dx = b.x - o.x
-              const dy = b.y - o.y
-              const d = Math.hypot(dx, dy)
-              if (d < 7 && d > 0.01) {
-                ox += (dx / d) * (7 - d) * 1.2
-                oy += (dy / d) * (7 - d) * 1.2
-              }
-            }
-            if (ox !== 0 || oy !== 0) cmd = { ...cmd, tx: cmd.tx + ox, ty: cmd.ty + oy }
-          }
-          // Tied up: a defender goal-side and on him slows the carrier down.
-          if (b === w.carrier && w.control) {
-            const cs = w.control
-            for (const o of oppOf(cs).skaters) {
-              if ((o.x - b.x) * cs.a > 0 && Math.hypot(o.x - b.x, o.y - b.y) < 4.2) {
-                const str = r01(b.player.ratings.physical.strength) - r01(o.player.ratings.physical.strength)
-                cmd = { ...raw, speed: raw.speed * clamp(0.45 + str * 0.4, 0.25, 0.75) }
-                break
-              }
-            }
-          }
+          let tx = raw.tx
+          let ty = raw.ty
           const sm = smooth.get(b)
           if (raw.urgency < 0.85 && b !== w.carrier && sm && !pending) {
             const f = DT / 0.45
             sm.x += (raw.tx - sm.x) * f
             sm.y += (raw.ty - sm.y) * f
-            cmd = { ...raw, tx: sm.x, ty: sm.y }
+            tx = sm.x
+            ty = sm.y
+          } else if (sm) {
+            sm.x = raw.tx
+            sm.y = raw.ty
           } else smooth.set(b, { x: raw.tx, y: raw.ty })
-          if (!sm) smooth.set(b, { x: raw.tx, y: raw.ty })
+          const sh = shaping.get(b)
+          const cmd: MoveCmd =
+            sh && (sh.ox !== 0 || sh.oy !== 0 || sh.sf !== 1 || tx !== raw.tx)
+              ? { ...raw, tx: tx + sh.ox, ty: ty + sh.oy, speed: raw.speed * sh.sf }
+              : raw
           stepBody(b, cmd, DT)
           all.push(b)
           if (tm) tm.noteAccel(b.accMag, speedOf(b))
@@ -1329,11 +1348,12 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           flight!.tried.set(r.victim, now)
         }
         if (r.penalty && !delayed) callPenalty(r.hitter, sideOf(r.hitter)!, r.penalty, r.victim)
+        maybeTheCode(r)
       }
       now += DT
       w.t = now
       if (deadAt !== null) continue
-      battleTick()
+      if (k === SUBSTEPS - 1) battleTick()
       if (w.delayedOffside) {
         const ds = w.delayedOffside
         if (puck.x * ds.a < BLUE_X || !anyOffside(ds)) w.delayedOffside = null
@@ -1495,6 +1515,55 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       return true
     }
     return false
+  }
+
+  // --- The code: answering a dirty (or star-rattling) hit. ------------------
+  function maybeTheCode(r: { hitter: Body; victim: Body; force: number; penalty: string | null }): void {
+    if (codeDue) return
+    const vs = sideOf(r.victim)
+    if (!vs) return
+    const dirty = r.penalty === 'boarding' || r.penalty === 'charging' || r.penalty === 'elbowing'
+    const star = r.victim.player.composites.scoring >= 72 && r.force > 20
+    if (!dirty && !star) return
+    // The toughest man on the ice for the victim's side steps up.
+    let ans: Body | null = null
+    let best = -1
+    for (const b of vs.skaters) {
+      if (b === r.victim && !dirty) continue
+      const tough = (b.player.fighting ?? b.player.composites.penaltyProne) + r01(b.player.ratings.mental.aggression) * 40 + (b.player.role === 'enforcer' ? 40 : 0)
+      if (tough > best) {
+        best = tough
+        ans = b
+      }
+    }
+    if (!ans) return
+    const p = clamp((best / 160) * (dirty ? 0.55 : 0.25) * (1 + (ctx.intensity ?? 0) * 0.8), 0, 0.7)
+    if (rng.chance(p)) codeDue = { answerer: ans, hitter: r.hitter, side: vs }
+  }
+  function settleTheCode(): boolean {
+    const c = codeDue
+    codeDue = null
+    if (!c) return false
+    const hs = sideOf(c.hitter)
+    if (!hs || !c.side.skaters.includes(c.answerer)) return false
+    const absNow = absBase + now
+    // Gloves off, or just a shove after the whistle (roughing).
+    const willing = (c.hitter.player.fighting ?? 50) + r01(c.hitter.player.ratings.mental.aggression) * 40
+    if (rng.chance(clamp(willing / 120, 0.2, 0.85))) {
+      for (const [s, b] of [[c.side, c.answerer], [hs, c.hitter]] as const) {
+        s.sim.sidelined.push({ expiresAt: absNow + FIGHT_MAJOR_SECONDS, playerId: b.player.id })
+        stat(ctx, b.player.id).penaltyMinutes += 5
+        ev({ t: T(), period, type: 'penalty', player: b.player.id, infraction: 'fighting', minutes: 5 })
+      }
+      if (tm) tm.fights++
+    } else {
+      c.side.sim.penalties.push({ expiresAt: absNow + PENALTY_SECONDS, playerId: c.answerer.player.id })
+      stat(ctx, c.answerer.player.id).penaltyMinutes += 2
+      ev({ t: T(), period, type: 'penalty', player: c.answerer.player.id, infraction: 'roughing', minutes: 2, drawnBy: c.hitter.player.id })
+      if (tm) tm.penalties++
+    }
+    if (tm) tm.codeAnswers++
+    return true
   }
 
   // --- Battles: a contested puck both teams are fighting for. ---------------
