@@ -90,7 +90,7 @@ const DT = FRAME_DT / SUBSTEPS
 // ---------------------------------------------------------------------------
 export const AGENT_TUNING = {
   /** Reconciles the empirical xG with this engine's shot mix → goals/game. */
-  finishK: 0.56,
+  finishK: 0.46,
   /** Base share of unblocked attempts that miss the net. */
   missBase: 0.3,
   /** Base per-contact shot-block chance for a body square in the lane. */

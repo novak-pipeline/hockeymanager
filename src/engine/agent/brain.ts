@@ -52,7 +52,7 @@ const r01 = (v: number | undefined): number => clamp((v ?? 50) / 100, 0, 1)
 
 /** Multiplier on the value of shooting (the shot-volume lever). */
 
-export const SHOOT_BIAS = { value: 0.355 }
+export const SHOOT_BIAS = { value: 0.34 }
 /** Seconds after a zone entry that play is still a "rush". */
 const RUSH_WINDOW = 4.5
 /** Stick reach from the body centre, ft. */
