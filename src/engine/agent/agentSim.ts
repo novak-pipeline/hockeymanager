@@ -90,7 +90,7 @@ const DT = FRAME_DT / SUBSTEPS
 // ---------------------------------------------------------------------------
 export const AGENT_TUNING = {
   /** Reconciles the empirical xG with this engine's shot mix → goals/game. */
-  finishK: 0.46,
+  finishK: 0.53,
   /** Base share of unblocked attempts that miss the net. */
   missBase: 0.3,
   /** Base per-contact shot-block chance for a body square in the lane. */
@@ -106,10 +106,10 @@ export const AGENT_TUNING = {
 }
 
 const PP_SHOT_BOOST = 1.12
-const EN_GOAL_P = 0.85
 const SHIFT_TARGET = 33
 const PENALTY_SECONDS = 120
-const BENCH = { x: 97, y: -36 }
+/** Bench door (ft): on the bench-side boards, on the team's defending half. */
+const BENCH_GATE = { x: 22, y: -41 }
 const GOAL_CELEBRATION_S = 4
 const FACEOFF_MIN_WAIT = 1.5
 const FACEOFF_MAX_WAIT = 12
@@ -243,12 +243,14 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   // -------------------------------------------------------------------------
   // Deployment / strength / line changes
   // -------------------------------------------------------------------------
+  const goalieAtBench = new Set<TeamSim>()
   const desiredFor = (team: TeamSim, opp: TeamSim): { kind: DeployKind; count: number } => {
     if (baseSkaters === 3) {
       const adv = clamp(opp.penalties.length - team.penalties.length, 0, 1)
       return { kind: 'ot', count: 3 + adv }
     }
-    const extra = team.pulled ? 1 : 0
+    // The extra attacker jumps on only once the goalie is at the bench door.
+    const extra = team.pulled && goalieAtBench.has(team) ? 1 : 0
     if (team.penalties.length > 0) return { kind: 'pk', count: clamp(5 - team.penalties.length + extra, 3, 6) }
     if (opp.penalties.length > 0) return { kind: 'pp', count: clamp(5 + extra, 3, 6) }
     return { kind: 'ev', count: clamp(5 + extra, 3, 6) }
@@ -287,7 +289,10 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       const isD = r.player.position === 'D'
       const src = free.find((b) => (b.player.position === 'D') === isD) ?? free[0]
       if (src) free.splice(free.indexOf(src), 1)
-      const b = makeBody(r.player, src ? src.x : r.pos.x * HALF_X, src ? src.y : r.pos.y * HALF_Y, s.a)
+      // Nobody leaving to take the place of (the extra attacker, a man back
+      // from the box): he comes over the boards at the bench door.
+      const gate = { x: -s.a * BENCH_GATE.x, y: BENCH_GATE.y + 1.5 }
+      const b = makeBody(r.player, src ? src.x : gate.x, src ? src.y : gate.y, s.a)
       if (src) {
         b.vx = src.vx
         b.vy = src.vy
@@ -309,7 +314,20 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const tilt = benchTilt(s.sim.goals - opp.sim.goals, (period - 1 + now / lengthSeconds) / 3)
     const old = s.skaters.slice()
     const inherit = old.map((b) => ({ x: b.x / HALF_X, y: b.y / HALF_Y }))
-    s.sim.deploy(rng, d.kind, d.count, inherit.length ? inherit : undefined, opp.sim, tilt)
+    const [curKind, curCount] = s.sim.deployKey.split(':')
+    const unit0 = s.sim.unit
+    if (unit0 && d.kind === curKind && d.count === Number(curCount) + 1 && s.sim.pulled) {
+      // The extra attacker joins the five already out there (nobody else changes).
+      const boxed = new Set([...s.sim.penalties, ...s.sim.sidelined].map((p) => p.playerId))
+      const onIce = unit0.skaters.map((r) => r.player.id)
+      const extraId = (s.sim as unknown as { bestExtraAttacker(on: PlayerId[], boxed: Set<PlayerId>): PlayerId | null }).bestExtraAttacker(onIce, boxed)
+      if (extraId) {
+        const p = s.sim.resolve(extraId)
+        unit0.skaters.push({ player: p, pos: { x: 0, y: 0 }, vel: { x: 0, y: 0 } })
+        unit0.slots = [...unit0.slots, 1]
+        s.sim.deployKey = `${d.kind}:${d.count}`
+      } else s.sim.deploy(rng, d.kind, d.count, inherit.length ? inherit : undefined, opp.sim, tilt)
+    } else s.sim.deploy(rng, d.kind, d.count, inherit.length ? inherit : undefined, opp.sim, tilt)
     const staying = new Set(s.sim.unit.skaters.map((r) => r.player.id))
     for (const b of old) {
       if (staying.has(b.player.id)) continue
@@ -352,7 +370,14 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     }
     const deficit = oppOf(s).sim.goals - t.goals
     const win = goaliePullWindow(deficit, t.team.tactics.aggressiveness)
-    t.pulled = win > 0 && lengthSeconds - now <= win
+    const wanted = win > 0 && lengthSeconds - now <= win
+    if (!wanted) {
+      t.pulled = false
+      return
+    }
+    // The goalie goes when it's safe: his team has the puck in the offensive
+    // half, or play is stopped (then he's already at the bench for the draw).
+    if (!t.pulled && ((w.control === s && puck.x * s.a > 0) || pending !== null)) t.pulled = true
   }
 
   // -------------------------------------------------------------------------
@@ -773,7 +798,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         0.08,
         0.65
       )
-      const miss = !opp.pulled && rng.chance(pMiss)
+      // At an empty net the only question is accuracy over the distance.
+      const miss = opp.pulled ? rng.chance(1 - clamp(1.05 - dist / 180, 0.3, 0.95)) : rng.chance(pMiss)
       if (tm) tm.unblocked++
       if (miss) {
         outcome = 'miss'
@@ -813,7 +839,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         void gRatings
         const strength = s.powerPlay ? PP_SHOT_BOOST : 1
         const pGoal = opp.pulled
-          ? EN_GOAL_P
+          ? 1
           : clamp(
               eff * AGENT_TUNING.finishK * finish * (1 - goalieEdge) * cf * opp.sim.goalieNight * (ctx.scoringMult ?? 1) * strength,
               0.004,
@@ -1704,10 +1730,12 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const g = s.goalie
     const own = -s.a
     if (s.sim.pulled) {
-      const tx = own * BENCH.x
-      const ty = BENCH.y
+      // Skates hard for his bench door (never through the play: along the boards).
+      const tx = own * BENCH_GATE.x
+      const ty = BENCH_GATE.y
       const d = Math.hypot(tx - g.x, ty - g.y)
-      const sp = Math.min(d / DT, 24)
+      if (d < 5) goalieAtBench.add(s.sim)
+      const sp = Math.min(d / DT, 22)
       if (d > 0.01) {
         g.vx = ((tx - g.x) / d) * sp
         g.vy = ((ty - g.y) / d) * sp
@@ -1716,6 +1744,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       }
       return
     }
+    goalieAtBench.delete(s.sim)
     // The goalie tracks a lagged read of the puck — a cross-ice pass leaves
     // him moving (and slower readers further behind the play).
     const gr = g.player.ratings.goalie

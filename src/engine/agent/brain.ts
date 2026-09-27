@@ -52,7 +52,7 @@ const r01 = (v: number | undefined): number => clamp((v ?? 50) / 100, 0, 1)
 
 /** Multiplier on the value of shooting (the shot-volume lever). */
 
-export const SHOOT_BIAS = { value: 0.34 }
+export const SHOOT_BIAS = { value: 0.355 }
 /** Seconds after a zone entry that play is still a "rush". */
 const RUSH_WINDOW = 4.5
 /** Stick reach from the body centre, ft. */
@@ -222,8 +222,25 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
   const lineCap = (x: number): number =>
     offsideMate && x * a > BLUE_X - 1 ? a * (BLUE_X - 1.5) : x
 
+  // --- Empty net: fire it from anywhere with a lane (mind the icing). ---
+  if (opp.pulled && adv > -60 && adv < GOAL_X - 1) {
+    const nx0 = a * GOAL_X
+    const dist = Math.hypot(nx0 - c.x, c.y)
+    let clear = 1
+    for (const o of opps) {
+      const L = Math.max(dist, 1)
+      const s1 = ((o.x - c.x) * (nx0 - c.x) + (o.y - c.y) * -c.y) / (L * L)
+      if (s1 < 0.03 || s1 > 1) continue
+      const d = Math.hypot(o.x - (c.x + (nx0 - c.x) * s1), o.y - c.y * (1 - s1))
+      if (d < 4) clear *= 0.35
+    }
+    const onTarget = clamp(1.05 - dist / 180, 0.3, 0.95)
+    const icingRisk = adv < 0 && !me.shorthanded ? (1 - onTarget) * 0.02 : 0
+    opts.push({ ev: 0.5 * onTarget * clear - icingRisk, act: { kind: 'shoot' } })
+  }
+
   // --- Shoot ---
-  if (adv > BLUE_X && adv < GOAL_X - 1) {
+  if (adv > BLUE_X && adv < GOAL_X - 1 && !opp.pulled) {
     const xg = xgAt(c.x, c.y, a)
     // Bodies in the lane to the net take shots away.
     let lane = 1
