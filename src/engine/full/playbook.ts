@@ -98,6 +98,8 @@ export interface PlayCtx {
   targetIdx: number
   /** Regroup dwell: the carrier settles in neutral ice instead of attacking. */
   hold: boolean
+  /** The carrier has a clear lane to the net: he drives it (optional). */
+  attack?: boolean
 }
 
 /**
@@ -235,6 +237,10 @@ export function attackPlayOrders(c: PlayCtx): MoveOrder[] {
     }
     default:
       break
+  }
+  // A carrier with a clear lane to the net TAKES it: drive the slot at pace.
+  if (c.attack && carrierIdx >= 0) {
+    orders[carrierIdx] = { tx: a * 0.8, ty: clamp(puck.y * 0.35, -0.2, 0.2), urgency: 0.95, through: true }
   }
   return orders
 }
