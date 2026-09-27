@@ -20,7 +20,7 @@
  *
  * Only decides; the sim executes (physics, pass/shot resolution, rules).
  */
-import type { XY } from '@domain'
+import type { DekeKind, XY } from '@domain'
 import { shotXg } from '@engine/full/fullSim'
 import type { Body, MoveCmd } from './physics'
 import { speedOf } from './physics'
@@ -67,7 +67,7 @@ const r01 = rLevel
  * a carrier who drives into a crowded house risks the whole continuation
  * value on a low-retention carry. That is what brings shots out to range.
  */
-export const VAL = { oz: 0.09, kPos: 0.15, shoot: 0.9, keep: 0.25, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 2, laneRead: 0.75, angleZero: 90, transMaxX: 70, transBack: 0.003, rushNoBackX: 0, regroupMaxX: 20, ozBack: 0.008 }
+export const VAL = { oz: 0.09, kPos: 0.15, shoot: 1.1, keep: 0.25, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 2, laneRead: 0.75, angleZero: 90, transMaxX: 70, transBack: 0.003, rushNoBackX: 0, regroupMaxX: 20, ozBack: 0.008 }
 /**
  * D safety (gap discipline): how far ahead a defenceman reads an attacker
  * coming at him (s), the base gap (ft) plus gap per ft/s of the attacker's
@@ -245,6 +245,8 @@ export function shotValue(me: Side, opps: readonly Body[], c: Body, x: number, y
   }
   // A man on him in tight will lift his stick.
   if (tight) for (const o of opps) if (Math.hypot(o.x - x, o.y - y) < 3.4) lane *= 0.6
+  // Jammed in on top of the goalie (no deke, no rebound): he has the angle.
+  if (L < 7) lane *= DEKE.tightShot
   // The shooter reads his chance against THIS goalie (the scale of a league's
   // ratings cancels out: a sniper vs an average goalie is the same edge in
   // any league).
@@ -272,6 +274,35 @@ export function shotValue(me: Side, opps: readonly Body[], c: Body, x: number, y
     tips * VAL.tip * lane * play -
     turnover
   )
+}
+
+/**
+ * Dekes. `base` / `baseG` set the average success against a defender / the
+ * goalie; `k` is how steeply skill decides it; `value` scales how attractive
+ * a move is to the carrier (the frequency lever); `beatG` is the finish
+ * multiplier on a goalie who bit.
+ */
+export const DEKE = { base: -2.8, baseG: -1.6, k: 7, lunge: 0.02, belief: 0.25, valueS: 1.1, valueG: 0.35, goalieRoom: 10, beatG: 1.6, minS: 0.4, maxS: 0.7, creaseRet: 0.45, tightShot: 0.6 }
+
+/** The carrier's hands for a 1-on-1 move (0..1): stickhandling first, then feet and hockey sense. */
+export function dekeSkill(c: Body): number {
+  const t = c.player.ratings
+  return 0.45 * r01(t.technical.stickhandling) + 0.25 * r01(c.player.composites.puckControl) + 0.15 * r01(t.physical.agility) + 0.15 * r01(t.mental.offensiveIQ)
+}
+
+/** Chance a deke beats `o` (a skater, or the goalie). */
+export function dekeChance(c: Body, o: Body, goalie: boolean): number {
+  const atk = dekeSkill(c)
+  if (goalie) {
+    const g = 0.6 * r01(o.player.ratings.goalie?.positioningG ?? o.player.composites.goaltending) + 0.4 * r01(o.player.ratings.mental.anticipation)
+    return sigmoid((atk - g) * DEKE.k + DEKE.baseG)
+  }
+  const d = 0.3 * rDef(o.player.ratings.mental.positioning) + 0.3 * rDef(o.player.ratings.defensive.stickChecking) + 0.2 * r01(o.player.ratings.mental.defensiveIQ) + 0.2 * r01(o.player.composites.takeaway)
+  // A defender who is lunging at you (closing fast) is easier to beat.
+  const ux = (c.x - o.x) / Math.max(Math.hypot(c.x - o.x, c.y - o.y), 0.1)
+  const uy = (c.y - o.y) / Math.max(Math.hypot(c.x - o.x, c.y - o.y), 0.1)
+  const closing = (o.vx - c.vx) * ux + (o.vy - c.vy) * uy
+  return sigmoid((atk - d) * DEKE.k + DEKE.base + clamp(closing - 6, 0, 10) * DEKE.lunge)
 }
 
 /** Shot blocking: per-body chance scale for a body square in the lane. */
@@ -360,7 +391,10 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       const tc = Math.hypot(qx - c.x, qy - c.y) / Math.max(sp * 0.5 + c.caps.top * 0.45, 10)
       const ret = retention(c, { x: qx, y: qy }, tc, opps)
       const protect = da === Math.PI
-      const retEff = protect ? clamp(ret + 0.25 * puckSkill, 0, 0.97) : ret
+      let retEff = protect ? clamp(ret + 0.25 * puckSkill, 0, 0.97) : ret
+      // Skating the puck into the crease is skating it into the goalie: he
+      // pokes it or smothers it. In close you deke him or you shoot.
+      if (!opp.pulled && Math.hypot(a * GOAL_X - qx, qy) < 9) retEff *= DEKE.creaseRet
       const v = posValue(qx, qy, a)
       const cost = posValue(qx, qy, -a)
       const ev = retEff * v - (1 - retEff) * cost * 0.9
@@ -381,6 +415,60 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
           }
         }
       })
+    }
+  }
+
+  // --- Deke: a 1-on-1 move on the man in his path, or on the goalie. ---
+  if (adv > -BLUE_X && !offsideMate && !opp.pulled) {
+    const inZone = adv > BLUE_X
+    const toX = inZone ? a * GOAL_X - c.x : a
+    const toY = inZone ? -c.y : 0
+    const toL = Math.max(Math.hypot(toX, toY), 0.1)
+    let man: Body | null = null
+    let md = Infinity
+    for (const o of opps) {
+      const dx = o.x - c.x
+      const dy = o.y - c.y
+      const d = Math.hypot(dx, dy)
+      if (d > 13 || d < 2 || dx * a < 1) continue
+      // In his lane: the man is between him and where he is going.
+      if ((dx * toX + dy * toY) / (d * toL) < 0.6) continue
+      if (d < md) {
+        md = d
+        man = o
+      }
+    }
+    if (man && sp > 8) {
+      const p = dekeChance(c, man, false)
+      // Beat him and the ice behind him is his; lose it and they have it here.
+      const side = c.y >= man.y ? 1 : -1
+      const bx = clamp(man.x + a * 12, -GOAL_X + 2, GOAL_X - 4)
+      const by = clamp(man.y + side * 7, -38, 38)
+      // Players trust their hands: the READ of a move is braver than its odds
+      // (more so for the ones with the hands), so dekes get tried and fail too.
+      const pb = clamp(p + DEKE.belief * (0.5 + dekeSkill(c)), 0, 0.97)
+      const ev = (pb * posValue(bx, by, a) - (1 - pb) * posValue(c.x, c.y, -a) * 0.9) * DEKE.valueS
+      // The move fits the space: wide around a man who is inside him with
+      // room on the outside; a toe drag on a man in stick reach; otherwise a
+      // shoulder fake or the forehand-backhand.
+      const roomOut = distToBoards(c.x, c.y) > 9
+      const move: DekeKind =
+        roomOut && Math.abs(man.y) < Math.abs(c.y) ? 'wide' : md < 6 ? 'toeDrag' : w.rng.next() < 0.5 ? 'shoulderFake' : 'forehandBackhand'
+      opts.push({ ev, act: { kind: 'deke', on: man, goalie: false, move, p, dir: move === 'wide' ? (c.y >= 0 ? 1 : -1) : side } })
+    }
+    // The goalie: in close with nobody on him, or alone on a breakaway.
+    const g = opp.goalie
+    const dNet = Math.hypot(a * GOAL_X - c.x, c.y)
+    let nearAny = Infinity
+    for (const o of opps) nearAny = Math.min(nearAny, Math.hypot(o.x - c.x, o.y - c.y))
+    if (inZone && dNet < 22 && dNet > 7 && Math.abs(c.y) < 20 && nearAny > DEKE.goalieRoom) {
+      const p = dekeChance(c, g, true)
+      // A goalie who bit is out of his net: the finish is from the doorstep.
+      const xgIn = xgAt(a * (GOAL_X - 7), c.y >= 0 ? -3 : 3, a)
+      const pb = clamp(p + DEKE.belief * (0.5 + dekeSkill(c)), 0, 0.97)
+      const ev = (pb * xgIn * DEKE.beatG * VAL.shoot + (1 - pb) * 0.15 * VAL.oz) * DEKE.valueG
+      const move: DekeKind = w.rng.next() < 0.6 ? 'forehandBackhand' : 'shoulderFake'
+      opts.push({ ev, act: { kind: 'deke', on: g, goalie: true, move, p, dir: c.y >= 0 ? -1 : 1 } })
     }
   }
 

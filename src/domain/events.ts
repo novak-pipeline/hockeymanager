@@ -116,6 +116,25 @@ export type BattleEvent = GameEventBase & {
   durationS: number
 }
 
+/** The move a puck carrier puts on a defender or the goalie. */
+export type DekeKind = 'forehandBackhand' | 'toeDrag' | 'shoulderFake' | 'wide'
+
+/**
+ * Additive variant (agent engine): a carrier's 1-on-1 move, emitted when the
+ * move STARTS. It plays out over ~0.4–0.7 s of game time before the shot or
+ * pass that follows it (renderers animate the stickhandle across that window).
+ * `on` is the defender or goalie it was put on; `success` is whether he was
+ * beaten (a failed deke ends in a poke check / takeaway or a smother).
+ */
+export type DekeEvent = GameEventBase & {
+  type: 'deke'
+  by: PlayerRef
+  on?: PlayerRef
+  kind: DekeKind
+  success: boolean
+  pos: XY
+}
+
 export type SaveEvent = GameEventBase & {
   type: 'save'
   goalie: PlayerRef
@@ -240,6 +259,7 @@ export type GameEvent =
   | FrameEvent
   | MissedShotEvent
   | BattleEvent
+  | DekeEvent
 
 export type GameEventType = GameEvent['type']
 

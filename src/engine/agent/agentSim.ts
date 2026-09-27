@@ -29,6 +29,7 @@ import type {
   GameEvent,
   PassEvent,
   PassKind,
+  DekeKind,
   ShotOrigin,
   ShotType,
   Player,
@@ -71,10 +72,10 @@ import {
   type Puck
 } from './physics'
 import { BLUE_X, DOT_EZ_X, DOT_NZ_X, DOT_Y, GOAL_X, HALF_X, HALF_Y, NET_HALF_W, boardsClamp, distToBoards } from './rink'
-import { REACH, blockChance, decideCarrier, pressureOn, realPressure, thinkSide, xgAt, type ThinkOut } from './brain'
+import { DEKE, REACH, blockChance, decideCarrier, dekeSkill, pressureOn, realPressure, thinkSide, xgAt, type ThinkOut } from './brain'
 import { decideHit, resolveHit, type HitIntent } from './physical'
 import { emptyAgentTelemetry, type AgentTelemetry } from './telemetry'
-import { LEVEL, levelDefOffset, levelOffset, rDef, rLevel, type Side, type World } from './world'
+import { LEVEL, levelDefOffset, levelOffset, rDef, rLevel, type CarrierAction, type Side, type World } from './world'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
 const r01 = rLevel
@@ -89,11 +90,11 @@ const DT = FRAME_DT / SUBSTEPS
 // ---------------------------------------------------------------------------
 export const AGENT_TUNING = {
   /** Reconciles the empirical xG with this engine's shot mix → goals/game. */
-  finishK: 0.85,
+  finishK: 0.86,
   /** Base share of unblocked attempts that miss the net. */
   missBase: 0.3,
   /** Poke-check success scale (takeaways). */
-  pokeK: 0.08,
+  pokeK: 0.065,
   /** Unforced fumble rate under pressure (giveaways). */
   fumbleK: 4.3,
   /** Per-think stick-foul chance when beaten (penalties). */
@@ -103,6 +104,8 @@ export const AGENT_TUNING = {
 }
 
 const PP_SHOT_BOOST = 1.12
+/** Seconds from committing to a shot to the puck leaving the blade (a slapper from the point winds up longer). */
+export const VAL_WINDUP = { near: FRAME_DT, far: FRAME_DT }
 const SHIFT_TARGET = 22
 const PENALTY_SECONDS = 120
 /**
@@ -242,6 +245,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   let flightKindAtGain = 'faceoff'
   let gotPos: XY = { x: 0, y: 0 }
   let turnSnap = ""
+  let deke = null as { c: Body; on: Body; goalie: boolean; move: DekeKind; success: boolean; until: number; dir: number } | null
+  let windup = null as { c: Body; at: number } | null
+  let bite = null as { side: Side; dy: number; until: number } | null
   let prevPoss: { side: Side; since: number; adv: number } | null = null
 
   const tries = (...bs: Body[]): Map<Body, number> => new Map(bs.map((b) => [b, now] as [Body, number]))
@@ -482,6 +488,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   // -------------------------------------------------------------------------
   const stopPlay = (dot: XY, zone: 'offensive' | 'defensive' | 'neutral', zoneFor: Side | null, reason?: 'offside' | 'icing' | 'goalieFreeze' | 'penalty' | 'other'): void => {
     endBattle(null)
+    deke = null
+    windup = null
     ev({ t: T(), period, type: 'whistle', pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y }, ...(reason ? { reason } : {}) })
     if (tm && reason) tm.stoppages[reason]++
     deadAt = { x: puck.x, y: puck.y }
@@ -674,6 +682,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   // Possession changes
   // -------------------------------------------------------------------------
   const gainControl = (b: Body, s: Side): void => {
+    deke = null
+    windup = null
     const prevSide = w.control ?? w.lastTouch
     flightKindAtGain = flight ? (flight.kind === 'pass' && flight.side === s ? 'pass' : flight.kind === 'shot' ? 'shotDeflect' : flight.side === s ? 'ownLoose' : 'oppLoose') : 'none'
     const gainKind = `${flightKindAtGain}:${flight?.kind ?? "-"}${poke ? "+poke" : ""}${fumble ? "+fumble" : ""}`
@@ -867,7 +877,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     return { x: gx + (dx / d) * depth, y: (dy / d) * depth }
   }
 
-  const shoot = (c: Body, s: Side, oneTimer: boolean): void => {
+  const shoot = (c: Body, s: Side, oneTimer: boolean, beatGoalie = false): void => {
     const opp = oppOf(s)
     const a = s.a
     const from = { x: puck.x, y: puck.y }
@@ -905,7 +915,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     }
     // In tight with a man on him: the defender lifts his stick / ties him up
     // before he can release (no attempt — the puck is loose).
-    if (dist < 16 && !oneTimer) {
+    if (dist < 16 && !oneTimer && !beatGoalie) {
       for (const o of opp.skaters) {
         if (Math.hypot(o.x - c.x, o.y - c.y) > 3.4) continue
         const sc = rDef(o.player.ratings.defensive.stickChecking)
@@ -1017,6 +1027,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         if (oneTimer && gMoving > 5) eff *= 1.35 // across the royal road, goalie moving
         eff *= 1 + Math.min(screen, 2) * 0.15 // can't see it
         if (tipper) eff *= 1.4
+        if (beatGoalie) eff *= DEKE.beatG // he bit on the deke: the net is open
         if (now - lastSaveAt < 1.6) eff *= 1.3 // rebound, goalie scrambling
         if (slap) eff *= 1.05
         void gRatings
@@ -1248,6 +1259,77 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   pending = { dot: { x: 0, y: 0 }, zone: 'neutral', since: -FACEOFF_MIN_WAIT, zoneFor: null }
 
   let lastFrameT = -1
+
+  // -------------------------------------------------------------------------
+  // Dekes and shot release
+  // -------------------------------------------------------------------------
+  interface Deke {
+    c: Body
+    on: Body
+    goalie: boolean
+    move: DekeKind
+    success: boolean
+    until: number
+    dir: number
+  }
+  const DEKE_PATH: Record<DekeKind, { fwd: number; lat: number }> = {
+    wide: { fwd: 12, lat: 10 },
+    toeDrag: { fwd: 4, lat: 7 },
+    shoulderFake: { fwd: 8, lat: 5 },
+    forehandBackhand: { fwd: 6, lat: 8 }
+  }
+  function startDeke(c: Body, s: Side, act: Extract<CarrierAction, { kind: 'deke' }>): void {
+    const success = rng.chance(act.p)
+    // Good hands make the move quicker.
+    const dur = clamp(DEKE.minS + (DEKE.maxS - DEKE.minS) * (1 - dekeSkill(c)) * rng.float(0.8, 1.4), DEKE.minS, DEKE.maxS)
+    ev({ t: T(), period, type: 'deke', by: c.player.id, on: act.on.player.id, kind: act.move, success, pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y } })
+    if (tm) {
+      tm.dekes++
+      if (success) tm.dekesWon++
+      if (act.goalie) tm.dekesOnGoalie++
+      if (act.goalie && success) tm.dekesOnGoalieWon++
+    }
+    deke = { c, on: act.on, goalie: act.goalie, move: act.move, success, until: now + dur, dir: act.dir }
+    if (success && !act.goalie) {
+      // He bit: off balance for the move (no stick on it), carried the wrong way.
+      act.on.stun = Math.max(act.on.stun, dur * 0.8 + 0.2)
+      act.on.vy -= act.dir * 6
+    } else if (success) {
+      // The goalie goes with the fake, out across his crease.
+      bite = { side: oppOf(s), dy: -act.dir * 3.5, until: now + dur + 0.5 }
+    }
+    stepDeke(deke, s)
+  }
+  function stepDeke(d: Deke, s: Side): void {
+    const c = d.c
+    if (now >= d.until - 1e-6) {
+      deke = null
+      if (d.goalie) {
+        if (d.success) shoot(c, s, false, true)
+        else {
+          // The goalie reads it: poke check / smother, the puck squirts free.
+          const out = -s.a
+          loosen(out * rng.float(4, 12) + c.vx * 0.2, (rng.chance(0.5) ? 1 : -1) * rng.float(6, 16), null)
+          flight!.tried.set(c, now)
+        }
+      } else if (!d.success) {
+        // The defender reads it and takes it off him.
+        poke = { by: d.on, from: c, side: oppOf(s), t: now }
+        const ang = Math.atan2(c.y - d.on.y, c.x - d.on.x) + rng.float(-0.8, 0.8)
+        loosen(Math.cos(ang) * rng.float(6, 12), Math.sin(ang) * rng.float(6, 12), null)
+        flight!.tried.set(c, now)
+      }
+      return
+    }
+    const pth = DEKE_PATH[d.move]
+    cmds.set(c, {
+      tx: c.x + s.a * pth.fwd,
+      ty: clamp(c.y + d.dir * pth.lat, -HALF_Y + 3, HALF_Y - 3),
+      speed: Math.max(speedOf(c), 12),
+      arrive: false,
+      urgency: 0.9
+    })
+  }
   while (now < lengthSeconds - 1e-9 && !ended) {
     const absNow = absBase + now
     home.prunePenalties(absNow)
@@ -1374,9 +1456,23 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       if (w.carrier && w.control) {
         const c = w.carrier
         const s = w.control
+        if (deke && deke.c !== c) deke = null
+        if (windup && windup.c !== c) windup = null
+        if (deke) {
+          stepDeke(deke, s)
+        } else if (windup) {
+          // The release: the puck leaves the blade at the shot event (the
+          // renderer swings in the lead-up, with the puck still on his stick).
+          if (now >= windup.at - 1e-6) {
+            windup = null
+            shoot(c, s, false)
+          } else cmds.set(c, { tx: c.x + c.vx * 0.6, ty: c.y + c.vy * 0.6, speed: speedOf(c) * 0.9, arrive: false, urgency: 0.5 })
+        } else {
         const act = decideCarrier(w, s, c)
         if (tm) tm.carrierThinks++
-        if (act.kind === 'carry') {
+        if (act.kind === 'deke') {
+          startDeke(c, s, act)
+        } else if (act.kind === 'carry') {
           cmds.set(c, act.cmd)
           if (act.protect && tm) tm.protects++
         } else if (act.kind === 'pass') {
@@ -1384,7 +1480,17 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         } else if (act.kind === 'dump') {
           release(c, s, act.at, act.speed, act.lift, 'dump')
         } else {
-          shoot(c, s, false)
+          // The puck must have been on his blade for the swing (the renderer
+          // starts the shot clip that long before the release): a man who has
+          // carried it a while releases now; one who just got it winds up first.
+          const far = Math.hypot(s.a * GOAL_X - c.x, c.y) > 45
+          const need = far ? VAL_WINDUP.far : VAL_WINDUP.near
+          if (now - gotAt >= need - 1e-6) shoot(c, s, false)
+          else {
+            windup = { c, at: gotAt + need }
+            cmds.set(c, { tx: c.x + c.vx * 0.6, ty: c.y + c.vy * 0.6, speed: speedOf(c) * 0.9, arrive: false, urgency: 0.5 })
+          }
+        }
         }
         if (w.carrier === c && !cmds.has(c)) cmds.set(c, { tx: c.x + c.vx, ty: c.y + c.vy, speed: speedOf(c), arrive: false, urgency: 0.4 })
       }
@@ -1401,6 +1507,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       for (const pk of out.pokes) {
         const c = w.carrier
         if (!c || !w.control) break
+        if (pk.stun > 0) continue // beaten on the deke: no stick on it
         const dp = Math.hypot(pk.x - puck.x, pk.y - puck.y)
         if (dp > REACH) continue
         const sc = (rDef(pk.player.ratings.defensive.stickChecking) + r01(pk.player.composites.takeaway)) / 2
@@ -1960,7 +2067,10 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const src = deadAt ?? puck
     const px = src.x - puck.vx * lag * (deadAt ? 0 : 1)
     const py = src.y - puck.vy * lag * (deadAt ? 0 : 1)
-    const ideal = goalieIdeal(s, px, py)
+    const ideal0 = goalieIdeal(s, px, py)
+    // He bit on a deke: he goes with the fake, out across his crease.
+    const bit = bite !== null && bite.side === s && now < bite.until
+    const ideal = bit && bite ? { x: ideal0.x, y: clamp(ideal0.y + bite.dy, -NET_HALF_W - 3, NET_HALF_W + 3) } : ideal0
     const dx = ideal.x - g.x
     const dy = ideal.y - g.y
     const d = Math.hypot(dx, dy)

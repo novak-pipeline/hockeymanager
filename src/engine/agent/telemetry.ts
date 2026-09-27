@@ -64,6 +64,11 @@ export interface AgentTelemetry {
   /** Carry entries by numbers: '<attackers>v<goal-side defenders>[T=transition] c<defenders caught up ice>'. */
   entryNumbers: Record<string, number>
   entryLog: string[]
+  /** 1-on-1 moves: attempted, won, and how many were on the goalie. */
+  dekes: number
+  dekesWon: number
+  dekesOnGoalie: number
+  dekesOnGoalieWon: number
   /** Free-form debug counters (probes only). */
   dbg: Record<string, number>
   dbgLog: string[]
@@ -132,6 +137,10 @@ export function emptyAgentTelemetry(): AgentTelemetry {
     battles: 0,
     entryNumbers: {},
     entryLog: [],
+    dekes: 0,
+    dekesWon: 0,
+    dekesOnGoalie: 0,
+    dekesOnGoalieWon: 0,
     dbg: {},
     dbgLog: [],
     codeAnswers: 0,

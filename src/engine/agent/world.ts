@@ -3,7 +3,7 @@
  * and who controls it. Kept separate so the brain (decisions) and the sim
  * (rules, events, physics loop) can both read it without a module cycle.
  */
-import type { TeamTactics, XY } from '@domain'
+import type { DekeKind, TeamTactics, XY } from '@domain'
 import type { Rng } from '@engine/shared/rng'
 import type { TeamSim } from '@engine/full/fullSim'
 import type { Body, MoveCmd, Puck } from './physics'
@@ -63,6 +63,8 @@ export type CarrierAction =
   | { kind: 'pass'; to: Body; at: XY; speed: number; oneTimer: boolean }
   | { kind: 'shoot' }
   | { kind: 'dump'; at: XY; speed: number; lift: number }
+  /** A 1-on-1 move on a defender (`goalie` false) or the goalie; `dir` is the side (±1) he goes to. */
+  | { kind: 'deke'; on: Body; goalie: boolean; move: DekeKind; p: number; dir: number }
 
 export function sideOf(w: World, b: Body): Side | null {
   for (const s of w.sides) if (s.skaters.includes(b) || s.goalie === b) return s
