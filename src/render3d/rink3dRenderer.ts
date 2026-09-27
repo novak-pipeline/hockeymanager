@@ -1081,14 +1081,14 @@ export class Rink3dRenderer implements MatchRenderer {
       return
     }
     const s = this.timeline.scoreAt(this.clockPos)
-    this.boardHold = { score: { home: s.home, away: s.away }, clock: this.timeline.clockAt(this.clockPos) }
+    this.boardHold = { score: { home: s.home, away: s.away }, clock: this.timeline.displayClockAt(this.clockPos) }
   }
   private boardHold: { score: { home: number; away: number }; clock: { period: number; text: string } } | null = null
 
   private updateArena(dt: number): void {
     if (!this.timeline) return
     const score = this.boardHold?.score ?? this.timeline.scoreAt(this.clockPos)
-    const clock = this.boardHold?.clock ?? this.timeline.clockAt(this.clockPos)
+    const clock = this.boardHold?.clock ?? this.timeline.displayClockAt(this.clockPos)
     if (this.playing) this.sinceGoal += dt
     const goalFlash = this.sinceGoal < 3.5 ? 3.5 - this.sinceGoal : 0
     this.arena.update(this.wallTime, {
@@ -1597,7 +1597,7 @@ export class Rink3dRenderer implements MatchRenderer {
   private emit(): void {
     if (!this.listener || !this.timeline) return
     const score = this.timeline.scoreAt(this.clockPos)
-    const clock = this.timeline.clockAt(this.clockPos)
+    const clock = this.timeline.displayClockAt(this.clockPos)
     const ended = this.clockPos >= this.timeline.duration
     this.listener({
       period: clock.period,

@@ -298,7 +298,7 @@ export class RinkRenderer implements MatchRenderer {
   private emit(): void {
     if (!this.listener || !this.timeline) return
     const score = this.timeline.scoreAt(this.clockPos)
-    const clock = this.timeline.clockAt(this.clockPos)
+    const clock = this.timeline.displayClockAt(this.clockPos)
     const ended = this.clockPos >= this.timeline.duration
     this.listener({
       period: clock.period,
