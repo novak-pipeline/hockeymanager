@@ -76,7 +76,6 @@ export const VAL = { oz: 0.09, kPos: 0.15, shoot: 0.9, keep: 0.25, noise: 0.5, n
  */
 export const D_SAFETY = { look: 2, gap: 12, gapPerV: 0.5, stepUpMargin: 1.3, pinchMaxX: 55, gapLead: 0.5, looseGuard: 1 }
 /** Support-skater motion loops around a spot: radius (ft) and angular speed (rad/s). */
-export const BRAIN_DBG = { on: false, m: {} as Record<string, number> }
 export const DRIFT = { rAtk: 12, rDef: 5, omAtk: 1.1, omDef: 0.9 }
 /** Defending the house: the on-puck man engages (no containing) inside this radius of our net (ft). */
 export const DZ = { engageFt: 30 }
@@ -290,7 +289,6 @@ export function blockChance(o: Body, d: number, slap: boolean): number {
 // ---------------------------------------------------------------------------
 
 interface Option {
-  dbg?: string
   ev: number
   act: CarrierAction
 }
@@ -454,7 +452,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       const cost = posValue(f.R.x, f.R.y, -a)
       let ev = comp * v - (1 - comp) * cost * 0.8
       if (f.back) ev -= transition ? VAL.transBack : adv > BLUE_X ? VAL.ozBack : 0.003
-      opts.push({ ev, act: { kind: 'pass', to: f.r, at: f.R, speed: f.speed, oneTimer }, ...(f.back && BRAIN_DBG.on ? { dbg: `${transition ? 'T' : '-'}${settledOz ? 'S' : '-'}${pressed ? 'P' : '-'} adv${Math.round(adv / 10) * 10} ps${Math.round(w.possStartAdv / 10) * 10} dt${Math.round(w.t - w.possSince)}` } : {}) })
+      opts.push({ ev, act: { kind: 'pass', to: f.r, at: f.R, speed: f.speed, oneTimer } })
     }
   }
 
@@ -508,7 +506,6 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
   for (let i = 0; i < opts.length; i++) {
     r -= ws[i]
     if (r <= 0) {
-      if (opts[i].dbg && BRAIN_DBG.on) BRAIN_DBG.m[opts[i].dbg!] = (BRAIN_DBG.m[opts[i].dbg!] ?? 0) + 1
       return opts[i].act
     }
   }

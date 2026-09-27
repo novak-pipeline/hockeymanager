@@ -67,7 +67,6 @@ export interface AgentTelemetry {
   /** Free-form debug counters (probes only). */
   dbg: Record<string, number>
   dbgLog: string[]
-  dbgRing?: string[]
   /** Dirty/star hits answered at the next whistle (fight or roughing). */
   codeAnswers: number
   /** Per-attempt diagnostics: distance, nearest defender, defenders in the house, seconds since the side won the puck. */

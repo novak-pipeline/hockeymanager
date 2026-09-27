@@ -747,7 +747,6 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     // Delayed offside: an offside attacker's team plays the puck in the zone.
     if (w.delayedOffside === s && puck.x * s.a > BLUE_X) {
       if (anyOffside(s)) {
-        if (tm) tm.dbg[`offside:delayed:${gainKind}`] = (tm.dbg[`offside:delayed:${gainKind}`] ?? 0) + 1
         callOffside(s)
         return
       }
@@ -1461,30 +1460,6 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     }
 
     if (!pending && !celebration) stepChanges()
-    if (tm && w.carrier && w.control && !pending && !celebration && puck.x * w.control.a > BLUE_X) {
-      const cs = w.control
-      for (const q of cs.skaters) {
-        if (q === w.carrier || q.player.position !== 'D' || q.x * cs.a >= BLUE_X) continue
-        const cm = cmds.get(q)
-        const k = `Dout:${cs.roles.get(q)}:tgt${cm ? Math.round((cm.tx * cs.a) / 10) * 10 : 'none'}:${hitIntent.has(q) ? 'hit' : ''}${changing.get(cs)?.swaps.some((x) => x.out === q) ? 'chg' : ''}`
-        tm.dbg[k] = (tm.dbg[k] ?? 0) + 1
-        if (cm && tm.dbgLog.length < 40 && rng.chance(0.01)) tm.dbgLog.push(`Dout t=${now.toFixed(1)} ${cs.roles.get(q)} x${(q.x * cs.a).toFixed(1)} y${q.y.toFixed(0)} vx${(q.vx * cs.a).toFixed(1)} vy${q.vy.toFixed(1)} tgt${(cm.tx * cs.a).toFixed(0)},${cm.ty.toFixed(0)} sp${cm.speed.toFixed(0)} u${cm.urgency.toFixed(2)} arr${cm.arrive} e${q.energy.toFixed(2)} face${cm.faceX !== undefined} stun${q.stun.toFixed(1)} puck${(puck.x * cs.a).toFixed(0)}`)
-      }
-    }
-    if (tm && tm.dbgRing && !pending && !celebration) {
-      const ctl = w.control ?? w.lastTouch ?? H
-      const fa = ctl.a
-      const f1 = (v: number): string => v.toFixed(0)
-      const row = (s: Side, tag: string): string =>
-        s.skaters
-          .map((q) => {
-            const cm = cmds.get(q)
-            return `${tag}${q.player.position}${q === w.carrier ? '*' : ''}:${s.roles.get(q) ?? '?'}(${f1(q.x * fa)},${f1(q.y * fa)} v${f1(q.vx * fa)},${f1(q.vy * fa)}${cm ? ` ->${f1(cm.tx * fa)},${f1(cm.ty * fa)} u${cm.urgency.toFixed(1)}` : ''})`
-          })
-          .join(' ')
-      tm.dbgRing.push(`t=${now.toFixed(2)} puck(${f1(puck.x * fa)},${f1(puck.y * fa)} v${f1(puck.vx * fa)}) ${w.carrier ? 'C' : 'L'} | ATK ${row(ctl, 'a')} | DEF ${row(oppOf(ctl), 'd')}`)
-      if (tm.dbgRing.length > 40) tm.dbgRing.shift()
-    }
 
     // ---- Command shaping (once per frame). ----
     // Personal space: steer around teammates instead of bumping into them
@@ -1562,9 +1537,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
             sh && (sh.ox !== 0 || sh.oy !== 0 || sh.sf !== 1 || tx !== raw.tx)
               ? { ...raw, tx: tx + sh.ox, ty: ty + sh.oy, speed: raw.speed * sh.sf }
               : raw
-          const v0x = b.vx, v0y = b.vy
           stepBody(b, cmd, DT)
-          if (tm && Math.hypot(b.vx - v0x, b.vy - v0y) / DT > 30) { const k = `dv:step:${Math.round(Math.hypot(v0x, v0y) / 5) * 5}->${Math.round(speedOf(b) / 5) * 5}`; tm.dbg[k] = (tm.dbg[k] ?? 0) + 1 }
           all.push(b)
           if (tm) tm.noteAccel(b.accMag, speedOf(b))
         }
@@ -1574,12 +1547,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         all.push(s.goalie)
       }
       const contacts: Contact[] = []
-      const vb = all.map((q) => [q.vx, q.vy])
       resolveBodies(all, contacts)
-      if (tm) all.forEach((q, i) => { if (Math.hypot(q.vx - vb[i][0], q.vy - vb[i][1]) / DT > 30) { const k = `dv:contact:${q.player.position}`; tm.dbg[k] = (tm.dbg[k] ?? 0) + 1 } })
-      const vc = all.map((q) => [q.vx, q.vy])
       for (const b of all) constrainBody(b)
-      if (tm) all.forEach((q, i) => { if (Math.hypot(q.vx - vc[i][0], q.vy - vc[i][1]) / DT > 30) { const k = `dv:constrain:${q.player.position}`; tm.dbg[k] = (tm.dbg[k] ?? 0) + 1 } })
       if (tm) tm.noteOverlap(all)
       // Contacts → hits (the physical game reads real collisions).
       for (const ct of contacts) {
@@ -1651,18 +1620,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
               const at = Number(turnSnap.split('@')[1]?.split(' ')[0] ?? 0)
               const zone = at < -BLUE_X ? 'DZ' : at < BLUE_X ? 'NZ' : 'OZ'
               tm.dbg[`oddZone:${zone}`] = (tm.dbg[`oddZone:${zone}`] ?? 0) + 1
-              const os = oppOf(s)
-              const dnow = os.skaters.map((q) => {
-                const cm = cmds.get(q)
-                return `${q.player.position}:${os.roles.get(q)}${hitIntent.has(q) ? '+HIT' : ''}${changing.get(os)?.swaps.some((x) => x.out === q) ? '+CHG' : ''} x${(q.x * s.a).toFixed(0)} v${(q.vx * s.a).toFixed(0)} tgt${cm ? (cm.tx * s.a).toFixed(0) : '-'} u${cm ? cm.urgency.toFixed(1) : '-'}`
-              })
-              if (tm.dbgRing && tm.dbg.dumps === undefined) tm.dbg.dumps = 0
-              if (tm.dbgRing && tm.dbg.dumps < 4 && zone === 'NZ') {
-                tm.dbg.dumps++
-                const n = Math.min(tm.dbgRing.length, Math.round((now - w.possSince) / FRAME_DT) + 4)
-                tm.dbgLog.push(`===== ${key}`, ...tm.dbgRing.slice(-n))
-              }
-              if (tm.dbgLog.length < 60) tm.dbgLog.push(`${key} poss ${(now - w.possSince).toFixed(1)}s puck x${adv0.toFixed(0)} v${(c.vx * s.a).toFixed(0)} | NOW ${dnow.join(' ; ')}`)
+              if (tm.dbgLog.length < 60) tm.dbgLog.push(`${key} poss ${(now - w.possSince).toFixed(1)}s | ${turnSnap}`)
             }
           }
         }
@@ -1780,7 +1738,6 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   function checkOffside(s: Side, carried: boolean): boolean {
     if (!anyOffside(s)) return false
     if (carried) {
-      if (tm && tm.dbgLog.length < 50) { const off = s.skaters.filter((b) => b !== w.carrier && b.x * s.a > BLUE_X + 1).map((b) => { const cm = cmds.get(b); return `${s.roles.get(b)} x${(b.x * s.a).toFixed(1)} vx${(b.vx * s.a).toFixed(1)} tgt${cm ? (cm.tx * s.a).toFixed(0) : "-"} u${cm?.urgency.toFixed(2)} stun${b.stun.toFixed(1)}` }).join(" / "); tm.dbgLog.push(`OFFSIDE carrier vx${((w.carrier?.vx ?? 0) * s.a).toFixed(1)} | ${off}`) }
       callOffside(s)
       return true
     }
