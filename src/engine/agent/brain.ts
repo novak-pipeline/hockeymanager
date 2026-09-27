@@ -52,6 +52,8 @@ const r01 = (v: number | undefined): number => clamp((v ?? 50) / 100, 0, 1)
 
 /** Multiplier on the value of shooting (the shot-volume lever). */
 
+/** Value of a teammate at the net-front for a shot from distance (tip/screen/rebound). */
+export const TIP_VALUE = { value: 0.012 }
 export const SHOOT_BIAS = { value: 0.355 }
 /** Seconds after a zone entry that play is still a "rush". */
 const RUSH_WINDOW = 4.5
@@ -257,7 +259,13 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
     for (const o of opps) if (Math.hypot(o.x - c.x, o.y - c.y) < 3.4) lane *= 0.6
     const shooter = (r01(c.player.ratings.technical.wristShot) + r01(c.player.composites.scoring)) / 2
     // A shot also keeps some of the possession (rebounds, retrievals).
-    const ev = (xg * lane * (0.7 + shooter * 0.6) * eager + 0.005) * SHOOT_BIAS.value
+    // From distance, a shot through traffic is a PLAY: a teammate at the
+    // net-front makes tips, screens and rebounds, and the puck stays in the
+    // zone. That is why D shoot from the point.
+    const dNet = Math.hypot(a * GOAL_X - c.x, c.y)
+    let tips = 0
+    if (dNet > 32) for (const b of me.skaters) if (b !== c && Math.hypot(b.x - a * GOAL_X, b.y) < 14) tips++
+    const ev = (xg * lane * (0.7 + shooter * 0.6) * eager + 0.005) * SHOOT_BIAS.value + Math.min(tips, 2) * TIP_VALUE.value * lane
     opts.push({ ev, act: { kind: 'shoot' } })
   }
 
