@@ -21,10 +21,10 @@ import { BLUE_X, distToBoards } from './rink'
 import type { HitKind } from '@domain'
 import type { Rng } from '@engine/shared/rng'
 import { speedOf, type Body, type Contact } from './physics'
-import { other, type Side, type World } from './world'
+import { other, rLevel, type Side, type World } from './world'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
-const r01 = (v: number | undefined): number => clamp((v ?? 50) / 100, 0, 1)
+const r01 = rLevel
 
 export const HIT_TUNING = {
   /** Per-think chance scale that a willing defender commits to a check. */
