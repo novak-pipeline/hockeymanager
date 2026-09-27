@@ -86,6 +86,7 @@ import {
   Y_FT,
   clamp,
   distFt,
+  isBackwardPass,
   nearestIdx,
   type BeatKind,
   type Ctx,
@@ -151,8 +152,11 @@ const ON_GOAL_SHARE = RATES.shotsOnGoal / (RATES.shotsOnGoal + RATES.blockedShot
 // Correction applied to the empirical xG so that GOALS/game match the target:
 // the director's shot mix is structure-weighted (screens, seams, rushes), so it
 // is higher-quality than a flat league average; this scalar reconciles the two.
-// Measured against the engine, then frozen.
-const FINISH_K = 0.6
+// Measured against the engine, then frozen. (0.6 → 0.53 with step 0 of the
+// match-engine plan: carriers with a clear lane now attack the slot instead of
+// passing back to the point, so the average attempt is more dangerous; goals
+// landed 3.54 → 3.81/team/game at 0.6, re-reconciled here.)
+const FINISH_K = 0.53
 
 // Non-shot events: per-game target → per-decision-tick probability. Hits and
 // takeaways are gated on the pressuring defender actually being near the puck
@@ -652,6 +656,87 @@ function countNear(skaters: RSkater[], p: XY, ft: number): number {
   return n
 }
 
+/** Feet from point p to the segment a→b (all normalized rink coords). */
+function segDistFt(p: XY, a: XY, b: XY): number {
+  const ax = a.x * X_FT
+  const ay = a.y * Y_FT
+  const dx = b.x * X_FT - ax
+  const dy = b.y * Y_FT - ay
+  const px = p.x * X_FT - ax
+  const py = p.y * Y_FT - ay
+  const len2 = dx * dx + dy * dy
+  const t = len2 > 1e-9 ? clamp((px * dx + py * dy) / len2, 0, 1) : 0
+  return Math.hypot(px - dx * t, py - dy * t)
+}
+
+/** Closest defender (feet) to the passing lane a→b, ignoring the ends' last 3 ft. */
+export function laneClearanceFt(from: XY, to: XY, defenders: readonly RSkater[]): number {
+  let best = 99
+  for (const r of defenders) {
+    // A defender standing ON the passer (checking him) doesn't block the lane.
+    if (distFt(r.pos, from) < 3) continue
+    best = Math.min(best, segDistFt(r.pos, from, to))
+  }
+  return best
+}
+
+/**
+ * Where a pass to `to` should be aimed: lead the receiver to where he will be
+ * when the puck arrives (speed in ft/s).
+ */
+function leadPoint(from: XY, to: RSkater, speedFt: number): XY {
+  const tEst = distFt(from, to.pos) / speedFt
+  return {
+    x: clamp(to.pos.x + (to.vel.x * tEst) / X_FT, -0.95, 0.95),
+    y: clamp(to.pos.y + (to.vel.y * tEst) / Y_FT, -0.92, 0.92)
+  }
+}
+
+/** Feet of open ice around p (distance to the nearest defender). */
+function openIceFt(p: XY, defenders: readonly RSkater[]): number {
+  let best = 99
+  for (const r of defenders) best = Math.min(best, distFt(r.pos, p))
+  return best
+}
+
+/**
+ * Real pressure on the carrier: a defender inside stick reach (~8 ft) who is
+ * closing on him (or already on top of him). The only situation in which a
+ * backward pass in the offensive half is a hockey play rather than a bail-out
+ * for no reason.
+ */
+function underRealPressure(cs: RSkater, defenders: readonly RSkater[]): boolean {
+  for (const r of defenders) {
+    const d = distFt(r.pos, cs.pos)
+    if (d >= 8) continue
+    if (d < 5) return true
+    // Closing speed: defender velocity relative to the carrier, along the line to him.
+    const ux = ((cs.pos.x - r.pos.x) * X_FT) / d
+    const uy = ((cs.pos.y - r.pos.y) * Y_FT) / d
+    const closing = (r.vel.x - cs.vel.x) * ux + (r.vel.y - cs.vel.y) * uy
+    if (closing > 1) return true
+  }
+  return false
+}
+
+/**
+ * A clear lane to the net: attacking half-slot range and no defending skater
+ * inside a 6-ft corridor between the carrier and the goal mouth.
+ */
+function laneToNet(cs: RSkater, a: number, defenders: readonly RSkater[]): boolean {
+  const adv = cs.pos.x * a
+  if (adv < 0.5 || adv > 0.87) return false
+  const net: XY = { x: a * 0.89, y: 0 }
+  if (distFt(cs.pos, net) > 36) return false
+  for (const r of defenders) {
+    // A man draped on him (within a stride) takes the lane away too.
+    if (distFt(r.pos, cs.pos) < 9) return false
+    if ((r.pos.x - cs.pos.x) * a < -0.02) continue // beaten: behind the carrier
+    if (segDistFt(r.pos, cs.pos, net) < 8) return false
+  }
+  return true
+}
+
 interface PeriodOutcome {
   /** True if a sudden-death period ended on a goal. */
   ended: boolean
@@ -695,6 +780,8 @@ interface ActiveBeat {
   passMade: boolean
   /** Featured skater index (offside winger, seam receiver, dump chaser). */
   targetIdx: number
+  /** The carrier has a clear lane to the net and is attacking it (no pass). */
+  attack: boolean
 }
 
 function simPeriod(
@@ -725,6 +812,12 @@ function simPeriod(
   let endedSuddenDeath = false
   let heldBy: PlayerId | null = null
   let heldTicks = 0
+  /** Open breakaway episode (telemetry only — never read by the sim). */
+  let bkEp: { team: TeamSim; id: PlayerId } | null = null
+  const closeBreakaway = (how: 'shot' | 'forwardPass' | 'backPass' | 'lost'): void => {
+    if (bkEp && ctx.telemetry) ctx.telemetry.breakaways[how]++
+    bkEp = null
+  }
 
   // A puck in flight (pass/shot/dump): advances by (vx,vy) per tick until it lands.
   let flight: { vx: number; vy: number; ticks: number; onLand: () => void } | null = null
@@ -894,6 +987,7 @@ function simPeriod(
    * jumps to the dot when the faceoff event fires (a legal snap boundary).
    */
   const stopPlay = (dot: XY, zone: Zone, extraDead = 0): void => {
+    if (bkEp) closeBreakaway('lost')
     pending = { dot, zone, wait: -extraDead }
     // Freeze the puck where it is right now; it will snap to dot at faceoff.
     if (deadPuckPos === null) {
@@ -928,7 +1022,8 @@ function simPeriod(
       oddMan: false,
       breakaway: false,
       passMade: false,
-      targetIdx: -1
+      targetIdx: -1,
+      attack: false
     }
   }
 
@@ -970,6 +1065,7 @@ function simPeriod(
     const def = otherOf(atk)
     const a = atk.attackSign()
     const from: XY = { x: puck.x, y: puck.y }
+    if (bkEp && bkEp.team === atk) closeBreakaway('shot')
 
     // Some attempts are blocked before they ever reach the net.
     if (rng.chance(1 - ON_GOAL_SHARE)) {
@@ -1180,6 +1276,32 @@ function simPeriod(
   const currentPhase = (team: TeamSim) =>
     phaseForPlay(beat && beat.team === team ? beat.play : defaultPlay(puck.x * team.attackSign()))
 
+  /** Telemetry: classify a pass by direction / zone / rush context. */
+  const notePass = (cs: RSkater, to: XY): void => {
+    const atk = possession
+    const a = atk.attackSign()
+    const back = isBackwardPass(puck, to, a)
+    if (bkEp && bkEp.id === cs.player.id) closeBreakaway(back ? 'backPass' : 'forwardPass')
+    const tm = ctx.telemetry
+    if (!tm) return
+    const def = otherOf(atk)
+    const pressed = underRealPressure(cs, def.unit.skaters)
+    tm.passes.total++
+    if (back) tm.passes.back++
+    if (puck.x * a > 0) {
+      tm.passes.ozTotal++
+      if (back) {
+        tm.passes.ozBack++
+        if (pressed) tm.passes.ozBackPressured++
+      }
+    }
+    const k = beat && beat.team === atk ? beat.kind : null
+    if (k === 'rushShot' || k === 'turnoverCounter' || k === 'entryCarry') {
+      tm.passes.rushTotal++
+      if (back) tm.passes.rushBack++
+    }
+  }
+
   /**
    * A DIRECTED pass — the choreographer's set-play feed (low-to-high to the
    * point, the royal-road seam, the trailer dish, the 2-on-1 pass across).
@@ -1202,12 +1324,9 @@ function simPeriod(
     }
     const d0 = distFt(cs.pos, toSk.pos)
     const speed = clamp(62 + d0 * 0.3, 60, 92)
-    const tEst = d0 / speed
-    const b: XY = {
-      x: clamp(toSk.pos.x + (toSk.vel.x * tEst) / X_FT, -0.95, 0.95),
-      y: clamp(toSk.pos.y + (toSk.vel.y * tEst) / Y_FT, -0.92, 0.92)
-    }
+    const b = leadPoint(cs.pos, toSk, speed)
     const completed = rng.chance(clamp(0.93 - d0 / 400 - (oneTimer ? 0.06 : 0), 0.55, 0.95))
+    notePass(cs, b)
     ctx.stream.push({
       t: clk.t,
       period,
@@ -1273,20 +1392,45 @@ function simPeriod(
     })
     if (mates.length === 0) return false
 
+    // WHEN may the puck go backwards? (Step 0 of the match-engine plan.)
+    //  - in our own half (incl. our half of the neutral zone): breakout
+    //    support, the D-to-D regroup, reverses — normal hockey;
+    //  - past the red line only as a BAIL-OUT: a defender in stick reach and
+    //    closing, and no open forward/across option to move it to instead.
+    // Everything else attacks: forward or across to a better-placed mate, or
+    // the carrier keeps it and makes a play himself (returns false).
+    // The deliberate regroup — D-to-D, a reverse — lives in our half of the
+    // neutral zone, which ownHalf covers; past the red line a team that has
+    // the puck going forward keeps going forward.
+    const ownHalf = puckAdv <= 0
+    const bail = underRealPressure(cs, def.unit.skaters)
+    const passSpeed = (r: RSkater): number => clamp(60 + tempo.passRisk * 18 + distFt(cs.pos, r.pos) * 0.25, 60, 90)
+    const info = mates.map((m) => {
+      const back = isBackwardPass(puck, leadPoint(cs.pos, m.r, passSpeed(m.r)), a)
+      const open = openIceFt(m.r.pos, def.unit.skaters)
+      const lane = laneClearanceFt(puck, m.r.pos, def.unit.skaters)
+      return { back, open, lane }
+    })
+    // A forward/across option is REAL if the receiver has a stride of room
+    // and the lane isn't sealed (a cycle pass down the wall to a covered-but-
+    // not-smothered man is still the right play).
+    const hasForwardOption = info.some((f) => !f.back && f.open > 6 && f.lane > 3.5)
+    const backOk = ownHalf || (bail && !hasForwardOption)
+
     const seam: boolean[] = new Array(mates.length).fill(false)
     const weights = mates.map((m, i) => {
       const r = m.r
       const rAdv = r.pos.x * a
       // Never feed a teammate camped beyond the blue line ahead of the puck —
       // that pass would be offside.
-      if (rAdv > O_BLUE && puckAdv < O_BLUE - 0.02) return 0.0001
+      if (rAdv > O_BLUE && puckAdv < O_BLUE - 0.02) return 0
+      const f = info[i]
+      if (f.back && !backOk) return 0
       const d = distFt(cs.pos, r.pos)
       const prox = clamp(1.45 - d / 60, 0.25, 1.45)
       const ahead = (r.pos.x - cs.pos.x) * a
-      // Backward passes are a regroup tool, not a rush option: while attacking
-      // with speed, a trailing teammate is nearly never the right play.
-      const backPenalty = phase === 'rush' || phase === 'entry' ? 0.08 : 0.35
-      let w = (ahead >= -0.03 ? 1 : backPenalty) + r.player.composites.playmaking * 0.004
+      // An allowed back pass is still the lesser option (a regroup tool).
+      let w = (f.back ? 0.35 : 1) + r.player.composites.playmaking * 0.004
       if (phase === 'breakout') {
         // Outlet chains: D→winger on the wall, D→C in the middle, D-to-D.
         if (m.slot <= 2 && Math.abs(r.pos.y) > 0.45) w += 1.7
@@ -1297,9 +1441,10 @@ function simPeriod(
         w += Math.max(0, ahead) * 6
         if (Math.abs(r.pos.y - cs.pos.y) > 0.5) w += tempo.passRisk * 1.2
       } else {
-        // Cycle: wall→corner→point→seam. Low-to-high to the D, and a seam feed
-        // across the royal road to a body in the slot for a one-timer.
-        if (m.slot >= 3 && rAdv < 0.48) w += 1.1
+        // Cycle: wall→corner→net-front→seam. The low-to-high to the point
+        // survives only as the pressured bail-out (backOk above); the seam
+        // feed across the royal road sets up the one-timer.
+        if (m.slot >= 3 && rAdv < 0.48) w += bail ? 1.1 : 0
         const royal =
           rAdv > 0.55 &&
           Math.abs(r.pos.y) < 0.32 &&
@@ -1309,24 +1454,34 @@ function simPeriod(
           seam[i] = true
           w += 1.2 + tempo.passRisk * 1.6
         }
+        // Better-placed: a mate in a more dangerous spot than the carrier.
+        w += clamp((shotXg(r.pos, a) - shotXg(cs.pos, a)) * 6, 0, 0.8)
       }
-      return w * prox
+      // Open receivers through clear lanes — a covered man is not an option.
+      const openF = clamp(f.open / 14, 0.15, 1.25)
+      const laneF = clamp(f.lane / 7, 0.2, 1.15)
+      return w * prox * openF * laneF
     })
+    if (!weights.some((w) => w > 0)) return false
 
     const pick = weightedIndex(rng, weights)
+    // Pressured past the red line and the read says "back": most carriers
+    // protect the puck along the wall and keep working it instead (strong
+    // puck handlers more so) — the low-to-high bail is the minority play.
+    if (info[pick].back && !ownHalf) {
+      const keep = clamp(0.8 + (cs.player.composites.puckControl - LEAGUE_AVG) / 250, 0.65, 0.92)
+      if (rng.chance(keep)) return false
+    }
     const toSk = mates[pick].r
     const oneTimer = seam[pick] && rng.chance(0.7)
     const d0 = distFt(cs.pos, toSk.pos)
-    const speed = clamp(60 + tempo.passRisk * 18 + d0 * 0.25, 60, 90)
+    const speed = passSpeed(toSk)
     // Lead the receiver: aim where he will be when the puck arrives.
-    const tEst = d0 / speed
-    const b: XY = {
-      x: clamp(toSk.pos.x + (toSk.vel.x * tEst) / X_FT, -0.95, 0.95),
-      y: clamp(toSk.pos.y + (toSk.vel.y * tEst) / Y_FT, -0.92, 0.92)
-    }
+    const b = leadPoint(cs.pos, toSk, speed)
     const completed = rng.chance(
       clamp(0.95 - pressure * 0.18 - d0 / 420 - (oneTimer ? 0.05 : 0), 0.55, 0.96)
     )
+    notePass(cs, b)
     ctx.stream.push({
       t: clk.t,
       period,
@@ -1420,23 +1575,6 @@ function simPeriod(
     return best
   }
 
-  /** A trailing teammate to dish to right after a carry-in, or null. */
-  const trailerOf = (atk: TeamSim, cs: RSkater, a: number): RSkater | null => {
-    let best: RSkater | null = null
-    let bd = Infinity
-    for (const r of atk.unit.skaters) {
-      if (r === cs) continue
-      const behind = (cs.pos.x - r.pos.x) * a
-      if (behind < 0.02 || behind > 0.45) continue
-      const d = distFt(r.pos, cs.pos)
-      if (d < bd) {
-        bd = d
-        best = r
-      }
-    }
-    return best
-  }
-
   /** The lane-filling teammate on a 2-on-1 to pass across to, or null. */
   const rushLaneMate = (atk: TeamSim, cs: RSkater, a: number): RSkater | null => {
     let best: RSkater | null = null
@@ -1445,7 +1583,8 @@ function simPeriod(
       if (r === cs) continue
       if (Math.abs(r.pos.y - cs.pos.y) < 0.25) continue // need a real second lane
       const v = r.pos.x * a
-      if (v < cs.pos.x * a - 0.15) continue // must be up with the play
+      if (v < cs.pos.x * a - 0.04) continue // must be level or ahead: across, never back
+      if (isBackwardPass(puck, leadPoint(cs.pos, r, 62 + distFt(cs.pos, r.pos) * 0.3), a)) continue
       if (v > bestAdv) {
         bestAdv = v
         best = r
@@ -1569,7 +1708,8 @@ function simPeriod(
         beatTicks: active ? active.ticks : 0,
         side: active ? active.side : puck.y >= 0 ? 1 : -1,
         targetIdx: active ? active.targetIdx : -1,
-        hold: active !== null && active.kind === 'regroup' && active.ticks < active.dwell
+        hold: active !== null && active.kind === 'regroup' && active.ticks < active.dwell,
+        attack: active !== null && active.attack
       })
       defOrders = defenderOrders({
         unit: def.unit,
@@ -1890,6 +2030,11 @@ function simPeriod(
       adv > 0.1 &&
       presserDist > 14 &&
       def.unit.skaters.every((r) => r.pos.x * a < csAdv - 0.08)
+    if (bkEp && (bkEp.team !== atk || bkEp.id !== cs.player.id)) closeBreakaway('lost')
+    if (breakaway && !bkEp && ctx.telemetry) {
+      ctx.telemetry.breakaways.started++
+      bkEp = { team: atk, id: cs.player.id }
+    }
     if (breakaway) {
       if (ctx.telemetry) ctx.telemetry.breakawayTicks++
       if (
@@ -2116,11 +2261,13 @@ function simPeriod(
           // Across the line with possession — the entry is made.
           if (ctx.telemetry) ctx.telemetry.entries.carry++
           entryAt.set(atk, clk.t)
-          if (!b.breakaway && rng.chance(0.16)) {
-            const trailer = trailerOf(atk, cs, a)
-            if (trailer) {
+          // Met at the line by a defender in his face: move it ACROSS to the
+          // lane-mate (never a drop back to a trailer — the rush keeps going).
+          if (!b.breakaway && underRealPressure(cs, def.unit.skaters) && rng.chance(0.35)) {
+            const mate = rushLaneMate(atk, cs, a)
+            if (mate) {
               if (ctx.telemetry) ctx.telemetry.entries.pass++
-              passTo(cs, trailer, false, false)
+              passTo(cs, mate, false, false)
               beat = mkBeat('cyclePossession', 'OZ_CYCLE', atk, director.cycleDwell())
               break
             }
@@ -2179,6 +2326,14 @@ function simPeriod(
         // the puck first (no instant fling right after the entry; rush beats
         // own the quick-strike shots, which keeps rushShotShare on the data).
         const settledInZone = clk.t - (entryAt.get(atk) ?? -999) > 6
+        // A clear lane to the net: the carrier takes it — he drives the slot
+        // (the playbook steers him there) and lets it go once he's in tight.
+        b.attack = laneToNet(cs, a, def.unit.skaters)
+        if (b.attack && adv > 0.68 && Math.abs(puck.y) < 0.4 && rng.chance(0.05 * strengthMult)) {
+          tryShoot(cs, 'cycle', false, false)
+          beat = null
+          break
+        }
         // Flair makes a carrier more willing to fire a tougher, lower-percentage
         // shot off the cycle. Shot DANGER still comes from position (shotXg).
         // Absent on fictional players (=> 1.0×), so calibration is unaffected.
@@ -2224,6 +2379,14 @@ function simPeriod(
             beat = null
             break
           }
+          // Low-to-high is the pressured bail-out that feeds the point shot.
+          // Unpressured, the carrier with the puck low is the better shooter:
+          // he attacks from where he is instead of dishing backwards.
+          if (!underRealPressure(cs, def.unit.skaters)) {
+            if (adv > 0.6 && Math.abs(puck.y) < 0.5) tryShoot(cs, 'cycle', false, false)
+            beat = adv > 0.6 && Math.abs(puck.y) < 0.5 ? null : mkBeat('cyclePossession', 'OZ_CYCLE', atk, director.cycleDwell())
+            break
+          }
           b.passMade = true
           passTo(cs, atk.unit.skaters[pm], false, false) // low-to-high
           break
@@ -2246,9 +2409,14 @@ function simPeriod(
           recv.pos.x * a > 0.45 &&
           Math.abs(recv.pos.y) < 0.42 &&
           Math.sign(recv.pos.y || 1) !== Math.sign(puck.y || 1)
-        if ((inSlot && b.ticks >= 4) || b.ticks >= b.dwell) {
+        // The feed goes ACROSS the royal road — never back to a receiver who
+        // hasn't got level with the puck yet (then the look is gone).
+        const across = !isBackwardPass(puck, leadPoint(cs.pos, recv, 62 + distFt(cs.pos, recv.pos) * 0.3), a)
+        if (across && ((inSlot && b.ticks >= 4) || b.ticks >= b.dwell)) {
           passTo(cs, recv, true, false) // the royal-road feed; shot on arrival
           beat = null
+        } else if (b.ticks >= b.dwell) {
+          beat = mkBeat('cyclePossession', 'OZ_CYCLE', atk, director.cycleDwell())
         }
         break
       }
@@ -2314,7 +2482,7 @@ function simPeriod(
     if (beat && beat.team === atk && !flight && carrier !== null) {
       const k = beat.kind
       const flowing = k === 'breakout' || k === 'regroup' || k === 'cyclePossession'
-      if (flowing && !beat.breakaway) {
+      if (flowing && !beat.breakaway && !beat.attack) {
         const tempoPace = atk.team.tactics.tempo.pace
         // passing slider (default 0.5→1.0) multiplies pass frequency.
         const passMult = sliderMult(atk.team.tactics.passing, PASS_SLIDER_LOW, PASS_SLIDER_HIGH)

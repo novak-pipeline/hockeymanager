@@ -134,6 +134,24 @@ export interface FullSimTelemetry {
    * swarmTicks / liveTicks (ticks with 3+ defenders within 12 ft of the puck).
    */
   flow: { liveTicks: number; carrierSpeedSumFt: number; swarmTicks: number }
+  /**
+   * Pass DIRECTION texture (additive across games). "Back" = the pass travels
+   * toward the passer's own net (see isBackwardPass). oz* = thrown from the
+   * offensive half (past the red line); rush* = thrown during a rush / entry /
+   * counter beat; underPressure counts back passes thrown with a defender in
+   * stick reach (the only justified back pass in the offensive half).
+   */
+  passes: {
+    total: number
+    back: number
+    ozTotal: number
+    ozBack: number
+    ozBackPressured: number
+    rushTotal: number
+    rushBack: number
+  }
+  /** Breakaway EPISODES and how each one ended (additive across games). */
+  breakaways: { started: number; shot: number; forwardPass: number; backPass: number; lost: number }
 }
 
 export function emptyTelemetry(): FullSimTelemetry {
@@ -147,7 +165,9 @@ export function emptyTelemetry(): FullSimTelemetry {
     breakawayPasses: 0,
     beats,
     stoppages: { offside: 0, icing: 0, goalieFreeze: 0, penalty: 0, goal: 0, other: 0 },
-    flow: { liveTicks: 0, carrierSpeedSumFt: 0, swarmTicks: 0 }
+    flow: { liveTicks: 0, carrierSpeedSumFt: 0, swarmTicks: 0 },
+    passes: { total: 0, back: 0, ozTotal: 0, ozBack: 0, ozBackPressured: 0, rushTotal: 0, rushBack: 0 },
+    breakaways: { started: 0, shot: 0, forwardPass: 0, backPass: 0, lost: 0 }
   }
 }
 
@@ -176,6 +196,18 @@ export function clamp(v: number, lo: number, hi: number): number {
 
 export function lerp(a: number, b: number, f: number): number {
   return a + (b - a) * f
+}
+
+/**
+ * A pass is BACKWARD when it travels toward the passer's own net by more than a
+ * few feet AND the backward component dominates (the pass angle is more than
+ * ~110° off the attack direction). Lateral passes that drift back a stride are
+ * "across", not back. `a` = the passing team's attack sign.
+ */
+export function isBackwardPass(from: XY, to: XY, a: number): boolean {
+  const dxFt = (to.x - from.x) * X_FT * a
+  const dyFt = Math.abs(to.y - from.y) * Y_FT
+  return dxFt < -6 && -dxFt > dyFt * 0.36
 }
 
 /** Real-feet distance between two normalized rink points. */
