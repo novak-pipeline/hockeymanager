@@ -340,7 +340,15 @@ export class Choreographer {
 
   private celebrate(c: ActionCue): void {
     const scorer = this.find(c.actorId)
-    if (scorer?.layer) scorer.layer.play(celebrationFor(c.actorId))
+    if (scorer?.layer) {
+      // the shot's follow-through ends here: its IK re-grip would pin the arms to the stick
+      for (const n of scorer.layer.playing) if (n.startsWith('shot_') || n === 'pass') scorer.layer.stop(n)
+      // Owner rigs: the retargeted fist pump reads as a clench at the chest and
+      // full-weight arms-up puts the gloves on the helmet — arms-up at partial
+      // weight (the skating arms still blend under it) is a real arms-raised celebration
+      if (this.ownerLoco) scorer.layer.play('celly_armsup', { weight: celebrationFor(c.actorId) === 'celly_armsup' ? 0.92 : 0.85 })
+      else scorer.layer.play(celebrationFor(c.actorId))
+    }
     if (scorer) {
       // linemates who are close join in for a hug a beat later
       for (const a of this.all()) {
