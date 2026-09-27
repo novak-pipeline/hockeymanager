@@ -1,7 +1,7 @@
 import { Component, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { motion, MotionConfig } from 'framer-motion'
 import { SimClient } from '../worker/client'
-import type { DashboardView, PostgameReceiptView, TeamInfo, WatchedGame, WorkerResponse } from '../worker/protocol'
+import type { CalendarView, DashboardView, PostgameReceiptView, TeamInfo, WatchedGame, WorkerResponse } from '../worker/protocol'
 import { receiptWorthAStop, shouldHoldOverlay } from '@renderer/lib/cadence'
 import { routeContinue, sceneToOpen, type LastRoute } from '@engine/career/beatGates'
 import { listCareerSaves, loadCareer, saveCareer, type CareerSaveInfo } from '@renderer/lib/saves'
@@ -421,6 +421,10 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
    *  next match-day frame instead ("Last game: …"). */
   const lastReceiptRef = useRef<PostgameReceiptView | null>(null)
   const advanceRef = useRef<(() => void) | null>(null)
+  /** The last calendar the overlay was given. The overlay used to open on a
+   *  BARE month grid while the day processed (the calendar was only fetched
+   *  after the sim) — the "empty calendar when it loads" the owner saw. */
+  const lastCalendarRef = useRef<CalendarView | null>(null)
   const advanceWithOverlay = useCallback((): void => {
     void (async () => {
       // B5: "the postgame screen is slow to load". Where the time actually goes
@@ -454,12 +458,20 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
       // Snapshot the inbox so we can diff for what arrives on this advance.
       let beforeIds = new Set<string>()
       try {
-        const bi = await client.getInbox()
+        const [bi, bc] = await Promise.all([
+          client.getInbox(),
+          lastCalendarRef.current ? Promise.resolve(null) : client.getCalendar().catch(() => null),
+        ])
         if (bi.type === 'inbox') beforeIds = new Set(bi.inbox.items.map((i) => i.id))
+        if (bc && bc.type === 'calendar') lastCalendarRef.current = bc.calendar
       } catch { /* non-fatal — worst case every item reads as "new" */ }
       perf.mark('inboxBefore')
 
-      setProcessing({ phase: 'running', nextGame: dashboard?.nextGame ?? null, incoming: [], ...(dashboard?.date ? { dateISO: dashboard.date } : {}) })
+      setProcessing({
+        phase: 'running', nextGame: dashboard?.nextGame ?? null, incoming: [],
+        ...(lastCalendarRef.current ? { calendar: lastCalendarRef.current } : {}),
+        ...(dashboard?.date ? { dateISO: dashboard.date } : {}),
+      })
       const res = await run(() => client.continueGame())
       perf.mark('continueGame')
       if (res === null) { setProcessing(null); return } // errored (toasted) or busy
@@ -473,7 +485,8 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
       perf.mark('views')
       const inbox = inboxR && inboxR.type === 'inbox' ? inboxR.inbox : null
       const dash = dashR && dashR.type === 'dashboard' ? dashR.dashboard : null
-      const cal = calR && calR.type === 'calendar' ? calR.calendar : null
+      const cal = calR && calR.type === 'calendar' ? calR.calendar : lastCalendarRef.current
+      if (cal) lastCalendarRef.current = cal
       // B6.2: receipts are only presented for the game THIS advance played.
       const receiptRaw = recR && recR.type === 'postgameReceipt' ? recR.receipt : null
       const receipt = receiptRaw && dash && receiptRaw.day === dash.day ? receiptRaw : null

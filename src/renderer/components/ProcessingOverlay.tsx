@@ -11,6 +11,7 @@
  */
 import { useEffect } from 'react'
 import type { NewsItem } from '@domain/news'
+import { SPAN_RGB, spanDayOf, spansCovering } from '../lib/calendarSpans'
 import type { CalendarEntry, CalendarView, MatchDayPreviewView, NextGameView, PostgameReceiptView } from '@engine/career/views'
 import { TeamCrest } from './Crest'
 import { Icon } from './primitives'
@@ -329,7 +330,8 @@ export function ProcessingOverlay({
                   const gameTitle = game
                     ? `${game.home ? 'vs' : '@'} ${game.opponentName}${r ? ` — ${resultLabel} ${r.homeGoals}–${r.awayGoals}` : game.isNext ? ' — next match' : ''}`
                     : null
-                  const title = [gameTitle, ...(info?.keydates ?? [])].filter(Boolean).join(' · ')
+                  const spans = spansCovering(data.calendar?.spans, cell.iso)
+                  const title = [gameTitle, ...(info?.keydates ?? []), ...spans.map((sp) => { const d = spanDayOf(sp, cell.iso); return `${sp.label} (day ${d.n} of ${d.of})` })].filter(Boolean).join(' · ')
                   return (
                     <div
                       key={cell.iso}
@@ -366,6 +368,23 @@ export function ProcessingOverlay({
                           </span>
                         </div>
                       )}
+                      {/* multi-day windows (camps, the July market, freezes): a
+                          labelled strip on every day they cover */}
+                      {spans.slice(0, 2).map((sp) => (
+                        <div
+                          key={sp.id}
+                          style={{
+                            marginTop: 2, padding: '0 3px', borderRadius: 3,
+                            fontSize: 7.5, fontWeight: 700, lineHeight: 1.45,
+                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                            color: isToday ? '#fff' : `rgb(${SPAN_RGB[sp.kind]})`,
+                            background: `rgba(${SPAN_RGB[sp.kind]},${isToday ? 0.35 : 0.18})`,
+                            borderLeft: sp.startISO === cell.iso ? `2px solid rgb(${SPAN_RGB[sp.kind]})` : undefined,
+                          }}
+                        >
+                          {sp.label}
+                        </div>
+                      ))}
                     </div>
                   )
                 })}

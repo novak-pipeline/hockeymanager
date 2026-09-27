@@ -4126,6 +4126,20 @@ export interface CalendarView {
   entries: CalendarEntry[]
   /** Current in-world date (offseason-aware). Optional/additive. */
   todayISO?: string
+  /** Multi-day windows (dev camp, training camp, the July market, the
+   *  freezes, the international breaks), painted on every day they cover.
+   *  Additive; built by engine/career/seasonSpans (the stage machine's source). */
+  spans?: CalendarSpan[]
+}
+
+/** A multi-day window of the hockey year. */
+export interface CalendarSpan {
+  id: string
+  kind: 'camp' | 'market' | 'window' | 'preseason' | 'freeze' | 'international'
+  label: string
+  /** Inclusive. */
+  startISO: string
+  endISO: string
 }
 
 /* ────────────────────────── data hub (xG analytics) ────────────────────────── */

@@ -47,6 +47,7 @@ import type {
   ArchetypeInfo,
   AttributeGroupView,
   CalendarEntry,
+  CalendarSpan,
   CalendarView,
   ContractView,
   CompareRadarView,
@@ -1895,6 +1896,8 @@ export interface CalendarCtx extends ViewCtx {
   extraKeyDates?: Array<{ dateISO: string; label: string }>
   /** The current in-world date (offseason-aware) — anchors the default month. */
   todayISO?: string
+  /** Multi-day windows (seasonSpans) to paint on the grid. */
+  spans?: CalendarSpan[]
 }
 
 /**
@@ -1958,8 +1961,8 @@ export function buildCalendarView(ctx: CalendarCtx): CalendarView {
     }
     entries.push({ kind: 'keydate', dateISO: dayToDateISO(ctx.year, firstDay), label: 'Season Begins' })
 
-    // Holiday roster freeze (late December).
-    entries.push({ kind: 'keydate', dateISO: `${ctx.year}-12-19`, label: 'Holiday Roster Freeze' })
+    // Holiday roster freeze (late December) — a span when spans are supplied.
+    if (!ctx.spans?.length) entries.push({ kind: 'keydate', dateISO: `${ctx.year}-12-19`, label: 'Holiday Roster Freeze' })
 
     // All-Star break ~55% through the season (early February in a real schedule).
     const asbDay = firstDay + Math.round((lastDay - firstDay) * 0.55)
@@ -1996,7 +1999,12 @@ export function buildCalendarView(ctx: CalendarCtx): CalendarView {
 
   entries.sort((a, b) => a.dateISO.localeCompare(b.dateISO))
 
-  return { year: ctx.year, entries, ...(ctx.todayISO ? { todayISO: ctx.todayISO } : {}) }
+  return {
+    year: ctx.year,
+    entries,
+    ...(ctx.todayISO ? { todayISO: ctx.todayISO } : {}),
+    ...(ctx.spans && ctx.spans.length > 0 ? { spans: ctx.spans } : {}),
+  }
 }
 
 /* ────────────────────────── data hub (xG analytics) ────────────────────────── */

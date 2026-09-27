@@ -1291,6 +1291,14 @@ button.topnav-beat:hover { filter: brightness(1.25); }
   min-height: 0;
   overflow-y: auto;
 }
+/* Inside a CONTENT-sized panel (.dash-shrink: the offseason Week Ahead) the
+   agenda must size to its rows. With the grower's `flex-basis: 0` it
+   contributed no height to an auto-height panel and collapsed to nothing —
+   the summer dashboard showed "Today" and an empty agenda under it. It may
+   still shrink (and scroll) when the column is over-full. */
+.dash-col > .dash-shrink > .dash-scroll {
+  flex: 0 1 auto;
+}
 
 /* Tighter cards on the dashboard — density is the point of a portal. */
 .dash-col > .panel {

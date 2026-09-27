@@ -19,6 +19,7 @@ import { Notice, Panel, ScreenHeader } from '../components/ui'
 import { Icon } from '../components/primitives'
 import { CategoryIcon, Icons } from '../components/icons'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { SPAN_RGB, spanDayOf, spanRange } from '../lib/calendarSpans'
 import { bumpRefresh } from '../components/store'
 
 /* ── category metadata ── */
@@ -1157,6 +1158,13 @@ function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, busy
     .sort((a, b) => a.dateISO.localeCompare(b.dateISO))
     .slice(0, 5)
 
+  // The multi-day windows running today or starting inside the horizon
+  // (training camp, the July market, a freeze…) — one row each, with its span.
+  const windows = (calendar?.spans ?? [])
+    .filter((sp) => sp.endISO >= todayISO && sp.startISO < horizonEnd)
+    .sort((a, b) => a.startISO.localeCompare(b.startISO))
+    .slice(0, 3)
+
   const dateCell = (iso: string): JSX.Element => {
     const dt = new Date(iso + 'T00:00:00Z')
     const mon = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'][dt.getUTCMonth()]
@@ -1207,6 +1215,21 @@ function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, busy
           the summer desk grows), a squeezed column shortens the AGENDA instead
           of cutting off the panels below it (#8) */}
       <div className="dash-scroll">
+      {windows.map((sp) => {
+        const running = sp.startISO <= todayISO
+        const d = spanDayOf(sp, running ? todayISO : sp.startISO)
+        return (
+          <div key={sp.id} style={{ ...rowStyle, borderLeft: `3px solid rgb(${SPAN_RGB[sp.kind]})`, background: `rgba(${SPAN_RGB[sp.kind]},0.07)` }}>
+            {dateCell(running ? todayISO : sp.startISO)}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>{sp.label}</div>
+              <div className="muted" style={{ fontSize: 11 }}>
+                {spanRange(sp)}{running ? ` · day ${d.n} of ${d.of}` : ` · ${d.of} days`}
+              </div>
+            </div>
+          </div>
+        )
+      })}
       {upcoming.map((e, i) => (
         <div key={i} style={rowStyle}>
           {dateCell(e.dateISO)}
@@ -1233,7 +1256,7 @@ function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, busy
           )}
         </div>
       ))}
-      {upcoming.length === 0 && (
+      {upcoming.length === 0 && windows.length === 0 && (
         <div className="muted small" style={{ padding: '8px 10px' }}>A quiet stretch — the calendar has the full picture.</div>
       )}
       {/* PHASE 0: the staff's info-only briefings live here now — reading them

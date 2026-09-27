@@ -6,6 +6,8 @@ import { Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { Icon } from '../components/primitives'
 import { Icons } from '../components/icons'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { SPAN_RGB, spanDayOf, spanMonths, spansCovering } from '../lib/calendarSpans'
+import type { CalendarSpan } from '../../engine/career/views'
 
 /**
  * FM-style calendar month grid.
@@ -123,7 +125,11 @@ function ResultChip({ entry }: ResultChipProps): JSX.Element | null {
 /* ── calendar body ── */
 
 function CalendarBody({ calendar }: { calendar: CalendarView }): JSX.Element {
-  const months = monthKeys(calendar.entries)
+  // Every month with a fixture, a key date OR a multi-day window is pageable.
+  const months = useMemo(
+    () => [...new Set([...monthKeys(calendar.entries), ...spanMonths(calendar.spans), ...(calendar.todayISO ? [monthOf(calendar.todayISO)] : [])])].sort(),
+    [calendar.entries, calendar.spans, calendar.todayISO],
+  )
 
   // Default month: the in-world today (offseason-aware) when known, else the
   // next unplayed game's month, else last game's month.
@@ -196,7 +202,7 @@ function CalendarBody({ calendar }: { calendar: CalendarView }): JSX.Element {
           disabled={!canPrev}
           style={{ minWidth: 36 }}
         >
-          ‹
+          <Icon size={16}><Icons.ChevronLeft /></Icon>
         </button>
         <span style={{ fontWeight: 600, fontSize: 16, color: 'var(--text)', minWidth: 180, textAlign: 'center' }}>
           {monthLabel(currentMonthKey)}
@@ -207,7 +213,7 @@ function CalendarBody({ calendar }: { calendar: CalendarView }): JSX.Element {
           disabled={!canNext}
           style={{ minWidth: 36 }}
         >
-          ›
+          <Icon size={16}><Icons.ChevronRight /></Icon>
         </button>
         <span className="muted small" style={{ marginLeft: 'var(--sp-2)' }}>
           {calendar.year} season
@@ -220,6 +226,11 @@ function CalendarBody({ calendar }: { calendar: CalendarView }): JSX.Element {
         <span className="chip chip-warn"    style={{ fontSize: 10 }}>OTL = overtime loss</span>
         <span className="chip chip-danger"  style={{ fontSize: 10 }}>L = regulation loss</span>
         <span className="chip chip-violet"  style={{ fontSize: 10 }}>Key date</span>
+        {[...new Map((calendar.spans ?? []).map((sp) => [sp.kind, sp] as const)).values()].map((sp) => (
+          <span key={sp.kind} className="chip" style={{ fontSize: 10, background: `rgba(${SPAN_RGB[sp.kind]},0.18)`, borderColor: `rgba(${SPAN_RGB[sp.kind]},0.6)` }}>
+            {SPAN_LEGEND[sp.kind]}
+          </span>
+        ))}
       </div>
 
       {/* Grid */}
@@ -303,6 +314,11 @@ function CalendarBody({ calendar }: { calendar: CalendarView }): JSX.Element {
                             {dayNum}
                           </span>
 
+                          {/* Multi-day windows: a bar on every day they cover */}
+                          {inMonth && spansCovering(calendar.spans, isoDate).map((sp) => (
+                            <SpanBar key={sp.id} span={sp} dateISO={isoDate} weekStart={di === 0} weekEnd={di === 6} />
+                          ))}
+
                           {/* Entries */}
                           {inMonth && cellEntries.map((entry, ei) => (
                             <CalendarCell key={ei} entry={entry} />
@@ -317,6 +333,42 @@ function CalendarBody({ calendar }: { calendar: CalendarView }): JSX.Element {
           </table>
         </div>
       </Panel>
+    </div>
+  )
+}
+
+const SPAN_LEGEND: Record<CalendarSpan['kind'], string> = {
+  camp: 'Camp', preseason: 'Preseason', market: 'Free agency', window: 'Contract window', freeze: 'Freeze', international: 'International',
+}
+
+/** One day of a multi-day window: a full-width band, square where the window
+ *  runs on into the next/previous day, labelled on every day it covers. */
+function SpanBar({ span, dateISO, weekStart, weekEnd }: { span: CalendarSpan; dateISO: string; weekStart: boolean; weekEnd: boolean }): JSX.Element {
+  const first = span.startISO === dateISO
+  const last = span.endISO === dateISO
+  const { n, of } = spanDayOf(span, dateISO)
+  const rgb = SPAN_RGB[span.kind]
+  const r = 4
+  return (
+    <div
+      title={`${span.label} — day ${n} of ${of}`}
+      style={{
+        // Bleed across the cell padding so consecutive days read as one bar.
+        marginLeft: first || weekStart ? 0 : -8,
+        marginRight: last || weekEnd ? 0 : -8,
+        padding: '1px 6px',
+        fontSize: 10, fontWeight: 700, lineHeight: 1.4,
+        color: `rgb(${rgb})`,
+        background: `rgba(${rgb},0.16)`,
+        borderTop: `1px solid rgba(${rgb},0.55)`,
+        borderBottom: `1px solid rgba(${rgb},0.55)`,
+        borderLeft: first ? `3px solid rgb(${rgb})` : 'none',
+        borderTopLeftRadius: first ? r : 0, borderBottomLeftRadius: first ? r : 0,
+        borderTopRightRadius: last ? r : 0, borderBottomRightRadius: last ? r : 0,
+        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+      }}
+    >
+      {span.label}{of > 1 ? <span style={{ fontWeight: 400, opacity: 0.8 }}> · {n}/{of}</span> : null}
     </div>
   )
 }
