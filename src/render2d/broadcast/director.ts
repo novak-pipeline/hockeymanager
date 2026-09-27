@@ -562,6 +562,34 @@ export function directBroadcast(
   return { pregame, pregameMs, game }
 }
 
+/** Watch modes, as the match viewer offers them. */
+export type WatchMode = 'full' | 'extended' | 'key'
+
+/** The cold open for Key Moments: the arena title, then the puck. */
+export const KEY_OPEN_MS = 3500
+
+/**
+ * The pregame open scaled to the watch mode (F-9). "Key Moments ~60 s" used
+ * to sit through the whole broadcast open (rookie laps, story cards, both
+ * lineups, the goalie tape — up to ~45 s) before the first puck.
+ *   full     → the open the presentation setting asks for
+ *   extended → at most the compact open (no lineups / tape / anthem)
+ *   key      → a cold open: the first KEY_OPEN_MS of the compact open
+ * `compact` is the same game directed at presentation 'compact' (only its
+ * pregame is used — the in-game cues stay the setting's).
+ */
+export function openForWatchMode(
+  setting: BroadcastPlan,
+  compact: BroadcastPlan,
+  mode: WatchMode,
+): Pick<BroadcastPlan, 'pregame' | 'pregameMs'> {
+  if (mode === 'full' || setting.pregameMs <= 0) return { pregame: setting.pregame, pregameMs: setting.pregameMs }
+  const base = setting.pregameMs <= compact.pregameMs ? setting : compact
+  if (mode === 'extended') return { pregame: base.pregame, pregameMs: base.pregameMs }
+  const ms = Math.min(KEY_OPEN_MS, base.pregameMs)
+  return { pregame: base.pregame.filter((c) => c.at < ms), pregameMs: ms }
+}
+
 function summariseGame(acc: Map<number, PeriodDetail>): PeriodDetail {
   const total: PeriodDetail = { period: 0, home: { goals: 0, shots: 0 }, away: { goals: 0, shots: 0 }, goals: [], final: true }
   for (const d of [...acc.values()].sort((a, b) => a.period - b.period)) {
