@@ -178,7 +178,7 @@ const PENALTY_P = RATES.penalties / DECISION_TICKS_PER_GAME
  * Map a 0–1 slider centred at 0.5 to a multiplier in [lowEnd, highEnd].
  * At 0.5 the result is exactly 1.0 (neutral).
  */
-function sliderMult(val: number | undefined, lowEnd: number, highEnd: number): number {
+export function sliderMult(val: number | undefined, lowEnd: number, highEnd: number): number {
   const v = val ?? 0.5
   if (v <= 0.5) return 1 + (v - 0.5) * 2 * (1 - lowEnd)
   return 1 + (v - 0.5) * 2 * (highEnd - 1)
@@ -268,7 +268,7 @@ const ALL_DOTS: XY[] = [
 ]
 
 /** Empirical xG for a shot from normalized rink position toward the attacked net. */
-function shotXg(puck: XY, attackSign: number): number {
+export function shotXg(puck: XY, attackSign: number): number {
   const dxFt = Math.abs(attackSign * 89 - puck.x * 100) // along-ice ft to that net
   const yFt = Math.abs(puck.y * 42.5)
   const dist = Math.hypot(dxFt, yFt)
@@ -288,7 +288,7 @@ const SLOTS_BY_COUNT: Record<number, number[]> = {
   6: [0, 1, 2, 3, 4, 1]
 }
 
-function stat(ctx: Ctx, id: PlayerId): GamePlayerStat {
+export function stat(ctx: Ctx, id: PlayerId): GamePlayerStat {
   let s = ctx.stats.get(id)
   if (!s) {
     s = emptyStat(id)
@@ -297,7 +297,7 @@ function stat(ctx: Ctx, id: PlayerId): GamePlayerStat {
   return s
 }
 
-function weightedIndex(rng: Rng, weights: number[]): number {
+export function weightedIndex(rng: Rng, weights: number[]): number {
   const total = weights.reduce((a, b) => a + b, 0)
   let r = rng.float(0, total)
   for (let i = 0; i < weights.length; i++) {
@@ -314,9 +314,9 @@ interface BoxedPenalty {
   playerId: PlayerId
 }
 
-type DeployKind = 'ev' | 'pp' | 'pk' | 'ot'
+export type DeployKind = 'ev' | 'pp' | 'pk' | 'ot'
 
-class TeamSim {
+export class TeamSim {
   readonly team: Team
   readonly resolve: (id: PlayerId) => Player
   /** Mean lineup quality (≈ league avg 50) — the director's strength input. */
@@ -565,7 +565,7 @@ class TeamSim {
 /** Resting y-offsets for slots [LW, C, RW, LD, RD] when fanning out. */
 const FORMATION_Y = [-0.42, 0, 0.42, -0.28, 0.28]
 
-function avg(skaters: RSkater[], pick: (p: Player) => number): number {
+export function avg(skaters: RSkater[], pick: (p: Player) => number): number {
   if (skaters.length === 0) return LEAGUE_AVG
   let s = 0
   for (const r of skaters) s += pick(r.player)
@@ -576,7 +576,7 @@ function snapshot(unit: Unit): SkaterSnapshot[] {
   return unit.skaters.map((r) => ({ player: r.player.id, pos: { x: r.pos.x, y: r.pos.y } }))
 }
 
-function pushFrame(
+export function pushFrame(
   ctx: Ctx,
   t: number,
   period: number,
@@ -598,7 +598,7 @@ function pushFrame(
   })
 }
 
-function pickAssists(rng: Rng, skaters: RSkater[], scorerId: PlayerId): PlayerId[] {
+export function pickAssists(rng: Rng, skaters: RSkater[], scorerId: PlayerId): PlayerId[] {
   const mates = skaters.filter((r) => r.player.id !== scorerId)
   if (mates.length === 0) return []
   // Forward bias: defencemen pick up point assists but forwards drive most of
@@ -629,7 +629,7 @@ function pickAssists(rng: Rng, skaters: RSkater[], scorerId: PlayerId): PlayerId
  * centre slot, and only as a last resort the best faceoff man on the ice
  * (special-teams / OT units may not have a natural centre out there).
  */
-function takerIdxOf(unit: Unit): number {
+export function takerIdxOf(unit: Unit): number {
   let best = -1
   for (let i = 0; i < unit.skaters.length; i++) {
     if (unit.skaters[i].player.position !== 'C') continue
@@ -737,12 +737,12 @@ function laneToNet(cs: RSkater, a: number, defenders: readonly RSkater[]): boole
   return true
 }
 
-interface PeriodOutcome {
+export interface PeriodOutcome {
   /** True if a sudden-death period ended on a goal. */
   ended: boolean
 }
 
-interface PeriodSpec {
+export interface PeriodSpec {
   period: number
   lengthSeconds: number
   /** Sudden death: the first goal ends the period (and the game). */
@@ -2500,7 +2500,7 @@ function simPeriod(
   return { ended: endedSuddenDeath }
 }
 
-function shootout(ctx: Ctx, home: TeamSim, away: TeamSim, period: number): void {
+export function shootout(ctx: Ctx, home: TeamSim, away: TeamSim, period: number): void {
   const rng = ctx.rng
   // Each team's snipers, best first; a round sends the next one down the list and
   // wraps around once everyone's shot (NHL rules).
@@ -2558,11 +2558,33 @@ export interface FullSimOptions {
   telemetry?: FullSimTelemetry
 }
 
+/** One period of play, whatever engine animates it. */
+export type PeriodSim = (ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec) => PeriodOutcome
+
 export function fullSimGame(
   home: Team,
   away: Team,
   resolve: (id: PlayerId) => Player,
   opts: FullSimOptions
+): GameOutcome {
+  return runGame(home, away, resolve, opts, (ctx) => {
+    const director = new Director(ctx.rng)
+    return (c, h, a, spec) => simPeriod(c, h, a, spec, director)
+  })
+}
+
+/**
+ * The game shell shared by every watched-game engine: rosters, nightly goalie
+ * form, fights/injury plans, regulation → OT (3v3 or playoff sudden death) →
+ * shootout, and the outcome. `makePeriodSim` supplies the engine that plays
+ * each period (the director engine here; the agent engine in engine/agent).
+ */
+export function runGame(
+  home: Team,
+  away: Team,
+  resolve: (id: PlayerId) => Player,
+  opts: FullSimOptions,
+  makePeriodSim: (ctx: Ctx) => PeriodSim
 ): GameOutcome {
   const rules = opts.rules ?? 'regularSeason'
   const rng = new Rng(opts.seed)
@@ -2574,7 +2596,7 @@ export function fullSimGame(
     ...(fightTimes.length > 0 ? { fights: { times: fightTimes, next: 0, rng: fightRngFor(opts.seed) } } : {}),
     ...(injuryPlan ? { injury: { plan: injuryPlan, rng: inGameInjuryRngFor(opts.seed), done: false } } : {}),
   }
-  const director = new Director(rng)
+  const periodSim = makePeriodSim(ctx)
   const homeSim = new TeamSim(home, resolve)
   const awaySim = new TeamSim(away, resolve)
   homeSim.isHome = true // last change — enables line matching if the bench uses it
@@ -2584,7 +2606,7 @@ export function fullSimGame(
 
   let absBase = 0
   for (let period = 1; period <= REGULATION_PERIODS; period++) {
-    simPeriod(
+    periodSim(
       ctx,
       homeSim,
       awaySim,
@@ -2594,8 +2616,7 @@ export function fullSimGame(
         suddenDeath: false,
         absBase,
         baseSkaters: 5
-      },
-      director
+      }
     )
     absBase += PERIOD_SECONDS
   }
@@ -2608,7 +2629,7 @@ export function fullSimGame(
       decidedBy = 'overtime'
       let period = REGULATION_PERIODS + 1
       for (;;) {
-        const ot = simPeriod(
+        const ot = periodSim(
           ctx,
           homeSim,
           awaySim,
@@ -2618,8 +2639,7 @@ export function fullSimGame(
             suddenDeath: true,
             absBase,
             baseSkaters: 5
-          },
-          director
+          }
         )
         absBase += PERIOD_SECONDS
         finalPeriod = period
@@ -2629,7 +2649,7 @@ export function fullSimGame(
     } else {
       // Regular season: 5 minutes of 3-on-3, then the shootout.
       finalPeriod = REGULATION_PERIODS + 1
-      const ot = simPeriod(
+      const ot = periodSim(
         ctx,
         homeSim,
         awaySim,
@@ -2639,8 +2659,7 @@ export function fullSimGame(
           suddenDeath: true,
           absBase,
           baseSkaters: 3
-        },
-        director
+        }
       )
       if (ot.ended) {
         decidedBy = 'overtime'
