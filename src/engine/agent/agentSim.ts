@@ -97,7 +97,12 @@ const DOWN_S = { knockdown: 1.8, pinned: 1.5 }
 // ---------------------------------------------------------------------------
 export const AGENT_TUNING = {
   /** Reconciles the empirical xG with this engine's shot mix → goals/game. */
-  finishK: 0.76,
+  finishK: 0.8,
+  /** A checker this close (ft) to a stopped carrier, himself stopped, is tied up with him. */
+  tieUpR: 5,
+  /** How long a tie-up lasts before somebody wins it (s), and the burst (ft/s) a carrier who spins off it leaves with. */
+  tieUpS: 0.7,
+  spinV: 6,
   /** Base share of unblocked attempts that miss the net. */
   missBase: 0.3,
   /** Poke-check success scale (takeaways). */
@@ -140,7 +145,6 @@ const POKE_RELOAD_S = 1.4
 /** Chance a carrier holds up at the line when a mate is still offside. */
 const OFFSIDE_READ = 0.7
 /** Seconds a carrier and a checker can lean on each other before one wins it. */
-const TIE_UP_S = 0.7
 /** A skater who fumbles a touch gets another try this much later. */
 const RETRY_S = 0.3
 /** Loose-puck pickup: base chance, relative speed (ft/s) that is still easy, how fast it gets hard. */
@@ -1659,10 +1663,10 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const c = w.carrier
         const os = oppOf(w.control)
         let tier: Body | null = null
-        for (const o of os.skaters) if (o.stun <= 0 && Math.hypot(o.x - c.x, o.y - c.y) < 3.3 && speedOf(o) < 7.3) tier = o
+        for (const o of os.skaters) if (o.stun <= 0 && Math.hypot(o.x - c.x, o.y - c.y) < AGENT_TUNING.tieUpR && speedOf(o) < 7.3) tier = o
         if (tier && speedOf(c) < 7.3) {
           if (!tieUp || tieUp.c !== c || tieUp.o !== tier) tieUp = { c, o: tier, since: now }
-          else if (now - tieUp.since > TIE_UP_S && !settling) {
+          else if (now - tieUp.since > AGENT_TUNING.tieUpS && !settling) {
             const atk = r01(c.player.ratings.physical.strength) * 0.5 + r01(c.player.composites.puckControl) * 0.5
             const dfn = r01(tier.player.composites.takeaway) * 0.55 + rDef(tier.player.ratings.defensive.checking) * 0.2 + r01(tier.player.ratings.physical.strength) * 0.25
             tieUp = null
@@ -1670,10 +1674,10 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
               // He spins off it: the checker is left leaning on nothing.
               tier.stun = Math.max(tier.stun, 0.45)
               const ang = Math.atan2(c.y - tier.y, c.x - tier.x)
-              c.vx += Math.cos(ang) * 6
-              c.vy += Math.sin(ang) * 6
+              c.vx += Math.cos(ang) * AGENT_TUNING.spinV
+              c.vy += Math.sin(ang) * AGENT_TUNING.spinV
             } else {
-              ev({ t: T(), period, type: 'battle', kind: distToBoards(c.x, c.y) < 8 ? 'boards' : 'loosePuck', pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y }, players: [c.player.id, tier.player.id], winner: tier.player.id, durationS: TIE_UP_S })
+              ev({ t: T(), period, type: 'battle', kind: distToBoards(c.x, c.y) < 8 ? 'boards' : 'loosePuck', pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y }, players: [c.player.id, tier.player.id], winner: tier.player.id, durationS: AGENT_TUNING.tieUpS })
               // (A battle won, not a stick steal: no takeaway is scored for it.)
               const ang = Math.atan2(c.y - tier.y, c.x - tier.x) + rng.float(-1.2, 1.2)
               loosen(Math.cos(ang) * rng.float(4, 9), Math.sin(ang) * rng.float(4, 9), null)

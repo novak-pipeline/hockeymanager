@@ -48,8 +48,8 @@ export interface Caps {
   yaw: number
 }
 
-export const MIN_TOP_FT = 24
-export const MAX_TOP_FT = 34.5
+export const MIN_TOP_FT = 23
+export const MAX_TOP_FT = 35.6
 
 export function capsFor(p: Player): Caps {
   const skating = r100(p.composites.skating)
