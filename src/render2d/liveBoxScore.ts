@@ -174,6 +174,11 @@ export class LiveBoxScoreBuilder {
    * `frame` events are ignored — feed them or don't, it makes no difference.
    */
   apply(ev: GameEvent, absT: number): void {
+    // Every period played gets a line for both teams (a 0 is a 0, not a gap).
+    if (ev.period > 0) {
+      this.bump(this.homeByPeriod, ev.period, 0)
+      this.bump(this.awayByPeriod, ev.period, 0)
+    }
     switch (ev.type) {
       case 'goal': {
         const side = this.sideOf(ev.scorer)

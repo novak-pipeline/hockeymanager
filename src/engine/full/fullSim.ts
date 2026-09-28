@@ -156,7 +156,7 @@ const ON_GOAL_SHARE = RATES.shotsOnGoal / (RATES.shotsOnGoal + RATES.blockedShot
 // match-engine plan: carriers with a clear lane now attack the slot instead of
 // passing back to the point, so the average attempt is more dangerous; goals
 // landed 3.54 → 3.81/team/game at 0.6, re-reconciled here.)
-const FINISH_K = 0.56
+const FINISH_K = 0.54
 
 /** Share of director-offered (non-rebound, non-one-timer) shot chances actually taken. */
 const SHOT_VOLUME = 0.83
@@ -1077,7 +1077,8 @@ function simPeriod(
     // Volume reconciliation: the beat sources together over-produce attempts
     // (~36 SOG a team-game on both leagues); a share of the chances the
     // director offers is passed up (the carrier keeps working it).
-    if (kind !== 'rebound' && kind !== 'onetimer' && !ctx.rng.chance(SHOT_VOLUME)) return
+    // (Never on a breakaway or an odd-man rush: those shots are always taken.)
+    if (kind !== 'rebound' && kind !== 'onetimer' && !oddMan && !(bkEp && bkEp.team === possession) && !ctx.rng.chance(Math.min(1, SHOT_VOLUME * scoreEffectMult(possession.goals - otherOf(possession).goals, (period - 1 + clk.t / lengthSeconds) / 3)))) return
     const atk = possession
     const def = otherOf(atk)
     const a = atk.attackSign()
@@ -1159,7 +1160,10 @@ function simPeriod(
     }
 
     const lvl = ctx.levelAvg ?? LEAGUE_AVG
-    const finish = shooterSk.player.composites.scoring / lvl
+    // (Square-rooted: a star finishes better, but a league with a wider talent
+    // spread — the imported NHL rosters — must not out-score the calibration
+    // league just because its best shooters take the most shots.)
+    const finish = Math.sqrt(shooterSk.player.composites.scoring / lvl)
     const goalieEdge = (goalie.player.composites.goaltending - lvl) / 220
     // Small coach roster-fit edge on finishing (neutral 1.0 when unset).
     const cf = atk.team.coachFit === undefined ? 1 : coachFitMultiplier(atk.team.coachFit)
