@@ -267,9 +267,9 @@ export function citeCamp(lines: CampGameLine[], group: CampGroup): string {
     const g = lines.reduce((s, l) => s + l.g, 0)
     const a = lines.reduce((s, l) => s + l.a, 0)
     const pts = g + a
-    if (pts >= 3) facts.push([pts + 1, `had ${pts} points (${g}G ${a}A) in ${numWord(gp)} camp games`])
+    if (pts >= 3) facts.push([pts + 1, `had ${pts} points (${g}G ${a}A) in ${gp === 1 ? 'his one game' : `${numWord(gp)} camp games`}`])
     else if (pts === 0 && gp >= 2) facts.push([3, `was held off the scoresheet in ${numWord(gp)} games`])
-    else if (pts > 0 && !multi) facts.push([pts, `${g > 0 ? `scored ${g === 1 ? 'once' : TIMES[g]}` : `picked up ${a === 1 ? 'an assist' : `${a} assists`}`} in ${numWord(gp)} games`])
+    else if (pts > 0 && !multi) facts.push([pts, `${g > 0 ? `scored ${g === 1 ? 'once' : TIMES[g]}` : `picked up ${a === 1 ? 'an assist' : `${a} assists`}`} in ${gp === 1 ? 'his one game' : `${numWord(gp)} games`}`])
     const pre = lines.filter((l) => l.kind === 'preseason')
     const prePm = pre.reduce((s, l) => s + l.pm, 0)
     if (pre.length > 0 && Math.abs(prePm) >= 2) {

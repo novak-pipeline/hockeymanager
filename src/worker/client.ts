@@ -308,6 +308,14 @@ export class SimClient {
     return this.send({ type: 'submitDevCamp', ...(standoutId !== undefined ? { standoutId } : {}) })
   }
 
+  setDevCampChoice(playerId: string, choice: string | null): Promise<WorkerResponse> {
+    return this.send({ type: 'setDevCampChoice', playerId, choice: choice as never })
+  }
+
+  setDevCampFocus(playerId: string, focus: string | null): Promise<WorkerResponse> {
+    return this.send({ type: 'setDevCampFocus', playerId, focus })
+  }
+
   skipDevCamp(): Promise<WorkerResponse> {
     return this.send({ type: 'skipDevCamp' })
   }
