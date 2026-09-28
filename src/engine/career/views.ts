@@ -1788,6 +1788,11 @@ export interface TradeDraftView {
   /** Plain projection, e.g. "Vancouver would likely reject this." or the
    *  concrete blocker (NTC / over the cap). */
   partnerLine: string
+  /** GM reputation telegraph: your calls to this club this week, shown before
+   *  one could cost anything. Optional/additive. */
+  callsLine?: string
+  /** True when the next call or two reaches the line. */
+  callsNear?: boolean
 }
 
 /* ────────────────────────── deadline day hub ────────────────────────── */
@@ -2338,6 +2343,17 @@ export interface MentorBadge {
 /** The user GM's standing with each rival club. Response to 'getGMRelationships'. */
 export interface GMRelationshipsView {
   rows: Array<{ teamAbbr: string; teamName: string; standing: number; label: string }>
+  /** GM reputation (anti-cheese): your name around the league. Optional/additive. */
+  reputation?: {
+    standing: number
+    label: string
+    /** Relationship points it adds or takes at every table. */
+    tilt: number
+    /** Calls past the line in the last 30 days. */
+    strikes30: number
+    notes: Array<{ dateISO: string; delta: number; text: string }>
+    rules: string
+  }
 }
 
 /** The user's GM identity, reputation, and career record. Response to 'getGMProfile'. */
@@ -2879,6 +2895,8 @@ export interface CareerSnapshot {
   wrapped?: import('@engine/story/wrapped').WrappedState
   /** Named AI GM personas per club (Living World LW2). Optional/additive. */
   gmPersonas?: Array<[string, GmPersona]>
+  /** GM reputation state (anti-cheese). Optional/additive — absent = a fresh name. */
+  gmReputation?: import('./gmReputation').GmReputationState
   /** Pending preseason board-meeting year (Season Rhythm M1). Optional/additive. */
   boardMeetingYear?: number | null
   /** M3 dev camp soft gate. Optional/additive. */

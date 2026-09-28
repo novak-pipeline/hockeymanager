@@ -308,7 +308,17 @@ function checkInboxText(ctx: Ctx): void {
 }
 
 function runSanity(ctx: Ctx): void {
-  checkStandings(ctx); checkRostersAndCap(ctx); checkPlayerStats(ctx); checkInboxText(ctx)
+  checkStandings(ctx); checkRostersAndCap(ctx); checkPlayerStats(ctx); checkInboxText(ctx); checkReputation(ctx)
+}
+
+/** GM reputation is an ANTI-CHEESE system: it must never touch normal play
+ *  (owner: fun over realism). The autopilot plays normally, so any call past
+ *  the line is a tuning bug, not a policy choice. */
+function checkReputation(ctx: Ctx): void {
+  const rep = guarded(ctx, 'getGMRelationships', () => ctx.career.getGMRelationships())?.reputation
+  if (!rep) return
+  if (rep.strikes30 > 0) issue(ctx, 'major', 'reputation', `normal play hit the anti-cheese line ${rep.strikes30}× in 30 days (standing ${rep.standing})`)
+  if (rep.standing < 45) issue(ctx, 'major', 'reputation', `normal play left the GM's standing at ${rep.standing} (${rep.label})`, rep.notes.slice(0, 5).map((n) => `${n.delta} ${n.text}`).join(' | '))
 }
 
 /* ─────────────────────── flavour audit (immersion) ─────────────────────── */

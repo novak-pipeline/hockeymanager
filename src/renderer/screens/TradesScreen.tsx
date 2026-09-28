@@ -1358,6 +1358,13 @@ function DealDeskPanel(props: {
               <span style={{ fontSize: 12, color: 'var(--muted)' }}>{draft.partnerLine}</span>
             </div>
           )}
+
+          {draft.callsLine && (
+            <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start', marginTop: 6, fontSize: 12, color: draft.callsNear ? 'var(--amber)' : 'var(--muted)' }}>
+              <Icon size={14} style={{ flexShrink: 0, marginTop: 1 }}><Icons.Phone /></Icon>
+              <span>{draft.callsLine}</span>
+            </div>
+          )}
         </>
       )}
 
