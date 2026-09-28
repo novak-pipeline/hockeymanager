@@ -72,7 +72,7 @@ import {
   type Puck
 } from './physics'
 import { BLUE_X, DOT_EZ_X, DOT_NZ_X, DOT_Y, GOAL_X, HALF_X, HALF_Y, NET_HALF_W, boardsClamp, distToBoards } from './rink'
-import { DEKE, REACH, blockChance, decideCarrier, dekeSkill, pressureOn, realPressure, thinkSide, xgAt, type ThinkOut } from './brain'
+import { DEKE, DEKE_LEVEL, REACH, blockChance, decideCarrier, dekeDefRead, dekeGoalieRead, dekeSkill, pressureOn, realPressure, thinkSide, xgAt, type ThinkOut } from './brain'
 import { decideHit, resolveHit, type HitIntent } from './physical'
 import { emptyAgentTelemetry, type AgentTelemetry } from './telemetry'
 import { LEVEL, levelDefOffset, levelOffset, rDef, rLevel, type CarrierAction, type Side, type World } from './world'
@@ -90,11 +90,11 @@ const DT = FRAME_DT / SUBSTEPS
 // ---------------------------------------------------------------------------
 export const AGENT_TUNING = {
   /** Reconciles the empirical xG with this engine's shot mix → goals/game. */
-  finishK: 0.78,
+  finishK: 0.66,
   /** Base share of unblocked attempts that miss the net. */
   missBase: 0.3,
   /** Poke-check success scale (takeaways). */
-  pokeK: 0.065,
+  pokeK: 0.04,
   /** Stick-check success multiplier on a carrier who is standing still. */
   pokeStill: 2.2,
   /** Chance per ready think that a defender stabs at a MOVING carrier in reach. */
@@ -105,9 +105,9 @@ export const AGENT_TUNING = {
   /** Success scale per real attempt (attempts are rarer than thinks). */
   pokeAttemptK: 6.5,
   /** Unforced fumble rate under pressure (giveaways). */
-  fumbleK: 7.5,
+  fumbleK: 13,
   /** Per-think stick-foul chance when beaten (penalties). */
-  stickFoulK: 2.5,
+  stickFoulK: 1.9,
   /** Misc stoppages per second of live play ("other": net off, high stick…). */
   miscStopPerSec: 0.0028
 }
@@ -126,10 +126,18 @@ const BENCH_GATE = { x: 22, y: -41 }
 const GOAL_CELEBRATION_S = 4
 const FACEOFF_MIN_WAIT = 1.5
 const FACEOFF_MAX_WAIT = 12
+/** Seconds between everyone being set and the drop (the linesman squares the centres up). */
+const FACEOFF_HOLD: [number, number] = [0.6, 1.2]
 /** Seconds a defender needs between two real stick checks. */
 const POKE_RELOAD_S = 1.4
+/** Chance a carrier holds up at the line when a mate is still offside. */
+const OFFSIDE_READ = 0.7
+/** Seconds a carrier and a checker can lean on each other before one wins it. */
+const TIE_UP_S = 0.7
 /** A skater who fumbles a touch gets another try this much later. */
 const RETRY_S = 0.3
+/** Loose-puck pickup: base chance, relative speed (ft/s) that is still easy, how fast it gets hard. */
+export const LOOSE_PICK = { base: 0.85, easyRel: 22, relScale: 70 }
 
 interface Flight {
   kind: 'pass' | 'shot' | 'dump' | 'loose'
@@ -178,6 +186,12 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const dressed = [home, away].flatMap((t) => [...t.team.lines.forwards.flat(), ...t.team.lines.defensePairs.flat()].map((id) => t.resolve(id)))
     LEVEL.offset = levelOffset(dressed)
     LEVEL.def = levelDefOffset(dressed)
+    const bodies0 = dressed.map((p) => makeBody(p, 0, 0, 1))
+    const goalies0 = [home, away].map((t) => makeBody(t.resolve(t.team.lines.goalies[0]), 0, 0, 1))
+    const mean = (xs: number[]): number => xs.reduce((q, v) => q + v, 0) / Math.max(1, xs.length)
+    DEKE_LEVEL.atk = mean(bodies0.filter((b) => b.player.position !== 'D').map(dekeSkill))
+    DEKE_LEVEL.def = mean(bodies0.map(dekeDefRead))
+    DEKE_LEVEL.goalie = mean(goalies0.map(dekeGoalieRead))
   }
 
   const bodies = new Map<PlayerId, Body>()
@@ -236,6 +250,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   let now = 0
   let ended = false
   let deadAt: XY | null = null
+  let foSetAt = null as number | null
+  let foHold = 0
   let pending: { dot: XY; zone: 'offensive' | 'defensive' | 'neutral'; since: number; zoneFor: Side | null } | null = null
   let celebration: { scorer: Body; side: Side; until: number } | null = null
   let delayed: DelayedPenalty | null = null
@@ -258,6 +274,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   let flightKindAtGain = 'faceoff'
   let gotPos: XY = { x: 0, y: 0 }
   let turnSnap = ""
+  let tieUp = null as { c: Body; o: Body; since: number } | null
   let deke = null as { c: Body; on: Body; goalie: boolean; move: DekeKind; success: boolean; until: number; dir: number } | null
   let windup = null as { c: Body; at: number } | null
   let bite = null as { side: Side; dy: number; until: number } | null
@@ -632,7 +649,19 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         }
       }
     }
-    if (!set && waited < FACEOFF_MAX_WAIT) return false
+    if (!set && waited < FACEOFF_MAX_WAIT) {
+      foSetAt = null
+      return false
+    }
+    // Everyone is set: the linesman steps in, the centres square up and
+    // lower their sticks — a short hold before the drop.
+    if (foSetAt === null) {
+      foSetAt = now
+      foHold = rng.float(FACEOFF_HOLD[0], FACEOFF_HOLD[1])
+    }
+    if (now - foSetAt < foHold) return false
+    const setAt = foSetAt
+    foSetAt = null
     if (!hC || !aC) return false
     const hw = hC.player.composites.faceoffWin
     const aw = aC.player.composites.faceoffWin
@@ -652,6 +681,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const dx = p.dot.x * win.a
     const play = (dx > 30 ? win.tactics.offensiveFaceoff : dx < -30 ? win.tactics.defensiveFaceoff : undefined) ?? 'standard'
     const clean = rng.chance(0.72 + (Math.abs((homeWins ? hw : aw) - (homeWins ? aw : hw)) / 100) * 0.4)
+    const tieUpDraw = !clean || play === 'tie-up'
     let target: Body | null = null
     let at: XY
     const spots = faceoffSpots(win, p.dot)
@@ -687,7 +717,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       zone: p.zone === 'neutral' ? 'neutral' : zoneOf(p.dot, win),
       winner: winner.player.id,
       pos: { x: p.dot.x / HALF_X, y: p.dot.y / HALF_Y },
-      loser: (homeWins ? aC : hC).player.id
+      loser: (homeWins ? aC : hC).player.id,
+      setAt: Math.round(setAt * 100) / 100,
+      ...(tieUpDraw ? { tieUp: true } : {})
     })
     return true
   }
@@ -771,6 +803,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     // Delayed offside: an offside attacker's team plays the puck in the zone.
     if (w.delayedOffside === s && puck.x * s.a > BLUE_X) {
       if (anyOffside(s)) {
+        if (tm) tm.dbg["offDelayed"] = (tm.dbg["offDelayed"] ?? 0) + 1
         callOffside(s)
         return
       }
@@ -1534,13 +1567,13 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         // you get beaten).
         const stillC = speedOf(c) < AGENT_TUNING.pokeStillV
         // A player with a good stick picks more moments to go for it.
-        const sc = 0.3 * rDef(pk.player.ratings.defensive.stickChecking) + 0.7 * r01(pk.player.composites.takeaway)
-        if (!rng.chance((stillC ? AGENT_TUNING.pokeTryStill : AGENT_TUNING.pokeTry) * (0.3 + 1.4 * sc * sc))) continue
+        const sc = 0.1 * rDef(pk.player.ratings.defensive.stickChecking) + 0.9 * r01(pk.player.composites.takeaway)
+        if (!rng.chance((stillC ? AGENT_TUNING.pokeTryStill : AGENT_TUNING.pokeTry) * (0.1 + 2 * sc * sc * sc))) continue
         pokeReady.set(pk, now + POKE_RELOAD_S * rng.float(0.8, 1.3))
         const pc = r01(c.player.composites.puckControl)
         const protect = (c.hx * (pk.x - c.x) + c.hy * (pk.y - c.y)) < 0 ? 0.6 : 1 // body between
         const still = stillC ? AGENT_TUNING.pokeStill : 1
-        const pSucc = clamp((0.004 + sc * sc * sc * 0.45 + (sc - pc) * 0.1) * protect * still * AGENT_TUNING.pokeK * AGENT_TUNING.pokeAttemptK, 0.001, 0.6)
+        const pSucc = clamp((0.004 + Math.pow(sc, 5) * 1.25 + (sc - pc) * 0.1) * protect * still * AGENT_TUNING.pokeK * AGENT_TUNING.pokeAttemptK, 0.001, 0.6)
         if (tm) tm.pokeAttempts++
         const won = rng.chance(pSucc)
         ev({ t: T(), period, type: 'pokeCheck', by: pk.player.id, on: c.player.id, success: won, pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y } })
@@ -1573,6 +1606,37 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
             break
           }
         }
+      }
+      // Tie-ups: a carrier and a checker leaning on each other (in contact,
+      // neither moving) don't stay that way. After a moment somebody wins it —
+      // the carrier's strength and hands spin him off the check, or the
+      // checker's body and stick take the puck.
+      if (w.carrier && w.control && !pending) {
+        const c = w.carrier
+        const os = oppOf(w.control)
+        let tier: Body | null = null
+        for (const o of os.skaters) if (o.stun <= 0 && Math.hypot(o.x - c.x, o.y - c.y) < 3.3 && speedOf(o) < 7.3) tier = o
+        if (tier && speedOf(c) < 7.3) {
+          if (!tieUp || tieUp.c !== c || tieUp.o !== tier) tieUp = { c, o: tier, since: now }
+          else if (now - tieUp.since > TIE_UP_S) {
+            const atk = r01(c.player.ratings.physical.strength) * 0.5 + r01(c.player.composites.puckControl) * 0.5
+            const dfn = r01(tier.player.composites.takeaway) * 0.55 + rDef(tier.player.ratings.defensive.checking) * 0.2 + r01(tier.player.ratings.physical.strength) * 0.25
+            tieUp = null
+            if (rng.chance(clamp(0.5 + (atk - dfn) * 1.5, 0.15, 0.85))) {
+              // He spins off it: the checker is left leaning on nothing.
+              tier.stun = Math.max(tier.stun, 0.45)
+              const ang = Math.atan2(c.y - tier.y, c.x - tier.x)
+              c.vx += Math.cos(ang) * 6
+              c.vy += Math.sin(ang) * 6
+            } else {
+              ev({ t: T(), period, type: 'battle', kind: distToBoards(c.x, c.y) < 8 ? 'boards' : 'loosePuck', pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y }, players: [c.player.id, tier.player.id], winner: tier.player.id, durationS: TIE_UP_S })
+              // (A battle won, not a stick steal: no takeaway is scored for it.)
+              const ang = Math.atan2(c.y - tier.y, c.x - tier.x) + rng.float(-1.2, 1.2)
+              loosen(Math.cos(ang) * rng.float(4, 9), Math.sin(ang) * rng.float(4, 9), null)
+              flight!.tried.set(c, now)
+            }
+          }
+        } else tieUp = null
       }
       // Fumbles under pressure (unforced).
       if (w.carrier && w.control && !pending) {
@@ -1700,7 +1764,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           pos: { x: r.victim.x / HALF_X, y: r.victim.y / HALF_Y },
           force: Math.round(clamp((r.force - 4) / 26, 0, 1) * 100) / 100,
           kind: r.kind,
-          targetHadPuck: r.hadPuck
+          targetHadPuck: r.hadPuck,
+          ...(r.knockdown ? { knockdown: true } : {}),
+          ...(r.pinned ? { pinned: true } : {})
         })
         if (tm) tm.noteHit(r)
         if (r.loosePuck && w.carrier === r.victim) {
@@ -1740,6 +1806,16 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         puck.vy = c.vy
         // Offside: the puck carried over the blue line with a teammate ahead of it.
         const s = w.control!
+        // A carrier reads the line: with a mate still in the zone he stops the
+        // puck short of it (edges dug in) rather than walking it in offside —
+        // offside is a mistake (a mate who didn't get out), not a habit.
+        if (lastCarrierAdvSide === s && prevAdv < BLUE_X && puck.x * s.a >= BLUE_X && anyOffside(s) && rng.chance(OFFSIDE_READ)) {
+          const over = puck.x * s.a - (BLUE_X - 0.3)
+          c.x -= s.a * over
+          puck.x -= s.a * over
+          if (c.vx * s.a > 0) c.vx = 0
+          puck.vx = c.vx
+        }
         const adv = puck.x * s.a
         if (lastCarrierAdvSide === s && prevAdv < BLUE_X && adv >= BLUE_X) {
           if (checkOffside(s, true)) continue
@@ -1883,6 +1959,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   function checkOffside(s: Side, carried: boolean): boolean {
     if (!anyOffside(s)) return false
     if (carried) {
+      if (tm) { const off = s.skaters.filter((b) => b !== w.carrier && b.x * s.a > BLUE_X + 1); const k = `offC:${off.length}:${off.map((b) => (b.vx * s.a < -2 ? "out" : b.vx * s.a > 2 ? "in" : "still")).join("")}:cv${Math.round((w.carrier ? w.carrier.vx * s.a : 0) / 10) * 10}`; tm.dbg[k] = (tm.dbg[k] ?? 0) + 1 }
       callOffside(s)
       return true
     }
@@ -2014,9 +2091,15 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           if (d > REACH + 1.5) f.tried.delete(b)
           continue
         }
-        if (now - (f.tried.get(b) ?? -99) < RETRY_S) continue
+        // The man GOING for this puck (the chaser, the pass target) keeps his
+        // stick on it — he gets a try every tenth of a second, not one pass.
+        const going = s.roles.get(b) === 'CHASE' || w.passTo === b
+        if (now - (f.tried.get(b) ?? -99) < (going ? 0.1 : RETRY_S)) continue
         // A saucer pass flies over the sticks in the lane.
         if (f.kind === 'pass' && f.side !== s && puck.z > 0.35) continue
+        // Delayed offside: they know it — nobody touches it in the zone until
+        // everyone is back onside.
+        if (w.delayedOffside === s && puck.x * s.a > BLUE_X && anyOffside(s)) continue
         cands.push({ b, s, d })
       }
     }
@@ -2045,7 +2128,12 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       } else {
         // Loose or dumped puck: speed makes it hard, hands make it easy; a
         // contested puck is a battle.
-        p = clamp(0.62 + (hands - 0.5) * 0.4 - Math.max(0, rel - 18) / 60, 0.08, 0.95)
+        // A loose puck the stick reaches is usually taken: it is only genuinely
+        // hard when it is fast relative to the stick (hands decide how fast).
+        const going = s.roles.get(b) === 'CHASE'
+        p = going
+          ? clamp(LOOSE_PICK.base + (hands - 0.5) * 0.3 - Math.max(0, rel - LOOSE_PICK.easyRel - hands * 10) / LOOSE_PICK.relScale, 0.15, 0.97)
+          : clamp(0.72 + (hands - 0.5) * 0.4 - Math.max(0, rel - 18) / 60, 0.08, 0.95)
         const rivals = cands.filter((q) => q.s !== s).length
         if (rivals > 0) {
           const str = r01(b.player.ratings.physical.strength)

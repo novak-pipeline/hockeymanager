@@ -62,7 +62,7 @@ describe('agent engine attribute correlations', () => {
       }
       return a
     }
-    const games = Number(process.env.CORR_GAMES ?? 32)
+    const games = Number(process.env.CORR_GAMES ?? 48)
     for (let i = 0; i < games; i++) {
       const out = agentSimGame(team(i), team(i + 3), resolve, { seed: 9100 + i })
       let holder: PlayerId | null = null

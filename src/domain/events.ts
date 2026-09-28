@@ -39,6 +39,14 @@ export type FaceoffEvent = GameEventBase & {
   pos: XY
   /** Additive (agent engine): the centre who lost the draw. */
   loser?: PlayerRef
+  /**
+   * Additive (agent engine): period clock (s) at which every skater was set
+   * on his spot and the linesman could drop the puck — the lining-up phase
+   * runs from the whistle to `setAt`, the drop is at `t`.
+   */
+  setAt?: number
+  /** Additive (agent engine): neither centre won it clean — a tie-up / scrum at the dot before the puck squirts out. */
+  tieUp?: boolean
 }
 
 export type CarryEvent = GameEventBase & {
@@ -177,6 +185,10 @@ export type HitEvent = GameEventBase & {
   kind?: HitKind
   /** Additive (agent engine): the target had the puck (or had just moved it). */
   targetHadPuck?: boolean
+  /** Additive (agent engine): the target went off his feet (down for ~1–1.5 s). */
+  knockdown?: boolean
+  /** Additive (agent engine): the target was pinned against the boards after the hit. */
+  pinned?: boolean
 }
 
 export type PenaltyEvent = GameEventBase & {
