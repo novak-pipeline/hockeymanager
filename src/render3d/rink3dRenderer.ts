@@ -1375,24 +1375,30 @@ export class Rink3dRenderer implements MatchRenderer {
   }
 
   /**
-   * Club branding in the arena: the home club's logo (an image URL / data URL
-   * from the mod logo pack) at centre ice. Omit or pass null for the league
-   * roundel. Resolves once the image has loaded (failures keep the roundel).
+   * Club branding in the arena (image URLs / data URLs from the mod logo
+   * pack): the HOME logo at centre ice, on dasher panels, the ribbon board and
+   * behind the benches; home AND away on the video board's matchup. A key left
+   * out is unchanged; null clears it (the league roundel / plain boards).
+   * Resolves once the images have loaded (a failed image counts as none).
    */
-  async setTeamLogos(logos: { home?: string | null }): Promise<void> {
-    if (!logos.home) {
-      this.arena.setCenterLogo(null)
-      return
+  async setTeamLogos(logos: { home?: string | null; away?: string | null }): Promise<void> {
+    const load = async (url: string | null | undefined): Promise<HTMLImageElement | null> => {
+      if (!url) return null
+      const img = new Image()
+      img.decoding = 'async'
+      img.src = url
+      try {
+        await img.decode()
+        return img
+      } catch {
+        return null
+      }
     }
-    const img = new Image()
-    img.decoding = 'async'
-    img.src = logos.home
-    try {
-      await img.decode()
-    } catch {
-      return
-    }
-    this.arena.setCenterLogo(img)
+    const [home, away] = await Promise.all([load(logos.home), load(logos.away)])
+    this.arena.setLogos({
+      ...(logos.home !== undefined ? { home } : {}),
+      ...(logos.away !== undefined ? { away } : {}),
+    })
   }
 
   /** Dev harness only: pin the camera to a fixed pose (null = normal presets). */

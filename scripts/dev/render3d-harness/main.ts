@@ -44,6 +44,24 @@ const r = await Impl.create(host, colors, {
   ...(q.has('loco') ? { locomotion: q.get('loco') as 'code' | 'clip' | 'hybrid' } : {}),
 })
 r.setEventStream(out.stream)
+// ?logo=1: generated stand-in club logos (the real ones are mod logo-pack data, never in the repo)
+if (q.get('logo') === '1') {
+  const standIn = (fill: number, ring: string, mark: string) => {
+    const c = document.createElement('canvas')
+    c.width = c.height = 256
+    const g = c.getContext('2d')!
+    g.fillStyle = ring
+    g.beginPath(); g.arc(128, 128, 122, 0, Math.PI * 2); g.fill()
+    g.fillStyle = `#${fill.toString(16).padStart(6, '0')}`
+    g.beginPath(); g.arc(128, 128, 104, 0, Math.PI * 2); g.fill()
+    g.fillStyle = ring
+    g.font = '900 120px "Arial Black", Impact, sans-serif'
+    g.textAlign = 'center'; g.textBaseline = 'middle'
+    g.fillText(mark, 128, 136)
+    return c.toDataURL('image/png')
+  }
+  void r.setTeamLogos({ home: standIn(Number(q.get('home') ?? 0x1f4fbf), '#ffffff', 'H'), away: standIn(Number(q.get('away') ?? 0xc8102e), '#f2c14e', 'A') })
+}
 r.setCamera((q.get('cam') ?? 'broadcast') as CameraPreset)
 let last = ''
 r.onUpdate((v) => {
