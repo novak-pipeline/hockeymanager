@@ -90,11 +90,11 @@ const DT = FRAME_DT / SUBSTEPS
 // ---------------------------------------------------------------------------
 export const AGENT_TUNING = {
   /** Reconciles the empirical xG with this engine's shot mix → goals/game. */
-  finishK: 0.78,
+  finishK: 0.64,
   /** Base share of unblocked attempts that miss the net. */
   missBase: 0.3,
   /** Poke-check success scale (takeaways). */
-  pokeK: 0.065,
+  pokeK: 0.055,
   /** Stick-check success multiplier on a carrier who is standing still. */
   pokeStill: 2.2,
   /** Chance per ready think that a defender stabs at a MOVING carrier in reach. */
@@ -105,7 +105,7 @@ export const AGENT_TUNING = {
   /** Success scale per real attempt (attempts are rarer than thinks). */
   pokeAttemptK: 6.5,
   /** Unforced fumble rate under pressure (giveaways). */
-  fumbleK: 9,
+  fumbleK: 13,
   /** Per-think stick-foul chance when beaten (penalties). */
   stickFoulK: 1.9,
   /** Misc stoppages per second of live play ("other": net off, high stick…). */
@@ -128,10 +128,14 @@ const FACEOFF_MIN_WAIT = 1.5
 const FACEOFF_MAX_WAIT = 12
 /** Seconds a defender needs between two real stick checks. */
 const POKE_RELOAD_S = 1.4
+/** Chance a carrier holds up at the line when a mate is still offside. */
+const OFFSIDE_READ = 0.7
 /** Seconds a carrier and a checker can lean on each other before one wins it. */
 const TIE_UP_S = 0.7
 /** A skater who fumbles a touch gets another try this much later. */
 const RETRY_S = 0.3
+/** Loose-puck pickup: base chance, relative speed (ft/s) that is still easy, how fast it gets hard. */
+export const LOOSE_PICK = { base: 0.85, easyRel: 22, relScale: 70 }
 
 interface Flight {
   kind: 'pass' | 'shot' | 'dump' | 'loose'
@@ -774,6 +778,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     // Delayed offside: an offside attacker's team plays the puck in the zone.
     if (w.delayedOffside === s && puck.x * s.a > BLUE_X) {
       if (anyOffside(s)) {
+        if (tm) tm.dbg["offDelayed"] = (tm.dbg["offDelayed"] ?? 0) + 1
         callOffside(s)
         return
       }
@@ -1774,6 +1779,16 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         puck.vy = c.vy
         // Offside: the puck carried over the blue line with a teammate ahead of it.
         const s = w.control!
+        // A carrier reads the line: with a mate still in the zone he stops the
+        // puck short of it (edges dug in) rather than walking it in offside —
+        // offside is a mistake (a mate who didn't get out), not a habit.
+        if (lastCarrierAdvSide === s && prevAdv < BLUE_X && puck.x * s.a >= BLUE_X && anyOffside(s) && rng.chance(OFFSIDE_READ)) {
+          const over = puck.x * s.a - (BLUE_X - 0.3)
+          c.x -= s.a * over
+          puck.x -= s.a * over
+          if (c.vx * s.a > 0) c.vx = 0
+          puck.vx = c.vx
+        }
         const adv = puck.x * s.a
         if (lastCarrierAdvSide === s && prevAdv < BLUE_X && adv >= BLUE_X) {
           if (checkOffside(s, true)) continue
@@ -1917,6 +1932,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   function checkOffside(s: Side, carried: boolean): boolean {
     if (!anyOffside(s)) return false
     if (carried) {
+      if (tm) { const off = s.skaters.filter((b) => b !== w.carrier && b.x * s.a > BLUE_X + 1); const k = `offC:${off.length}:${off.map((b) => (b.vx * s.a < -2 ? "out" : b.vx * s.a > 2 ? "in" : "still")).join("")}:cv${Math.round((w.carrier ? w.carrier.vx * s.a : 0) / 10) * 10}`; tm.dbg[k] = (tm.dbg[k] ?? 0) + 1 }
       callOffside(s)
       return true
     }
@@ -2048,9 +2064,15 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           if (d > REACH + 1.5) f.tried.delete(b)
           continue
         }
-        if (now - (f.tried.get(b) ?? -99) < RETRY_S) continue
+        // The man GOING for this puck (the chaser, the pass target) keeps his
+        // stick on it — he gets a try every tenth of a second, not one pass.
+        const going = s.roles.get(b) === 'CHASE' || w.passTo === b
+        if (now - (f.tried.get(b) ?? -99) < (going ? 0.1 : RETRY_S)) continue
         // A saucer pass flies over the sticks in the lane.
         if (f.kind === 'pass' && f.side !== s && puck.z > 0.35) continue
+        // Delayed offside: they know it — nobody touches it in the zone until
+        // everyone is back onside.
+        if (w.delayedOffside === s && puck.x * s.a > BLUE_X && anyOffside(s)) continue
         cands.push({ b, s, d })
       }
     }
@@ -2079,7 +2101,12 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       } else {
         // Loose or dumped puck: speed makes it hard, hands make it easy; a
         // contested puck is a battle.
-        p = clamp(0.62 + (hands - 0.5) * 0.4 - Math.max(0, rel - 18) / 60, 0.08, 0.95)
+        // A loose puck the stick reaches is usually taken: it is only genuinely
+        // hard when it is fast relative to the stick (hands decide how fast).
+        const going = s.roles.get(b) === 'CHASE'
+        p = going
+          ? clamp(LOOSE_PICK.base + (hands - 0.5) * 0.3 - Math.max(0, rel - LOOSE_PICK.easyRel - hands * 10) / LOOSE_PICK.relScale, 0.15, 0.97)
+          : clamp(0.72 + (hands - 0.5) * 0.4 - Math.max(0, rel - 18) / 60, 0.08, 0.95)
         const rivals = cands.filter((q) => q.s !== s).length
         if (rivals > 0) {
           const str = r01(b.player.ratings.physical.strength)

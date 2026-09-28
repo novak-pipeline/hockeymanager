@@ -67,7 +67,7 @@ const r01 = rLevel
  * a carrier who drives into a crowded house risks the whole continuation
  * value on a low-retention carry. That is what brings shots out to range.
  */
-export const VAL = { oz: 0.09, kPos: 0.15, shoot: 0.9, keep: 0.25, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 2, laneRead: 0.75, angleZero: 90, behindNet: 0.85, transMaxX: 70, transBack: 0.003, rushNoBackX: 0, regroupMaxX: 20, ozBack: 0.008 }
+export const VAL = { oz: 0.11, kPos: 0.15, shoot: 0.68, keep: 0.18, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 1.2, laneRead: 0.95, angleZero: 90, behindNet: 0.85, transMaxX: 70, transBack: 0.003, rushNoBackX: 0, regroupMaxX: 20, ozBack: 0.008 }
 /**
  * D safety (gap discipline): how far ahead a defenceman reads an attacker
  * coming at him (s), the base gap (ft) plus gap per ft/s of the attacker's
@@ -315,7 +315,7 @@ export function dekeChance(c: Body, o: Body, goalie: boolean): number {
 }
 
 /** Shot blocking: per-body chance scale for a body square in the lane. */
-export const SHOT_BLOCK = { base: 1.85 }
+export const SHOT_BLOCK = { base: 1.6 }
 
 /** Chance a body `d` ft off the shot line (between shooter and net) blocks it. */
 export function blockChance(o: Body, d: number, slap: boolean): number {
@@ -594,7 +594,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       const side = c.y >= 0 ? 1 : -1
       const chipAt = { x: a * 8, y: side * 40 }
       const ev = 0.4 * posValue(chipAt.x, chipAt.y, a) - 0.5 * posValue(chipAt.x, chipAt.y, -a) * 0.8
-      opts.push({ ev: ev - (pressure < 0.4 ? 0.004 : 0), act: { kind: 'dump', at: chipAt, speed: rimSpeed(c, chipAt, 1.1), lift: 9 } })
+      opts.push({ ev: ev - (pressure < 0.4 ? 0.004 : 0), act: { kind: 'dump', at: chipAt, speed: rimSpeed(c, chipAt, 0.9), lift: 9 } })
       if (me.shorthanded) {
         const at = { x: a * 90, y: clamp(c.y, -20, 20) }
         opts.push({ ev: 0.012, act: { kind: 'dump', at, speed: 85, lift: 0 } })
