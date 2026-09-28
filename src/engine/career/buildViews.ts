@@ -14,6 +14,7 @@ import type {
   Team,
   TeamId,
 } from '@domain'
+import { allStarBreakDay } from '@engine/career/seasonSpans'
 import { ratedOverall, agedPotential, overallToStars } from '@engine/ratings/composites'
 import { computeRadar } from '@engine/ratings/radar'
 import type { RadarView } from '@engine/ratings/radar'
@@ -1965,7 +1966,7 @@ export function buildCalendarView(ctx: CalendarCtx): CalendarView {
     if (!ctx.spans?.length) entries.push({ kind: 'keydate', dateISO: `${ctx.year}-12-19`, label: 'Holiday Roster Freeze' })
 
     // All-Star break ~55% through the season (early February in a real schedule).
-    const asbDay = firstDay + Math.round((lastDay - firstDay) * 0.55)
+    const asbDay = allStarBreakDay(firstDay, lastDay)
     entries.push({ kind: 'keydate', dateISO: dayToDateISO(ctx.year, asbDay), label: 'All-Star Break' })
 
     // Trade deadline.

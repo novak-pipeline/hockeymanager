@@ -12,7 +12,7 @@ import { useShellActions } from '../components/ActionsContext'
 import { PlayerLink, TeamLink, useNav } from '../components/NavContext'
 import { PlayerFace } from '../components/PlayerFace'
 import { fmtDate, fmtMoney } from '../components/format'
-import { dayToDateISO } from '../../engine/career/views'
+import { dayToDateISO, type WeekLoadView, type WeekPlanView } from '../../engine/career/views'
 import { TeamCrest } from '../components/Crest'
 import { OverallStars } from '../components/Stars'
 import { Notice, Panel, ScreenHeader } from '../components/ui'
@@ -20,7 +20,7 @@ import { Icon } from '../components/primitives'
 import { CategoryIcon, Icons } from '../components/icons'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { SPAN_RGB, spanDayOf, spanRange } from '../lib/calendarSpans'
-import { bumpRefresh } from '../components/store'
+import { bumpRefresh, toast } from '../components/store'
 
 /* ── category metadata ── */
 const CAT_COLOR: Record<NewsCategory, string> = {
@@ -363,6 +363,12 @@ export function DashboardScreen(): JSX.Element {
             onOpenCalendar={() => nav.navigate('calendar')}
             onOpenOffseason={() => nav.navigate('offseason')}
             onWatch={actions.watchNext}
+            onSetLoad={(load) => {
+              void client.setWeekLoad(load).then((r) => {
+                if (r.type === 'error') toast(r.message, 'error')
+                else bumpRefresh()
+              })
+            }}
             busy={actions.busy}
             fill={d.phase !== 'offseason'}
           />
@@ -1128,15 +1134,87 @@ function DashHero({ d, customize }: { d: DashboardView; customize: React.ReactNo
   )
 }
 
+const ordinal = (n: number): string => {
+  const v = n % 100
+  const suf = v >= 11 && v <= 13 ? 'th' : n % 10 === 1 ? 'st' : n % 10 === 2 ? 'nd' : n % 10 === 3 ? 'rd' : 'th'
+  return `${n}${suf}`
+}
+
+/** THE WEEK: what this week is about, how hard we skate, the coach's read and
+ *  the race. Pure agenda — nothing here holds Continue. */
+function WeekPlan({ week, onSetLoad, busy }: {
+  week: WeekPlanView
+  onSetLoad: (load: WeekLoadView | null) => void
+  busy: boolean
+}): JSX.Element {
+  const race = week.race
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '6px 8px' }}>
+      {week.storyline && (
+        <div style={{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'flex-start' }} title={week.storyline.text}>
+          <Icon size={14} color="var(--violet-h)" style={{ flexShrink: 0, marginTop: 2 }}><Icons.News /></Icon>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 12.5, fontWeight: 700 }}>{week.storyline.title}</div>
+            <div className="muted" style={{ fontSize: 11, lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{week.storyline.text}</div>
+          </div>
+        </div>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+        <Icon size={14} color="var(--muted)" style={{ flexShrink: 0 }}><Icons.Training /></Icon>
+        <span className="muted" style={{ fontSize: 11 }}>Practice</span>
+        <div style={{ display: 'flex', gap: 3 }}>
+          {week.loadOptions.map((o) => (
+            <button
+              key={o.load}
+              className={`btn btn-sm ${week.load === o.load ? 'btn-primary' : 'btn-ghost'}`}
+              style={{ padding: '1px 8px', fontSize: 11 }}
+              disabled={busy}
+              title={o.effect}
+              onClick={() => onSetLoad(o.load === week.staffLoad && week.loadSource === 'gm' ? null : o.load)}
+            >
+              {o.label}
+            </button>
+          ))}
+        </div>
+        <span className={`chip ${week.loadSource === 'gm' ? 'chip-warn' : ''}`} style={{ fontSize: 9.5 }} title={week.loadWhy}>
+          {week.loadSource === 'gm' ? 'Your call' : 'Staff call'}
+        </span>
+        <span className="muted" style={{ fontSize: 10.5 }} title={week.loadWhy}>{week.focusLabel} focus · {week.trainingDays} practice day{week.trainingDays === 1 ? '' : 's'}</span>
+      </div>
+      {race && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5 }}>
+          <Icon size={14} color="var(--muted)" style={{ flexShrink: 0 }}><Icons.Playoffs /></Icon>
+          {race.status === 'clinched' ? (
+            <span className="chip chip-success" style={{ fontSize: 10 }}>Playoff spot clinched</span>
+          ) : race.status === 'eliminated' ? (
+            <span className="chip chip-danger" style={{ fontSize: 10 }}>Eliminated</span>
+          ) : race.magic !== undefined ? (
+            <span><b>Magic number {race.magic}</b> <span className="muted">vs {race.vsTeam} · {race.gap >= 0 ? `+${race.gap}` : race.gap} on the line</span></span>
+          ) : race.tragic !== undefined ? (
+            <span><b>Tragic number {race.tragic}</b> <span className="muted">vs {race.vsTeam} · {race.gap} on the line</span></span>
+          ) : null}
+        </div>
+      )}
+      {week.staffRead && (
+        <div style={{ fontSize: 11, lineHeight: 1.4 }} title={week.staffRead.lines.join(' ')}>
+          <span style={{ fontWeight: 700 }}>{week.staffRead.coach}:</span>{' '}
+          <span className="muted">{week.staffRead.lines[0]}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
 /** The Week Ahead — the dashboard centerpiece. A vertical agenda derived from
  *  the calendar: today highlighted, then everything coming — games, summer
  *  beats, decisions. Continue visibly walks down this list. */
-function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, busy, fill = false }: {
+function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, onSetLoad, busy, fill = false }: {
   d: DashboardView
   calendar: CalendarView | null
   onOpenCalendar: () => void
   onOpenOffseason: () => void
   onWatch: () => void
+  onSetLoad: (load: WeekLoadView | null) => void
   busy: boolean
   /** True = act as the column's grower (#8): absorb slack, scroll the agenda. */
   fill?: boolean
@@ -1215,6 +1293,9 @@ function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, busy
           the summer desk grows), a squeezed column shortens the AGENDA instead
           of cutting off the panels below it (#8) */}
       <div className="dash-scroll">
+      {/* THE WEEK: inside the scroll region, so a squeezed column scrolls the
+          plan with the agenda instead of spilling it past the panel (#8). */}
+      {d.week && <WeekPlan week={d.week} onSetLoad={onSetLoad} busy={busy} />}
       {windows.map((sp) => {
         const running = sp.startISO <= todayISO
         const d = spanDayOf(sp, running ? todayISO : sp.startISO)
@@ -1239,6 +1320,17 @@ function WeekAhead({ d, calendar, onOpenCalendar, onOpenOffseason, onWatch, busy
               <div style={{ flex: 1, minWidth: 0, fontSize: 13 }}>
                 <span className="muted">{e.home ? 'vs' : '@'}</span>{' '}
                 <span style={{ fontWeight: 600 }}>{e.opponentName}</span>
+                {(() => {
+                  const wg = d.week?.games.find((g) => g.dateISO === e.dateISO)
+                  if (!wg) return null
+                  return (
+                    <div className="muted" style={{ fontSize: 10.5 }}>
+                      {ordinal(wg.opponentRank)} in the league · last 10 {wg.opponentLastTen}
+                      {wg.backToBack && <span className="chip chip-warn" style={{ fontSize: 9, marginLeft: 5 }}>B2B</span>}
+                      {wg.tag && <span className="chip" style={{ fontSize: 9, marginLeft: 5 }}>{wg.tag}</span>}
+                    </div>
+                  )
+                })()}
               </div>
               {e.result ? (
                 <span className={`chip ${e.result.won ? 'chip-success' : 'chip-danger'}`} style={{ fontSize: 10 }}>

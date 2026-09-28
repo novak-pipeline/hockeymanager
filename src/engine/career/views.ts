@@ -634,6 +634,9 @@ export interface DashboardView {
   /** PHASE 0: the staff's info-only briefings for the week ahead (the timer
    *  meeting used to stop Continue to read these aloud). Additive. */
   staffBrief?: string[]
+  /** THE WEEK: the week-ahead plan (games, practice load, storyline, the
+   *  coach's read, the race). Regular season only. Optional/additive. */
+  week?: WeekPlanView
   userTeam: {
     teamId: string
     name: string
@@ -2885,6 +2888,15 @@ export interface CareerSnapshot {
   /** PHASE 0 staff-meeting Responsibilities + the cap's clock. Optional/additive. */
   staffMeetingMode?: 'weekly' | 'onDemand' | 'delegate'
   lastStaffMeeting?: { year: number; day: number } | null
+  /** THE WEEK: the GM's load override, the dev-multiplier log since the last
+   *  development pass, the last day the load was applied, the coach's read.
+   *  Optional/additive — older saves start fresh. */
+  theWeek?: {
+    override: { year: number; week: number; load: 'push' | 'standard' | 'light' } | null
+    devLog: number[]
+    mark: { year: number; day: number } | null
+    read: { year: number; week: number; coach: string; lines: string[] } | null
+  }
   /** #182: the GM's curated dev-camp invite list (undefined ⇒ auto). Additive. */
   devCampRoster?: string[]
   /** #182: the GM's curated training-camp PTO invite list (undefined ⇒ AGM auto). Additive. */
@@ -3912,6 +3924,61 @@ export interface AgmReportView {
   }
   categoryBests: Array<{ category: string; playerId: string; playerName: string }>
   topProspects: AgmRankedPlayerView[]
+}
+
+/* ────────────────────────── the week ────────────────────────── */
+
+/** How hard the club skates between games this week (THE WEEK). */
+export type WeekLoadView = 'push' | 'standard' | 'light'
+
+/** One game in the week ahead. */
+export interface WeekGameView {
+  dateISO: string
+  opponentId: string
+  opponentName: string
+  opponentAbbr: string
+  home: boolean
+  /** The second night of a back-to-back. */
+  backToBack: boolean
+  /** Opponent's league rank by points (1 = best). */
+  opponentRank: number
+  /** Opponent's last ten, e.g. "6-3-1". */
+  opponentLastTen: string
+  /** A game with history: a rivalry, or a player facing his old club. */
+  tag?: string
+}
+
+/** The week-ahead plan on the dashboard (THE WEEK). Pure data; Continue never waits on it. */
+export interface WeekPlanView {
+  startISO: string
+  endISO: string
+  games: WeekGameView[]
+  /** Days this week without a game (practice or rest days). */
+  trainingDays: number
+  /** The load in force this week, who set it, and why. */
+  load: WeekLoadView
+  loadSource: 'staff' | 'gm'
+  loadWhy: string
+  /** What the staff would pick (shown when the GM overrides). */
+  staffLoad: WeekLoadView
+  loadOptions: Array<{ load: WeekLoadView; label: string; effect: string }>
+  /** The team practice focus in force (the Training screen sets it). */
+  focusLabel: string
+  /** What this week is about. */
+  storyline: { title: string; text: string } | null
+  /** The head coach's weekly read (written at the start of each week). */
+  staffRead: { coach: string; lines: string[] } | null
+  /** The race to the cut line, once the season is far enough along. */
+  race?: {
+    inSpot: boolean
+    /** Points clear of (positive) or behind (negative) the line. */
+    gap: number
+    magic?: number
+    tragic?: number
+    /** The club on the other side of the line. */
+    vsTeam: string
+    status: 'alive' | 'clinched' | 'eliminated'
+  }
 }
 
 /* ────────────────────────── practice view ────────────────────────── */

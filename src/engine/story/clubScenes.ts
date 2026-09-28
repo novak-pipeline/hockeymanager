@@ -195,9 +195,91 @@ export const FARM_TRIP_EVENTS: DecisionEvent[] = [
   },
 ]
 
+/* ────────────────────────── the race decided ────────────────────────── */
+
+/**
+ * THE WEEK: the night the standings stop being a question. Clinch or
+ * elimination, the captain is at your door, and what you tell the room sets
+ * the tone for every game left. Raised once a season, by name, the day the
+ * math is settled.
+ *
+ * Slots: {name} {last} {team}.
+ */
+export const RACE_EVENTS: DecisionEvent[] = [
+  {
+    id: 'ev.race.clinched',
+    speaker: 'player',
+    scene:
+      `The dressing room is loud behind him when {last} leans into your office. The spot is clinched and the ` +
+      `captain wants to know what the room hears from you before it hears it from the press. ` +
+      `"Guys want to enjoy this one. I want to know what we're doing with the rest of the month."`,
+    options: [
+      {
+        id: 'enjoy-it',
+        label: `"Enjoy tonight. Tomorrow we get back to work."`,
+        effects: { roomMorale: 6, roomRespect: -1 },
+        outcome:
+          `The room took the night and the room will remember you gave it to them. A couple of the veterans ` +
+          `wondered aloud whether a clinch is really the thing to celebrate. That is their job.`,
+      },
+      {
+        id: 'no-banners',
+        label: `"Nobody hangs a banner for making the playoffs."`,
+        effects: { roomRespect: 5, roomMorale: -3 },
+        outcome:
+          `{last} nodded like a man who had been hoping you would say it. The music got quieter. The standard ` +
+          `in that room is now higher than the standings, which is either exactly right or a long April.`,
+      },
+      {
+        id: 'promise-rest',
+        label: `"The top guys get their minutes managed down the stretch."`,
+        effects: { morale: 4, promise: 'iceTime', roomMorale: 2 },
+        outcome:
+          `A promise the lineup card has to keep: {last} will tell the others, and they will count their ` +
+          `minutes against it. Done right, the club arrives in the playoffs with legs.`,
+      },
+    ],
+  },
+  {
+    id: 'ev.race.eliminated',
+    speaker: 'player',
+    scene:
+      `It went official tonight: the playoffs are gone for {team}. {last} stays behind after the others have ` +
+      `left and sits down without being asked. "There are games left. I need to know what they're for, ` +
+      `because I have to walk back in there and tell them."`,
+    options: [
+      {
+        id: 'pride',
+        label: `"We play every one of them like it matters. It does."`,
+        effects: { roomRespect: 5, morale: -2 },
+        outcome:
+          `The honest answer, and a demanding one. Nobody in that room gets to coast, including the men who ` +
+          `already know they are not coming back. {last} took it in without a word.`,
+      },
+      {
+        id: 'kids',
+        label: `"This is where we find out about the young players."`,
+        effects: { roomMorale: -3, promise: 'iceTime' },
+        outcome:
+          `The veterans heard the part you did not say. The kids will read every lineup card from here to the ` +
+          `end of the season, looking for the minutes you just promised them.`,
+      },
+      {
+        id: 'own-it',
+        label: `"That's on me. The roster wasn't good enough."`,
+        effects: { roomMorale: 4, roomRespect: 3, leakChance: 0.35 },
+        outcome:
+          `The captain did not expect the GM to take it. The room will like you more for it, and if it reaches ` +
+          `the press, the owner will read it too.`,
+      },
+    ],
+  },
+]
+
 /** Every summoned scene, for lookup by id when a response comes back. */
 export const CLUB_SCENES: DecisionEvent[] = [
   ...DRAFT_CALL_EVENTS,
   ...ARRIVAL_EVENTS,
   ...FARM_TRIP_EVENTS,
+  ...RACE_EVENTS,
 ]

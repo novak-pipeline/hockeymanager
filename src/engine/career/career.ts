@@ -148,7 +148,8 @@ import { buildScoutDraftRead, scoutBoardNote, scoutSignalParts } from '@engine/c
 import { farmSplit } from '@engine/career/farmReassign'
 import { runDrills, showingOf, gradeOf, citeWeek, readinessOf, choicesFor, staffRead, type DrillResult, type DevGroup, type Readiness, type ChoiceSet } from '@engine/career/devCamp'
 import { detectBattles, rankBattle, battleRead, type CampCandidate, type CampGroup } from '@engine/career/campBattles'
-import { seasonSpans, devCampDateISO, resignDateISO, faDateISO, campDateISO, boardMeetingDateISO, inHolidayFreeze, FREE_AGENCY, ARBITRATION, TRAINING_CAMP } from '@engine/career/seasonSpans'
+import { seasonSpans, devCampDateISO, resignDateISO, faDateISO, campDateISO, boardMeetingDateISO, inHolidayFreeze, allStarBreakDay, HOLIDAY_FREEZE, FREE_AGENCY, ARBITRATION, TRAINING_CAMP } from '@engine/career/seasonSpans'
+import { WEEK_LOADS, WEEK_LOAD_ORDER, staffWeekLoad, countBackToBacks, raceNumbers, buildStaffRead, pickStoryline, type WeekLoad, type StorylineCandidate } from '@engine/career/theWeek'
 import { buildNeeds, leagueBenchmark, type DepthEntry, type NeedsCandidate, type NeedGroup } from '@engine/career/offseasonNeeds'
 import { buildOppositionReport } from '@engine/career/oppositionReport'
 import { buildDraftClassArticle } from '@engine/career/draftClassArticle'
@@ -505,6 +506,7 @@ import { DECISION_EVENTS, decisionSlots, pickDecisionEvent, type DecisionAct, ty
 import {
   ARRIVAL_EVENTS,
   CLUB_SCENES,
+  RACE_EVENTS,
   DRAFT_CALL_EVENTS,
   FARM_TRIP_EVENTS,
 } from '@engine/story/clubScenes'
@@ -816,6 +818,7 @@ import {
   type DraftRankRowView,
   type ScoutBoardRowView,
   type DashboardView,
+  type WeekPlanView,
   type DraftView,
   type DraftAdviceView,
   type ProspectRowView,
@@ -5888,7 +5891,9 @@ export class Career {
     const gp = this.standings.get(this.userTeamId)?.gamesPlayed ?? 0
     const total = this.userGamesScheduled()
     if (total - gp <= 15) return 'push'
-    if (gp >= total / 2 - 3 && gp <= total / 2 + 3) return 'midseason'
+    // The midseason report is held at the All-Star break (THE WEEK).
+    const asb = this.allStarDay()
+    if (asb !== null ? day >= asb - 3 && day <= asb + 3 : gp >= total / 2 - 3 && gp <= total / 2 + 3) return 'midseason'
     const mm = parseInt(iso.slice(5, 7), 10)
     if (mm === 10 || mm === 11) return 'early'
     return 'winter'
@@ -6912,6 +6917,27 @@ export class Career {
     if (a) this.publishBeat(a, { teaser: false })
   }
 
+  /** The All-Star report's awards race: the league's scoring and goaltending
+   *  leaders, and where the club's best stands (NHL clubs only). */
+  private awardsRaceLine(): string {
+    const nhl = new Set(this.data.league.teams.map((t) => this.data.teams.get(t)?.abbreviation ?? ''))
+    const own = new Set(this.userTeam.roster.map((id) => id as string))
+    const lines = this.buildSeasonLines().filter((l) => nhl.has(l.teamAbbr))
+    const sk = lines.filter((l) => l.position !== 'G').sort((a, b) => b.points - a.points || b.goals - a.goals)
+    const lead = sk[0]
+    if (!lead) return ''
+    const mineAt = sk.findIndex((l) => own.has(l.playerId))
+    const mine = mineAt >= 0 ? sk[mineAt] : undefined
+    const g = lines
+      .filter((l) => l.position === 'G' && l.gamesPlayed >= 15)
+      .sort((a, b) => b.savePct - a.savePct)[0]
+    const parts = [`The scoring race: ${lead.name} (${lead.teamAbbr}) leads with ${lead.points} points.`]
+    if (mine && mine !== lead) parts.push(`Our best, ${mine.name}, sits ${ordinalWord(mineAt + 1)} with ${mine.points}.`)
+    else if (mine === lead) parts.push('That is our man at the top.')
+    if (g) parts.push(`In goal, ${g.name} (${g.teamAbbr}) has the best save percentage, ${g.savePct.toFixed(3).replace(/^0/, '')}.`)
+    return parts.join(' ')
+  }
+
   /* ── act features ── */
   private beatActFeature(day: number): boolean {
     const act = this.seasonAct(day)
@@ -6984,8 +7010,9 @@ export class Career {
           disappointment
             ? `The disappointment: ${disappointment.p.name}, ${disappointment.line.pts} points in ${disappointment.line.gp} games. More was expected, and he knows it.`
             : `No one has fallen badly short, which is its own kind of compliment.`,
-        ],
-        dek: `${record} at the halfway mark. Overall grade: ${grade}.`,
+          this.awardsRaceLine(),
+        ].filter((x) => x.length > 0),
+        dek: `${record} at the All-Star break. Overall grade: ${grade}.`,
       })
     }
     if (act === 'deadline' && !this.mediaDone('deadline')) {
@@ -9257,6 +9284,9 @@ export class Career {
     this.checkPlayoffBerth()
     // #184: AI GMs answer any trade proposals whose deliberation has elapsed.
     this.resolvePendingTrades()
+    // THE WEEK: the practice load on the days without a game (fatigue now, a
+    // development multiplier for the next pass).
+    if (this.phase === 'regularSeason') this.applyWeekLoad(day)
     // #170 weekly practice: the user's regimen shifts fatigue. A hard focus tires
     // the roster (the price of sharper development); a recovery week freshens
     // legs at the cost of growth. Only the user's club runs a chosen regimen.
@@ -9273,6 +9303,8 @@ export class Career {
       // #188: honour (or break) the promises implied by each player's status.
       this.tickSquadPromises()
     }
+    // THE WEEK: the coach's read for the week that starts tomorrow.
+    if (this.phase === 'regularSeason') this.maybeWriteWeekRead(day)
     // LW6: anniversary callbacks — the world remembers its own history. At most
     // one per day, exact-day matches only, and only your club's durable moments.
     {
@@ -9364,6 +9396,7 @@ export class Career {
       const developIds = new Set<PlayerId>()
       for (const t of this.data.teams.values()) for (const id of t.roster) developIds.add(id)
       const inSeasonWorldStrength = this.worldStrengthByPlayer()
+      const weekDev = this.weekDevMult()
       // Development reads rosters (locker room, org membership) but never
       // moves anyone: one index for the whole pass.
       this.withTeamIndex(() => tickInSeasonDevelopment({
@@ -9380,10 +9413,13 @@ export class Career {
           const tid = this.teamOf(id)
           const lr = tid ? this.lockerRooms.get(tid) : undefined
           const base = lr ? developmentModifier(lr, id as string) : 1
-          return base * this.mentorshipDevBonus(id as string)
+          // THE WEEK: how hard the club practised since the last pass.
+          const load = tid === this.userTeamId ? weekDev : 1
+          return base * this.mentorshipDevBonus(id as string) * load
         },
         attributeBias: (id) => this.practiceAttributeBias(id),
       }))
+      this.weekDevLog = []
     }
     // Snapshot opinions on a roughly bi-weekly cadence so the timeline stays compact.
     if (day % 15 === 0) {
@@ -9431,7 +9467,7 @@ export class Career {
     // of its named assets changes hands. Clear those every day so the desk only
     // ever holds paper that could actually be signed.
     this.pruneDeadOffers()
-    if (this.phase === 'regularSeason' && day <= this.deadlineDay) {
+    if (this.phase === 'regularSeason' && day <= this.deadlineDay && !this.inTradeFreeze(day)) {
       // Living World LW3: postures + GM personas drive who calls and how hard,
       // and the offer rate ramps toward the deadline. Ranks computed once.
       const ranks = this.strengthRanks()
@@ -9509,7 +9545,8 @@ export class Career {
       // Talks open and close over days (two-phase) — see leagueMarketTick.
       const dl = this.deadlineDay - day
       const attempts = dl <= 5 ? 2.2 : dl <= 20 ? 1.7 : 1.5
-      this.leagueMarketTick(dl <= 5 ? 'deadline' : 'inSeason', attempts, day)
+      // The holiday freeze stops the clock on league talks too.
+      if (!this.inTradeFreeze(day)) this.leagueMarketTick(dl <= 5 ? 'deadline' : 'inSeason', attempts, day)
     }
     this.currentDay = day
     if (this.phase === 'regularSeason') this.storyTickDay(day, outcomes)
@@ -19634,7 +19671,11 @@ export class Career {
   }
 
   proposeTrade(proposal: TradeProposal): TradeEvaluation {
-    if (!this.tradingOpen()) throw new Error('the trade market is closed')
+    if (!this.tradingOpen()) {
+      throw new Error(this.inTradeFreeze(this.currentDay + 1)
+        ? `the holiday roster freeze is on: no trades until December ${HOLIDAY_FREEZE.lastDay + 1}`
+        : 'the trade market is closed')
+    }
     const partnerId = asTeamId(proposal.partnerTeamId)
     const partner = this.data.teams.get(partnerId)
     if (!partner) throw new Error('unknown partner team')
@@ -19886,6 +19927,8 @@ export class Career {
    *  every day advance (in-season and offseason). */
   private resolvePendingTrades(): void {
     if (this.pendingTrades.length === 0) return
+    // No answers land during the holiday freeze: the clock resumes after it.
+    if (this.inTradeFreeze(this.currentDay)) return
     const carry: typeof this.pendingTrades = []
     for (const pt of this.pendingTrades) {
       pt.daysLeft -= 1
@@ -20708,7 +20751,13 @@ export class Career {
     // Open all season until the deadline, closed through the playoffs, and
     // OPEN again all summer — July trades are half the fun of an offseason.
     if (this.phase === 'offseason') return true
-    return this.phase === 'regularSeason' && this.currentDay <= this.deadlineDay
+    return this.phase === 'regularSeason' && this.currentDay <= this.deadlineDay && !this.inTradeFreeze(this.currentDay + 1)
+  }
+
+  /** THE WEEK: the holiday roster freeze is REAL — no trades Dec 19–27, for
+   *  anyone. Talks and pending answers wait for it to lift. */
+  private inTradeFreeze(day: number): boolean {
+    return this.phase === 'regularSeason' && day >= 1 && inHolidayFreeze(dayToDateISO(this.year, day))
   }
 
   /** The named GM running an AI club (Living World LW2). Lazily built once per
@@ -22599,6 +22648,300 @@ export class Career {
     }
   }
 
+  /* ═══════════════════════════ THE WEEK ═══════════════════════════ */
+  // The season is lived a week at a time (depth audit §3): the plan on the
+  // dashboard, a practice load with real costs, the coach's weekly read, and
+  // the race. None of it holds Continue.
+
+  /** The GM's practice load for ONE week (null = the staff's call). */
+  private weekOverride: { year: number; week: number; load: WeekLoad } | null = null
+  /** Development multipliers, one per training day since the last in-season
+   *  development pass; their mean scales that pass for the club's players. */
+  private weekDevLog: number[] = []
+  /** The last day the load was applied (so skipped calendar days still count). */
+  private weekLoadMark: { year: number; day: number } | null = null
+  /** The coach's read, written at the turn of each week. */
+  private weekRead: { year: number; week: number; coach: string; lines: string[] } | null = null
+  /** Points/GP per player at the last read, for "who drove last week". Transient. */
+  private weekPtsMark: Map<string, { pts: number; gp: number }> | null = null
+  private userGameDaysCache: { year: number; days: Set<number> } | null = null
+
+  /** Week w covers days 7w+1 … 7w+7 (the practice tick lands on its last day). */
+  private static weekOf(day: number): number { return Math.floor(Math.max(0, day - 1) / 7) }
+  private currentWeek(): number { return Career.weekOf(this.currentDay + 1) }
+
+  private userGameDays(): Set<number> {
+    if (this.userGameDaysCache?.year === this.year) return this.userGameDaysCache.days
+    const days = new Set<number>()
+    for (const g of this.data.league.schedule) {
+      if (g.homeTeamId === this.userTeamId || g.awayTeamId === this.userTeamId) days.add(g.day)
+    }
+    this.userGameDaysCache = { year: this.year, days }
+    return days
+  }
+
+  /** The week's calendar facts: its days, the club's game days, the room's legs. */
+  private weekFacts(week: number): { days: number[]; gameDays: number[]; b2b: number; avgFatigue: number } {
+    const first = week * 7 + 1
+    const days = Array.from({ length: 7 }, (_, i) => first + i)
+    const ug = this.userGameDays()
+    const gameDays = days.filter((d) => ug.has(d))
+    const dressed = this.userTeam.roster
+      .map((id) => this.data.players.get(id))
+      .filter((p): p is Player => !!p && p.injuryStatus === null)
+    const avgFatigue = dressed.length ? dressed.reduce((n, p) => n + (p.fatigue ?? 0), 0) / dressed.length : 0
+    // A back-to-back that straddles the week boundary still counts.
+    const withPrev = ug.has(first - 1) ? [first - 1, ...gameDays] : gameDays
+    return { days, gameDays, b2b: countBackToBacks(withPrev), avgFatigue }
+  }
+
+  /** The load in force for a week, whose call it is, and why. */
+  private weekLoadFor(week: number): { load: WeekLoad; source: 'staff' | 'gm'; why: string; staff: WeekLoad } {
+    const f = this.weekFacts(week)
+    const staff = staffWeekLoad({ games: f.gameDays.length, backToBacks: f.b2b, avgFatigue: f.avgFatigue })
+    const o = this.weekOverride
+    if (o && o.year === this.year && o.week === week && o.load !== staff.load) {
+      return { load: o.load, source: 'gm', why: `Your call. The staff would have gone ${WEEK_LOADS[staff.load].label.toLowerCase()}: ${staff.why}`, staff: staff.load }
+    }
+    return { load: staff.load, source: 'staff', why: staff.why, staff: staff.load }
+  }
+
+  /** THE WEEK: set this week's practice load; null (or the staff's own pick)
+   *  hands the week back to the staff. */
+  setWeekLoad(load: WeekLoad | null): { ok: boolean; message?: string } {
+    if (this.phase !== 'regularSeason' || (this.trainingCamp && !this.trainingCamp.resolved)) {
+      return { ok: false, message: 'The weekly practice plan starts with the regular season.' }
+    }
+    if (load !== null && !WEEK_LOAD_ORDER.includes(load)) return { ok: false, message: 'Unknown practice load.' }
+    const week = this.currentWeek()
+    this.weekOverride = load === null ? null : { year: this.year, week, load }
+    return { ok: true }
+  }
+
+  /** Apply the practice load to every elapsed day the club did not play:
+   *  fatigue now (legs and injury risk are already fatigue-driven), and a
+   *  development multiplier logged for the next in-season development pass. */
+  private applyWeekLoad(day: number): void {
+    const mark = this.weekLoadMark
+    const from = mark && mark.year === this.year && mark.day < day ? mark.day + 1 : day
+    this.weekLoadMark = { year: this.year, day }
+    const ug = this.userGameDays()
+    for (let d = from; d <= day; d++) {
+      if (d < 1 || ug.has(d)) continue
+      const spec = WEEK_LOADS[this.weekLoadFor(Career.weekOf(d)).load]
+      this.weekDevLog.push(spec.devMult)
+      if (spec.fatiguePerDay === 0) continue
+      for (const id of this.userTeam.roster) {
+        const p = this.data.players.get(id)
+        if (!p || p.injuryStatus !== null) continue
+        p.fatigue = Math.max(0, Math.min(100, (p.fatigue ?? 0) + spec.fatiguePerDay))
+      }
+    }
+  }
+
+  /** The mean logged development multiplier (1 when nothing is logged). */
+  private weekDevMult(): number {
+    const log = this.weekDevLog
+    if (log.length === 0) return 1
+    return log.reduce((a, b) => a + b, 0) / log.length
+  }
+
+  /** A club's W/L/O results over the days (fromDay, toDay], oldest first. */
+  private resultsBetween(teamId: TeamId, fromDay: number, toDay: number): Array<'W' | 'L' | 'O'> {
+    const out: Array<'W' | 'L' | 'O'> = []
+    for (const g of this.data.league.schedule) {
+      if (!g.result || g.day <= fromDay || g.day > toDay) continue
+      const home = g.homeTeamId === teamId
+      if (!home && g.awayTeamId !== teamId) continue
+      const us = home ? g.result.homeGoals : g.result.awayGoals
+      const them = home ? g.result.awayGoals : g.result.homeGoals
+      out.push(us > them ? 'W' : g.result.decidedBy === 'regulation' ? 'L' : 'O')
+    }
+    return out
+  }
+
+  /** A club's last ten as "W-L-O". */
+  private lastTenOf(teamId: TeamId): string {
+    const t = this.resultsBetween(teamId, -Infinity, Infinity).slice(-10)
+    return `${t.filter((r) => r === 'W').length}-${t.filter((r) => r === 'L').length}-${t.filter((r) => r === 'O').length}`
+  }
+
+  /** The coach writes his read at the turn of each week (end of finishDay). */
+  private maybeWriteWeekRead(day: number): void {
+    const week = Career.weekOf(day + 1)
+    if (this.weekRead && this.weekRead.year === this.year && this.weekRead.week === week) return
+    const roster = this.userTeam.roster.map((id) => this.data.players.get(id)).filter((p): p is Player => !!p)
+    // Who drove the week just gone: points since the last read.
+    const now = new Map<string, { pts: number; gp: number }>()
+    for (const p of roster) {
+      const l = this.seasonLineOf(p.id)
+      now.set(p.id as string, { pts: l.pts, gp: l.gp })
+    }
+    let standout: { name: string; pts: number; gp: number } | undefined
+    if (this.weekPtsMark) {
+      for (const p of roster) {
+        const a = now.get(p.id as string)!
+        const b = this.weekPtsMark.get(p.id as string)
+        if (!b) continue
+        const pts = a.pts - b.pts
+        if (pts > 0 && (!standout || pts > standout.pts)) standout = { name: p.name, pts, gp: a.gp - b.gp }
+      }
+    }
+    this.weekPtsMark = now
+    const tired = roster.filter((p) => p.injuryStatus === null).sort((a, b) => (b.fatigue ?? 0) - (a.fatigue ?? 0))[0]
+    const loadNow = this.weekLoadFor(week)
+    const facts = this.weekFacts(week)
+    const race = this.raceOf(this.userTeamId)
+    const read = buildStaffRead({
+      coachName: this.getTeamStaff(this.userTeamId as string).headCoach.name,
+      lastWeek: this.resultsBetween(this.userTeamId, day - 7, day),
+      standout,
+      tiredest: tired ? { name: tired.name, fatigue: tired.fatigue ?? 0 } : undefined,
+      injuredCount: roster.filter((p) => p.injuryStatus !== null).length,
+      load: loadNow.load,
+      gamesAhead: facts.gameDays.length,
+      race: race.gp >= 20 ? { inSpot: race.inSpot, gap: race.gap } : undefined,
+    })
+    this.weekRead = { year: this.year, week, coach: read.coach, lines: read.lines }
+  }
+
+  /** The race to the cut line with the club on the other side of it. */
+  private raceDetail(): WeekPlanView['race'] | undefined {
+    const race = this.raceOf(this.userTeamId)
+    const total = this.userGamesScheduled()
+    if (race.gp < Math.min(40, Math.floor(total / 2))) return undefined
+    const status = this.playoffBerthAnnounced ?? 'alive'
+    const sorted = sortStandings([...this.standings.values()])
+    const field = this.currentPlayoffField(sorted)
+    const conf = this.userTeam.conferenceId
+    const confRows = sorted.filter((r) => this.data.teams.get(r.teamId)?.conferenceId === conf)
+    const rival = race.inSpot
+      ? confRows.find((r) => !field.has(r.teamId as string))
+      : [...confRows].reverse().find((r) => field.has(r.teamId as string))
+    if (!rival) return undefined
+    const left = (tid: TeamId): number => {
+      let n = 0
+      for (const g of this.data.league.schedule) if (!g.result && (g.homeTeamId === tid || g.awayTeamId === tid)) n++
+      return n
+    }
+    const nums = raceNumbers({
+      inSpot: race.inSpot,
+      userPts: race.pts,
+      userGamesLeft: left(this.userTeamId),
+      rivalPts: rival.points,
+      rivalGamesLeft: left(rival.teamId),
+    })
+    return {
+      inSpot: race.inSpot,
+      gap: race.gap,
+      ...(nums.magic !== undefined ? { magic: nums.magic } : {}),
+      ...(nums.tragic !== undefined ? { tragic: nums.tragic } : {}),
+      vsTeam: this.data.teams.get(rival.teamId)?.name ?? '',
+      status,
+    }
+  }
+
+  /** What the week is about: the act's landmark first, then the race, a big
+   *  game, a streak — one line, the most important one. */
+  private weekStoryline(week: number, games: WeekPlanView['games'], race: WeekPlanView['race'] | undefined): StorylineCandidate | null {
+    const f = this.weekFacts(week)
+    const acts = new Set(f.days.map((d) => this.seasonAct(d)))
+    const r = this.raceOf(this.userTeamId)
+    const cands: StorylineCandidate[] = []
+    const inOut = r.inSpot
+      ? `We are in a spot, ${r.gap === 0 ? 'level with' : `${r.gap} point${r.gap === 1 ? '' : 's'} clear of`} the first team out.`
+      : `We are ${Math.abs(r.gap)} point${Math.abs(r.gap) === 1 ? '' : 's'} out of a spot.`
+    if (acts.has('deadline') && this.deadlineDay > 0 && this.currentDay < this.deadlineDay) {
+      cands.push({ priority: 85, title: 'Deadline week', text: `The market closes on ${this.weekdayOf(dayToDateISO(this.year, this.deadlineDay))}. ${inOut} Buyer, seller or hold: this is the week that decides it.` })
+    }
+    if (acts.has('thanksgiving')) {
+      cands.push({ priority: 80, title: 'The Thanksgiving benchmark', text: `Clubs in a playoff spot at American Thanksgiving make it about three times in four. ${inOut}` })
+    }
+    const asb = this.allStarDay()
+    if (asb !== null && f.days.includes(asb)) {
+      cands.push({ priority: 78, title: 'The All-Star break', text: 'The league stops for its showcase and the midseason report lands: the grades, the awards race and the second half.' })
+    }
+    if (f.days.some((d) => inHolidayFreeze(dayToDateISO(this.year, d)))) {
+      cands.push({ priority: 75, title: 'The holiday freeze', text: `No trades from December ${HOLIDAY_FREEZE.firstDay} to ${HOLIDAY_FREEZE.lastDay}. The roster you have is the roster you ride into the new year.` })
+    }
+    if (race) {
+      if (race.status === 'clinched') cands.push({ priority: 68, title: 'In', text: 'The spot is clinched. Now it is about seeding, health, and arriving in April with legs.' })
+      else if (race.status === 'eliminated') cands.push({ priority: 68, title: 'Playing for pride', text: 'Mathematically out. The rest of the season is about the kids, the room, and next year.' })
+      else if (race.magic !== undefined && race.magic <= 12) cands.push({ priority: 72, title: `Magic number: ${race.magic}`, text: `Any combination of our points and ${race.vsTeam} dropped points totalling ${race.magic} puts us out of their reach.` })
+      else if (race.tragic !== undefined && race.tragic <= 12) cands.push({ priority: 72, title: `Tragic number: ${race.tragic}`, text: `${race.tragic} more points of our dropped points and ${race.vsTeam} wins, and they are out of our reach. Every night is a playoff game now.` })
+      else cands.push({ priority: 55, title: 'The race', text: inOut })
+    }
+    const big = games.find((g) => g.tag)
+    if (big) cands.push({ priority: 50, title: `${big.tag}: ${big.opponentName}`, text: `${big.home ? 'At home to' : 'Away at'} ${big.opponentName} on ${this.weekdayOf(big.dateISO)}. Circle it.` })
+    const streak = this.streakOf(this.userTeamId)
+    if (Math.abs(streak) >= 3) {
+      cands.push(streak > 0
+        ? { priority: 45, title: `${streak} straight wins`, text: 'The room is confident. The job this week is to not start believing it.' }
+        : { priority: 45, title: `${-streak} straight losses`, text: 'The slide has a number now. One win changes the conversation.' })
+    }
+    if (games.length >= 4) cands.push({ priority: 30, title: `${games.length} games in seven nights`, text: 'A heavy week. Depth and goaltending decide weeks like this.' })
+    if (games.length === 0) cands.push({ priority: 20, title: 'A week off', text: 'No games. Practice, rest, and a look at the standings from the outside.' })
+    return pickStoryline(cands)
+  }
+
+  /** The All-Star break's day this season (null before the schedule exists). */
+  private allStarDay(): number | null {
+    const md = this.matchDays
+    if (md.length === 0) return null
+    return allStarBreakDay(md[0]!, md[md.length - 1]!)
+  }
+
+  private weekPlanView(): WeekPlanView | null {
+    if (this.phase !== 'regularSeason' || (this.trainingCamp && !this.trainingCamp.resolved)) return null
+    const week = this.currentWeek()
+    const f = this.weekFacts(week)
+    const sorted = sortStandings([...this.standings.values()])
+    const rankOf = new Map(sorted.map((r, i) => [r.teamId as string, i + 1]))
+    const ug = this.userGameDays()
+    const gameDaySet = new Set(f.gameDays)
+    const games: WeekPlanView['games'] = []
+    for (const g of this.data.league.schedule) {
+      if (!gameDaySet.has(g.day)) continue
+      const home = g.homeTeamId === this.userTeamId
+      if (!home && g.awayTeamId !== this.userTeamId) continue
+      const opp = this.data.teams.get(home ? g.awayTeamId : g.homeTeamId)
+      if (!opp) continue
+      const gi = gameIntensity(this.rivalriesState, this.userTeamId as string, opp.id as string)
+      const tag = gi.label ?? (this.revengeLine(opp.id) ? 'Old faces' : undefined)
+      games.push({
+        dateISO: dayToDateISO(this.year, g.day),
+        opponentId: opp.id as string,
+        opponentName: opp.name,
+        opponentAbbr: opp.abbreviation,
+        home,
+        backToBack: ug.has(g.day - 1),
+        opponentRank: rankOf.get(opp.id as string) ?? sorted.length,
+        opponentLastTen: this.lastTenOf(opp.id),
+        ...(tag ? { tag } : {}),
+      })
+    }
+    const load = this.weekLoadFor(week)
+    const race = this.raceDetail()
+    const story = this.weekStoryline(week, games, race)
+    const read = this.weekRead && this.weekRead.year === this.year && this.weekRead.week === week ? this.weekRead : null
+    const focus = this.practiceState.teamFocus
+    return {
+      startISO: dayToDateISO(this.year, f.days[0]!),
+      endISO: dayToDateISO(this.year, f.days[6]!),
+      games,
+      trainingDays: 7 - f.gameDays.length,
+      load: load.load,
+      loadSource: load.source,
+      loadWhy: load.why,
+      staffLoad: load.staff,
+      loadOptions: WEEK_LOAD_ORDER.map((l) => ({ load: l, label: WEEK_LOADS[l].label, effect: WEEK_LOADS[l].effect })),
+      focusLabel: focus.charAt(0).toUpperCase() + focus.slice(1),
+      storyline: story ? { title: story.title, text: story.text } : null,
+      staffRead: read ? { coach: read.coach, lines: [...read.lines] } : null,
+      ...(race ? { race } : {}),
+    }
+  }
+
   getDashboard(): DashboardView {
     const ctx = this.ctx()
     const sorted = ctx.standingsSorted
@@ -22853,6 +23196,7 @@ export class Career {
       tradeOffersPending: this.pendingTradeOffers().length,
       staffMeetingMode: this.staffMeetingMode,
       ...(this.phase === 'regularSeason' && this.staffBrief.length > 0 ? { staffBrief: [...this.staffBrief] } : {}),
+      ...((): { week?: WeekPlanView } => { const w = this.weekPlanView(); return w ? { week: w } : {} })(),
       userTeam: {
         teamId: this.userTeamId as string,
         name: team.name,
@@ -26216,6 +26560,7 @@ export class Career {
       const kid = roster.find((p) => p.age <= 22 && p !== top)
       if (top) this.queueVoice({ kind: 'clinch', playerId: top.id as string, relevant: true })
       if (kid) this.queueVoice({ kind: 'clinch', playerId: kid.id as string, relevant: true })
+      this.raiseRaceScene('ev.race.clinched', `${team.name} clinch: the captain at your door`)
     } else {
       this.pushNews(
         'playoffs',
@@ -26223,7 +26568,23 @@ export class Career {
         `The ${team.name} can no longer reach the playoffs — mathematically out with the season still running. Attention turns to pride, development, and the draft lottery.`,
         { teamId: this.userTeamId as string, salience: 85 }
       )
+      this.raiseRaceScene('ev.race.eliminated', `${team.name} eliminated: the captain wants a word`)
     }
+  }
+
+  /** THE WEEK: the night the race is settled, the captain (or the best healthy
+   *  veteran) comes to the office. It exists at one moment only, so it is
+   *  raised even when another conversation is open. It opens itself; Continue
+   *  still advances past it. */
+  private raiseRaceScene(eventId: string, headline: string): void {
+    const roster = this.userTeam.roster
+      .map((id) => this.data.players.get(id))
+      .filter((p): p is Player => !!p && p.injuryStatus === null)
+    const capId = this.userTeam.captainId as string | undefined
+    const speaker = roster.find((p) => (p.id as string) === capId)
+      ?? [...roster].sort((a, b) => b.age - a.age || ratedOverall(b) - ratedOverall(a))[0]
+    if (!speaker) return
+    this.summonClubScene({ pool: RACE_EVENTS, eventId, player: speaker, day: this.currentDay, headline, allowBusy: true })
   }
 
   /** Squad Planner: experience matrix + depth/age/contract report for the user club. */
@@ -30160,6 +30521,12 @@ export class Career {
       ...(this.stagedNews.length > 0 ? { stagedNews: this.stagedNews } : {}),
       ...(this.staffMeetingMode !== 'onDemand' ? { staffMeetingMode: this.staffMeetingMode } : {}),
       ...(this.lastStaffMeeting ? { lastStaffMeeting: this.lastStaffMeeting } : {}),
+      theWeek: {
+        override: this.weekOverride ? { ...this.weekOverride } : null,
+        devLog: [...this.weekDevLog],
+        mark: this.weekLoadMark ? { ...this.weekLoadMark } : null,
+        read: this.weekRead ? { ...this.weekRead, lines: [...this.weekRead.lines] } : null,
+      },
       devCampRoster: this.devCampRoster ? [...this.devCampRoster] : undefined,
       campPtoInvites: this.campPtoInvites ? [...this.campPtoInvites] : undefined,
       devCampState: this.devCampState ? structuredClone(this.devCampState) : null,
@@ -30369,6 +30736,10 @@ export class Career {
     career.stagedNews = snapshot.stagedNews ?? []
     career.staffMeetingMode = snapshot.staffMeetingMode ?? 'onDemand'
     career.lastStaffMeeting = snapshot.lastStaffMeeting ?? null
+    career.weekOverride = snapshot.theWeek?.override ? { ...snapshot.theWeek.override } : null
+    career.weekDevLog = [...(snapshot.theWeek?.devLog ?? [])]
+    career.weekLoadMark = snapshot.theWeek?.mark ? { ...snapshot.theWeek.mark } : null
+    career.weekRead = snapshot.theWeek?.read ? { ...snapshot.theWeek.read, lines: [...snapshot.theWeek.read.lines] } : null
     career.devCampRoster = snapshot.devCampRoster ? [...snapshot.devCampRoster] : undefined
     career.campPtoInvites = snapshot.campPtoInvites ? [...snapshot.campPtoInvites] : undefined
     career.devCampState = snapshot.devCampState ? structuredClone(snapshot.devCampState) : null
