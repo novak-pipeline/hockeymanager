@@ -90,7 +90,7 @@ const DT = FRAME_DT / SUBSTEPS
 // ---------------------------------------------------------------------------
 export const AGENT_TUNING = {
   /** Reconciles the empirical xG with this engine's shot mix → goals/game. */
-  finishK: 0.71,
+  finishK: 0.78,
   /** Base share of unblocked attempts that miss the net. */
   missBase: 0.3,
   /** Poke-check success scale (takeaways). */
