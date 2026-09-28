@@ -152,6 +152,7 @@ if (q.has('look')) {
 if (q.get('nobloom') === '1') (r as unknown as { bloom: { enabled: boolean } }).bloom.enabled = false
 const win = window as unknown as Win
 win.__r3d = r
+win.__stream = out.stream
 win.__duration = tl.duration
 win.__goals = out.stream
   .filter((e) => e.type === 'goal')

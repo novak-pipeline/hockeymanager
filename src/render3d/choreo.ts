@@ -62,6 +62,10 @@ export interface ActionCue {
   hitKind?: 'boards' | 'openIce' | 'finish' | 'battle'
   /** hit (agent engine, additive): the physics put him on the ice (true) / kept him up (false) */
   knockdown?: boolean
+  /** hit (agent engine, additive): pinned against the boards for a beat (a board battle) */
+  pinned?: boolean
+  /** faceoff (agent engine, additive): the centre who lost the draw */
+  loserId?: string
   /** shot (agent engine): the release type */
   shotType?: string
   /** deke (agent engine): which move */
@@ -100,9 +104,12 @@ export function extractActionCues(stream: GameStream): ActionCue[] {
       out.push({ kind: 'goal', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.scorer, assists: [...ev.assists] })
     } else if (isEvent(ev, 'hit')) {
       const kd = (ev as unknown as { knockdown?: unknown }).knockdown
+      const pn = (ev as unknown as { pinned?: unknown }).pinned
       out.push({
         kind: 'hit', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.by, targetId: ev.on,
-        ...(ev.force !== undefined ? { force: ev.force } : {}), ...(ev.kind ? { hitKind: ev.kind } : {}), ...(typeof kd === 'boolean' ? { knockdown: kd } : {}),
+        ...(ev.force !== undefined ? { force: ev.force } : {}), ...(ev.kind ? { hitKind: ev.kind } : {}), ...(typeof kd === 'boolean' ? { knockdown: kd } : ev.force !== undefined ? { knockdown: false } : {}),
+        // the agent engine says outright whether he was pinned (absent on its hits = not pinned)
+        ...(typeof pn === 'boolean' ? { pinned: pn } : ev.force !== undefined ? { pinned: false } : {}),
       })
     } else if ((ev as { type: string }).type === 'knockdown') {
       // additive agent-engine event (tolerant read): { player | on, by?, pos?, force? } — marks
@@ -131,11 +138,13 @@ export function extractActionCues(stream: GameStream): ActionCue[] {
       out.push({ kind: 'poke', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.by, targetId: ev.from, success: true })
     } else if (isEvent(ev, 'faceoff')) {
       // additive agent-engine pacing (tolerant): `setAt` (period seconds the set began) and `tieUp`
-      const f = ev as unknown as { setAt?: unknown; tieUp?: unknown }
+      const f = ev as unknown as { setAt?: unknown; tieUp?: unknown; loser?: unknown }
       out.push({
         kind: 'faceoff', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.winner,
         ...(typeof f.setAt === 'number' ? { setT: absTime(ev.period, f.setAt) } : pendingSet !== null ? { setT: pendingSet } : {}),
-        ...(typeof f.tieUp === 'boolean' ? { tieUp: f.tieUp } : {}),
+        // the agent engine sets tieUp only on a tie-up: with its setAt present, absent = a clean draw
+        ...(typeof f.tieUp === 'boolean' ? { tieUp: f.tieUp } : typeof f.setAt === 'number' ? { tieUp: false } : {}),
+        ...(typeof f.loser === 'string' ? { loserId: f.loser } : {}),
       })
       pendingSet = null
     } else if ((ev as { type: string }).type === 'faceoffSet') {
@@ -186,7 +195,7 @@ export function planCues(cues: ActionCue[], contactOf: (clip: string) => number 
       const pt = lastPassTo.get(cue.actorId)
       clip = shotClipFor(dist, pt === undefined ? null : cue.absT - pt, undefined, cue.shotType, `${cue.actorId}@${cue.absT.toFixed(2)}`)
     } else if (cue.kind === 'hit') {
-      clip = cue.actorId ? hitPlan(12, distToBoards(normXtoWorld(cue.nx), normYtoWorld(cue.ny)), cue.force, cue.hitKind, 'back', cue.knockdown).hitter : null
+      clip = cue.actorId ? hitPlan(12, distToBoards(normXtoWorld(cue.nx), normYtoWorld(cue.ny)), cue.force, cue.hitKind, 'back', cue.knockdown, cue.pinned).hitter : null
     } else if (cue.kind === 'deke') {
       clip = DEKE_CLIP[cue.dekeKind ?? ''] ?? 'deke_fb'
     } else if (cue.kind === 'poke') {
@@ -468,7 +477,7 @@ export class Choreographer {
     }
     const push = Math.hypot(dx, dz) > 1e-3 ? hitPushDir(dx, dz, target.angle) : 'back'
     // the engine's own impact + kind + knockdown when it has them (agent engine), else read it from the closing speed
-    const plan = hitPlan(rel, distToBoards(wx, wz), c.force, c.hitKind, push, c.knockdown)
+    const plan = hitPlan(rel, distToBoards(wx, wz), c.force, c.hitKind, push, c.knockdown, c.pinned)
     // reactions scale with the impact: a light hit only part-weights the stagger
     target.layer.play(plan.target, { weight: plan.target === 'hit_stagger' ? 0.45 + 0.55 * plan.hardness : 1 })
     const meta = CLIPS[plan.target]!
@@ -522,6 +531,12 @@ export class Choreographer {
   }
 
   private faceoffTakers(c: ActionCue): ChoreoActor[] {
+    // the engine names both centres (winner + loser): take those when they are on the ice
+    if (c.loserId) {
+      const w = this.find(c.actorId)
+      const l = this.find(c.loserId)
+      if (w?.layer && l?.layer) return [w, l]
+    }
     const fx = normXtoWorld(c.nx)
     const fz = normYtoWorld(c.ny)
     const pick = (team: 'home' | 'away') => {

@@ -187,6 +187,19 @@ describe('boards + hits', () => {
     for (const t of ['hit_fall_fwd', 'hit_fall_side_L', 'hit_fall_side_R', 'hit_stumble_fwd', 'getup_knees']) expect(SKATER_CLIPS).toContain(t)
   })
 
+  it('uses the agent engine’s pinned: a boards hit that did not pin him bounces him off', () => {
+    expect(hitPlan(20, 30, 0.6, 'boards', 'back', false, true).target).toBe('pinned_boards')
+    const off = hitPlan(20, 30, 0.6, 'boards', 'back', false, false)
+    expect(off.pinned).toBe(false)
+    expect(off.target).toBe('hit_stumble')
+    expect(hitPlan(20, 30, 0.2, 'boards', 'back', false, false).target).toBe('hit_stagger')
+    // knocked down on the wall still folds into it
+    expect(hitPlan(20, 30, 0.9, 'boards', 'back', true, false).target).toBe('hit_fall_fwd')
+    // agent hits without the flags: not knocked down, not pinned
+    const [c] = extractActionCues([{ type: 'hit', period: 1, t: 5, by: asPlayerId('a'), on: asPlayerId('b'), pos: { x: 0.9, y: 0.95 }, force: 0.95, kind: 'boards' }])
+    expect([c!.knockdown, c!.pinned]).toEqual([false, false])
+  })
+
   it('reads the knockdown as a hit flag or a separate event (tolerant)', () => {
     const P = asPlayerId
     const cues = extractActionCues([
@@ -286,6 +299,12 @@ describe('cue planning (choreographer)', () => {
     ]).filter((c) => c.kind === 'faceoff')
     expect(f.map((c) => c.setT)).toEqual([97.5, 198, undefined])
     expect(f[0]!.tieUp).toBe(true)
+    // no setAt and no tieUp (classic engine): undecided — the renderer picks some tie-ups
+    expect(f[2]!.tieUp).toBeUndefined()
+    // the agent engine always sends setAt and flags only the tie-ups: absent = clean
+    const [clean] = extractActionCues([{ type: 'faceoff', period: 1, t: 50, zone: 'neutral', winner: P('c1'), loser: P('c9'), pos: { x: 0, y: 0 }, setAt: 49 } as unknown as GameStream[number]])
+    expect(clean!.tieUp).toBe(false)
+    expect(clean!.loserId).toBe('c9')
     const plan = planCues(f)
     expect(plan[0]!.lead).toBeCloseTo(2.5)
     expect(plan[1]!.lead).toBeCloseTo(2)
