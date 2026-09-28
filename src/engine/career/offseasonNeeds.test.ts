@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildNeeds, leagueBenchmark, type DepthEntry, type NeedsCandidate } from './offseasonNeeds'
+import { buildNeeds, leagueBenchmark, needsFor, type DepthEntry, type NeedsCandidate } from './offseasonNeeds'
 import { generateLeague } from '@data/generate'
 import { Career } from './career'
 import { askTerms, faClassDecisionDay, rankOffers, type FaMarketBid } from '@engine/league/contracts'
@@ -71,6 +71,67 @@ describe('needs builder', () => {
     const ids = r.needs.flatMap((n) => n.candidates.map((c) => c.playerId))
     expect(new Set(ids).size).toBe(ids.length)
     for (const n of r.needs) expect(n.candidates.length).toBeLessThanOrEqual(5)
+  })
+})
+
+describe('needs board — each desk shows its own kind of answer', () => {
+  // A weak backup (answers from both markets), a D pair with only trade
+  // answers, and a cap need (answers are contracts to move).
+  function mixed() {
+    const depth = parDepth()
+      .map((x) => (x.playerId === 'g1' ? { ...x, ovr: 60 } : x))
+      .map((x) => (x.playerId === 'd4' ? { ...x, ovr: 60 } : x))
+    const pool = [
+      cand('g-fa', 'G', 68), cand('g-own', 'G', 66, { kind: 'resign' }), cand('g-tr', 'G', 72, { kind: 'trade', teamAbbr: 'DAL' }),
+      cand('d-tr1', 'D', 76, { kind: 'trade', teamAbbr: 'EDM' }), cand('d-tr2', 'D', 74, { kind: 'trade', teamAbbr: 'SJS' }),
+    ]
+    const moveable = [cand('big', 'F', 70, { kind: 'move', capHit: 9e6, assetValue: 5 })]
+    return buildNeeds({ depth, benchmark: bench, capCeiling: 90e6, committed: 89e6, pool, moveable }).needs
+  }
+
+  it('the Free Agents desk: free agents and your own re-sign candidates only — never a trade target', () => {
+    const view = needsFor(mixed(), 'fa')
+    for (const n of view) {
+      for (const g of n.groups) for (const c of g.candidates) expect(['fa', 'resign']).toContain(c.kind)
+    }
+    const g = view.find((n) => n.label === 'a backup G')!
+    expect(g.groups[0]!.candidates.map((c) => c.playerId).sort()).toEqual(['g-fa', 'g-own'])
+    // A need with no free-agent answer is KEPT, with a pointer to the other desk.
+    const d = view.find((n) => n.group === 'D')!
+    expect(d.groups[0]!.candidates).toHaveLength(0)
+    expect(d.elsewhere).toEqual({ text: 'No free agents fit — see the Trade Centre.', screen: 'trades' })
+    const cap = view.find((n) => n.kind === 'cap')!
+    expect(cap.elsewhere?.screen).toBe('trades')
+  })
+
+  it('the Trade Centre: trade targets, and for a cap need the contracts that would clear it', () => {
+    const view = needsFor(mixed(), 'trade')
+    for (const n of view) {
+      for (const gr of n.groups) for (const c of gr.candidates) expect(['trade', 'move']).toContain(c.kind)
+    }
+    expect(view.find((n) => n.label === 'a backup G')!.groups[0]!.candidates.map((c) => c.playerId)).toEqual(['g-tr'])
+    const cap = view.find((n) => n.kind === 'cap')!
+    expect(cap.groups[0]!.title).toBe('Contracts that would clear it')
+    expect(cap.groups[0]!.candidates.map((c) => c.playerId)).toEqual(['big'])
+    expect(cap.elsewhere).toBeUndefined()
+  })
+
+  it('the offseason overview: both, grouped as "Free agents" and "Trade targets"', () => {
+    const view = needsFor(mixed(), 'all')
+    const g = view.find((n) => n.label === 'a backup G')!
+    expect(g.groups.map((x) => x.title)).toEqual(['Free agents', 'Trade targets'])
+    expect(view.every((n) => n.groups.length > 0 || n.elsewhere)).toBe(true)
+  })
+
+  it('each market keeps up to five answers of its own even when the other has more', () => {
+    const depth = parDepth().map((x) => (x.playerId === 'g1' ? { ...x, ovr: 55 } : x))
+    const pool = [
+      ...Array.from({ length: 7 }, (_, i) => cand(`t${i}`, 'G', 75 + i, { kind: 'trade' })),
+      cand('only-fa', 'G', 60),
+    ]
+    const n = buildNeeds({ depth, benchmark: bench, capCeiling: 90e6, committed: 60e6, pool, moveable: [] }).needs[0]!
+    expect(needsFor([n], 'fa')[0]!.groups[0]!.candidates.map((c) => c.playerId)).toEqual(['only-fa'])
+    expect(needsFor([n], 'trade')[0]!.groups[0]!.candidates).toHaveLength(5)
   })
 })
 

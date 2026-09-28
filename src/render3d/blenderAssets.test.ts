@@ -108,14 +108,18 @@ describe('Blender athletes: clips', () => {
     }
   })
 
-  it('puts the stick where the shot was authored at the release frame', () => {
-    // clips.py shot_wrist frame 9: blade middle (0.9, 0.03, 2.5), blade yaw -0.35 → heel = mid - dir·0.45
+  it('puts the blade on the ice, heading where the shot was authored, at the release frame', () => {
+    // clips.py shot_wrist frame 9: blade middle (1.0, 0.03, 2.9), blade yaw -0.4. The
+    // blade then slides out along the ice until the top hand holds the knob (posekit).
     const clip = skater.clips.get('shot_wrist')!
     const v = new THREE.Vector3()
     samplePos(clip, 'stick_blade', 9 / 30, false, v)
-    const dir = new THREE.Vector3(Math.cos(-0.35), 0, -Math.sin(-0.35))
-    const heel = new THREE.Vector3(0.9, 0.03, 2.5).addScaledVector(dir, -0.45)
-    expect(v.distanceTo(heel)).toBeLessThan(0.02)
+    expect(Math.abs(v.y - 0.03)).toBeLessThan(0.02)
+    expect(v.z).toBeGreaterThan(2.4)
+    const q = new THREE.Quaternion()
+    sampleRot(clip, 'stick_blade', 9 / 30, false, q)
+    const toe = new THREE.Vector3(1, 0, 0).applyQuaternion(q)
+    expect(toe.angleTo(new THREE.Vector3(Math.cos(-0.4), 0, -Math.sin(-0.4)))).toBeLessThan(0.05)
   })
 
   it('loops seamlessly (first sample == last sample)', () => {

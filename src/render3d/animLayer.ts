@@ -8,8 +8,9 @@
  *   1. AthleteRig.apply() writes the procedural pose;
  *   2. blendBody()  slerps masked bones toward the active clips;
  *   3. the rig places the stick, blendStick() pulls it toward the clip's stick;
- *   4. the rig re-solves both hands onto the stick with its IK;
- *   5. blendArms()  applies 'clip'-hands clips (fist pumps, falls) on top.
+ *   4. the rig solves both hands onto the (code) stick with its IK;
+ *   5. blendArms()  applies the clips' own baked arms on top;
+ *   6. the rig locks the gripping hands onto the shaft (gripWeights).
  * Sampling is two array reads + a slerp per bone (BakedClip is pre-resampled
  * at 30 fps and already retargeted), so a full team costs microseconds.
  */
@@ -84,6 +85,31 @@ export function blendClip(bones: Bones, clip: BakedClip, t: number, loop: boolea
     const b = bones[name]!
     if (sampleInto(clip, name, t, loop, _q)) b.quaternion.slerp(_q, w)
     if ((name === 'hips' || isStick) && samplePos(clip, name, t, loop, _v)) b.position.lerp(_v, w)
+  }
+}
+
+const _h0 = new THREE.Quaternion()
+const _h1 = new THREE.Quaternion()
+const _hd = new THREE.Quaternion()
+
+/**
+ * An upper-body clip was solved (arms on the stick, torso lean) on its OWN
+ * pelvis orientation; under it the skating cycle tilts the pelvis its own way
+ * (the owner idle stands the pelvis up), which swung the whole torso — and the
+ * shoulders out of reach of the stick. So the pelvis turns to the clip's while
+ * the legs keep their world pose exactly (thighs counter-rotated): the skating
+ * legs are untouched, the torso is the clip's.
+ */
+function leadHips(bones: Bones, clip: BakedClip, t: number, loop: boolean, w: number): void {
+  const hips = bones['hips']
+  if (!hips || w <= 0 || !sampleInto(clip, 'hips', t, loop, _h1)) return
+  _h0.copy(hips.quaternion)
+  hips.quaternion.slerp(_h1, w)
+  // thigh' = hips'⁻¹ · hips · thigh  (the same world orientation under the new pelvis)
+  _hd.copy(hips.quaternion).invert().multiply(_h0)
+  for (const n of ['thigh_L', 'thigh_R']) {
+    const b = bones[n]
+    if (b) b.quaternion.premultiply(_hd)
   }
 }
 
@@ -197,29 +223,45 @@ export class ActionLayer {
   }
 
   blendBody(bones: Bones): void {
-    for (const a of this.active) blendClip(bones, a.clip, this.time(a), !!a.meta.loop, this.weight(a), a.meta.mask, 'body')
+    for (const a of this.active) {
+      const w = this.weight(a)
+      if (a.meta.mask === 'upper') leadHips(bones, a.clip, this.time(a), !!a.meta.loop, w)
+      blendClip(bones, a.clip, this.time(a), !!a.meta.loop, w, a.meta.mask, 'body')
+    }
   }
 
   blendStick(bones: Bones): void {
     for (const a of this.active) blendClip(bones, a.clip, this.time(a), !!a.meta.loop, this.weight(a), a.meta.mask, 'stick')
   }
 
+  /**
+   * Every clip drives the arms with its own baked arm motion: the Blender
+   * clips and the owner bakes were both solved with the stick in the hands on
+   * their own skeleton (scripts/blender/posekit.py). The grips are then only
+   * TOUCHED UP onto the shaft (gripWeights → athlete.ts lockGrips).
+   */
   blendArms(bones: Bones): void {
-    for (const a of this.active) if (a.meta.hands === 'clip' || a.clip.ownArms) blendClip(bones, a.clip, this.time(a), !!a.meta.loop, this.weight(a), a.meta.mask, 'arms')
+    for (const a of this.active) blendClip(bones, a.clip, this.time(a), !!a.meta.loop, this.weight(a), a.meta.mask, 'arms')
   }
 
-  /** Weight of active clips whose hands are re-gripped onto THEIR stick by IK (upper / full body). */
-  ikArmsWeight(): number {
-    let w = 0
-    for (const a of this.active) if (a.meta.hands === 'stick' && !a.clip.ownArms && a.meta.mask !== 'lower') w = Math.max(w, this.weight(a))
-    return w
-  }
-
-  /** Does any active clip drive the arms directly? (skip nothing — IK still runs first) */
+  /** Weight of active clips driving the arms (upper / full body). */
   armsWeight(): number {
     let w = 0
-    for (const a of this.active) if ((a.meta.hands === 'clip' || a.clip.ownArms) && a.meta.mask !== 'lower') w = Math.max(w, this.weight(a))
+    for (const a of this.active) if (a.meta.mask !== 'lower') w = Math.max(w, this.weight(a))
     return w
+  }
+
+  /** How strongly each hand must be locked onto the shaft now (stick-hands clips). */
+  gripWeights(): { L: number; R: number } {
+    let L = 0
+    let R = 0
+    for (const a of this.active) {
+      if (a.meta.hands !== 'stick' || a.meta.mask === 'lower') continue
+      const w = this.weight(a)
+      R = Math.max(R, w)
+      if (a.meta.grip !== 'R') L = Math.max(L, w)
+    }
+    return { L, R }
   }
 }
 

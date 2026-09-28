@@ -1278,6 +1278,27 @@ export class Rink3dRenderer implements MatchRenderer {
     }
   }
 
+  /**
+   * Club branding in the arena: the home club's logo (an image URL / data URL
+   * from the mod logo pack) at centre ice. Omit or pass null for the league
+   * roundel. Resolves once the image has loaded (failures keep the roundel).
+   */
+  async setTeamLogos(logos: { home?: string | null }): Promise<void> {
+    if (!logos.home) {
+      this.arena.setCenterLogo(null)
+      return
+    }
+    const img = new Image()
+    img.decoding = 'async'
+    img.src = logos.home
+    try {
+      await img.decode()
+    } catch {
+      return
+    }
+    this.arena.setCenterLogo(img)
+  }
+
   /** Dev harness only: pin the camera to a fixed pose (null = normal presets). */
   setDebugCamera(pose: { px: number; py: number; pz: number; lx: number; ly: number; lz: number; fov?: number } | null): void {
     this.debugCam = pose

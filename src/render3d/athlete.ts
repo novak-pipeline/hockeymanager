@@ -534,8 +534,10 @@ export interface PoseOverlay {
   body(bones: Record<BoneName, THREE.Bone>): void
   /** After the procedural stick is placed, before the hands are solved onto it. */
   stick(bones: Record<BoneName, THREE.Bone>): void
-  /** After the IK: clips that own the arms (hands off the stick). */
+  /** After the IK: the clips' own (baked) arm motion. */
   arms(bones: Record<BoneName, THREE.Bone>): void
+  /** How strongly each hand must then be locked onto the shaft (0..1). */
+  grip?(): { L: number; R: number }
 }
 
 // ── rig ─────────────────────────────────────────────────────────────────────
@@ -545,8 +547,10 @@ const _w = new THREE.Vector3()
 const _q0 = new THREE.Quaternion()
 const _q1 = new THREE.Quaternion()
 const _q2 = new THREE.Quaternion()
+const _q3 = new THREE.Quaternion()
+const _u = new THREE.Vector3()
+const _m = new THREE.Matrix4()
 const _inv = new THREE.Matrix4()
-const DOWN = new THREE.Vector3(0, -1, 0)
 const UP = new THREE.Vector3(0, 1, 0)
 const toV3 = (v: THREE.Vector3): V3 => ({ x: v.x, y: v.y, z: v.z })
 
@@ -622,6 +626,9 @@ export class AthleteRig {
   /** Segment lengths for the IK / hip-height maths (the RIG constants unless the body is an owner import). */
   readonly dims: RigDims
 
+  /** Where each glove's palm holds the shaft, in its hand bone's frame (zero = the wrist joint). */
+  readonly gripPalm: Record<'L' | 'R', THREE.Vector3>
+
   constructor(readonly goalie: boolean, readonly slot: number, material: THREE.Material | THREE.Material[], template?: AthleteTemplate | null) {
     this.skin = SKIN_TONES[slot % SKIN_TONES.length]!
     this.stickColor = STICK_TONES[(slot * 7) % STICK_TONES.length]!
@@ -633,6 +640,7 @@ export class AthleteRig {
     this.dims = ownOff
       ? { upperArm: len('forearm_L'), forearm: len('hand_L'), thigh: len('shin_L'), shin: len('foot_L'), skate: template!.joints.foot_L!.y, stickLen: template!.stickLen ?? RIG.stickLen }
       : RIG_DIMS
+    this.gripPalm = { L: template?.grip?.L?.clone() ?? new THREE.Vector3(), R: template?.grip?.R?.clone() ?? new THREE.Vector3() }
     for (const name of BONE_NAMES) {
       const bone = new THREE.Bone()
       bone.name = name
@@ -902,6 +910,51 @@ export class AthleteRig {
     if (overlay) {
       overlay.arms(B)
       r.updateMatrixWorld(true)
+      const g = !this.goalie && overlay.grip ? overlay.grip() : null
+      if (g && (g.L > 0.001 || g.R > 0.001)) this.lockGrips(g)
+    }
+  }
+
+  /**
+   * Lock the gripping hands onto the shaft: each clip's baked arms were solved
+   * with the hands on ITS stick, but the body under them (skating hips, a
+   * blended torso) moves the shoulders a little. The palm point is projected
+   * onto the shaft and the arm re-solved to reach it, with the clip's own elbow
+   * as the pole (the bend stays the clip's), blended by the clip's weight.
+   */
+  private lockGrips(w: { L: number; R: number }): void {
+    const B = this.bones
+    const r = this.root
+    _inv.copy(r.matrixWorld).invert()
+    const heel = B.stick.getWorldPosition(new THREE.Vector3()).applyMatrix4(_inv)
+    const dir = new THREE.Vector3(0, 1, 0).applyQuaternion(B.stick.quaternion).normalize()
+    const len = this.dims.stickLen
+    for (const h of ['R', 'L'] as const) {
+      const k = w[h]
+      if (k <= 0.001) continue
+      const upper = B[`upperarm_${h}`]
+      const fore = B[`forearm_${h}`]
+      const hand = B[`hand_${h}`]
+      for (let it = 0; it < 3; it++) {
+        const S = upper.getWorldPosition(new THREE.Vector3()).applyMatrix4(_inv)
+        const E = fore.getWorldPosition(new THREE.Vector3()).applyMatrix4(_inv)
+        const Wr = hand.getWorldPosition(new THREE.Vector3()).applyMatrix4(_inv)
+        const P = hand.localToWorld(_v.copy(this.gripPalm[h])).applyMatrix4(_inv)
+        // the nearest point of the shaft to the palm — or, when the body under
+        // the clip has moved the shoulder out of reach of it, the nearest point
+        // that shoulder CAN reach (the hand slides along the shaft)
+        const want = Math.min(len - 0.1, Math.max(0.3, _w.copy(P).sub(heel).dot(dir)))
+        // (the palm sits past the wrist, but not along the arm: count the arm alone)
+        const palmReach = (this.dims.upperArm + this.dims.forearm) * 0.95
+        const g = gripOnShaft(toV3(heel), toV3(dir), toV3(S), want, palmReach, 0.3, len - 0.1)
+        const t = g.t
+        const G = heel.clone().addScaledVector(dir, t)
+        const delta = G.sub(P)
+        if (delta.lengthSq() < 1e-4) break
+        const target = Wr.addScaledVector(delta, k)
+        const { elbow, hand: hp } = solveTwoBone(toV3(S), toV3(target), this.dims.upperArm, this.dims.forearm, toV3(E))
+        this.aimArm(upper, fore, toV3(S), elbow, hp, toV3(E))
+      }
     }
   }
 
@@ -910,19 +963,38 @@ export class AthleteRig {
     // elbows out and down, not tucked back: the arms reach forward to the stick
     const pole = { x: sh.x + side * 1.5, y: sh.y - 1.3, z: sh.z + 0.2 }
     const { elbow, hand } = solveTwoBone(sh, target, this.dims.upperArm, this.dims.forearm, pole)
-    this.aimBone(upper, _v.set(elbow.x - sh.x, elbow.y - sh.y, elbow.z - sh.z).normalize())
-    this.aimBone(fore, _v.set(hand.x - elbow.x, hand.y - elbow.y, hand.z - elbow.z).normalize())
+    this.aimArm(upper, fore, sh, elbow, hand, pole)
   }
 
-  /** Point a bone's −Y along `dirRoot` (a root-space direction). */
-  private aimBone(bone: THREE.Bone, dirRoot: THREE.Vector3): void {
-    const rootQ = this.root.getWorldQuaternion(_q0)
-    const parentWorld = bone.parent!.getWorldQuaternion(_q1)
-    // parent orientation expressed in root space
-    const parentRoot = rootQ.invert().multiply(parentWorld)
-    const desired = _q2.setFromUnitVectors(DOWN, dirRoot)
-    bone.quaternion.copy(parentRoot.invert().multiply(desired))
-    bone.updateMatrixWorld(true)
+  /**
+   * Upper arm + forearm as a HINGE (posekit.arm_frames, same maths): each
+   * bone's −Y runs along it, the elbow bends about their shared local X and the
+   * forearm swings toward local +Z — where the elbow crease faces at rest. A
+   * shortest-arc aim gives the upper arm an arbitrary twist, so the skinned
+   * elbow bent sideways or backwards.
+   */
+  private aimArm(upper: THREE.Bone, fore: THREE.Bone, sh: V3, elbow: V3, hand: V3, pole: V3): void {
+    const u = norm(sub3(elbow, sh))
+    const f = norm(sub3(hand, elbow))
+    let z = sub3(f, scale3(u, dot3(f, u)))
+    if (len3(z) < 1e-3) {
+      const pv = sub3(pole, sh)
+      z = scale3(sub3(pv, scale3(u, dot3(pv, u))), -1)
+      if (len3(z) < 1e-6) z = sub3({ x: 0, y: 0, z: 1 }, scale3(u, u.z))
+    }
+    z = norm(z)
+    const y = scale3(u, -1)
+    const x = norm(cross3(y, z))
+    const y2 = scale3(f, -1)
+    const z2 = norm(cross3(x, y2))
+    const Wu = _q0.setFromRotationMatrix(_m.makeBasis(_v.set(x.x, x.y, x.z), _w.set(y.x, y.y, y.z), _u.set(z.x, z.y, z.z)))
+    const Wf = _q1.setFromRotationMatrix(_m.makeBasis(_v.set(x.x, x.y, x.z), _w.set(y2.x, y2.y, y2.z), _u.set(z2.x, z2.y, z2.z)))
+    // shoulder orientation in root space
+    const rootQ = this.root.getWorldQuaternion(_q2).invert()
+    const parentRoot = rootQ.multiply(upper.parent!.getWorldQuaternion(_q3))
+    upper.quaternion.copy(parentRoot.invert().multiply(Wu))
+    fore.quaternion.copy(Wu.invert().multiply(Wf))
+    upper.updateMatrixWorld(true)
   }
 }
 
@@ -960,6 +1032,8 @@ const sub3 = (a: V3, b: V3): V3 => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z }
 const add3 = (a: V3, b: V3): V3 => ({ x: a.x + b.x, y: a.y + b.y, z: a.z + b.z })
 const scale3 = (a: V3, k: number): V3 => ({ x: a.x * k, y: a.y * k, z: a.z * k })
 const len3 = (a: V3) => Math.hypot(a.x, a.y, a.z)
+const dot3 = (a: V3, b: V3) => a.x * b.x + a.y * b.y + a.z * b.z
+const cross3 = (a: V3, b: V3): V3 => ({ x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x })
 const norm = (a: V3): V3 => {
   const l = len3(a) || 1
   return { x: a.x / l, y: a.y / l, z: a.z / l }

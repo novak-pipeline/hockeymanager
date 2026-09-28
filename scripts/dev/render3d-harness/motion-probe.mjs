@@ -45,6 +45,8 @@ const r = await page.evaluate(async (secs) => {
   const last = new Map(), lastW = new Map(), lastQ = new Map()
   let maxSpeed = 0, flips = 0, rigSec = 0, over40 = 0, samples = 0
   let boneSamples = 0, boneRigSec = 0, pops = 0, handChecks = 0, handOff = 0
+  let gripChecks = 0, gripOff = 0, elbowChecks = 0, elbowInv = 0, elbowSide = 0
+  const gripD = [], gctx = {}, ectx = {}
   const speeds = []
   const spikes = [], worst = []
   const frameMs = []
@@ -148,6 +150,42 @@ const r = await page.evaluate(async (secs) => {
             }
           }
         }
+        // clip grips: every hand a stick-hands clip holds at full weight, its PALM
+        // (rig.gripPalm; the wrist for Blender rigs) on the drawn shaft line
+        if (!goalie && p.layer) {
+          // (older builds without gripWeights: any stick clip playing counts as both hands gripping)
+          const stickClip = [...(p.layer.playing ?? [])].some((n) => /^(shot_|pass|deke_|stickhandle|faceoff_|check$|poke)/.test(n))
+          const gw = p.layer.gripWeights ? p.layer.gripWeights() : { L: stickClip ? 1 : 0, R: stickClip ? 1 : 0 }
+          B.stick.updateWorldMatrix(true, false)
+          const e = B.stick.matrixWorld.elements
+          const heel = { x: e[12], y: e[13], z: e[14] }
+          const len = Math.hypot(e[4], e[5], e[6]) || 1
+          const dir = { x: e[4] / len, y: e[5] / len, z: e[6] / len }
+          for (const h of ['R', 'L']) {
+            if (gw[h] < 0.9) continue
+            const hb = B['hand_' + h]
+            hb.updateWorldMatrix(true, false)
+            const hp = (p.rig.gripPalm?.[h] ?? { x: 0, y: 0, z: 0 }).clone ? p.rig.gripPalm[h].clone().applyMatrix4(hb.matrixWorld) : wpos(hb)
+            const d = { x: hp.x - heel.x, y: hp.y - heel.y, z: hp.z - heel.z }
+            const t = d.x * dir.x + d.y * dir.y + d.z * dir.z
+            const off = Math.hypot(d.x - dir.x * t, d.y - dir.y * t, d.z - dir.z * t)
+            gripChecks++
+            gripD.push(off)
+            if (off > 0.3) { gripOff++; const k = `${h} [${[...(p.layer?.playing ?? [])].join('+')}]`; gctx[k] = (gctx[k] ?? 0) + 1 }
+          }
+        }
+        // elbows: the forearm swings toward the upper arm's local +Z (crease) about its X;
+        // inverted = bent backwards, sideways = off the hinge plane
+        if (!goalie) for (const h of ['L', 'R']) {
+          const q = B['forearm_' + h].quaternion
+          // forearm −Y in the upper arm's frame
+          const x = q.x, y = q.y, z = q.z, w = q.w
+          const dx = -(2 * (x * y - w * z)), dy = -(1 - 2 * (x * x + z * z)), dz = -(2 * (y * z + w * x))
+          const flex = Math.atan2(dz, -dy)
+          elbowChecks++
+          if (flex < -0.15) { elbowInv++; const k = `inv ${h} [${[...(p.layer?.playing ?? [])].join('+') || '-'}]`; ectx[k] = (ectx[k] ?? 0) + 1 }
+          else if (Math.abs(dx) > 0.35) { elbowSide++; const k = `side ${h} [${[...(p.layer?.playing ?? [])].join('+') || '-'}]`; ectx[k] = (ectx[k] ?? 0) + 1 }
+        }
         // top / bottom hand on the shaft?
         if (!goalie && p.layer && (p.layer.armsWeight?.() ?? 0) < 0.05) {
           B.stick.updateWorldMatrix(true, false)
@@ -182,6 +220,8 @@ const r = await page.evaluate(async (secs) => {
     boneSamples, bonePopSamples: pops, popsPerRigSec: +(pops / Math.max(1e-9, boneRigSec)).toFixed(3), handStickPopsPerRigSec: +(limbPops / Math.max(1e-9, boneRigSec)).toFixed(3), boneP99: +pct(speeds, 0.99).toFixed(2),
     puckBlade: { frames: blade.length, p50: +pct(blade, 0.5).toFixed(2), p90: +pct(blade, 0.9).toFixed(2), over1ft: +(blade.filter((x) => x > 1).length / Math.max(1, blade.length)).toFixed(3), bladeYp50: +pct(bladeY, 0.5).toFixed(2), bladeYp90: +pct(bladeY, 0.9).toFixed(2), contexts: Object.entries(bctx).sort((a, b) => b[1] - a[1]).slice(0, 6) },
     overlap: { framesPct: +(100 * overlapFrames / Math.max(1, overlapN)).toFixed(1), pairsPerFrame: +(overlapPairs / Math.max(1, overlapN)).toFixed(3) },
+    grip: { checks: gripChecks, offPct: +(100 * gripOff / Math.max(1, gripChecks)).toFixed(2), p50: +pct(gripD, 0.5).toFixed(3), p95: +pct(gripD, 0.95).toFixed(3), contexts: Object.entries(gctx).sort((a, b) => b[1] - a[1]).slice(0, 6) },
+    elbow: { checks: elbowChecks, invertedPct: +(100 * elbowInv / Math.max(1, elbowChecks)).toFixed(2), sidewaysPct: +(100 * elbowSide / Math.max(1, elbowChecks)).toFixed(2), contexts: Object.entries(ectx).sort((a, b) => b[1] - a[1]).slice(0, 6) },
     handOffStick: handOff, handChecks, handOffContexts: Object.entries(hctx).sort((a, b) => b[1] - a[1]).slice(0, 8),
     frameP95ms: +pct(frameMs, 0.95).toFixed(1), frameMaxMs: +Math.max(0, ...frameMs).toFixed(1), framesOver50ms: frameMs.filter((x) => x > 50).length, longFrames, frames: frameMs.length,
     popContexts: top, worstPops: [...worst].sort((a, b) => b.v - a.v).slice(0, 5),

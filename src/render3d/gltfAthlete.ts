@@ -30,12 +30,6 @@ export interface BakedClip {
   name: string
   /** Contact time (s) authored into the clip name (`slot@cN`, owner imports); else the catalogue's. */
   contact?: number
-  /**
-   * The clip's own arm motion holds its own stick (owner imports: arms and
-   * stick were retargeted together from the source, on the same skeleton), so
-   * it drives the arms instead of the renderer re-gripping the hands by IK.
-   */
-  ownArms?: boolean
   /** Number of samples (frames + 1: the last sample is the end pose). */
   samples: number
   duration: number
@@ -68,6 +62,12 @@ export interface AthleteTemplate {
   groups?: Array<{ start: number; count: number; group: OwnerGroup }>
   /** Stick length (ft) — the grips slide along it. */
   stickLen?: number
+  /**
+   * Where each glove's PALM grips the shaft, in its hand bone's frame (owner
+   * imports: measured from the owner's own idle, `<role>_grip.json`). Absent =
+   * the wrist joint itself sits on the shaft (the Blender athletes).
+   */
+  grip?: Partial<Record<'L' | 'R', THREE.Vector3>>
 }
 
 export type OwnerGroup = 'clothes' | 'gear' | 'visor'
@@ -385,13 +385,21 @@ export function loadOwnerAssets(): Promise<OwnerAssets | null> {
         const [s, g, ts, tg] = await Promise.all([parse(sk!), gk ? parse(gk) : Promise.resolve(null), texFor('skater'), texFor('goalie')])
         if (!ts || !layout['skater']) throw new Error('owner skater textures / layout missing — rerun npm run import:owner-assets')
         const goalieOk = g && tg && layout['goalie']
-        const own = (t: AthleteTemplate) => {
-          for (const c of t.clips.values()) c.ownArms = true
+        const gripUrl = await url('skater_grip.json')
+        const gripJson = gripUrl ? ((await (await fetch(gripUrl)).json()) as Record<'L' | 'R', { palm: [number, number, number] } | null>) : null
+        const own = (t: AthleteTemplate, role: 'skater' | 'goalie') => {
+          if (role === 'skater' && gripJson) {
+            t.grip = {}
+            for (const h of ['L', 'R'] as const) {
+              const g = gripJson[h]
+              if (g) t.grip[h] = new THREE.Vector3(...g.palm)
+            }
+          }
           return t
         }
         return {
-          skater: own(templateFromGltf(s, false)),
-          goalie: goalieOk ? own(templateFromGltf(g, true)) : null,
+          skater: own(templateFromGltf(s, false), 'skater'),
+          goalie: goalieOk ? own(templateFromGltf(g, true), 'goalie') : null,
           tex: { skater: ts, goalie: goalieOk ? tg : null },
           layout: { skater: layout['skater']!, goalie: goalieOk ? layout['goalie']! : null },
         }
