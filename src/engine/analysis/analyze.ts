@@ -36,7 +36,7 @@ import {
   shotGeometry,
   thirdOf
 } from './rink'
-import { SHAPE_TEMPLATES, mergeShapeAccum, scoreShapes, type ShapeAccum, type ShapeTemplate } from './shapes'
+import { SHAPE_TEMPLATES, mergeShapeAccum, scoreShapes, type ShapeAccum, type ShapeSituation, type ShapeTemplate } from './shapes'
 
 type Side = 'home' | 'away'
 type FrameEv = Extract<GameEvent, { type: 'frame' }>
@@ -88,6 +88,7 @@ export const HIST_SPECS: Record<string, [number, number, number]> = {
   'skate.radiusFt.15to20': [0, 400, 2],
   'skate.radiusFt.20plus': [0, 400, 2],
   'skate.gameMaxMph': [0, 40, 0.25],
+  'motion.puckBladeFt': [0, 20, 0.05],
   'skate.milesPer60': [0, 30, 0.1],
   'skate.milesPer60.F': [0, 30, 0.1],
   'skate.milesPer60.D': [0, 30, 0.1],
@@ -187,6 +188,12 @@ const MPH18 = 18 * FT_PER_S_PER_MPH
 const RUSH_MAX_ADV_FT = 75
 /** Faster than any human skater (~30.7 mph) — a position jump, not skating. */
 const TELEPORT_FT_S = 45
+/** A carried puck sits this far out in front of the carrier (his blade, ft) ... */
+const BLADE_REACH_FT = 2.3
+/** ... and is "off the blade" beyond this from it (ft). */
+const PUCK_OFF_BLADE_FT = 1.5
+/** A knocked-down / pinned man must stay in the frames this long after the hit (s). */
+const DOWN_VISIBLE_S = 1.5
 /** A frame gap above this breaks a kinematic track / shift. */
 const MAX_TRACK_GAP_S = 0.6
 const SHIFT_GAP_S = 1.5
@@ -344,6 +351,8 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
   /** Puck advancement (ft, possessing team's frame) when possession was gained. */
   let possStartAdv = 0
   const entryArmed: Record<Side, boolean> = { home: false, away: false }
+  const lastEntryAt: Record<Side, number> = { home: -999, away: -999 }
+  const entryTransition: Record<Side, boolean> = { home: false, away: false }
   const lastCompletedPass: Record<Side, { t: number; bAdv: number } | null> = { home: null, away: null }
   let pendingShot: { t: number; from: XY; max: number } | null = null
   let pendingPass: { t: number; from: XY; max: number } | null = null
@@ -403,6 +412,9 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
     px.state.away = 'outside'
   }
 
+  /** Knocked-down / pinned men still getting up (the frames must keep them). */
+  const downs: { player: string; t: number; until: number; period: number }[] = []
+
   const onStop = (): void => {
     live = false
     stoppedSinceFrame = true
@@ -434,7 +446,10 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
         if (sh) closeShift(s.player, sh, frameDt)
         shifts.set(s.player, { start: t, last: t })
       }
-      onIceSec.set(s.player, (onIceSec.get(s.player) ?? 0) + frameDt)
+      // Time on ice is GAME-CLOCK time, as the NHL keeps it: the clock stops at
+      // a whistle, so dead time (lining up for a draw, celebrations) is not
+      // on-ice time for the per-60 distance rate.
+      if (live) onIceSec.set(s.player, (onIceSec.get(s.player) ?? 0) + frameDt)
     }
 
     const continuous = !stoppedSinceFrame && dt > 0 && dt <= MAX_TRACK_GAP_S && live
@@ -545,6 +560,34 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
     }
     puckPrev = { t, pos: f.puck }
 
+    // The carried puck on the carrier's stick: the stream names a carrier only
+    // with the puck on his blade (streams that give a facing: the blade sits
+    // ~2.3 ft out in front of him). Renderers put the puck on the drawn blade.
+    if (f.puckCarrier) {
+      const c = [...f.home, ...f.away].find((s) => s.player === f.puckCarrier)
+      if (c && c.facing !== undefined) {
+        const bx = c.pos.x * HALF_LENGTH_FT + Math.cos(c.facing) * BLADE_REACH_FT
+        const by = c.pos.y * HALF_WIDTH_FT + Math.sin(c.facing) * BLADE_REACH_FT
+        const d = Math.hypot(f.puck.x * HALF_LENGTH_FT - bx, f.puck.y * HALF_WIDTH_FT - by)
+        addSample(H['motion.puckBladeFt'], d)
+        inc('motion.carriedFrames')
+        if (d > PUCK_OFF_BLADE_FT) inc('motion.puckOffBlade')
+      }
+    }
+    // A man knocked down or pinned stays in the picture through his fall and
+    // get-up (a line change never takes him off mid-fall).
+    for (let i = downs.length - 1; i >= 0; i--) {
+      const d = downs[i]
+      if (d.period !== f.period || t > d.until) {
+        downs.splice(i, 1)
+        continue
+      }
+      if (t > d.t && !present.has(d.player)) {
+        inc('motion.downVanish')
+        downs.splice(i, 1)
+      }
+    }
+
     // Possession.
     const carrierSide = f.puckCarrier ? teamOf.get(f.puckCarrier) ?? null : null
     if (carrierSide && carrierSide !== possTeam) {
@@ -565,6 +608,8 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
       const prevAdv = lastFrame ? advFt(lastFrame.puck, a) : adv
       if (continuous && entryArmed[possTeam] && prevAdv < BLUE_LINE_FT && adv >= BLUE_LINE_FT) {
         entryArmed[possTeam] = false
+        lastEntryAt[possTeam] = t
+        entryTransition[possTeam] = possStartAdv < BLUE_LINE_FT && t - possStart <= 8
         const lp = lastCompletedPass[possTeam]
         const kind =
           carrierSide === possTeam
@@ -626,13 +671,29 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
     // Shape templates (live, settled carrier).
     if (live && possTeam && carrierSide === possTeam) {
       const a = signOf(possTeam, f.period)
-      scoreShapes(
-        af(f.puck, a),
-        skatersOf(f, possTeam).map((s) => af(s.pos, a)),
-        skatersOf(f, other(possTeam)).map((s) => af(s.pos, a)),
-        m.shapes,
-        templates
-      )
+      // Which situation is this? (see ShapeSituation)
+      const pAdv = advFt(f.puck, a)
+      const sinceEntry = t - lastEntryAt[possTeam]
+      const cTr = f.puckCarrier ? tracks.get(f.puckCarrier) : undefined
+      const cVx = cTr?.vel ? cTr.vel.x * a : 0
+      let situation: ShapeSituation | null = null
+      if (pAdv >= BLUE_LINE_FT) {
+        if (sinceEntry <= 2 && entryTransition[possTeam]) situation = 'rush'
+        else if (sinceEntry >= 4) situation = 'settledOz'
+      } else if (pAdv < -BLUE_LINE_FT) {
+        if (t - possStart >= 1) situation = 'breakout'
+      } else if (cVx < 5 && t - possStart >= 2) situation = 'regroup'
+      else if (t - possStart <= 8 && possStartAdv < BLUE_LINE_FT && pAdv > BLUE_LINE_FT - 12) situation = 'rush'
+      if (situation) {
+        scoreShapes(
+          af(f.puck, a),
+          skatersOf(f, possTeam).map((s) => af(s.pos, a)),
+          skatersOf(f, other(possTeam)).map((s) => af(s.pos, a)),
+          m.shapes,
+          templates,
+          situation
+        )
+      }
     }
 
     // Heat map + overlaps (live).
@@ -811,6 +872,10 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
         if (tag) inc(`hit.by${tag}`)
         const lf = lastFrame as FrameEv | null // assigned inside onFrame (closure) — widen the narrowed type
         if (lf && lf.puckCarrier === ev.on) inc('hit.onCarrier')
+        if (ev.knockdown || ev.pinned) {
+          inc('hit.downs')
+          downs.push({ player: ev.on, t: abs(ev), until: abs(ev) + DOWN_VISIBLE_S, period: ev.period })
+        }
         proxyEvent(ev, ev.by, ev.pos)
         break
       }

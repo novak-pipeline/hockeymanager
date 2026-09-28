@@ -67,7 +67,7 @@ const r01 = rLevel
  * a carrier who drives into a crowded house risks the whole continuation
  * value on a low-retention carry. That is what brings shots out to range.
  */
-export const VAL = { oz: 0.11, kPos: 0.15, shoot: 0.56, keep: 0.18, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 1.2, laneRead: 0.95, angleZero: 90, behindNet: 0.85, transMaxX: 70, transBack: 0.003, rushNoBackX: 0, regroupMaxX: 20, ozBack: 0.008 }
+export const VAL = { otMinX: 50, otMinY: 6, otMaxY: 28, nzBack: 0.0015, carryKeep: 0.004, oz: 0.11, kPos: 0.15, shoot: 0.62, keep: 0.18, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 0.8, laneRead: 0.95, angleZero: 90, behindNet: 0.85, transMaxX: 70, transBack: 0.003, rushNoBackX: 0, regroupMaxX: 20, ozBack: 0.008 }
 /**
  * D safety (gap discipline): how far ahead a defenceman reads an attacker
  * coming at him (s), the base gap (ft) plus gap per ft/s of the attacker's
@@ -76,7 +76,9 @@ export const VAL = { oz: 0.11, kPos: 0.15, shoot: 0.56, keep: 0.18, noise: 0.5, 
  */
 export const D_SAFETY = { look: 2, gap: 12, gapPerV: 0.5, stepUpMargin: 1.3, pinchMaxX: 55, gapLead: 0.5, looseGuard: 1 }
 /** Support-skater motion loops around a spot: radius (ft) and angular speed (rad/s). */
-export const DRIFT = { rAtk: 12, rDef: 5, omAtk: 1.1, omDef: 0.9 }
+/** Shape tuning: where the breakout hands over to the neutral-zone lanes (x in the attack frame), and the target-smoothing time constant (s). */
+export const SHAPE_TUNING = { breakoutX: -25, smooth: 0.45 }
+export const DRIFT = { rAtk: 12, rDef: 5, omAtk: 0.55, omDef: 0.5 }
 /**
  * In close: the radius (ft) around their net where a carrier may not dawdle,
  * the seconds he may hold it there before he must act, the per-second cost of
@@ -291,7 +293,7 @@ export function shotValue(me: Side, opps: readonly Body[], c: Body, x: number, y
  * a move is to the carrier (the frequency lever); `beatG` is the finish
  * multiplier on a goalie who bit.
  */
-export const DEKE = { base: -2.8, baseG: -1.6, k: 7, lunge: 0.02, belief: 0.25, valueS: 1.1, valueG: 0.35, goalieRoom: 10, beatG: 1.6, minS: 0.4, maxS: 0.7, creaseRet: 0.45, tightShot: 0.6 }
+export const DEKE = { base: -2.8, baseG: -1.6, k: 7, lunge: 0.02, belief: 0.25, valueS: 1.1, valueG: 0.35, goalieRoom: 10, beatG: 1.6, minS: 0.4, maxS: 0.7, creaseRet: 0.6, tightShot: 0.85 }
 
 /** The carrier's hands for a 1-on-1 move (0..1): stickhandling first, then feet and hockey sense. */
 export function dekeSkill(c: Body): number {
@@ -440,8 +442,11 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       // Holding it in close costs a little more every moment (the box closes).
       const ev = retEff * v - (1 - retEff) * cost * 0.9 - (inClose && qClose ? INCLOSE.holdCost * heldClose : 0)
       const urg = me.tactics.tempo.pace * 0.4 + (adv < BLUE_X ? 0.55 : 0.35) + (pressure > 0.5 ? 0.2 : 0) + (inClose ? 0.3 : 0)
+      // Momentum: a man skating with it keeps going the way he is going
+      // (a new heading every look is a man who never gets up to speed).
+      const keep = sp > 4 ? VAL.carryKeep * Math.max(0, ((qx - c.x) * c.vx + (qy - c.y) * c.vy) / (Math.hypot(qx - c.x, qy - c.y) * sp + 1e-6)) : 0
       opts.push({
-        ev: ev + (protect ? -0.002 : 0),
+        ev: ev + keep + (protect ? -0.002 : 0),
         act: {
           kind: 'carry',
           protect,
@@ -573,7 +578,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       if (radv > BLUE_X && radv < GOAL_X - 1 && !opp.pulled) v = Math.max(v, shotValue(me, opps, f.r, f.R.x, f.R.y, eager, false, opp.goalie) * VAL.passShot)
       // Across the royal road to a shooter: the one-timer look (goalie moving).
       const royal =
-        f.R.x * a > 55 && Math.abs(f.R.y) < 16 && Math.sign(f.R.y || 1) !== Math.sign(c.y || 1) && Math.abs(c.y) > 8
+        f.R.x * a > VAL.otMinX && Math.abs(f.R.y) >= VAL.otMinY && Math.abs(f.R.y) < VAL.otMaxY && Math.sign(f.R.y || 1) !== Math.sign(c.y || 1) && Math.abs(c.y) > 8
       const oneTimer = royal && f.open > 7
       if (oneTimer) v *= 1.3
       // Open ice at the receiver is worth more (time to make the next play).
@@ -582,7 +587,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       v *= clamp(f.open / 11, 0.2, 1.2)
       const cost = posValue(f.R.x, f.R.y, -a)
       let ev = comp * v - (1 - comp) * cost * 0.8
-      if (f.back) ev -= transition ? VAL.transBack : adv > BLUE_X ? VAL.ozBack : 0.003
+      if (f.back) ev -= transition ? VAL.transBack : adv > BLUE_X ? VAL.ozBack : VAL.nzBack
       opts.push({ ev, act: { kind: 'pass', to: f.r, at: f.R, speed: f.speed, oneTimer } })
     }
   }
@@ -662,7 +667,7 @@ function supportTable(w: World, me: Side, withPuck: boolean): RoleSpot[] {
   const m = opp.skaters.length
   if (withPuck) {
     if (me.powerPlay && px > BLUE_X) return n - m >= 2 ? PP_5V3 : powerPlay(me.tactics.specialTeams.powerPlay)
-    if (px < -BLUE_X) return BREAKOUT
+    if (px < SHAPE_TUNING.breakoutX) return BREAKOUT
     if (px < BLUE_X) return TRANSITION
     if (w.t - me.entryAt < RUSH_WINDOW) return RUSH
     // 4-on-4: more ice — two D up top, two forwards working low and the slot.

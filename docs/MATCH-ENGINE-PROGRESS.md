@@ -269,3 +269,49 @@ on puck location only, so transitions are scored as set plays); shot-location
 TVD 0.3; accel p99 ~28 ft/s² (hits and contacts are real impulses now); carrier
 speed in close (median ~7 mph against ≥ 9); standoffs ~2–4 per game; 22+ mph
 bursts; neutral-zone back passes 0.04 (band ≥ 0.05).
+
+## Pass 3 (2026-09-28): stream consistency, kinematics, shot map
+
+**Stream fixes (found by the 3D work):**
+- **Puck on the blade.** A reception now names the new carrier only after the puck has slid onto his blade. The puck glides the last few feet at 30 ft/s or more. A puck that was just won is settled for 0.2 s before a poke, tie-up or fumble can take it back.
+  - Carried frames with the puck more than 1.5 ft off the blade: 2.3% → 0.
+  - The worst case was a pass reception assigned up to 5 ft away.
+  - New metrics: `motion.puckOffBladeShare` (band 0–0.01) and `motion.puckBladeP90`. The agent gate test checks the share.
+- **A downed man stays in the picture.** When a whistle's line change would take off a knocked-down or pinned man, the change is deferred until he is up: at least 1.8 s after a knockdown and 1.5 s after a pin. The faceoff waits for it.
+  - Players missing from the frames within 1.5 s of their knockdown or pin: 4/106 → 0.
+  - New metric: `motion.downVanishShare` (band 0). The agent gate test checks it.
+
+**Situation-aware shape matcher.** Each template is scored only in its own situation (breakout / regroup / rush / settled OZ), and on-ice time is game-clock time.
+
+**Kinematics and shot map** (imported league, 40 games):
+
+| metric | before | after | target |
+|---|---|---|---|
+| miles / 60 | 7.64 | 8.08 | ≥ 8 |
+| accel p50 (ft/s²) | 9.81 | 7.95 | ≤ 8 |
+| accel p99 (ft/s²) | 28.0 | 22.1 | ≤ 25 |
+| 22+ mph bursts / skater-game | 0.010 | 0.048 | ≥ 0.02 |
+| 20+ mph bursts / skater-game | 1.86 | < 3 | 0.3–3 |
+| standoffs / game | 7.9 | 5.2 | → 0 |
+| NZ back-pass share | 0.037 | 0.050 | ≥ 0.05 |
+| shot location TVD | 0.316 | 0.176 | ≤ 0.15 |
+| mean shot distance (ft) | 37.3 | 34.5 | |
+| in-close carrier speed p50 (mph) | 6.0 | 6.3 | ≥ 9 |
+| SOG / goals per team-game | 29.8 / 3.18 | 29.0 / 3.26 | |
+
+**Levers:**
+- **Top speed** now runs from 23 to 35.6 ft/s by skating rating.
+- **Support loops** are smaller and slower. The centripetal acceleration of the drift loop was what set the accel median.
+- **Carry momentum:** a carrier who is moving keeps going the way he is going.
+- **Tie-ups:** a stopped checker within stick reach (5 ft) of a stopped carrier is a tie-up that gets settled.
+- **Regroup back passes** in the neutral zone are penalised less.
+- **Shot map.** Before this pass, 21% of attempts were centre-slot one-timers.
+  - The royal-road one-timer now goes to the circles (|y| 6–28 ft).
+  - Point shots are less automatic.
+  - In tight, a shot or deke is less often a lost cause.
+- **Recalibrated:** shoot 0.62, finishK 0.80, hit intent 0.01.
+
+**Still open:**
+- **In-close carrier speed.** About 70% of the slow in-close frames are receptions or pickups less than 0.75 s old: receivers standing at their spots. Skate-through chasing did not move it.
+- **Standoffs.** The remaining ones are mostly OZ half-wall holds.
+- **Team shapes** are still 14–27 ft off the templates. The spot targets match the templates; what remains is lag (NZ and rush lanes 12–20 ft behind). A puck-velocity lead and a later breakout hand-off moved them by about 1 ft.

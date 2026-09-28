@@ -14,6 +14,7 @@ import { agentSimGame, emptyAgentTelemetry } from './agentSim'
 import { MAX_TOP_FT } from './physics'
 import { histPct } from './telemetry'
 import { passShape } from '@engine/full/passShape'
+import { analyzeGame } from '@engine/analysis'
 
 const data = generateLeague({ seed: 99 })
 const resolve = (id: PlayerId): Player => {
@@ -68,6 +69,28 @@ describe('agent engine', () => {
     expect(maxStep).toBeGreaterThan(0)
     expect(maxStep).toBeLessThanOrEqual(cap)
   }, 60000)
+
+  it('keeps the stream consistent for the renderers: the carried puck on the blade, a downed man in the picture', () => {
+    // While puckCarrier is X the puck is on X's blade (a reception names the
+    // new carrier only once the puck has arrived), and a man knocked down or
+    // pinned is never swapped off the ice mid-fall by a whistle's line change.
+    let carried = 0
+    let off = 0
+    let downs = 0
+    let vanish = 0
+    for (let i = 0; i < 4; i++) {
+      const out = agentSimGame(team(i), team(i + 5), resolve, { seed: 300 + i })
+      const m = analyzeGame(out.stream)
+      carried += m.counts['motion.carriedFrames'] ?? 0
+      off += m.counts['motion.puckOffBlade'] ?? 0
+      downs += m.counts['hit.downs'] ?? 0
+      vanish += m.counts['motion.downVanish'] ?? 0
+    }
+    expect(carried).toBeGreaterThan(10000)
+    expect(off / carried).toBeLessThanOrEqual(0.01)
+    expect(downs).toBeGreaterThan(20)
+    expect(vanish).toBe(0)
+  }, 120000)
 
   it('lands in the NHL band and keeps its play logic over many games', () => {
     const tm = emptyAgentTelemetry()

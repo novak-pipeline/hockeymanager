@@ -28,7 +28,7 @@ const r01 = rLevel
 
 export const HIT_TUNING = {
   /** Per-think chance scale that a willing defender commits to a check. */
-  intentK: 0.0095,
+  intentK: 0.01,
   /** Contact closing speed (ft/s) needed for a collision to count as a hit when unplanned. */
   incidentalClosing: 19,
   /** Minimum closing speed for a planned hit to land as a hit. */
@@ -36,7 +36,7 @@ export const HIT_TUNING = {
   /** Penalty scale on dangerous hits. */
   penaltyK: 1.7,
   /** Hit-intent multipliers by where the target is: the hitter's offensive zone / own zone. */
-  forecheckK: 3.8,
+  forecheckK: 5,
   ownZoneK: 0.9
 }
 
