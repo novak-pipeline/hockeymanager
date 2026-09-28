@@ -3011,6 +3011,10 @@ export class Career {
 
   /** Current-season per-player lines for the records module. */
   private buildSeasonLines(): SeasonLine[] {
+    return this.withTeamIndex(() => this.buildSeasonLinesInner())
+  }
+
+  private buildSeasonLinesInner(): SeasonLine[] {
     const lines: SeasonLine[] = []
     for (const [pid, t] of this.totals) {
       const games = this.gp.get(pid) ?? 0
@@ -5005,7 +5009,8 @@ export class Career {
 
     /* ── player lines + point/scoreless streaks (skaters) ── */
     const playerLines: ArcInputs['playerLines'] = []
-    for (const res of outcomes) {
+    // (A read-only pass: one roster index instead of a world scan per skater.)
+    this.withTeamIndex(() => { for (const res of outcomes) {
       for (const [pid, s] of res.playerStats) {
         if (s.toi <= 0) continue
         const p = this.data.players.get(pid)
@@ -5035,7 +5040,7 @@ export class Career {
           scorelessStreak: this.scorelessStreaks.get(id) ?? 0,
         })
       }
-    }
+    } })
 
     /* ── standings delta vs yesterday, with preseason expectation ── */
     const sorted = sortStandings([...this.standings.values()])
@@ -8207,8 +8212,22 @@ export class Career {
   }
 
   private teamOf(id: PlayerId): TeamId | null {
+    if (this.teamIndexScope) return this.teamIndexScope.get(id as string) ?? null
     for (const t of this.data.teams.values()) if (t.roster.includes(id)) return t.id
     return null
+  }
+
+  /** PERF: a player → team index for a stretch of code that READS rosters but
+   *  never changes them. teamOf scanned every roster in the world per call —
+   *  ~1,700 calls a day (development, the story tick, season lines) at 50+ ms.
+   *  First match wins, exactly as the scan does, so answers are identical. */
+  private teamIndexScope: Map<string, TeamId> | null = null
+  private withTeamIndex<T>(fn: () => T): T {
+    if (this.teamIndexScope) return fn()
+    const idx = new Map<string, TeamId>()
+    for (const t of this.data.teams.values()) for (const id of t.roster) if (!idx.has(id as string)) idx.set(id as string, t.id)
+    this.teamIndexScope = idx
+    try { return fn() } finally { this.teamIndexScope = null }
   }
 
   /** While set, pushNews stamps items with this day instead of currentDay. */
@@ -9345,7 +9364,9 @@ export class Career {
       const developIds = new Set<PlayerId>()
       for (const t of this.data.teams.values()) for (const id of t.roster) developIds.add(id)
       const inSeasonWorldStrength = this.worldStrengthByPlayer()
-      tickInSeasonDevelopment({
+      // Development reads rosters (locker room, org membership) but never
+      // moves anyone: one index for the whole pass.
+      this.withTeamIndex(() => tickInSeasonDevelopment({
         players: this.data.players,
         developIds,
         gamesPlayedById: (id) => this.combinedDevGames(id),
@@ -9362,7 +9383,7 @@ export class Career {
           return base * this.mentorshipDevBonus(id as string)
         },
         attributeBias: (id) => this.practiceAttributeBias(id),
-      })
+      }))
     }
     // Snapshot opinions on a roughly bi-weekly cadence so the timeline stays compact.
     if (day % 15 === 0) {
@@ -26627,7 +26648,11 @@ export class Career {
   private emitScoutDigest(day: number): void {
     const st = this.scouting
     const recs = st.recommendations ?? []
-    const scouts = this.getScouting().scouts
+    // PERF: the digest only needs WHO is deployed WHERE. Building the whole
+    // Scouting view for it (draft rankings, coverage, the scout market) cost
+    // ~250 ms a week. The roster sync is the view's only side effect; keep it.
+    this.syncScoutRoster()
+    const scouts = st.assignments
     if (recs.length === 0 && scouts.length === 0) return
     // "This week" = finds whose foundDate lands in the last 7 sim days.
     const weekAgoISO = dayToDateISO(this.year, Math.max(1, day - 6))

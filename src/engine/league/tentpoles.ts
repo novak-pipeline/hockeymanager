@@ -133,14 +133,19 @@ export function createInitialTentpolesState(): TentpolesState {
  */
 function teamStrengths(
   teams: Map<TeamId, Team>,
-  players: Map<PlayerId, Player>
+  players: Map<PlayerId, Player>,
+  ovrMemo?: Map<Player, number>,
 ): Map<string, number> {
   const means: Array<[string, number]> = []
   for (const t of teams.values()) {
     let total = 0, n = 0
     for (const id of t.roster) {
       const p = players.get(id)
-      if (p) { total += overall(p.composites, p.position); n++ }
+      if (p) {
+        const o = overall(p.composites, p.position)
+        ovrMemo?.set(p, o)
+        total += o; n++
+      }
     }
     means.push([t.id as string, n === 0 ? 0 : total / n])
   }
@@ -255,7 +260,10 @@ export function tickRumors(args: TickRumorsArgs): TickRumorsResult {
     return { newsSeeds, arcSeeds }
   }
 
-  const strengths = teamStrengths(teams, players)
+  // PERF: every player's overall is computed once per tick (the strength
+  // table needs them all) and reused by the spawn pass below.
+  const ovrMemo = new Map<Player, number>()
+  const strengths = teamStrengths(teams, players, ovrMemo)
   const totalTeams = teams.size
   const sellerThreshold = Math.ceil(totalTeams / 3)   // bottom third are sellers
   const daysToDeadline = Math.max(0, deadlineDay - day)
@@ -281,7 +289,7 @@ export function tickRumors(args: TickRumorsArgs): TickRumorsResult {
       const p = players.get(pid)
       if (!p || rumorSet.has(pid as string)) continue
 
-      const ovr = overall(p.composites, p.position)
+      const ovr = ovrMemo.get(p) ?? overall(p.composites, p.position)
       const isStar = ovr >= 75
       const isExpiring = p.contract.yearsRemaining === 1 && p.age >= 28
       const isUnhappy = p.morale < 35
@@ -331,7 +339,10 @@ export function tickRumors(args: TickRumorsArgs): TickRumorsResult {
   }
 
   // ── advance heat + morale effects ──────────────────────────────────────
-  const stale: string[] = []
+  // PERF: emittedKeys grows all career long; a Set gives the same membership
+  // answer in O(1). Pushes still go to the array (the saved shape).
+  const emitted = new Set(state.emittedKeys)
+  const stale = new Set<string>()
   for (const rumor of state.rumors) {
     rumor.heat = clamp(rumor.heat + heatRise, 0, 100)
 
@@ -342,8 +353,9 @@ export function tickRumors(args: TickRumorsArgs): TickRumorsResult {
 
     // Escalate to deadline rumor news once heat crosses 70
     const hotKey = `rumor-hot-${rumor.playerId}-${year}`
-    if (rumor.heat >= 70 && !state.emittedKeys.includes(hotKey)) {
+    if (rumor.heat >= 70 && !emitted.has(hotKey)) {
       state.emittedKeys.push(hotKey)
+      emitted.add(hotKey)
       const team = teams.get(rumor.teamId as TeamId)
       if (p && team) {
         const hotSlots = { name: p.name, team: team.name, abbr: team.abbreviation, namePoss: possessive(p.name), teamPoss: possessive(team.name) }
@@ -362,10 +374,10 @@ export function tickRumors(args: TickRumorsArgs): TickRumorsResult {
     // Remove stale rumors for players who are no longer on the team
     const team = teams.get(rumor.teamId as TeamId)
     if (!team || !team.roster.includes(rumor.playerId as PlayerId)) {
-      stale.push(rumor.playerId)
+      stale.add(rumor.playerId)
     }
   }
-  state.rumors = state.rumors.filter((r) => !stale.includes(r.playerId))
+  if (stale.size) state.rumors = state.rumors.filter((r) => !stale.has(r.playerId))
 
   return { newsSeeds, arcSeeds }
 }
