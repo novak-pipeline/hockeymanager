@@ -67,7 +67,7 @@ const r01 = rLevel
  * a carrier who drives into a crowded house risks the whole continuation
  * value on a low-retention carry. That is what brings shots out to range.
  */
-export const VAL = { otMinX: 50, otMinY: 6, otMaxY: 28, nzBack: 0.0015, carryKeep: 0.004, oz: 0.11, kPos: 0.15, shoot: 0.62, keep: 0.18, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 0.8, laneRead: 0.95, angleZero: 90, behindNet: 0.85, transMaxX: 70, transBack: 0.003, rushNoBackX: 0, regroupMaxX: 20, ozBack: 0.008 }
+export const VAL = { keepRoute: 3, minCarry: 4, oneTimerV: 1.3, otMinX: 50, otMinY: 6, otMaxY: 28, nzBack: 0.0015, carryKeep: 0.004, oz: 0.11, kPos: 0.15, shoot: 0.76, keep: 0.18, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 0.8, laneRead: 0.95, angleZero: 90, behindNet: 0.85, transMaxX: 70, transBack: 0.003, rushNoBackX: 0, regroupMaxX: 20, ozBack: 0.008 }
 /**
  * D safety (gap discipline): how far ahead a defenceman reads an attacker
  * coming at him (s), the base gap (ft) plus gap per ft/s of the attacker's
@@ -78,7 +78,7 @@ export const D_SAFETY = { look: 2, gap: 12, gapPerV: 0.5, stepUpMargin: 1.3, pin
 /** Support-skater motion loops around a spot: radius (ft) and angular speed (rad/s). */
 /** Shape tuning: where the breakout hands over to the neutral-zone lanes (x in the attack frame), and the target-smoothing time constant (s). */
 export const SHAPE_TUNING = { breakoutX: -25, smooth: 0.45 }
-export const DRIFT = { rAtk: 12, rDef: 5, omAtk: 0.55, omDef: 0.5 }
+export const DRIFT = { rAtk: 12, rDef: 5, omAtk: 0.5, omDef: 0.45 }
 /**
  * In close: the radius (ft) around their net where a carrier may not dawdle,
  * the seconds he may hold it there before he must act, the per-second cost of
@@ -338,7 +338,7 @@ export function dekeChance(c: Body, o: Body, goalie: boolean): number {
 }
 
 /** Shot blocking: per-body chance scale for a body square in the lane. */
-export const SHOT_BLOCK = { base: 1.25 }
+export const SHOT_BLOCK = { base: 1.5 }
 
 /** Chance a body `d` ft off the shot line (between shooter and net) blocks it. */
 export function blockChance(o: Body, d: number, slap: boolean): number {
@@ -428,6 +428,9 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       qx = lineCap(h.x)
       qy = h.y
       if (qx * a > GOAL_X - 2 && Math.abs(qy) < 6) qx = a * (GOAL_X - 4)
+      // A heading the boards or the line cut to nothing is no carry at all
+      // (it would be a man standing on the wall with the puck).
+      if (Math.hypot(qx - c.x, qy - c.y) < VAL.minCarry) continue
       const tc = Math.hypot(qx - c.x, qy - c.y) / Math.max(sp * 0.5 + c.caps.top * 0.45, 10)
       const ret = retention(c, { x: qx, y: qy }, tc, opps)
       const protect = da === Math.PI
@@ -580,7 +583,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       const royal =
         f.R.x * a > VAL.otMinX && Math.abs(f.R.y) >= VAL.otMinY && Math.abs(f.R.y) < VAL.otMaxY && Math.sign(f.R.y || 1) !== Math.sign(c.y || 1) && Math.abs(c.y) > 8
       const oneTimer = royal && f.open > 7
-      if (oneTimer) v *= 1.3
+      if (oneTimer) v *= VAL.oneTimerV
       // Open ice at the receiver is worth more (time to make the next play).
       // A covered man (a defender on his hip) is not really open: he'll be
       // tied up or stripped before he can do anything with it.
@@ -841,7 +844,23 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
     }
     for (const b of chasers) {
       const ip = icpt.get(b)?.p ?? { x: puck.x, y: puck.y }
-      const h = boardsClamp(ip.x, ip.y, 1.5)
+      let tx = ip.x
+      let ty = ip.y
+      // A pass led to a man in motion: if he keeps skating his line the puck
+      // meets him (it was aimed where he'd be) — he takes it in stride instead
+      // of pulling up on the intercept point to wait for it.
+      if (b === w.passTo && speedOf(b) > 6) {
+        let miss = Infinity
+        for (let tt = 0; tt <= 1.2; tt += 0.05) {
+          const pp = path(tt)
+          miss = Math.min(miss, Math.hypot(pp.x - (b.x + b.vx * tt), pp.y - (b.y + b.vy * tt)))
+        }
+        if (miss < VAL.keepRoute) {
+          tx = b.x + b.vx
+          ty = b.y + b.vy
+        }
+      }
+      const h = boardsClamp(tx, ty, 1.5)
       const far = Math.hypot(h.x - b.x, h.y - b.y) > 45
       cmds.set(b, { tx: h.x, ty: h.y, speed: b.caps.top * (far ? 1 : 0.9), arrive: false, urgency: 1 })
       me.roles.set(b, 'CHASE')

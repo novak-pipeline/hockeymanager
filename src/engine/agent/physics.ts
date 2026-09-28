@@ -49,7 +49,7 @@ export interface Caps {
 }
 
 export const MIN_TOP_FT = 23
-export const MAX_TOP_FT = 35.6
+export const MAX_TOP_FT = 35.4
 
 export function capsFor(p: Player): Caps {
   const skating = r100(p.composites.skating)

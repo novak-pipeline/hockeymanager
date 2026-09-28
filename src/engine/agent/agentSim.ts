@@ -89,7 +89,7 @@ const RECV_SPEED = 30
 /** A puck just won can't be taken straight back for this long (s). */
 const SETTLE_S = 0.2
 /** A knocked-down / pinned man is in the picture at least this long (s): the fall and the get-up. */
-const DOWN_S = { knockdown: 1.8, pinned: 1.5 }
+const DOWN_S = { knockdown: 1.8, pinned: 1.7 }
 
 // ---------------------------------------------------------------------------
 // Calibration constants (measured against the engine, then frozen — retune
@@ -97,12 +97,18 @@ const DOWN_S = { knockdown: 1.8, pinned: 1.5 }
 // ---------------------------------------------------------------------------
 export const AGENT_TUNING = {
   /** Reconciles the empirical xG with this engine's shot mix → goals/game. */
-  finishK: 0.8,
+  finishK: 0.7,
   /** A checker this close (ft) to a stopped carrier, himself stopped, is tied up with him. */
   tieUpR: 5,
+  /** Share of tipped shots credited to the tipper (the NHL scores a tip as the deflector's shot). */
+  tipCredit: 1,
+  /** Tip-chance scale for a stick on the line in front. */
+  tipK: 2,
   /** How long a tie-up lasts before somebody wins it (s), and the burst (ft/s) a carrier who spins off it leaves with. */
   tieUpS: 0.7,
-  spinV: 6,
+  spinV: 10,
+  /** Share of won tie-ups the scorer logs as a takeaway. */
+  tieUpTakeaway: 0.5,
   /** Base share of unblocked attempts that miss the net. */
   missBase: 0.3,
   /** Poke-check success scale (takeaways). */
@@ -1063,9 +1069,15 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       if (dn > 12) continue
       const s1 = (sk.x - from.x) * ux + (sk.y - from.y) * uy
       const d = Math.abs(-(sk.x - from.x) * uy + (sk.y - from.y) * ux)
-      if (s1 > L - 16 && d < 3 && rng.chance(0.25 * r01(sk.player.ratings.technical.deflections) + 0.05)) tipper = sk
+      if (s1 > L - 16 && d < 3 && rng.chance((0.25 * r01(sk.player.ratings.technical.deflections) + 0.05) * AGENT_TUNING.tipK)) tipper = sk
     }
 
+    // A tipped shot is the tipper's (as the NHL scores it): his shot, from his
+    // stick at the tip, the shooter's pass-like touch the assist.
+    const tipped = tipper !== null && !blocker && rng.chance(AGENT_TUNING.tipCredit)
+    const shooterB = tipped && tipper ? tipper : c
+    const shotFrom = tipped && tipper ? { x: tipper.x, y: tipper.y } : from
+    if (tipped) touches.push({ b: c, side: s, t: now })
     let outcome: ShotPlan['outcome']
     let at: XY
     let travel: number
@@ -1094,11 +1106,11 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           t: T(),
           period,
           type: 'missedShot',
-          shooter: c.player.id,
-          from: { x: from.x / HALF_X, y: from.y / HALF_Y },
+          shooter: shooterB.player.id,
+          from: { x: shotFrom.x / HALF_X, y: shotFrom.y / HALF_Y },
           target: { x: a, y: clamp(wide / HALF_Y, -1, 1) },
           result: r < 0.08 ? 'post' : r < 0.38 ? 'high' : 'wide',
-          shotType: shotType(),
+          shotType: tipped ? 'tip' : shotType(),
           speedMph: Math.round(speed * 0.6818)
         })
       } else {
@@ -1141,16 +1153,16 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           t: T(),
           period,
           type: 'shot',
-          shooter: c.player.id,
-          from: { x: from.x / HALF_X, y: from.y / HALF_Y },
+          shooter: shooterB.player.id,
+          from: { x: shotFrom.x / HALF_X, y: shotFrom.y / HALF_Y },
           target: { x: a, y: 0 },
           danger: clamp(eff / 0.25, 0, 1),
-          shotType: shotType(),
+          shotType: tipped ? 'tip' : shotType(),
           speedMph: Math.round(speed * 0.6818),
           origin: shotOrigin(),
           oddMan: oddManNow()
         })
-        const st = stat(ctx, c.player.id)
+        const st = stat(ctx, shooterB.player.id)
         st.shots++
         if (!opp.pulled) {
           const gs = stat(ctx, g.player.id)
@@ -1164,10 +1176,10 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           if (now - s.entryAt < 6) tm.rushShots++
         }
       }
-      const st = stat(ctx, c.player.id)
+      const st = stat(ctx, shooterB.player.id)
       st.xg = (st.xg ?? 0) + xg
       // Expected assist: the last teammate to touch it set this chance up.
-      const setup = [...touches].reverse().find((tc) => tc.side === s && tc.b !== c)
+      const setup = [...touches].reverse().find((tc) => tc.side === s && tc.b !== shooterB)
       if (setup) {
         const fs = stat(ctx, setup.b.player.id)
         fs.xA = (fs.xA ?? 0) + xg
@@ -1192,7 +1204,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       releaseAdv: puck.x * a,
       untouched: true,
       tried: tries(c),
-      shot: { outcome, shooter: c, side: s, blocker, at, travel, travelled: 0, from, xg, rebound: now - lastSaveAt < 1.6 }
+      shot: { outcome, shooter: shooterB, side: s, blocker, at, travel, travelled: 0, from: shotFrom, xg, rebound: now - lastSaveAt < 1.6 }
     }
   }
 
@@ -1663,9 +1675,17 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const c = w.carrier
         const os = oppOf(w.control)
         let tier: Body | null = null
-        for (const o of os.skaters) if (o.stun <= 0 && Math.hypot(o.x - c.x, o.y - c.y) < AGENT_TUNING.tieUpR && speedOf(o) < 7.3) tier = o
+        let tierD = AGENT_TUNING.tieUpR
+        for (const o of os.skaters) {
+          const dd = Math.hypot(o.x - c.x, o.y - c.y)
+          if (o.stun <= 0 && dd < tierD && speedOf(o) < 7.3) {
+            tier = o
+            tierD = dd
+          }
+        }
         if (tier && speedOf(c) < 7.3) {
-          if (!tieUp || tieUp.c !== c || tieUp.o !== tier) tieUp = { c, o: tier, since: now }
+          // (A second checker stepping in does not restart the clock on the carrier.)
+          if (!tieUp || tieUp.c !== c) tieUp = { c, o: tier, since: now }
           else if (now - tieUp.since > AGENT_TUNING.tieUpS && !settling) {
             const atk = r01(c.player.ratings.physical.strength) * 0.5 + r01(c.player.composites.puckControl) * 0.5
             const dfn = r01(tier.player.composites.takeaway) * 0.55 + rDef(tier.player.ratings.defensive.checking) * 0.2 + r01(tier.player.ratings.physical.strength) * 0.25
@@ -1673,12 +1693,22 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
             if (rng.chance(clamp(0.5 + (atk - dfn) * 1.5, 0.15, 0.85))) {
               // He spins off it: the checker is left leaning on nothing.
               tier.stun = Math.max(tier.stun, 0.45)
+              // Off the wall he spins out ALONG it (the boards are no way out).
               const ang = Math.atan2(c.y - tier.y, c.x - tier.x)
-              c.vx += Math.cos(ang) * AGENT_TUNING.spinV
-              c.vy += Math.sin(ang) * AGENT_TUNING.spinV
+              let sx = Math.cos(ang)
+              let sy = Math.sin(ang)
+              if (Math.abs(c.y) > HALF_Y - 9 && sy * Math.sign(c.y) > 0) {
+                sy = -sy * 0.3
+                sx = (Math.abs(sx) > 0.2 ? Math.sign(sx) : w.control.a) * 1
+              }
+              const sl = Math.hypot(sx, sy)
+              c.vx += (sx / sl) * AGENT_TUNING.spinV
+              c.vy += (sy / sl) * AGENT_TUNING.spinV
             } else {
               ev({ t: T(), period, type: 'battle', kind: distToBoards(c.x, c.y) < 8 ? 'boards' : 'loosePuck', pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y }, players: [c.player.id, tier.player.id], winner: tier.player.id, durationS: AGENT_TUNING.tieUpS })
-              // (A battle won, not a stick steal: no takeaway is scored for it.)
+              // He came away with it: the scorer credits the checker a takeaway if
+              // his side collects the loose puck (a battle won by aggression).
+              if (rng.chance(AGENT_TUNING.tieUpTakeaway)) poke = { by: tier, from: c, side: oppOf(w.control), t: now }
               const ang = Math.atan2(c.y - tier.y, c.x - tier.x) + rng.float(-1.2, 1.2)
               loosen(Math.cos(ang) * rng.float(4, 9), Math.sin(ang) * rng.float(4, 9), null)
               flight!.tried.set(c, now)
