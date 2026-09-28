@@ -9,7 +9,7 @@
 import * as THREE from 'three'
 import { buildIceCanvas, buildIceRoughnessCanvas, RINK_CORNER_R, RINK_HALF_L, RINK_HALF_W } from './iceCanvas'
 import { rinkOutline, stationsAlong, sweepProfile, type ProfilePoint } from './rinkShape'
-import { buildBlobCanvas, buildDasherCanvas, buildNetCanvas, buildRibbonCanvas, DASHER_PERIOD_FT, paintJumbotron } from './textures'
+import { buildBenchBannerCanvas, buildBlobCanvas, buildDasherCanvas, buildNetCanvas, buildRibbonCanvas, DASHER_PERIOD_FT, paintJumbotron, type LogoImage } from './textures'
 import { mulberry32 } from './rng'
 import { kitFor } from './palette'
 
@@ -78,6 +78,46 @@ export class Arena {
     if (!this.iceMap) return
     this.iceMap.image = buildIceCanvas({ centerLogo: img })
     this.iceMap.needsUpdate = true
+  }
+
+  private homeLogo: LogoImage | null = null
+  private awayLogo: LogoImage | null = null
+  private dasherTex: THREE.CanvasTexture | null = null
+  private readonly benchBanners: Array<{ tex: THREE.CanvasTexture; home: boolean }> = []
+  /** Home-colour accents: video-board rings, the bowl trim bands. */
+  private readonly accentMats: THREE.MeshStandardMaterial[] = []
+
+  /**
+   * Club branding around the building (mod logo-pack images; null = none):
+   * the home logo at centre ice, on every third dasher panel (the fictional
+   * sponsors stay in between), on the ribbon board and on the banners behind
+   * the benches; both logos on the video board's matchup.
+   */
+  setLogos(logos: { home?: LogoImage | null; away?: LogoImage | null }): void {
+    if (logos.home !== undefined) {
+      this.homeLogo = logos.home
+      this.setCenterLogo(logos.home)
+      if (this.dasherTex) {
+        this.dasherTex.image = buildDasherCanvas(logos.home)
+        this.dasherTex.needsUpdate = true
+      }
+    }
+    if (logos.away !== undefined) this.awayLogo = logos.away
+    this.repaintClubArt()
+  }
+
+  /** Ribbon, bench banners, accents and the video board — after a logo or colour change. */
+  private repaintClubArt(): void {
+    if (this.ribbonTex) {
+      this.ribbonTex.image = buildRibbonCanvas(this.homeColor, this.homeLogo)
+      this.ribbonTex.needsUpdate = true
+    }
+    for (const b of this.benchBanners) {
+      b.tex.image = buildBenchBannerCanvas(b.home ? this.homeColor : this.awayColor, b.home ? this.homeLogo : this.awayLogo ?? null)
+      b.tex.needsUpdate = true
+    }
+    for (const m of this.accentMats) m.emissive.setHex(this.homeColor)
+    this.jumboKey = ''
   }
   private jumboCanvas: HTMLCanvasElement | null = null
   private jumboTex: THREE.CanvasTexture | null = null
@@ -244,7 +284,8 @@ export class Arena {
 
   // ── boards, glass, stanchions ──────────────────────────────────────────
   private buildBoards(): void {
-    const dasher = srgb(new THREE.CanvasTexture(buildDasherCanvas()))
+    const dasher = srgb(new THREE.CanvasTexture(buildDasherCanvas())) as THREE.CanvasTexture
+    this.dasherTex = dasher
     dasher.wrapS = THREE.RepeatWrapping
     dasher.anisotropy = this.renderer.capabilities.getMaxAnisotropy()
     const faceMat = new THREE.MeshStandardMaterial({ map: dasher, roughness: 0.42, side: THREE.DoubleSide })
@@ -444,6 +485,14 @@ export class Arena {
       const wall = new THREE.Mesh(new THREE.BoxGeometry(31, 5, 0.6), back)
       wall.position.set(cx, 2.5, z0 + 6.3)
       this.group.add(wall)
+      // the club banner along the wall behind the bench (faces the ice)
+      const home = cx < 0
+      const tex = srgb(new THREE.CanvasTexture(buildBenchBannerCanvas(color))) as THREE.CanvasTexture
+      this.benchBanners.push({ tex, home })
+      const banner = new THREE.Mesh(new THREE.PlaneGeometry(30, 4.6), new THREE.MeshBasicMaterial({ map: tex, color: new THREE.Color(0.95, 0.95, 0.95) }))
+      banner.position.set(cx, 2.7, z0 + 5.98)
+      banner.rotation.y = Math.PI
+      this.group.add(banner)
       const kit = kitFor(color, cx < 0 ? 'home' : 'away')
       for (let i = 0; i < 9; i++) {
         m.compose(new THREE.Vector3(cx - 12 + i * 3 + (i % 2) * 0.4, 1.6, z0 + 5), q, new THREE.Vector3(1.05, 1.05, 1.05))
@@ -519,9 +568,14 @@ export class Arena {
     // back wall of the lower bowl up to the ribbon
     const fasciaMat = new THREE.MeshStandardMaterial({ color: 0x0c0f14, roughness: 0.9, side: THREE.DoubleSide })
     this.group.add(sweptMesh([{ o: 65, y: 29.5 }, { o: 65, y: 33 }, { o: 71, y: 33 }, { o: 71, y: 38 }], fasciaMat))
+    // home-colour trim: a lit band along the front of the lower bowl and under the club-level fascia
+    const trim = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: this.homeColor, emissiveIntensity: 1.1, side: THREE.DoubleSide })
+    this.accentMats.push(trim)
+    this.group.add(sweptMesh([{ o: 5.95, y: 3.1 }, { o: 5.95, y: 3.55 }], trim, 0, 64))
+    this.group.add(sweptMesh([{ o: 64.95, y: 30.2 }, { o: 64.95, y: 30.9 }], trim, 0, 64))
 
     // LED ribbon on the club-level fascia (emissive, scrolls)
-    const ribbonTex = srgb(new THREE.CanvasTexture(buildRibbonCanvas(this.homeColor))) as THREE.CanvasTexture
+    const ribbonTex = srgb(new THREE.CanvasTexture(buildRibbonCanvas(this.homeColor, this.homeLogo))) as THREE.CanvasTexture
     ribbonTex.wrapS = THREE.RepeatWrapping
     this.ribbonTex = ribbonTex
     const ribbonMat = new THREE.MeshBasicMaterial({ map: ribbonTex, side: THREE.DoubleSide, toneMapped: true, color: new THREE.Color(1.6, 1.6, 1.6) })
@@ -661,6 +715,7 @@ export class Arena {
     }
     // LED rings top/bottom in home color
     const ringMat = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: this.homeColor, emissiveIntensity: 1.6 })
+    this.accentMats.push(ringMat)
     for (const y of [-8.6, 8.6]) {
       const ring = new THREE.Mesh(new THREE.BoxGeometry(31, 1.2, 23), ringMat)
       ring.position.y = y
@@ -683,7 +738,7 @@ export class Arena {
     const key = `${s.homeScore}|${s.awayScore}|${s.period}|${s.clock}|${flashStep}`
     if (key === this.jumboKey) return
     this.jumboKey = key
-    paintJumbotron(this.jumboCanvas, { ...s, homeColor: this.homeColor, awayColor: this.awayColor })
+    paintJumbotron(this.jumboCanvas, { ...s, homeColor: this.homeColor, awayColor: this.awayColor, homeLogo: this.homeLogo, awayLogo: this.awayLogo })
     this.jumboTex.needsUpdate = true
   }
 
@@ -700,7 +755,7 @@ export class Arena {
     if (colors.home === this.homeColor && colors.away === this.awayColor) return
     this.homeColor = colors.home
     this.awayColor = colors.away
-    this.jumboKey = ''
+    this.repaintClubArt()
     if (this.benchFans) {
       const hk = kitFor(colors.home, 'home')
       const ak = kitFor(colors.away, 'away')

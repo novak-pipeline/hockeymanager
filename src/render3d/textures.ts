@@ -29,6 +29,17 @@ const BRANDS: Array<{ text: string; bg: string; fg: string }> = [
   { text: 'SUMMIT & CO', bg: '#0b6e4f', fg: '#ffffff' },
 ]
 
+/** A club logo (mod logo-pack image) — never shipped: the renderer draws whatever it's handed. */
+export type LogoImage = CanvasImageSource & { width: number; height: number }
+
+/** Draw a logo fitted (contain) and centred in a box. */
+export function drawLogo(ctx: CanvasRenderingContext2D, img: LogoImage, x: number, y: number, w: number, h: number): void {
+  const k = Math.min(w / img.width, h / img.height)
+  const dw = img.width * k
+  const dh = img.height * k
+  ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh)
+}
+
 /** Feet of boards one dasher texture period covers. */
 export const DASHER_PERIOD_FT = 96
 
@@ -36,7 +47,7 @@ export const DASHER_PERIOD_FT = 96
  * Dasher boards: white boards, yellow kick plate, ad panels. Texture v = 0 is
  * ice level, v = 1 the top of the 42" boards.
  */
-export function buildDasherCanvas(): HTMLCanvasElement {
+export function buildDasherCanvas(logo?: LogoImage | null): HTMLCanvasElement {
   const pxPerFt = 32
   const [c, ctx] = canvas(DASHER_PERIOD_FT * pxPerFt, Math.round(3.5 * pxPerFt))
   const H = c.height
@@ -65,6 +76,13 @@ export function buildDasherCanvas(): HTMLCanvasElement {
   for (let i = 0; i * panelW < c.width; i++) {
     const b = BRANDS[i % BRANDS.length]!
     const x = i * panelW + 8
+    // the home club's own panels, mixed in with the sponsors (every third one)
+    if (logo && i % 3 === 1) {
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(x, top, panelW - 16, ph)
+      drawLogo(ctx, logo, x + 10, top + 4, panelW - 36, ph - 8)
+      continue
+    }
     ctx.fillStyle = b.bg
     ctx.fillRect(x, top, panelW - 16, ph)
     ctx.fillStyle = b.fg
@@ -77,7 +95,7 @@ export function buildDasherCanvas(): HTMLCanvasElement {
 }
 
 /** LED ribbon board (fascia between bowls) — emissive, scrolls in the shader via offset. */
-export function buildRibbonCanvas(homeColor: number): HTMLCanvasElement {
+export function buildRibbonCanvas(homeColor: number, logo?: LogoImage | null): HTMLCanvasElement {
   const [c, ctx] = canvas(2048, 64)
   ctx.fillStyle = '#05070b'
   ctx.fillRect(0, 0, c.width, c.height)
@@ -94,7 +112,15 @@ export function buildRibbonCanvas(homeColor: number): HTMLCanvasElement {
       ctx.font = 'italic 900 34px "Arial Black", Impact, sans-serif'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      ctx.fillText('THE SHOW', x + seg / 2, 33)
+      if (logo) {
+        drawLogo(ctx, logo, x + 8, 8, 48, 48)
+        ctx.fillText('THE SHOW', x + seg / 2 + 24, 33, seg - 76)
+      } else ctx.fillText('THE SHOW', x + seg / 2, 33)
+    } else if (logo && i % 4 === 2) {
+      // the club: its logo three-up on its colour
+      ctx.fillStyle = css(homeColor)
+      ctx.fillRect(x + 2, 6, seg - 4, 52)
+      for (let k = 0; k < 3; k++) drawLogo(ctx, logo, x + 12 + k * 80, 8, 72, 48)
     } else {
       const b = BRANDS[(i * 3) % BRANDS.length]!
       ctx.fillStyle = b.bg === '#ffffff' ? '#0d1522' : b.bg
@@ -286,7 +312,7 @@ export function buildNetCanvas(): HTMLCanvasElement {
 /** Center-hung video board face. Redrawn only when the displayed state changes. */
 export function paintJumbotron(
   c: HTMLCanvasElement,
-  s: { homeScore: number; awayScore: number; period: number; clock: string; homeColor: number; awayColor: number; goalFlash: number }
+  s: { homeScore: number; awayScore: number; period: number; clock: string; homeColor: number; awayColor: number; goalFlash: number; homeLogo?: LogoImage | null; awayLogo?: LogoImage | null }
 ): void {
   const ctx = c.getContext('2d')!
   const W = c.width
@@ -302,6 +328,10 @@ export function paintJumbotron(
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.fillText('GOAL!', W / 2, H / 2)
+    if (on && s.homeLogo) {
+      drawLogo(ctx, s.homeLogo, 12, H * 0.2, H * 0.6, H * 0.6)
+      drawLogo(ctx, s.homeLogo, W - 12 - H * 0.6, H * 0.2, H * 0.6, H * 0.6)
+    }
     return
   }
   const half = W / 2
@@ -316,7 +346,12 @@ export function paintJumbotron(
     ctx.font = `900 ${Math.round(H * 0.5)}px "Arial Black", Impact, sans-serif`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
-    ctx.fillText(String(score), x + half / 2, H * 0.34)
+    // the matchup: each club's logo beside its score
+    const logo = i === 0 ? s.homeLogo : s.awayLogo
+    if (logo) {
+      drawLogo(ctx, logo, x + 14, 14, half * 0.42, H * 0.5)
+      ctx.fillText(String(score), x + half * 0.72, H * 0.34)
+    } else ctx.fillText(String(score), x + half / 2, H * 0.34)
     ctx.font = `700 ${Math.round(H * 0.11)}px Arial, sans-serif`
     ctx.fillText(i === 0 ? 'HOME' : 'AWAY', x + half / 2, H * 0.72)
   }
@@ -343,4 +378,16 @@ export function paintOfficialSlot(atlas: HTMLCanvasElement, slot: number, kit: K
   }
   const [ys, hs] = band(ATLAS_REGIONS.sock[0], ATLAS_REGIONS.sock[1])
   ctx.fillRect(x0, ys, S, hs)
+}
+
+/** A banner behind a bench: the club's colour with its logo repeated (null logo → a plain colour band). */
+export function buildBenchBannerCanvas(color: number, logo?: LogoImage | null): HTMLCanvasElement {
+  const [c, ctx] = canvas(1024, 160)
+  const g = ctx.createLinearGradient(0, 0, 0, c.height)
+  g.addColorStop(0, css(color))
+  g.addColorStop(1, '#0b0e14')
+  ctx.fillStyle = g
+  ctx.fillRect(0, 0, c.width, c.height)
+  if (logo) for (let k = 0; k < 4; k++) drawLogo(ctx, logo, 40 + k * 250, 16, 190, 128)
+  return c
 }

@@ -557,8 +557,11 @@ export function MatchViewer(props: {
         if (r instanceof Rink3dRenderer) {
           renderer3dRef.current = r
           r.setEventStream(game.stream)
-          // the home club's logo at centre ice (mod logo pack; none = league roundel)
-          void teamLogoUrl(game.homeName).then((url) => { if (!disposed && url) void r.setTeamLogos({ home: url }) })
+          // club branding (mod logo pack; none = league roundel / plain boards): the home logo
+          // around the building, both on the video board's matchup
+          void Promise.all([teamLogoUrl(game.homeName), teamLogoUrl(game.awayName)]).then(([home, away]) => {
+            if (!disposed && (home || away)) void r.setTeamLogos({ home: home ?? null, away: away ?? null })
+          })
           r.setCamera(camPreset)
         } else {
           renderer3dRef.current = null

@@ -271,15 +271,22 @@ export function hitPushDir(dx: number, dz: number, facing: number): HitPush {
  * front he falls backward, feet out; from behind he pitches forward onto his
  * knees; from the side he goes down on his hip). The agent engine's
  * `knockdown` decides the fall outright when present (true: he goes down, even
- * against the boards — folding into them; false: he stays up).
+ * against the boards — folding into them; false: he stays up), and its
+ * `pinned` whether a boards hit pins him (false: he bounces off it).
  */
-export function hitPlan(relSpeedFtS: number, boardsDistFt: number, force?: number, kind?: 'boards' | 'openIce' | 'finish' | 'battle', push: HitPush = 'back', knockdown?: boolean): HitPlan {
+export function hitPlan(relSpeedFtS: number, boardsDistFt: number, force?: number, kind?: 'boards' | 'openIce' | 'finish' | 'battle', push: HitPush = 'back', knockdown?: boolean, pinned?: boolean): HitPlan {
   const hardness = force !== undefined ? Math.min(1, Math.max(0, force)) : Math.min(1, Math.max(0, (relSpeedFtS - 4) / 22))
   const fall = { back: 'hit_fall', forward: 'hit_fall_fwd', left: 'hit_fall_side_L', right: 'hit_fall_side_R' }[push]
   const stumble = push === 'forward' ? 'hit_stumble_fwd' : 'hit_stumble'
   // a battle is two bodies leaning on each other: a shove, never a knockdown
   if (kind === 'battle' && knockdown !== true) return { hitter: 'check', target: 'hit_stagger', hardness: Math.min(hardness, 0.4), pinned: false }
   const onBoards = kind ? kind === 'boards' : boardsDistFt <= BOARDS_PIN_FT
+  // the agent engine says whether the boards hit pinned him; one that didn't
+  // (he bounced off, or it was a glancing rub) reacts like an open-ice hit
+  if (onBoards && pinned === false && knockdown !== true) {
+    const t = hardness < 0.35 ? 'hit_stagger' : stumble
+    return { hitter: 'check_boards', target: t, hardness, pinned: false }
+  }
   if (onBoards) {
     // knocked down on the wall: chest to the glass, he folds and slides down it (film C1)
     if (knockdown === true) return { hitter: 'check_boards', target: 'hit_fall_fwd', hardness, pinned: true }
