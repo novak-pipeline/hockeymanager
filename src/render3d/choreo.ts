@@ -193,6 +193,9 @@ export interface ChoreoActor {
  */
 export interface LocoSmooth {
   t: number
+  /** Smoothed speed (ft/s) and deceleration (ft/s², >= 0) — coasting reads as a glide. */
+  sp?: number
+  decel?: number
   w: Record<string, number>
   vx: number
   vz: number
@@ -214,6 +217,12 @@ function locoState(a: ChoreoActor): { st: LocoSmooth; dt: number } {
   const kv = dt > 0 ? 1 - Math.exp(-dt / VEL_TAU) : 0
   st.vx += (a.vx - st.vx) * kv
   st.vz += (a.vz - st.vz) * kv
+  if (dt > 0) {
+    const sp = Math.hypot(st.vx, st.vz)
+    const d = st.sp === undefined ? 0 : Math.max(0, (st.sp - sp) / dt)
+    st.decel = (st.decel ?? 0) + (d - (st.decel ?? 0)) * (1 - Math.exp(-dt / 0.3))
+    st.sp = sp
+  }
   return { st, dt }
 }
 
@@ -530,7 +539,7 @@ export function blendLocomotion(
   const back = sp > 1 ? Math.max(0, -Math.cos(wrapAngle(vAng - facing))) : 0
   // + = toward the player's left (his +X = (cos θ, −sin θ) in world X/Z)
   const lateral = owner && sp > 1 ? Math.sin(wrapAngle(vAng - facing)) : 0
-  const w = locomotionWeights({ speed: a.speedSm, turnRate: a.turnSm, backward: back, decel: 0, lateral }) as Record<string, number>
+  const w = locomotionWeights({ speed: a.speedSm, turnRate: a.turnSm, backward: back, decel: st.decel ?? 0, lateral }) as Record<string, number>
   if (owner && clips.has('skate_idle')) {
     // an owner rig idles in its own stance instead of the Blender glide
     w['skate_idle'] = w['skate_glide']!

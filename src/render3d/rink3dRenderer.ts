@@ -149,6 +149,11 @@ const FACING_VEL_TAU = 0.3
 // Action clips that are really locomotion: the stick stays on the ice through them (groundStick).
 const GROUNDED_CLIPS = new Set(['hockey_stop', 'skate_start', 'stickhandle'])
 
+const smoothstep01 = (e0: number, e1: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)))
+  return t * t * (3 - 2 * t)
+}
+
 // ── Movement limits ─────────────────────────────────────────────────────────
 // Nothing on the ice moves faster than an elite skater: a residual teleport in
 // the stream (faceoff resets, a stoppage) becomes a skate, never a snap.
@@ -1478,6 +1483,8 @@ export class Rink3dRenderer implements MatchRenderer {
     // owner clips), which puts a carried puck visibly off the blade
     for (const p of this.homePoses) this.groundStick(p, dt)
     for (const p of this.awayPoses) this.groundStick(p, dt)
+    for (const p of this.homePoses) this.skateHeading(p, dt, simDt)
+    for (const p of this.awayPoses) this.skateHeading(p, dt, simDt)
 
     // Carrier pose (resolved AFTER the slots updated their ids this frame)
     let carrierPose: PlayerPose | null = null
@@ -1530,6 +1537,72 @@ export class Rink3dRenderer implements MatchRenderer {
 
     this.batch.sync()
     this.syncBlobs()
+  }
+
+  /** Per skater, per foot: last ankle position (world) and the eased blade-heading offset (rad). */
+  private readonly skates = new Map<PlayerPose, { L: { x: number; z: number; off: number } | null; R: { x: number; z: number; off: number } | null }>()
+  private readonly sQ = new THREE.Quaternion()
+  private readonly sQ2 = new THREE.Quaternion()
+  private static readonly UP = new THREE.Vector3(0, 1, 0)
+
+  /**
+   * A skate on the ice can only run along its blade. The skating cycle is
+   * phase-locked to the body's speed, but the body also turns, drifts and
+   * pushes sideways — so a skate pointing straight ahead while it travelled
+   * sideways SKIDDED across the ice (motion-probe footSlip.skid). Each skate on
+   * the ice turns (±0.85 rad, eased) toward the way it is actually travelling:
+   * pushes toe out, crossovers toe in, as real strides do. Game-time eased;
+   * a skate in the air keeps the clip's heading.
+   */
+  private skateHeading(pose: PlayerPose, dt: number, simDt: number): void {
+    const rig = pose.rig
+    if (!rig.visible || rig.goalie || pose.mode === 'idle' || dt <= 0 || simDt <= 0) {
+      this.skates.delete(pose)
+      return
+    }
+    let st = this.skates.get(pose)
+    if (!st) {
+      st = { L: null, R: null }
+      this.skates.set(pose, st)
+    }
+    const rest = rig.dims.skate
+    const k = 1 - Math.exp(-simDt / 0.05)
+    for (const side of ['L', 'R'] as const) {
+      const foot = rig.bones[`foot_${side}`]
+      foot.updateWorldMatrix(true, false)
+      const e = foot.matrixWorld.elements
+      const x = e[12]!
+      const y = e[13]!
+      const z = e[14]!
+      const prev = st[side]
+      const cur = { x, z, off: prev?.off ?? 0 }
+      st[side] = cur
+      if (!prev) continue
+      // game-time velocity of the ankle over the ice
+      const vx = (x - prev.x) / simDt
+      const vz = (z - prev.z) / simDt
+      const v = Math.hypot(vx, vz)
+      const onIce = 1 - smoothstep01(rest + 0.05, rest + 0.25, y)
+      let want = 0
+      if (v > 2.5 && onIce > 0) {
+        const hx = e[8]!
+        const hz = e[10]!
+        // the blade runs both ways: fold the angle into ±90° (backward skating runs heel-first)
+        // (the matrix is the clip's own heading: apply() re-poses the foot every frame)
+        let d = wrapAngle(Math.atan2(vx, vz) - Math.atan2(hx, hz))
+        if (d > Math.PI / 2) d -= Math.PI
+        else if (d < -Math.PI / 2) d += Math.PI
+        want = Math.max(-0.85, Math.min(0.85, d)) * onIce * Math.min(1, (v - 2.5) / 3)
+      }
+      cur.off = prev.off + (want - prev.off) * k
+      if (Math.abs(cur.off) < 1e-4) continue
+      // turn the foot about world up at the ankle: local' = parentWorld⁻¹ · R_y · world
+      foot.getWorldQuaternion(this.sQ)
+      this.sQ.premultiply(this.sQ2.setFromAxisAngle(Rink3dRenderer.UP, cur.off))
+      foot.parent!.getWorldQuaternion(this.sQ2).invert()
+      foot.quaternion.copy(this.sQ2.multiply(this.sQ))
+      foot.updateMatrixWorld(true)
+    }
   }
 
   private readonly gPivot = new THREE.Vector3()
@@ -1788,15 +1861,19 @@ export class Rink3dRenderer implements MatchRenderer {
       pose.speed = 0
     }
 
-    // Velocity-based speed
+    // Velocity-based speed — in GAME ft/s: at 2×/4× playback the positions move
+    // 2×/4× per wall second, and reading that as skating speed cycled the legs
+    // 4×–16× too fast (a faster cadence for the doubled "speed", on top of the
+    // doubled animation clock). `pb` is the playback rate (simDt / dt).
+    const pb = dt > 0 && simDt > 0 ? simDt / dt : 1
     const vx = pose.worldX.pos - pose.prevWx
     const vz = pose.worldZ.pos - pose.prevWz
     const distSq = vx * vx + vz * vz
-    const speedFt = dt > 0 ? Math.sqrt(distSq) / dt : 0
+    const speedFt = dt > 0 ? Math.sqrt(distSq) / dt / pb : 0
     pose.speed = Math.min(1, speedFt / 22)
     if (dt > 0) {
-      pose.vx = emaStep(pose.vx, vx / dt, dt, 0.12)
-      pose.vz = emaStep(pose.vz, vz / dt, dt, 0.12)
+      pose.vx = emaStep(pose.vx, vx / dt / pb, dt, 0.12)
+      pose.vz = emaStep(pose.vz, vz / dt / pb, dt, 0.12)
     } else pose.vx = pose.vz = 0
     pose.prevWx = pose.worldX.pos
     pose.prevWz = pose.worldZ.pos
@@ -1830,7 +1907,7 @@ export class Rink3dRenderer implements MatchRenderer {
       pose.velSmX = 0
       pose.velSmZ = 0
     }
-    const turnRate = dt > 0 ? wrapAngle(pose.angle - prevAngle) / dt : 0
+    const turnRate = dt > 0 ? wrapAngle(pose.angle - prevAngle) / dt / pb : 0
 
     if (dt === 0) {
       pose.speedSm = 0
@@ -1863,7 +1940,8 @@ export class Rink3dRenderer implements MatchRenderer {
     }
     if (pose.layer) {
       pose.layer.update(simDt)
-      this.choreo?.locomotionEvents(pose, dt, this.speed)
+      // (velocities are already game ft/s: game-time dt, no playback correction)
+      this.choreo?.locomotionEvents(pose, simDt, 1)
     }
     pose.rig.apply(pose.worldX.pos, pose.worldZ.pos, pose.angle, body, stick, pose.overlay)
 
@@ -1884,9 +1962,10 @@ export class Rink3dRenderer implements MatchRenderer {
     if (dt > 0) {
       pose.worldX = springStep(pose.worldX, wx, dt, PLAYER_FOLLOW_HL)
       pose.worldZ = springStep(pose.worldZ, wz, dt, PLAYER_FOLLOW_HL)
-      // goalie locomotion (owner imports) reads the travel direction
-      pose.vx = pose.worldX.vel
-      pose.vz = pose.worldZ.vel
+      // goalie locomotion (owner imports) reads the travel direction and speed (game ft/s)
+      const pb = simDt > 0 ? simDt / dt : 1
+      pose.vx = pose.worldX.vel / pb
+      pose.vz = pose.worldZ.vel / pb
     } else {
       pose.worldX = snapSpring(wx)
       pose.worldZ = snapSpring(wz)

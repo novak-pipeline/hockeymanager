@@ -269,7 +269,7 @@ export interface LocoState {
   turnRate: number
   /** 0..1 how much the skater is backing up (facing away from his velocity). */
   backward: number
-  /** Deceleration (ft/s², >= 0). */
+  /** Deceleration (ft/s², >= 0) — above ~2 the skater coasts into a glide. */
   decel: number
 }
 
@@ -285,8 +285,10 @@ export function locomotionWeights(s: LocoState): Record<'skate_stride' | 'skate_
   const turnLeft = Math.abs(lat) > smooth(0.9, 1.8, Math.abs(s.turnRate)) ? lat > 0 : s.turnRate > 0
   const turn = turnMag * smooth(0.2, 0.45, s.speed) * (1 - back)
   const fwd = 1 - back - turn
-  const stride = fwd * moving
-  const glide = fwd * (1 - moving)
+  // coasting (slowing down, not pushing): the skates glide instead of striding (film S6)
+  const coast = smooth(2, 6, s.decel)
+  const stride = fwd * moving * (1 - coast)
+  const glide = fwd * (1 - moving * (1 - coast))
   return {
     skate_stride: stride,
     skate_glide: glide,
