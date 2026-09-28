@@ -13,6 +13,7 @@
  * All numeric coefficients here are first-pass and will be replaced by the
  * calibration harness (build step #5).
  */
+import { gameLevelAvg } from '@engine/shared/ratingLevel'
 import type {
   CompositeRatings,
   GameEvent,
@@ -46,11 +47,16 @@ const THREE_ON_THREE_SHOT_MULT = 1.25
 // League-average targets the coefficients aim at (calibration will refine).
 const SHOTS_PER_TEAM_PER_GAME = 30
 const SHIFTS_PER_GAME = (PERIOD_SECONDS * REGULATION_PERIODS) / SHIFT_SECONDS
-const BASE_SHOTS_PER_SHIFT = SHOTS_PER_TEAM_PER_GAME / SHIFTS_PER_GAME
-const BASE_SHOT_CONVERSION = 0.095 // ~ league shooting %
+// (0.94: the team-strength multipliers average ~1.07 on a real league, so the
+// base sits under the target to land ON it — measured on both the generated
+// and the imported league, 400 games each.)
+const BASE_SHOTS_PER_SHIFT = (SHOTS_PER_TEAM_PER_GAME / SHIFTS_PER_GAME) * 0.94
+// League shooting % base. 0.095 put the generated league at 3.70 and the
+// imported one at 3.99 goals a team-game (NHL ~3.07); re-measured at 0.0835.
+const BASE_SHOT_CONVERSION = 0.0825
 const PENALTY_CHANCE_PER_SHIFT = 0.045
 const PENALTY_SECONDS = 120
-const PP_SHOT_MULT = 1.6
+const PP_SHOT_MULT = 1.8
 const PK_SHOT_MULT = 0.7
 
 /**
@@ -77,7 +83,7 @@ export type QuickSimResult = GameOutcome
 // Home-ice conversion edge (applied +to home / −to away, so it's calibration-
 // neutral on total goals). Tuned to land the equal-strength home win rate near
 // the real-NHL ~53-54%.
-const HOME_ICE_EDGE = 0.05
+const HOME_ICE_EDGE = 0.045
 const FWD_LINE_WEIGHTS = [0.34, 0.28, 0.22, 0.16]
 const DEF_PAIR_WEIGHTS = [0.42, 0.34, 0.24]
 // #175: on special teams the top unit does most of the work; PP1/PK1 heavier.
@@ -705,6 +711,8 @@ function shootout(ctx: Ctx, home: TeamSim, away: TeamSim): void {
     t.resolve(t.startingGoalie ?? t.team.lines.goalies[0]).composites.goaltending
   const attempt = (shooters: Player[], round: number, def: TeamSim): boolean => {
     const shooter = shooters[round % Math.max(1, shooters.length)]
+    // A club with no skaters dressed (goalies only) has nobody to send: a miss.
+    if (!shooter) return false
     return rng.chance(shootoutGoalChance(shootoutSkill(shooter.composites), goaltending(def), ctx.leagueAvg))
   }
 
@@ -715,7 +723,7 @@ function shootout(ctx: Ctx, home: TeamSim, away: TeamSim): void {
     if (attempt(homeShooters, round, away)) h++
     if (attempt(awayShooters, round, home)) a++
   }
-  for (; h === a; round++) {
+  for (; h === a && round < 60; round++) {
     const hg = attempt(homeShooters, round, away)
     const ag = attempt(awayShooters, round, home)
     if (hg) h++
@@ -918,7 +926,10 @@ export function quickSimGame(
   const fightTimes = rollFightPlan(opts.seed, opts.intensity ?? 0)
   const injuryPlan = rollInGameInjury(opts.seed)
   const ctx: Ctx = {
-    rng, stream: [], stats: new Map(), leagueAvg: opts.leagueAvg ?? LEAGUE_AVG,
+    // A league on another rating scale (the imported real rosters) is read
+    // against its own level; the calibration league and explicit world-league
+    // baselines are untouched.
+    rng, stream: [], stats: new Map(), leagueAvg: opts.leagueAvg ?? gameLevelAvg(home, away, resolve, LEAGUE_AVG),
     scoringMult: playoffScoringMult(rules), intensity: opts.intensity,
     ...(fightTimes.length > 0 ? { fights: { times: fightTimes, next: 0, rng: fightRngFor(opts.seed) } } : {}),
     ...(injuryPlan ? { injury: { plan: injuryPlan, rng: inGameInjuryRngFor(opts.seed), done: false } } : {}),
