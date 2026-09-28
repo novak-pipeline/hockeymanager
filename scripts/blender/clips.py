@@ -314,25 +314,30 @@ def skater_clips(arm):
     A('faceoff_wing', [wg(0, 0.0), wg(20, 0.04), wg(40, 0.0)])
 
     # ── hitting ──
-    # the hitter (film C1-C3): crouch and load, then EXPLODE up through the man —
-    # the lead (left) shoulder turned in and driven at chest height, a little
-    # hop at contact (skates barely off the ice), then ride through upright
+    # the hitter (film item 10, C1-C3): telegraphed low — knees deep, hips
+    # down, stick on the ice — then a COMPACT drive: the lead (left) shoulder
+    # turned in and raised into the man's chest, torso ~40° forward, the
+    # trailing leg extended back as the push, the stick staying down; he rides
+    # through upright-ish and recovers
     A('check', [
         (0, P(lean=0.72, stick=carry(0.0))),
-        (5, P(lean=0.95, yaw=-0.5, L=leg(1.0, 0.25, 1.6), R=leg(0.95, 0.3, 1.5), shrugL=0.15,
-              stick=dict(blade=(1.0, 0.1, 1.9), top=top(-0.1, 0.4, 0.9)))),
-        (8, P(lean=0.55, yaw=-0.95, roll=-0.28, hip=(0, rig.H - 0.25, 0.5), L=leg(0.2, 0.18, 0.3, ankle=-0.25), R=leg(0.35, 0.22, 0.55, ankle=-0.2),
-              shrugL=0.4, stick=dict(blade=(0.9, 0.35, 1.5), top=top(-0.25, 0.95, 0.75)))),
-        (12, P(lean=0.4, yaw=-0.55, hip=(0, None, 0.25), stick=dict(blade=(1.0, 0.1, 2.1), top=top(-0.1, 0.6, 0.9)))),
+        (4, P(lean=0.92, yaw=-0.4, L=leg(1.1, 0.25, 1.75), R=leg(0.95, 0.3, 1.6), shrugL=0.1,
+              stick=dict(blade=(1.0, 0.02, 2.2), top=top(-0.1, 0.25, 1.0)))),
+        (8, P(lean=0.8, yaw=-0.65, roll=-0.22, look=(-0.2, 0.25), hipRot=(0.0, -0.4, 0.0), hip=(0, None, 0.6),
+              L=leg(1.15, 0.2, 1.65), R=leg(-0.5, 0.3, 0.35, ankle=-0.25),
+              shrugL=0.38, stick=dict(blade=(1.1, 0.02, 2.3), top=top(-0.15, 0.2, 1.0)))),
+        (11, P(lean=0.66, yaw=-0.5, roll=-0.1, hipRot=(0.0, -0.25, 0.0), hip=(0, None, 0.45), L=leg(0.9, 0.2, 1.3), R=leg(-0.1, 0.32, 0.5),
+               shrugL=0.25, stick=dict(blade=(1.1, 0.02, 2.4), top=top(-0.1, 0.35, 1.0)))),
         (18, P(stick=carry(0.0))),
     ])
     pin_hands = dict(handL=(0.55, hipY + 1.85, 1.9), handR=(-0.45, hipY + 1.7, 1.85),
                      stick=dict(hand='R', dir=(0.25, 0.9, -0.3), grip=3.4))
     A('check_boards', [
         (0, P(lean=0.72, stick=carry(0.0))),
-        (5, P(lean=0.85, yaw=-0.5, L=leg(0.85, 0.25, 1.35), R=leg(0.85, 0.25, 1.35), shrugL=0.2,
-              stick=dict(blade=(1.0, 0.1, 1.6), top=top(-0.1, 0.55, 0.8)))),
-        (8, P(lean=0.45, yaw=-0.35, hip=(0, None, 0.35), L=leg(0.45, 0.3, 0.7), R=leg(0.7, 0.3, 1.0), **pin_hands)),
+        (5, P(lean=0.95, yaw=-0.5, L=leg(1.05, 0.25, 1.65), R=leg(0.95, 0.28, 1.55), shrugL=0.2,
+              stick=dict(blade=(1.0, 0.02, 2.0), top=top(-0.1, 0.3, 1.0)))),
+        # drive: low into him, lead shoulder up, then (film C4) rising up the glass with him
+        (8, P(lean=0.62, yaw=-0.3, roll=-0.15, hipRot=(0.0, -0.2, 0.0), hip=(0, None, 0.45), L=leg(0.95, 0.25, 1.35), R=leg(-0.4, 0.35, 0.4, ankle=-0.3), shrugL=0.3, **pin_hands)),
         (15, P(lean=0.5, yaw=-0.3, hip=(0, None, 0.3), L=leg(0.5, 0.3, 0.8), R=leg(0.72, 0.3, 1.05), **pin_hands)),
         (22, P(lean=0.48, yaw=-0.32, hip=(0, None, 0.32), L=leg(0.48, 0.3, 0.75), R=leg(0.7, 0.3, 1.0), **pin_hands)),
         (30, P(stick=carry(0.0))),
