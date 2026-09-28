@@ -985,6 +985,8 @@ export interface WatchedGame {
   homeColors: { primary: number; secondary: number }
   awayColors: { primary: number; secondary: number }
   playerNames: Record<string, string>
+  /** Which way each player shoots (Player.handedness) — the 3D view mirrors right-handed skaters. Additive; older saves lack it. */
+  playerHands?: Record<string, 'L' | 'R'>
   stream: GameStream
 }
 
@@ -10689,7 +10691,12 @@ export class Career {
     const h = this.data.teams.get(home)!
     const a = this.data.teams.get(away)!
     const playerNames: Record<string, string> = {}
-    for (const id of [...h.roster, ...a.roster]) playerNames[id as string] = this.resolve(id).name
+    const playerHands: Record<string, 'L' | 'R'> = {}
+    for (const id of [...h.roster, ...a.roster]) {
+      const p = this.resolve(id)
+      playerNames[id as string] = p.name
+      playerHands[id as string] = p.handedness
+    }
     return {
       homeName: h.name,
       awayName: a.name,
@@ -10700,6 +10707,7 @@ export class Career {
       homeColors: { ...h.colors },
       awayColors: { ...a.colors },
       playerNames,
+      playerHands,
       stream,
     }
   }

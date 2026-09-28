@@ -31,6 +31,7 @@ import {
   distToBoards,
   goalieLocoWeights,
   hitPlan,
+  hitPushDir,
   locomotionWeights,
   saveClipFor,
   shotClipFor,
@@ -39,7 +40,7 @@ import {
 import type { BoneName, PoseOverlay } from './athlete'
 import type * as THREE from 'three'
 
-export type ActionKind = 'shot' | 'save' | 'goal' | 'hit' | 'pass' | 'faceoff' | 'deke'
+export type ActionKind = 'shot' | 'save' | 'goal' | 'hit' | 'pass' | 'faceoff' | 'deke' | 'poke'
 
 export interface ActionCue {
   kind: ActionKind
@@ -58,10 +59,14 @@ export interface ActionCue {
   /** hit (agent engine): impact 0..1 and where it happened */
   force?: number
   hitKind?: 'boards' | 'openIce' | 'finish' | 'battle'
+  /** hit (agent engine, additive): the physics put him on the ice (true) / kept him up (false) */
+  knockdown?: boolean
   /** shot (agent engine): the release type */
   shotType?: string
   /** deke (agent engine): which move */
   dekeKind?: string
+  /** poke: did it knock the puck free (agent pokeCheck.success; takeaways always did) */
+  success?: boolean
 }
 
 /** The deke clip for each move the engine names (additive 'deke' event). */
@@ -88,18 +93,47 @@ export function extractActionCues(stream: GameStream): ActionCue[] {
     } else if (isEvent(ev, 'goal')) {
       out.push({ kind: 'goal', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.scorer, assists: [...ev.assists] })
     } else if (isEvent(ev, 'hit')) {
-      out.push({ kind: 'hit', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.by, targetId: ev.on, ...(ev.force !== undefined ? { force: ev.force } : {}), ...(ev.kind ? { hitKind: ev.kind } : {}) })
+      const kd = (ev as unknown as { knockdown?: unknown }).knockdown
+      out.push({
+        kind: 'hit', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.by, targetId: ev.on,
+        ...(ev.force !== undefined ? { force: ev.force } : {}), ...(ev.kind ? { hitKind: ev.kind } : {}), ...(typeof kd === 'boolean' ? { knockdown: kd } : {}),
+      })
+    } else if ((ev as { type: string }).type === 'knockdown') {
+      // additive agent-engine event (tolerant read): { player | on, by?, pos?, force? } — marks
+      // the hit that put him down (or stands alone when there is none)
+      const d = ev as unknown as { period: number; t: number; player?: string; on?: string; by?: string; pos?: { x: number; y: number }; force?: number }
+      const who = d.player ?? d.on
+      if (who) {
+        const at = absTime(d.period, d.t)
+        let hit: ActionCue | undefined
+        for (let j = out.length - 1; j >= 0 && out[j]!.absT > at - 1.2; j--) if (out[j]!.kind === 'hit' && out[j]!.targetId === who) { hit = out[j]; break }
+        if (hit) hit.knockdown = true
+        else out.push({ kind: 'hit', absT: at, nx: d.pos?.x ?? 0, ny: d.pos?.y ?? 0, actorId: d.by ?? '', targetId: who, force: d.force ?? 0.9, knockdown: true })
+      }
     } else if (isEvent(ev, 'pass') && ev.completed) {
       out.push({ kind: 'pass', absT: absTime(ev.period, ev.t), nx: ev.a.x, ny: ev.a.y, actorId: ev.from, targetId: ev.to })
     } else if ((ev as { type: string }).type === 'deke') {
       // additive agent-engine event: { by, on?, kind, success, pos } (tolerant read)
       const d = ev as unknown as { period: number; t: number; by: string; on?: string; kind?: string; pos?: { x: number; y: number } }
       out.push({ kind: 'deke', absT: absTime(d.period, d.t), nx: d.pos?.x ?? 0, ny: d.pos?.y ?? 0, actorId: d.by, ...(d.on ? { targetId: d.on } : {}), dekeKind: d.kind ?? 'forehandBackhand' })
+    } else if ((ev as { type: string }).type === 'pokeCheck') {
+      // additive agent-engine event: { by, on, success, pos } (tolerant read)
+      const d = ev as unknown as { period: number; t: number; by?: string; on?: string; success?: boolean; pos?: { x: number; y: number } }
+      if (d.by) out.push({ kind: 'poke', absT: absTime(d.period, d.t), nx: d.pos?.x ?? 0, ny: d.pos?.y ?? 0, actorId: d.by, ...(d.on ? { targetId: d.on } : {}), success: d.success !== false })
+    } else if (isEvent(ev, 'takeaway')) {
+      // the defender's stick knocked it off him: a poke (both engines emit takeaways)
+      out.push({ kind: 'poke', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.by, targetId: ev.from, success: true })
     } else if (isEvent(ev, 'faceoff')) {
       out.push({ kind: 'faceoff', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.winner })
     }
   }
-  return out.sort((a, b) => a.absT - b.absT)
+  out.sort((a, b) => a.absT - b.absT)
+  // a successful pokeCheck and the takeaway it produced are ONE poke
+  return out.filter((c, i) => {
+    if (c.kind !== 'poke') return true
+    for (let j = i - 1; j >= 0 && out[j]!.absT > c.absT - 0.6; j--) if (out[j]!.kind === 'poke' && out[j]!.actorId === c.actorId) return false
+    return true
+  })
 }
 
 /** Seconds the faceoff crouch starts before the drop. */
@@ -135,9 +169,11 @@ export function planCues(cues: ActionCue[], contactOf: (clip: string) => number 
       const pt = lastPassTo.get(cue.actorId)
       clip = shotClipFor(dist, pt === undefined ? null : cue.absT - pt, undefined, cue.shotType, `${cue.actorId}@${cue.absT.toFixed(2)}`)
     } else if (cue.kind === 'hit') {
-      clip = hitPlan(12, distToBoards(normXtoWorld(cue.nx), normYtoWorld(cue.ny)), cue.force, cue.hitKind).hitter
+      clip = cue.actorId ? hitPlan(12, distToBoards(normXtoWorld(cue.nx), normYtoWorld(cue.ny)), cue.force, cue.hitKind, 'back', cue.knockdown).hitter : null
     } else if (cue.kind === 'deke') {
       clip = DEKE_CLIP[cue.dekeKind ?? ''] ?? 'deke_fb'
+    } else if (cue.kind === 'poke') {
+      clip = 'poke'
     } else if (cue.kind === 'faceoff') {
       clip = 'faceoff_crouch'
       lead = FACEOFF_LEAD_S
@@ -193,6 +229,9 @@ export interface ChoreoActor {
  */
 export interface LocoSmooth {
   t: number
+  /** Smoothed speed (ft/s) and deceleration (ft/s², >= 0) — coasting reads as a glide. */
+  sp?: number
+  decel?: number
   w: Record<string, number>
   vx: number
   vz: number
@@ -214,6 +253,12 @@ function locoState(a: ChoreoActor): { st: LocoSmooth; dt: number } {
   const kv = dt > 0 ? 1 - Math.exp(-dt / VEL_TAU) : 0
   st.vx += (a.vx - st.vx) * kv
   st.vz += (a.vz - st.vz) * kv
+  if (dt > 0) {
+    const sp = Math.hypot(st.vx, st.vz)
+    const d = st.sp === undefined ? 0 : Math.max(0, (st.sp - sp) / dt)
+    st.decel = (st.decel ?? 0) + (d - (st.decel ?? 0)) * (1 - Math.exp(-dt / 0.3))
+    st.sp = sp
+  }
   return { st, dt }
 }
 
@@ -337,6 +382,11 @@ export class Choreographer {
     const a = this.find(c.actorId)
     if (!a?.layer || !p.clip) return
     a.layer.play(p.clip, { at: late })
+    if (c.kind === 'hit' && c.targetId) {
+      // the hitter squares up to his man so the clip's turned-in shoulder meets him (through the facing spring)
+      const t = this.find(c.targetId)
+      if (t) a.faceOverride = { angle: Math.atan2(t.worldX.pos - a.worldX.pos, t.worldZ.pos - a.worldZ.pos), until: c.absT + 0.25 }
+    }
   }
 
   private contact(p: PlannedCue): void {
@@ -355,15 +405,25 @@ export class Choreographer {
   }
 
   private resolveHit(c: ActionCue): void {
-    const hitter = this.find(c.actorId)
+    const hitter = c.actorId ? this.find(c.actorId) : null
     const target = c.targetId ? this.find(c.targetId) : null
     if (!target?.layer) return
     const rel = hitter ? Math.hypot(hitter.vx - target.vx, hitter.vz - target.vz) : 12
     const wx = normXtoWorld(c.nx)
     const wz = normYtoWorld(c.ny)
-    // the engine's own impact + kind when it has them (agent engine), else read it from the closing speed
-    const plan = hitPlan(rel, distToBoards(wx, wz), c.force, c.hitKind)
-    target.layer.play(plan.target, { weight: plan.target === 'hit_stagger' ? 0.55 + 0.45 * plan.hardness : 1 })
+    // the impulse runs from the hitter into the target (else along the hitter's
+    // travel, else the target's own recoil): it picks the way he goes down
+    let dx = hitter ? target.worldX.pos - hitter.worldX.pos : 0
+    let dz = hitter ? target.worldZ.pos - hitter.worldZ.pos : 0
+    if (Math.hypot(dx, dz) < 0.5) {
+      dx = hitter ? hitter.vx : target.vx
+      dz = hitter ? hitter.vz : target.vz
+    }
+    const push = Math.hypot(dx, dz) > 1e-3 ? hitPushDir(dx, dz, target.angle) : 'back'
+    // the engine's own impact + kind + knockdown when it has them (agent engine), else read it from the closing speed
+    const plan = hitPlan(rel, distToBoards(wx, wz), c.force, c.hitKind, push, c.knockdown)
+    // reactions scale with the impact: a light hit only part-weights the stagger
+    target.layer.play(plan.target, { weight: plan.target === 'hit_stagger' ? 0.45 + 0.55 * plan.hardness : 1 })
     const meta = CLIPS[plan.target]!
     const len = (meta.hold ?? 0) + 1.2 + (meta.next ? 1.4 : 0)
     if (plan.pinned) {
@@ -373,8 +433,11 @@ export class Choreographer {
       const face = Math.abs(wz) / 42.5 > Math.abs(wx) / 100 ? (wz > 0 ? 0 : Math.PI) : wx > 0 ? Math.PI / 2 : -Math.PI / 2
       target.faceOverride = { angle: wrapAngle(face), until: this.clock + len }
     }
-    if (plan.target !== 'hit_stagger') {
-      target.followHL = plan.target === 'hit_fall' ? 0.9 : 0.35
+    // Classic engine: the stream doesn't move the bodies at a hit, so a knocked
+    // down player's root trails the sim on a slower spring (he slides). The
+    // agent engine's physics already moves them — follow the stream as is.
+    if (c.force === undefined && plan.target !== 'hit_stagger') {
+      target.followHL = plan.target.startsWith('hit_fall') ? 0.9 : 0.35
       this.pending.push({ at: this.clock + len, run: () => (target.followHL = this.baseFollowHL) })
     }
   }
@@ -530,7 +593,7 @@ export function blendLocomotion(
   const back = sp > 1 ? Math.max(0, -Math.cos(wrapAngle(vAng - facing))) : 0
   // + = toward the player's left (his +X = (cos θ, −sin θ) in world X/Z)
   const lateral = owner && sp > 1 ? Math.sin(wrapAngle(vAng - facing)) : 0
-  const w = locomotionWeights({ speed: a.speedSm, turnRate: a.turnSm, backward: back, decel: 0, lateral }) as Record<string, number>
+  const w = locomotionWeights({ speed: a.speedSm, turnRate: a.turnSm, backward: back, decel: st.decel ?? 0, lateral }) as Record<string, number>
   if (owner && clips.has('skate_idle')) {
     // an owner rig idles in its own stance instead of the Blender glide
     w['skate_idle'] = w['skate_glide']!

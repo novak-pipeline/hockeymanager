@@ -79,6 +79,15 @@ describe('skating stride', () => {
     expect(strideRateHz(0.5)).toBeLessThan(strideRateHz(1))
   })
 
+  it('cycles with the ground covered: ~3.3 pushes/s cruising (film S1), slow strides when slow', () => {
+    const pushes = (ftS: number) => 2 * strideRateHz(ftS / 22)
+    expect(pushes(16)).toBeGreaterThan(3.0)
+    expect(pushes(16)).toBeLessThan(3.6)
+    expect(pushes(22)).toBeLessThanOrEqual(4)
+    // a slow skater no longer pedals: under 1.5 pushes/s at 6 ft/s
+    expect(pushes(6)).toBeLessThan(1.5)
+  })
+
   it('phase is integrated: a speed change never jumps the legs', () => {
     let p = 1
     const before = p

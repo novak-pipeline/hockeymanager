@@ -314,13 +314,16 @@ def skater_clips(arm):
     A('faceoff_wing', [wg(0, 0.0), wg(20, 0.04), wg(40, 0.0)])
 
     # ── hitting ──
+    # the hitter (film C1-C3): crouch and load, then EXPLODE up through the man —
+    # the lead (left) shoulder turned in and driven at chest height, a little
+    # hop at contact (skates barely off the ice), then ride through upright
     A('check', [
         (0, P(lean=0.72, stick=carry(0.0))),
-        (5, P(lean=0.8, yaw=-0.55, L=leg(0.85, 0.25, 1.35), R=leg(0.85, 0.25, 1.35), shrugL=0.15,
-              stick=dict(blade=(1.0, 0.1, 1.6), top=top(-0.1, 0.55, 0.8)))),
-        (8, P(lean=0.3, yaw=-0.75, roll=-0.12, hip=(0, None, 0.35), L=leg(0.3, 0.2, 0.45), R=leg(0.45, 0.25, 0.6), shrugL=0.3,
-              stick=dict(blade=(0.9, 0.35, 1.3), top=top(-0.2, 0.9, 0.75)))),
-        (12, P(lean=0.45, yaw=-0.45, hip=(0, None, 0.2), stick=dict(blade=(1.0, 0.1, 2.0), top=top(-0.1, 0.6, 0.9)))),
+        (5, P(lean=0.95, yaw=-0.5, L=leg(1.0, 0.25, 1.6), R=leg(0.95, 0.3, 1.5), shrugL=0.15,
+              stick=dict(blade=(1.0, 0.1, 1.9), top=top(-0.1, 0.4, 0.9)))),
+        (8, P(lean=0.55, yaw=-0.95, roll=-0.28, hip=(0, rig.H - 0.25, 0.5), L=leg(0.2, 0.18, 0.3, ankle=-0.25), R=leg(0.35, 0.22, 0.55, ankle=-0.2),
+              shrugL=0.4, stick=dict(blade=(0.9, 0.35, 1.5), top=top(-0.25, 0.95, 0.75)))),
+        (12, P(lean=0.4, yaw=-0.55, hip=(0, None, 0.25), stick=dict(blade=(1.0, 0.1, 2.1), top=top(-0.1, 0.6, 0.9)))),
         (18, P(stick=carry(0.0))),
     ])
     pin_hands = dict(handL=(0.55, hipY + 1.85, 1.9), handR=(-0.45, hipY + 1.7, 1.85),
@@ -367,6 +370,54 @@ def skater_clips(arm):
         (32, P(lean=0.55, hip=(0, None, 0.0), L=leg(1.35, 0.15, 1.5), R=leg(0.1, 0.15, 1.65), stick=carry(0.0, 2.4))),
         (40, P(stick=carry(0.0))),
     ])
+    # ── directional reactions (choreo picks by the direction of the impulse) ──
+    # pushed from BEHIND: lurch forward, catch on the knees and gloves
+    knees = dict(hip=(0, 1.75, 0.55), hipRot=(0.35, 0.0, 0.0), lean=0.55, look=(-0.5, 0.0),
+                 L=leg(0.1, 0.2, 1.9, ankle=-0.3), R=leg(0.15, 0.22, 1.95, ankle=-0.3),
+                 handL=(0.9, 0.45, 2.3), handR=(-0.9, 0.45, 2.2), stick=dict(hand='R', dir=(-0.2, 0.1, -0.97), grip=3.0))
+    A('hit_stumble_fwd', [
+        (0, P(stick=carry(0.0))),
+        (4, P(lean=1.15, hip=(0, None, 0.5), look=(-0.5, 0.0), L=leg(1.1, 0.25, 1.6), R=leg(0.2, 0.3, 0.3, ankle=-0.2),
+              handL=(1.0, hipY + 0.2, 2.0), handR=(-1.0, hipY + 0.4, 1.9), stick=dict(hand='R', dir=(-0.2, 0.2, -0.95), grip=3.2))),
+        (11, P(lean=0.9, hip=(0, None, 0.3), L=leg(0.9, 0.25, 1.4), R=leg(0.8, 0.3, 1.3), stick=carry(0.0, 2.6))),
+        (22, P(stick=carry(0.0))),
+    ])
+    A('hit_fall_fwd', [
+        (0, P(stick=carry(0.0))),
+        (4, P(lean=1.25, hip=(0, None, 0.6), look=(-0.6, 0.0), L=leg(1.2, 0.25, 1.7), R=leg(0.1, 0.3, 0.3, ankle=-0.3),
+              handL=(1.0, hipY - 0.2, 2.3), handR=(-1.0, hipY - 0.1, 2.2), stick=dict(hand='R', dir=(-0.2, 0.15, -0.97), grip=3.2))),
+        (10, P(**knees)),
+        (16, P(**dict(knees, hip=(0, 1.55, 0.7), hipRot=(0.5, 0.0, 0.05), handL=(0.95, 0.35, 2.5), handR=(-0.95, 0.35, 2.4)))),
+        (24, P(**dict(knees, hip=(0, 1.6, 0.65), hipRot=(0.45, 0.0, 0.0)))),
+    ])
+    A('getup_knees', [
+        (0, P(**dict(knees, hip=(0, 1.6, 0.65), hipRot=(0.45, 0.0, 0.0)))),
+        (10, P(lean=0.9, hip=(0, 2.1, 0.4), look=(-0.3, 0.0), L=leg(1.5, 0.2, 1.6), R=leg(0.2, 0.25, 1.9, ankle=-0.3),
+               handL=(0.8, 1.2, 1.6), handR=(-0.8, 1.3, 1.5), stick=dict(hand='R', dir=(-0.1, 0.3, -0.95), grip=3.0))),
+        (20, P(lean=0.6, L=leg(0.8, 0.2, 1.2), R=leg(0.6, 0.2, 1.0), stick=carry(0.0, 2.4))),
+        (28, P(stick=carry(0.0))),
+    ])
+    # pushed SIDEWAYS: the near leg buckles, he goes down on his hip and rolls
+    # onto his back (the getup's start), gloves out to break the fall
+    down0 = dict(lean=0.1, hipRot=(-1.4, 0.0, 0.12), hip=(0, 0.7, -1.45), look=(0.45, 0.2), L=leg(0.6, 0.25, 0.5), R=leg(0.9, 0.2, 1.1), **down_arms)
+
+    def side_fall(s):
+        # s = +1: falls to HIS LEFT (+X; pushed from his right), -1: to his right
+        o, i = ('L', 'R') if s > 0 else ('R', 'L')  # the leg on the falling side / the other
+        k1 = P(lean=0.3, roll=s * 0.35, yaw=-s * 0.2, hipRot=(0.0, 0.0, s * 0.35), hip=(s * 0.5, None, 0.0), look=(-0.3, s * 0.3),
+               handL=(1.6, hipY + 0.9, 0.4), handR=(-1.6, hipY + 1.0, 0.4), stick=dict(hand='R', dir=(-0.3, 0.35, -0.89), grip=3.0))
+        k1[o] = leg(0.6, 0.05, 1.3)
+        k1[i] = leg(0.2, 0.55, 0.3)
+        k2 = P(lean=0.2, roll=s * 0.3, hipRot=(-0.3, 0.0, s * 1.0), hip=(s * 1.0, 1.25, -0.2), look=(0.0, s * 0.4),
+               handL=(1.4 if s > 0 else 1.2, 0.5, 0.6), handR=(-1.2 if s > 0 else -1.4, 1.2, 0.4), stick=dict(hand='R', dir=(-0.2, -0.2, 0.95), grip=3.1))
+        k2[o] = leg(0.9, 0.1, 1.2)
+        k2[i] = leg(0.5, 0.35, 0.6)
+        k3 = P(lean=0.15, hipRot=(-0.8, 0.0, s * 1.2), hip=(s * 1.2, 0.8, -0.6), look=(0.3, s * 0.3), **down_arms)
+        k3[o] = leg(0.7, 0.2, 0.8)
+        k3[i] = leg(0.8, 0.25, 1.0)
+        return [(0, P(stick=carry(0.0))), (4, k1), (10, k2), (16, k3), (26, P(**down0))]
+    A('hit_fall_side_L', side_fall(1))
+    A('hit_fall_side_R', side_fall(-1))
     glass = dict(handL=(0.95, hipY + 2.5, 1.15), handR=(-0.95, hipY + 2.35, 1.15), stick=dict(hand='R', dir=(0.1, 0.95, 0.25), grip=3.6))
     A('pinned_boards', [
         (0, P(stick=carry(0.0))),

@@ -89,6 +89,12 @@ export const CLIPS: Record<string, ClipMeta> = {
   hit_stumble: { mask: 'full', hands: 'clip', contact: 0, fadeIn: 0.05, fadeOut: 0.3 },
   hit_fall: { mask: 'full', hands: 'clip', contact: 0, fadeIn: 0.05, fadeOut: 0.1, hold: 0.8, next: 'getup' },
   getup: { mask: 'full', hands: 'clip', fadeIn: 0.1, fadeOut: 0.4 },
+  // directional reactions: pushed from behind (forward) / to his left / to his right
+  hit_stumble_fwd: { mask: 'full', hands: 'clip', contact: 0, fadeIn: 0.05, fadeOut: 0.3 },
+  hit_fall_fwd: { mask: 'full', hands: 'clip', contact: 0, fadeIn: 0.05, fadeOut: 0.1, hold: 0.6, next: 'getup_knees' },
+  getup_knees: { mask: 'full', hands: 'clip', fadeIn: 0.1, fadeOut: 0.4 },
+  hit_fall_side_L: { mask: 'full', hands: 'clip', contact: 0, fadeIn: 0.05, fadeOut: 0.1, hold: 0.5, next: 'getup' },
+  hit_fall_side_R: { mask: 'full', hands: 'clip', contact: 0, fadeIn: 0.05, fadeOut: 0.1, hold: 0.5, next: 'getup' },
   pinned_boards: { mask: 'full', hands: 'clip', contact: 0, fadeIn: 0.05, fadeOut: 0.3 },
   // ── celebrations & broadcast moments ──
   celly_fistpump: { mask: 'upper', hands: 'clip', fadeIn: 0.15, fadeOut: 0.3 },
@@ -240,18 +246,45 @@ export interface HitPlan {
   pinned: boolean
 }
 
+/** Which way the hit pushes the target, in HIS frame (the impulse's direction). */
+export type HitPush = 'back' | 'forward' | 'left' | 'right'
+
+/**
+ * The push direction in the target's frame from the impulse's world direction
+ * (dx, dz) and his facing (rad; his front = (sin a, cos a), his left = (cos a, −sin a)).
+ */
+export function hitPushDir(dx: number, dz: number, facing: number): HitPush {
+  const fwd = dx * Math.sin(facing) + dz * Math.cos(facing)
+  const left = dx * Math.cos(facing) - dz * Math.sin(facing)
+  if (Math.abs(fwd) >= Math.abs(left)) return fwd >= 0 ? 'forward' : 'back'
+  return left >= 0 ? 'left' : 'right'
+}
+
 /**
  * A hit from the relative speed at contact (ft/s) and where it happens.
  * Near the boards the hitter PINS (check_boards / pinned_boards); in open ice
- * the target staggers (light), stumbles (medium) or goes down and gets up (hard).
+ * the target staggers (light), stumbles (medium) or goes down and gets up
+ * (hard) — in the direction the impulse pushes him (film C3: hit from the
+ * front he falls backward, feet out; from behind he pitches forward onto his
+ * knees; from the side he goes down on his hip). The agent engine's
+ * `knockdown` decides the fall outright when present (true: he goes down, even
+ * against the boards — folding into them; false: he stays up).
  */
-export function hitPlan(relSpeedFtS: number, boardsDistFt: number, force?: number, kind?: 'boards' | 'openIce' | 'finish' | 'battle'): HitPlan {
+export function hitPlan(relSpeedFtS: number, boardsDistFt: number, force?: number, kind?: 'boards' | 'openIce' | 'finish' | 'battle', push: HitPush = 'back', knockdown?: boolean): HitPlan {
   const hardness = force !== undefined ? Math.min(1, Math.max(0, force)) : Math.min(1, Math.max(0, (relSpeedFtS - 4) / 22))
+  const fall = { back: 'hit_fall', forward: 'hit_fall_fwd', left: 'hit_fall_side_L', right: 'hit_fall_side_R' }[push]
+  const stumble = push === 'forward' ? 'hit_stumble_fwd' : 'hit_stumble'
   // a battle is two bodies leaning on each other: a shove, never a knockdown
-  if (kind === 'battle') return { hitter: 'check', target: 'hit_stagger', hardness: Math.min(hardness, 0.4), pinned: false }
+  if (kind === 'battle' && knockdown !== true) return { hitter: 'check', target: 'hit_stagger', hardness: Math.min(hardness, 0.4), pinned: false }
   const onBoards = kind ? kind === 'boards' : boardsDistFt <= BOARDS_PIN_FT
-  if (onBoards) return { hitter: 'check_boards', target: 'pinned_boards', hardness, pinned: true }
-  const target = hardness < 0.35 ? 'hit_stagger' : hardness < 0.7 ? 'hit_stumble' : 'hit_fall'
+  if (onBoards) {
+    // knocked down on the wall: chest to the glass, he folds and slides down it (film C1)
+    if (knockdown === true) return { hitter: 'check_boards', target: 'hit_fall_fwd', hardness, pinned: true }
+    return { hitter: 'check_boards', target: 'pinned_boards', hardness, pinned: true }
+  }
+  let target = hardness < 0.35 ? 'hit_stagger' : hardness < 0.7 ? stumble : fall
+  if (knockdown === true) target = fall
+  else if (knockdown === false && target === fall) target = stumble
   return { hitter: 'check', target, hardness, pinned: false }
 }
 
@@ -269,7 +302,7 @@ export interface LocoState {
   turnRate: number
   /** 0..1 how much the skater is backing up (facing away from his velocity). */
   backward: number
-  /** Deceleration (ft/s², >= 0). */
+  /** Deceleration (ft/s², >= 0) — above ~2 the skater coasts into a glide. */
   decel: number
 }
 
@@ -285,8 +318,10 @@ export function locomotionWeights(s: LocoState): Record<'skate_stride' | 'skate_
   const turnLeft = Math.abs(lat) > smooth(0.9, 1.8, Math.abs(s.turnRate)) ? lat > 0 : s.turnRate > 0
   const turn = turnMag * smooth(0.2, 0.45, s.speed) * (1 - back)
   const fwd = 1 - back - turn
-  const stride = fwd * moving
-  const glide = fwd * (1 - moving)
+  // coasting (slowing down, not pushing): the skates glide instead of striding (film S6)
+  const coast = smooth(2, 6, s.decel)
+  const stride = fwd * moving * (1 - coast)
+  const glide = fwd * (1 - moving * (1 - coast))
   return {
     skate_stride: stride,
     skate_glide: glide,

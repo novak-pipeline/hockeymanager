@@ -548,6 +548,9 @@ const _q0 = new THREE.Quaternion()
 const _q1 = new THREE.Quaternion()
 const _q2 = new THREE.Quaternion()
 const _q3 = new THREE.Quaternion()
+const HALF_TURN_Y = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)
+const MIRROR_CENTRE = ['hips', 'spine', 'chest', 'neck', 'head'] as const
+const MIRROR_PAIRS = (['shoulder', 'upperarm', 'forearm', 'hand', 'thigh', 'shin', 'foot'] as const).map((n) => [`${n}_L`, `${n}_R`] as [BoneName, BoneName])
 const _u = new THREE.Vector3()
 const _m = new THREE.Matrix4()
 const _inv = new THREE.Matrix4()
@@ -913,6 +916,51 @@ export class AthleteRig {
       const g = !this.goalie && overlay.grip ? overlay.grip() : null
       if (g && (g.L > 0.001 || g.R > 0.001)) this.lockGrips(g)
     }
+    if (this.rightHanded) {
+      this.mirrorPose()
+      r.updateMatrixWorld(true)
+    }
+  }
+
+  /**
+   * Shoots RIGHT (player handedness 'R'): every clip and the code pose are
+   * authored left-handed, so the finished pose is MIRRORED across his own
+   * sagittal plane — never the mesh (scale.x = −1 would mirror the jersey
+   * numbers and flip the winding). With rest frames that are identity and a
+   * symmetric skeleton, the mirror of a local rotation (x, y, z, w) is
+   * (x, −y, −z, w) on the partner bone; the stick turns a half-turn about its
+   * own shaft as well, so the blade's toe points out on the right. Top hand =
+   * hand_L, blade on his right.
+   */
+  private mirrorPose(): void {
+    const B = this.bones
+    const mq = (q: THREE.Quaternion) => q.set(q.x, -q.y, -q.z, q.w)
+    for (const n of MIRROR_CENTRE) mq(B[n].quaternion)
+    for (const [a, b] of MIRROR_PAIRS) {
+      _q0.copy(B[a].quaternion)
+      B[a].quaternion.copy(B[b].quaternion)
+      mq(B[a].quaternion)
+      B[b].quaternion.copy(_q0)
+      mq(B[b].quaternion)
+    }
+    B.hips.position.x = -B.hips.position.x
+    for (const n of ['stick', 'stick_blade'] as const) {
+      mq(B[n].quaternion).multiply(HALF_TURN_Y)
+      B[n].position.x = -B[n].position.x
+    }
+  }
+
+  /** Right-handed shooter: the pose is mirrored (see mirrorPose). */
+  rightHanded = false
+
+  /** The hand at the top of the stick (the grip the stick pivots about). */
+  get topHand(): THREE.Bone {
+    return this.rightHanded ? this.bones.hand_L : this.bones.hand_R
+  }
+
+  /** +1 when the blade is on his left (shoots left), −1 on his right. */
+  get bladeSide(): 1 | -1 {
+    return this.rightHanded ? -1 : 1
   }
 
   /**

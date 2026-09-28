@@ -45,6 +45,8 @@ const r = await page.evaluate(async (secs) => {
   const last = new Map(), lastW = new Map(), lastQ = new Map()
   let maxSpeed = 0, flips = 0, rigSec = 0, over40 = 0, samples = 0
   let boneSamples = 0, boneRigSec = 0, pops = 0, handChecks = 0, handOff = 0
+  const slipBack = [], slipAll = [], cadence = [], ratio = []
+  const lastFoot = new Map()
   let gripChecks = 0, gripOff = 0, elbowChecks = 0, elbowInv = 0, elbowSide = 0
   const gripD = [], gctx = {}, ectx = {}
   const speeds = []
@@ -150,12 +152,39 @@ const r = await page.evaluate(async (secs) => {
             }
           }
         }
+        // skating feet: a skate on the ice (ankle within 0.12 ft of its rest height)
+        // must not slide BACKWARD over the ice (the legs cycling faster than the
+        // body travels); report its backward speed (ft/s) along the direction of travel
+        if (!goalie && p.mode === 'play') {
+          const sp = Math.hypot(cur.x - prev.x, cur.z - prev.z) / dt
+          const ux = (cur.x - prev.x) / (sp * dt || 1), uz = (cur.z - prev.z) / (sp * dt || 1)
+          const rest = p.rig.dims?.skate ?? 0.38
+          for (const f of ['foot_L', 'foot_R']) {
+            const fp = wpos(B[f])
+            const key = i + f
+            const lf = lastFoot.get(key)
+            lastFoot.set(key, fp)
+            if (!lf || sp < 4 || fp.y > rest + 0.12) continue
+            const vx = (fp.x - lf.x) / dt, vz = (fp.z - lf.z) / dt
+            const along = vx * ux + vz * uz
+            slipBack.push(Math.max(0, -along))
+            ratio.push(along / sp)
+            // SKID: a blade on the ice can only run along its own heading; the
+            // foot's speed across the blade is the visible slip (ft/s)
+            const e = B[f].matrixWorld.elements
+            const hx = e[8], hz = e[10], hl = Math.hypot(hx, hz) || 1
+            slipAll.push(Math.abs((vx * -hz + vz * hx) / hl))
+          }
+          if (sp > 4 && p.stridePhase !== undefined) cadence.push([sp, p.speedSm])
+        }
         // clip grips: every hand a stick-hands clip holds at full weight, its PALM
         // (rig.gripPalm; the wrist for Blender rigs) on the drawn shaft line
         if (!goalie && p.layer) {
           // (older builds without gripWeights: any stick clip playing counts as both hands gripping)
           const stickClip = [...(p.layer.playing ?? [])].some((n) => /^(shot_|pass|deke_|stickhandle|faceoff_|check$|poke)/.test(n))
-          const gw = p.layer.gripWeights ? p.layer.gripWeights() : { L: stickClip ? 1 : 0, R: stickClip ? 1 : 0 }
+          const gw0 = p.layer.gripWeights ? p.layer.gripWeights() : { L: stickClip ? 1 : 0, R: stickClip ? 1 : 0 }
+          // clips are authored left-handed; a right-handed rig is the mirror (its top hand is hand_L)
+          const gw = p.rig.rightHanded ? { L: gw0.R, R: gw0.L } : gw0
           B.stick.updateWorldMatrix(true, false)
           const e = B.stick.matrixWorld.elements
           const heel = { x: e[12], y: e[13], z: e[14] }
@@ -220,6 +249,7 @@ const r = await page.evaluate(async (secs) => {
     boneSamples, bonePopSamples: pops, popsPerRigSec: +(pops / Math.max(1e-9, boneRigSec)).toFixed(3), handStickPopsPerRigSec: +(limbPops / Math.max(1e-9, boneRigSec)).toFixed(3), boneP99: +pct(speeds, 0.99).toFixed(2),
     puckBlade: { frames: blade.length, p50: +pct(blade, 0.5).toFixed(2), p90: +pct(blade, 0.9).toFixed(2), over1ft: +(blade.filter((x) => x > 1).length / Math.max(1, blade.length)).toFixed(3), bladeYp50: +pct(bladeY, 0.5).toFixed(2), bladeYp90: +pct(bladeY, 0.9).toFixed(2), contexts: Object.entries(bctx).sort((a, b) => b[1] - a[1]).slice(0, 6) },
     overlap: { framesPct: +(100 * overlapFrames / Math.max(1, overlapN)).toFixed(1), pairsPerFrame: +(overlapPairs / Math.max(1, overlapN)).toFixed(3) },
+    footSlip: { samples: slipBack.length, backP50: +pct(slipBack, 0.5).toFixed(2), backP90: +pct(slipBack, 0.9).toFixed(2), ratioP10: +pct(ratio, 0.1).toFixed(2), ratioP50: +pct(ratio, 0.5).toFixed(2), backMean: +(slipBack.reduce((a, b) => a + b, 0) / Math.max(1, slipBack.length)).toFixed(2), skidP50: +pct(slipAll, 0.5).toFixed(2), skidP90: +pct(slipAll, 0.9).toFixed(2), skidMean: +(slipAll.reduce((a, b) => a + b, 0) / Math.max(1, slipAll.length)).toFixed(2) },
     grip: { checks: gripChecks, offPct: +(100 * gripOff / Math.max(1, gripChecks)).toFixed(2), p50: +pct(gripD, 0.5).toFixed(3), p95: +pct(gripD, 0.95).toFixed(3), contexts: Object.entries(gctx).sort((a, b) => b[1] - a[1]).slice(0, 6) },
     elbow: { checks: elbowChecks, invertedPct: +(100 * elbowInv / Math.max(1, elbowChecks)).toFixed(2), sidewaysPct: +(100 * elbowSide / Math.max(1, elbowChecks)).toFixed(2), contexts: Object.entries(ectx).sort((a, b) => b[1] - a[1]).slice(0, 6) },
     handOffStick: handOff, handChecks, handOffContexts: Object.entries(hctx).sort((a, b) => b[1] - a[1]).slice(0, 8),
