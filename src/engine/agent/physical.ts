@@ -36,8 +36,8 @@ export const HIT_TUNING = {
   /** Penalty scale on dangerous hits. */
   penaltyK: 1.7,
   /** Hit-intent multipliers by where the target is: the hitter's offensive zone / own zone. */
-  forecheckK: 5,
-  ownZoneK: 0.45
+  forecheckK: 3.8,
+  ownZoneK: 0.9
 }
 
 /**
