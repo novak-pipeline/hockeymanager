@@ -14,6 +14,7 @@ import {
   saveClipFor,
   distToBoards,
   hitPlan,
+  hitPushDir,
   celebrationFor,
   locomotionWeights,
   wantsHockeyStop,
@@ -158,6 +159,44 @@ describe('boards + hits', () => {
     const b = hitPlan(30, 30, 1, 'battle')
     expect(b.target).toBe('hit_stagger')
     expect(b.hardness).toBeLessThanOrEqual(0.4)
+  })
+
+  it('the target goes down the way the impulse pushes him (film C3)', () => {
+    // facing +Z (angle 0): hit from the front pushes him back, from behind forward, from his right to his left
+    expect(hitPushDir(0, -1, 0)).toBe('back')
+    expect(hitPushDir(0, 1, 0)).toBe('forward')
+    expect(hitPushDir(1, 0, 0)).toBe('left') // his left is +X at angle 0
+    expect(hitPushDir(-1, 0, 0)).toBe('right')
+    expect(hitPushDir(1, 0, Math.PI / 2)).toBe('forward') // facing +X
+    expect(hitPlan(28, 30, undefined, undefined, 'back').target).toBe('hit_fall')
+    expect(hitPlan(28, 30, undefined, undefined, 'forward').target).toBe('hit_fall_fwd')
+    expect(hitPlan(28, 30, undefined, undefined, 'left').target).toBe('hit_fall_side_L')
+    expect(hitPlan(28, 30, undefined, undefined, 'right').target).toBe('hit_fall_side_R')
+    expect(hitPlan(16, 30, undefined, undefined, 'forward').target).toBe('hit_stumble_fwd')
+  })
+
+  it("the engine's knockdown decides the fall (agent engine)", () => {
+    expect(hitPlan(2, 30, 0.2, 'openIce', 'back', true).target).toBe('hit_fall')
+    expect(hitPlan(30, 30, 1, 'openIce', 'back', false).target).toBe('hit_stumble')
+    // knocked down on the wall: he folds into the boards
+    const w = hitPlan(20, 30, 0.8, 'boards', 'back', true)
+    expect(w.target).toBe('hit_fall_fwd')
+    expect(w.pinned).toBe(true)
+    // a battle with a knockdown still goes down
+    expect(hitPlan(10, 30, 0.5, 'battle', 'left', true).target).toBe('hit_fall_side_L')
+    for (const t of ['hit_fall_fwd', 'hit_fall_side_L', 'hit_fall_side_R', 'hit_stumble_fwd', 'getup_knees']) expect(SKATER_CLIPS).toContain(t)
+  })
+
+  it('reads the knockdown as a hit flag or a separate event (tolerant)', () => {
+    const P = asPlayerId
+    const cues = extractActionCues([
+      { type: 'hit', period: 1, t: 5, by: P('a'), on: P('b'), pos: { x: 0, y: 0 }, force: 0.4, knockdown: true } as unknown as GameStream[number],
+      { type: 'hit', period: 1, t: 9, by: P('c'), on: P('d'), pos: { x: 0, y: 0 }, force: 0.9 },
+      { type: 'knockdown', period: 1, t: 9.3, player: 'd' } as unknown as GameStream[number],
+      { type: 'knockdown', period: 1, t: 30, player: 'e', pos: { x: 0.1, y: 0 } } as unknown as GameStream[number],
+    ]).filter((c) => c.kind === 'hit')
+    expect(cues.map((c) => [c.targetId, c.knockdown])).toEqual([['b', true], ['d', true], ['e', true]])
+    expect(planCues(cues)[2]!.clip).toBeNull() // no hitter to animate
   })
 })
 
