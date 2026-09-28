@@ -685,6 +685,9 @@ function supportTable(w: World, me: Side, withPuck: boolean): RoleSpot[] {
   return DZ_ZONE
 }
 
+/** Role assignment: hysteresis on a man's current role (ft of skating it is worth keeping), and whether to solve the whole shape at once. */
+export const ROLE_ASSIGN = { keep: 12, optimal: 1 }
+
 /** Assign roles greedily in priority order, with hysteresis on current roles. */
 function assignRoles(me: Side, pool: Body[], table: RoleSpot[], targets: Map<string, XY>): Map<Body, RoleSpot> {
   const out = new Map<Body, RoleSpot>()
@@ -710,17 +713,51 @@ function assignRoles(me: Side, pool: Body[], table: RoleSpot[], targets: Map<str
       return false
     })
   }
+  const costOf = (b: Body, spot: RoleSpot): number => {
+    const tgt = targets.get(spot.role)!
+    const isD = b.player.position === 'D'
+    let cost = Math.hypot(b.x - tgt.x, b.y - tgt.y)
+    if (spot.pos === 'F' && isD) cost += 30
+    if (spot.pos === 'D' && !isD) cost += 30
+    if (me.roles.get(b) === spot.role) cost -= ROLE_ASSIGN.keep
+    return cost
+  }
+  // The shape as a whole: the assignment with the least total skating (all
+  // permutations — five men at most), so nobody crosses the ice to take a
+  // spot a teammate is standing next to, and the roles don't churn.
+  const men = [...free]
+  if (ROLE_ASSIGN.optimal && men.length <= 5 && used.length <= 6 && men.length > 0 && men.length <= used.length) {
+    const k = Math.min(men.length, used.length)
+    let bestCost = Infinity
+    let bestPick: number[] = []
+    const pick: number[] = []
+    const usedSpot = new Array(used.length).fill(false)
+    const rec = (i: number, acc: number): void => {
+      if (acc >= bestCost) return
+      if (i === k) {
+        bestCost = acc
+        bestPick = pick.slice()
+        return
+      }
+      for (let j = 0; j < used.length; j++) {
+        if (usedSpot[j]) continue
+        usedSpot[j] = true
+        pick.push(j)
+        rec(i + 1, acc + costOf(men[i], used[j]) + ROLE_ASSIGN.keep)
+        pick.pop()
+        usedSpot[j] = false
+      }
+    }
+    rec(0, 0)
+    for (let i = 0; i < k; i++) out.set(men[i], used[bestPick[i]])
+    return out
+  }
   for (const spot of used) {
     if (free.size === 0) break
-    const tgt = targets.get(spot.role)!
     let best: Body | null = null
     let bc = Infinity
     for (const b of free) {
-      const isD = b.player.position === 'D'
-      let cost = Math.hypot(b.x - tgt.x, b.y - tgt.y)
-      if (spot.pos === 'F' && isD) cost += 30
-      if (spot.pos === 'D' && !isD) cost += 30
-      if (me.roles.get(b) === spot.role) cost -= 12
+      const cost = costOf(b, spot)
       if (cost < bc) {
         bc = cost
         best = b
