@@ -101,6 +101,7 @@ import { defenderOrders, faceoffOrders, faceoffSpot } from './formations'
 import { attackPlayOrders, phaseForPlay, type PlayId } from './playbook'
 import { Director } from './director'
 import { coachFitMultiplier } from '@engine/league/coachProfile'
+import { gameLevelAvg as sharedGameLevelAvg } from '@engine/shared/ratingLevel'
 
 const PERIOD_SECONDS = 1200
 const REGULATION_PERIODS = 3
@@ -156,10 +157,10 @@ const ON_GOAL_SHARE = RATES.shotsOnGoal / (RATES.shotsOnGoal + RATES.blockedShot
 // match-engine plan: carriers with a clear lane now attack the slot instead of
 // passing back to the point, so the average attempt is more dangerous; goals
 // landed 3.54 → 3.81/team/game at 0.6, re-reconciled here.)
-const FINISH_K = 0.62
+const FINISH_K = 0.59
 
 /** Share of director-offered (non-rebound, non-one-timer) shot chances actually taken. */
-const SHOT_VOLUME = 0.83
+const SHOT_VOLUME = 0.8
 
 // Non-shot events: per-game target → per-decision-tick probability. Hits and
 // takeaways are gated on the pressuring defender actually being near the puck
@@ -2624,22 +2625,9 @@ export function budgetTactics(team: Team): Team {
   return { ...team, tactics: next }
 }
 
-/** Mean (scoring + puckControl + skating) / 3 of the generated calibration league's dressed skaters. */
-const CALIBRATION_LEVEL = 57.2
-
-/** LEAGUE_AVG shifted by how far tonight's dressed skaters sit from the calibration league. */
+/** LEAGUE_AVG shifted by how far tonight's dressed skaters sit from the calibration league (shared with the quick sim). */
 export function gameLevelAvg(home: Team, away: Team, resolve: (id: PlayerId) => Player): number {
-  let s = 0
-  let n = 0
-  for (const t of [home, away]) {
-    for (const id of [...t.lines.forwards.flat(), ...t.lines.defensePairs.flat()]) {
-      const p = resolve(id)
-      if (!p) continue
-      s += (p.composites.scoring + p.composites.puckControl + p.composites.skating) / 3
-      n++
-    }
-  }
-  return n > 0 ? LEAGUE_AVG + (s / n - CALIBRATION_LEVEL) : LEAGUE_AVG
+  return sharedGameLevelAvg(home, away, resolve, LEAGUE_AVG)
 }
 
 /**
