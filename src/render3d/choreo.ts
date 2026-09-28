@@ -39,7 +39,7 @@ import {
 import type { BoneName, PoseOverlay } from './athlete'
 import type * as THREE from 'three'
 
-export type ActionKind = 'shot' | 'save' | 'goal' | 'hit' | 'pass' | 'faceoff' | 'deke'
+export type ActionKind = 'shot' | 'save' | 'goal' | 'hit' | 'pass' | 'faceoff' | 'deke' | 'poke'
 
 export interface ActionCue {
   kind: ActionKind
@@ -62,6 +62,8 @@ export interface ActionCue {
   shotType?: string
   /** deke (agent engine): which move */
   dekeKind?: string
+  /** poke: did it knock the puck free (agent pokeCheck.success; takeaways always did) */
+  success?: boolean
 }
 
 /** The deke clip for each move the engine names (additive 'deke' event). */
@@ -95,11 +97,24 @@ export function extractActionCues(stream: GameStream): ActionCue[] {
       // additive agent-engine event: { by, on?, kind, success, pos } (tolerant read)
       const d = ev as unknown as { period: number; t: number; by: string; on?: string; kind?: string; pos?: { x: number; y: number } }
       out.push({ kind: 'deke', absT: absTime(d.period, d.t), nx: d.pos?.x ?? 0, ny: d.pos?.y ?? 0, actorId: d.by, ...(d.on ? { targetId: d.on } : {}), dekeKind: d.kind ?? 'forehandBackhand' })
+    } else if ((ev as { type: string }).type === 'pokeCheck') {
+      // additive agent-engine event: { by, on, success, pos } (tolerant read)
+      const d = ev as unknown as { period: number; t: number; by?: string; on?: string; success?: boolean; pos?: { x: number; y: number } }
+      if (d.by) out.push({ kind: 'poke', absT: absTime(d.period, d.t), nx: d.pos?.x ?? 0, ny: d.pos?.y ?? 0, actorId: d.by, ...(d.on ? { targetId: d.on } : {}), success: d.success !== false })
+    } else if (isEvent(ev, 'takeaway')) {
+      // the defender's stick knocked it off him: a poke (both engines emit takeaways)
+      out.push({ kind: 'poke', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.by, targetId: ev.from, success: true })
     } else if (isEvent(ev, 'faceoff')) {
       out.push({ kind: 'faceoff', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.winner })
     }
   }
-  return out.sort((a, b) => a.absT - b.absT)
+  out.sort((a, b) => a.absT - b.absT)
+  // a successful pokeCheck and the takeaway it produced are ONE poke
+  return out.filter((c, i) => {
+    if (c.kind !== 'poke') return true
+    for (let j = i - 1; j >= 0 && out[j]!.absT > c.absT - 0.6; j--) if (out[j]!.kind === 'poke' && out[j]!.actorId === c.actorId) return false
+    return true
+  })
 }
 
 /** Seconds the faceoff crouch starts before the drop. */
@@ -138,6 +153,8 @@ export function planCues(cues: ActionCue[], contactOf: (clip: string) => number 
       clip = hitPlan(12, distToBoards(normXtoWorld(cue.nx), normYtoWorld(cue.ny)), cue.force, cue.hitKind).hitter
     } else if (cue.kind === 'deke') {
       clip = DEKE_CLIP[cue.dekeKind ?? ''] ?? 'deke_fb'
+    } else if (cue.kind === 'poke') {
+      clip = 'poke'
     } else if (cue.kind === 'faceoff') {
       clip = 'faceoff_crouch'
       lead = FACEOFF_LEAD_S

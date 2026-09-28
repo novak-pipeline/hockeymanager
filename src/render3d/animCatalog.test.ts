@@ -237,4 +237,21 @@ describe('cue planning (choreographer)', () => {
     const fo = plans.find((p) => p.cue.kind === 'faceoff')!
     expect(fo.lead).toBeGreaterThan(0.5)
   })
+
+  it('pokes on the agent pokeCheck and on takeaways (one poke when both describe it)', () => {
+    const pokes = extractActionCues([
+      // agent engine: the poke, then the takeaway it produced
+      { type: 'pokeCheck', period: 1, t: 20, by: 'd1', on: 'f5', success: true, pos: { x: 0.2, y: 0.1 } } as unknown as GameStream[number],
+      { type: 'takeaway', period: 1, t: 20.1, by: P('d1'), from: P('f5'), pos: { x: 0.2, y: 0.1 } },
+      // a missed poke (no takeaway)
+      { type: 'pokeCheck', period: 1, t: 25, by: 'd2', on: 'f6', success: false, pos: { x: 0.1, y: 0 } } as unknown as GameStream[number],
+      // classic engine: a takeaway alone
+      { type: 'takeaway', period: 1, t: 40, by: P('d3'), from: P('f7'), pos: { x: -0.3, y: 0.2 } },
+    ]).filter((c) => c.kind === 'poke')
+    expect(pokes.map((c) => c.actorId)).toEqual(['d1', 'd2', 'd3'])
+    expect(pokes[1]!.success).toBe(false)
+    const plan = planCues(pokes)
+    expect(plan.every((p) => p.clip === 'poke')).toBe(true)
+    expect(plan[0]!.lead).toBeCloseTo(CLIPS.poke!.contact!)
+  })
 })
