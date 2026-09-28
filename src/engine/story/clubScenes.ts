@@ -276,10 +276,58 @@ export const RACE_EVENTS: DecisionEvent[] = [
   },
 ]
 
+/* ────────────────────────── the code ────────────────────────── */
+
+/**
+ * The night before the rematch with the club whose man hurt one of yours.
+ * The room's toughest player is at your door, and the room wants to know
+ * whether the GM wants it answered. Answering is real: the game is played at
+ * grudge-match heat (more penalties, a fight more likely). Raised once, by
+ * name, the day before the rematch.
+ *
+ * Slots: {name} {last} {team} {hitter} {victim} {opp}.
+ */
+export const CODE_EVENTS: DecisionEvent[] = [
+  {
+    id: 'ev.code.rematch',
+    speaker: 'player',
+    scene:
+      `{last} doesn't sit down. "The {opp} are in tomorrow. {hitter} is dressing, and {victim} is still in the ` +
+      `treatment room from that hit. The guys want to know where you stand before they decide where they stand."`,
+    options: [
+      {
+        id: 'answer-it',
+        label: `"Nobody does that to one of ours for free."`,
+        effects: { roomMorale: 5, roomRespect: 3, leakChance: 0.3 },
+        outcome:
+          `The room heard what it wanted to hear. Tomorrow is played hot: more whistles, a fight likely, and a ` +
+          `penalty kill that had better be ready. If it leaks, the league will be watching the tape too.`,
+      },
+      {
+        id: 'scoreboard',
+        label: `"We answer it on the scoreboard. Power play, not the penalty box."`,
+        effects: { roomRespect: 2, roomMorale: -2 },
+        outcome:
+          `The disciplined answer, and the coaches will love it. A few of the older players think the message ` +
+          `was the wrong one, and {last} will be watching to see whether you meant it when the first cheap shot comes.`,
+      },
+      {
+        id: 'league',
+        label: `"The league has the tape. Let Player Safety handle it."`,
+        effects: { roomMorale: -4, roomRespect: -2, residue: 'wasDismissed' },
+        outcome:
+          `Correct on paper and cold in the room. {last} nodded and left. Nobody will do anything stupid ` +
+          `tomorrow, and nobody will forget that you asked them not to.`,
+      },
+    ],
+  },
+]
+
 /** Every summoned scene, for lookup by id when a response comes back. */
 export const CLUB_SCENES: DecisionEvent[] = [
   ...DRAFT_CALL_EVENTS,
   ...ARRIVAL_EVENTS,
   ...FARM_TRIP_EVENTS,
   ...RACE_EVENTS,
+  ...CODE_EVENTS,
 ]

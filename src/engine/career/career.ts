@@ -149,6 +149,7 @@ import { farmSplit } from '@engine/career/farmReassign'
 import { runDrills, showingOf, gradeOf, citeWeek, readinessOf, choicesFor, staffRead, type DrillResult, type DevGroup, type Readiness, type ChoiceSet } from '@engine/career/devCamp'
 import { detectBattles, rankBattle, battleRead, type CampCandidate, type CampGroup } from '@engine/career/campBattles'
 import { seasonSpans, devCampDateISO, resignDateISO, faDateISO, campDateISO, boardMeetingDateISO, inHolidayFreeze, allStarBreakDay, HOLIDAY_FREEZE, FREE_AGENCY, ARBITRATION, TRAINING_CAMP } from '@engine/career/seasonSpans'
+import { pickHitter, playerSafetyFine, lineNickname, connSmythe, handshakeLine, beardsLine, dayWithTheCup, ebugVignette, NICKNAME_MIN_GP, NICKNAME_MIN_PPG, type HitterCandidate, type PlayoffLine } from '@engine/story/hockeySoul'
 import { createGmReputation, callsThisWeek, recordContact, adjustStanding, driftStanding, standingTilt, standingLabel, FREE_PER_WEEK, type GmReputationState, type ContactKind } from '@engine/career/gmReputation'
 import { WEEK_LOADS, WEEK_LOAD_ORDER, staffWeekLoad, countBackToBacks, raceNumbers, buildStaffRead, pickStoryline, type WeekLoad, type StorylineCandidate } from '@engine/career/theWeek'
 import { buildNeeds, leagueBenchmark, type DepthEntry, type NeedsCandidate, type NeedGroup } from '@engine/career/offseasonNeeds'
@@ -508,6 +509,7 @@ import {
   ARRIVAL_EVENTS,
   CLUB_SCENES,
   RACE_EVENTS,
+  CODE_EVENTS,
   DRAFT_CALL_EVENTS,
   FARM_TRIP_EVENTS,
 } from '@engine/story/clubScenes'
@@ -4324,6 +4326,7 @@ export class Career {
       const chosen = ev?.options.find((o) => o.id === optionId)
       if (ev && chosen) {
         this.applyDecisionEffects(interaction, player, chosen)
+        if (ev.id === 'ev.code.rematch') this.resolveCodeChoice(interactionId, optionId)
         this.decisionEventFor.delete(interactionId)
         // The receipt, not the authored outcome: a refused act rewrote it.
         return { ok: true, message: interaction.outcome ?? chosen.outcome }
@@ -8144,6 +8147,8 @@ export class Career {
         if (teamId === this.userTeamId) {
           const oppId = res.homeTeamId === this.userTeamId ? res.awayTeamId : res.homeTeamId
           this.pushInjuryNews(player, injury, true, this.data.teams.get(oppId)?.name ?? 'the opposition')
+          // Hockey soul: the code — was it a hit, and whose?
+          if (this.phase === 'regularSeason') this.noteCodeDebt(player, res)
         }
       }
     }
@@ -8284,6 +8289,7 @@ export class Career {
   }
 
   private writeUserResultNews(day: number, res: GameOutcome, gameId = '', playoff = false): void {
+    this.trackNamedLines(res)
     const home = this.data.teams.get(res.homeTeamId)!
     const away = this.data.teams.get(res.awayTeamId)!
     const userIsHome = res.homeTeamId === this.userTeamId
@@ -9313,6 +9319,14 @@ export class Career {
     }
     // THE WEEK: the coach's read for the week that starts tomorrow.
     if (this.phase === 'regularSeason') this.maybeWriteWeekRead(day)
+    // Hockey soul: the rematch is settled, the next one raised; named lines;
+    // the EBUG.
+    if (this.phase === 'regularSeason') {
+      this.settleCode(day, outcomes.find((o) => o.homeTeamId === this.userTeamId || o.awayTeamId === this.userTeamId))
+      this.raiseCodeScene(day)
+      if (day % 7 === 0) this.checkNamedLineBreakups()
+      this.maybeEbug(day)
+    }
     // LW6: anniversary callbacks — the world remembers its own history. At most
     // one per day, exact-day matches only, and only your club's durable moments.
     {
@@ -9653,7 +9667,7 @@ export class Career {
       const away = this.data.teams.get(game.awayTeamId)!
       const res = quickSimGame(home, away, this.storyResolve(), {
         seed: this.gameSeedFor(game),
-        intensity: gameIntensity(this.rivalriesState, game.homeTeamId as string, game.awayTeamId as string).factor,
+        intensity: this.gameHeat(game),
       })
       this.applyOutcome(game, res)
       outcomes.push(res)
@@ -10796,7 +10810,7 @@ export class Career {
       const sim = isUser ? this.watchSim() : quickSimGame
       const res = sim(home, away, this.storyResolve(), {
         seed: this.gameSeedFor(game),
-        intensity: gameIntensity(this.rivalriesState, game.homeTeamId as string, game.awayTeamId as string).factor,
+        intensity: this.gameHeat(game),
       })
       this.applyOutcome(game, res)
       outcomes.push(res)
@@ -10877,6 +10891,10 @@ export class Career {
       qualified.add(s.lowSeedTeamId as string)
     }
     const made = qualified.has(this.userTeamId as string)
+    // Hockey soul: a new spring's Conn Smythe race; the beards start.
+    this.playoffLinesAcc.clear()
+    this.cupTraditionsDone = false
+    if (made) this.pushNews('playoffs', 'The razors go in the drawer', beardsLine(this.captainOf(this.userTeamId)), { teamId: this.userTeamId as string, salience: 45 })
     this.pushNews(
       'playoffs',
       made ? 'Playoffs begin — you are in!' : 'Playoffs begin',
@@ -11037,6 +11055,7 @@ export class Career {
         intensity: gameIntensity(this.rivalriesState, g.homeTeamId as string, g.awayTeamId as string).factor,
       })
       if (res.decidedBy === 'shootout') throw new Error('playoff game decided by shootout')
+      this.accumulatePlayoffLines(res)
       const result: SeriesGameResult = {
         gameId: asGameId(`${g.seriesId}-g${g.gameNumber}`),
         gameNumber: g.gameNumber,
@@ -11125,9 +11144,16 @@ export class Career {
         this.pushNews(
           'playoffs',
           won ? `Series won vs ${opp.abbreviation}!` : `Eliminated by ${opp.abbreviation}`,
-          won
-            ? `The ${this.userTeam.name} take the series ${series.highSeedTeamId === this.userTeamId ? series.highSeedWins : series.lowSeedWins}–${series.highSeedTeamId === this.userTeamId ? series.lowSeedWins : series.highSeedWins} and advance.`
-            : `The season ends. Time to build for next year.`,
+          (won
+            ? `The ${this.userTeam.name} take the series ${series.highSeedTeamId === this.userTeamId ? series.highSeedWins : series.lowSeedWins}–${series.highSeedTeamId === this.userTeamId ? series.lowSeedWins : series.highSeedWins} and advance. `
+            : `The season ends. `) +
+            handshakeLine({
+              won,
+              ourCaptain: this.captainOf(this.userTeamId),
+              theirCaptain: this.captainOf(opp.id),
+              oppName: opp.name,
+              games: `${Math.max(series.highSeedWins, series.lowSeedWins)}–${Math.min(series.highSeedWins, series.lowSeedWins)}`,
+            }),
           { teamId: opp.id as string }
         )
       }
@@ -11156,6 +11182,10 @@ export class Career {
       this.runBeatDay(day, beatOutcomes, true)
     }
 
+    if (po.championTeamId && !this.cupTraditionsDone) {
+      this.cupTraditionsDone = true
+      this.cupTraditions(po.championTeamId, day)
+    }
     if (po.championTeamId) {
       const champ = this.data.teams.get(po.championTeamId)!
       this.pushNews(
@@ -12213,6 +12243,7 @@ export class Career {
       }
       case 'freeAgency': {
         os.faDay++
+        this.releaseCupDay(os.faDay)
         // FEED-V2-1: the summer has a voice too. Yesterday's signings post now,
         // on free agency's own advancing clock (so the daily cap still binds —
         // the regular-season story tick doesn't run out here).
@@ -22697,6 +22728,268 @@ export class Career {
     }
   }
 
+  /* ═══════════════════════════ HOCKEY SOUL ═══════════════════════════ */
+  // The code, line nicknames, Cup traditions, the EBUG (hockeySoul.ts has the
+  // pure half). Every beat fires off real sim state; the code and a broken-up
+  // line have real consequences.
+
+  /** Open "debts" under the code: an opponent hurt one of yours. */
+  private codeDebts: Array<{ year: number; day: number; oppId: string; victimId: string; hitterId: string; raised: boolean; interactionId?: string; answered?: boolean }> = []
+  /** The GM chose to answer it: the rematch with this club is played at
+   *  grudge-match heat. One game, then it clears. */
+  private codeHeat: { year: number; oppId: string } | null = null
+  /** Debts settled this season (for the three-a-season cap). */
+  private codeSettled: Array<{ year: number }> = []
+  private codeSettledThisYear(): number { return this.codeSettled.filter((x) => x.year === this.year).length }
+  /** Games and points per forward trio this season (key = sorted ids). */
+  private lineTogether = new Map<string, { gp: number; pts: number }>()
+  /** Lines the room (or the city) has named. */
+  private namedLines: Array<{ key: string; ids: string[]; name: string; year: number; active: boolean }> = []
+  /** Playoff lines this spring, for the Conn Smythe. */
+  private playoffLinesAcc = new Map<string, PlayoffLine>()
+  /** Players queued for their day with the Cup (released through July). */
+  private cupSummer: string[] = []
+  private ebugYear = -1
+  /** Latch: Cup traditions run once per spring (reset when playoffs open). */
+  private cupTraditionsDone = false
+
+  /** Game heat for the sim: the rivalry's, or grudge-match heat when the GM
+   *  chose to answer a dirty hit and this is the rematch. */
+  private gameHeat(game: { homeTeamId: TeamId; awayTeamId: TeamId }): number {
+    const base = gameIntensity(this.rivalriesState, game.homeTeamId as string, game.awayTeamId as string).factor
+    const h = this.codeHeat
+    if (!h || h.year !== this.year) return base
+    const ids = [game.homeTeamId as string, game.awayTeamId as string]
+    if (ids.includes(this.userTeamId as string) && ids.includes(h.oppId)) return Math.max(base, 1)
+    return base
+  }
+
+  /** The code: one of ours went down in-game. If a genuinely physical opponent
+   *  was throwing hits, that is a debt the room will remember until the rematch. */
+  private noteCodeDebt(victim: Player, res: GameOutcome): void {
+    // Rare by design: a real absence (not a day-to-day knock), and at most
+    // three debts a season, so the code stays an event and not a chore.
+    if ((victim.injuryStatus?.gamesRemaining ?? 0) < 2) return
+    if (this.codeDebts.filter((d) => d.year === this.year).length + this.codeSettledThisYear() >= 3) return
+    const oppId = (res.homeTeamId === this.userTeamId ? res.awayTeamId : res.homeTeamId) as string
+    const opp = this.data.teams.get(oppId as TeamId)
+    if (!opp) return
+    const oppRoster = new Set(opp.roster.map((id) => id as string))
+    const cands: HitterCandidate[] = []
+    for (const [pid, st] of res.playerStats) {
+      if (!oppRoster.has(pid as string) || st.toi <= 0) continue
+      const p = this.data.players.get(pid)
+      if (!p || p.position === 'G') continue
+      cands.push({ id: pid as string, name: p.name, hits: st.hits ?? 0, aggression: p.ratings.mental.aggression })
+    }
+    const hitter = pickHitter(cands)
+    if (!hitter) return
+    if (this.codeDebts.some((d) => d.year === this.year && d.oppId === oppId && d.answered === undefined)) return
+    this.codeDebts.push({ year: this.year, day: this.currentDay, oppId, victimId: victim.id as string, hitterId: hitter.id, raised: false })
+    this.pushNews('injury', `${victim.name} down after a hit from ${hitter.name}`,
+      `${hitter.name} finished his check and ${victim.name} did not get up quickly. The bench saw it, the room saw it, and the next meeting with the ${opp.name} is now circled.`,
+      { playerId: victim.id as string, teamId: this.userTeamId as string, salience: 60 })
+    const fine = playerSafetyFine(hitter.aggression)
+    if (fine !== null) {
+      this.pushNews('league', `Player Safety fines ${hitter.name}`,
+        `The Department of Player Safety reviewed the hit on ${victim.name} and fined ${hitter.name} $${fine.toLocaleString('en-US')}${fine >= 5000 ? ', the maximum allowable under the CBA' : ''}. No suspension. Nobody in your room thinks that settles it.`,
+        { playerId: hitter.id, teamId: oppId, salience: 50 })
+    }
+  }
+
+  /** The night before the rematch, the room asks whether the GM wants it answered. */
+  private raiseCodeScene(day: number): void {
+    const next = this.nextUserGame(day)
+    if (!next || next.day !== day + 1) return
+    const debt = this.codeDebts.find((d) => d.year === this.year && !d.raised && d.oppId === (next.oppId as string))
+    if (!debt) return
+    debt.raised = true
+    const roster = this.userTeam.roster
+      .map((id) => this.data.players.get(id))
+      .filter((p): p is Player => !!p && p.position !== 'G' && p.injuryStatus === null && (p.id as string) !== debt.victimId)
+    const tough = [...roster].sort((a, b) => b.ratings.mental.aggression - a.ratings.mental.aggression || ratedOverall(b) - ratedOverall(a))[0]
+    if (!tough) return
+    const opp = this.data.teams.get(next.oppId)
+    const id = this.summonClubScene({
+      pool: CODE_EVENTS,
+      eventId: 'ev.code.rematch',
+      player: tough,
+      day,
+      slots: {
+        hitter: this.data.players.get(asPlayerId(debt.hitterId))?.name ?? 'their guy',
+        victim: this.data.players.get(asPlayerId(debt.victimId))?.name ?? 'our guy',
+        opp: opp ? clubNickname(opp) : 'opposition',
+      },
+      headline: `The ${opp?.name ?? 'rematch'} are in tomorrow: the room wants a word`,
+      allowBusy: true,
+    })
+    if (id) debt.interactionId = id
+  }
+
+  /** The GM's answer to the code scene. */
+  private resolveCodeChoice(interactionId: string, optionId: string): void {
+    const debt = this.codeDebts.find((d) => d.interactionId === interactionId)
+    if (!debt) return
+    debt.answered = optionId === 'answer-it'
+    if (debt.answered) this.codeHeat = { year: this.year, oppId: debt.oppId }
+  }
+
+  /** After a user game day: the rematch is played, the debt is settled. */
+  private settleCode(day: number, res: GameOutcome | undefined): void {
+    if (!res) return
+    const oppId = (res.homeTeamId === this.userTeamId ? res.awayTeamId : res.homeTeamId) as string
+    const debt = this.codeDebts.find((d) => d.year === this.year && d.oppId === oppId && d.raised && d.day < day)
+    if (!debt) return
+    this.codeDebts = this.codeDebts.filter((d) => d !== debt)
+    this.codeSettled.push({ year: this.year })
+    if (this.codeSettled.length > 12) this.codeSettled = this.codeSettled.slice(-12)
+    const heated = this.codeHeat?.oppId === oppId
+    if (heated) this.codeHeat = null
+    const fought = res.stream.some((e) => isEvent(e, 'penalty') && e.infraction === 'fighting')
+    const pim = [...res.playerStats].filter(([pid]) => this.userTeam.roster.includes(pid)).reduce((n, [, s]) => n + s.penaltyMinutes, 0)
+    const hitter = this.data.players.get(asPlayerId(debt.hitterId))?.name ?? 'their man'
+    if (!heated && !fought) return
+    this.pushNews('result', fought ? 'The code, honoured' : 'A message sent',
+      fought
+        ? `It took until the rematch, but it was answered. The gloves came off, the room stood up on the bench, and ${hitter} knows exactly why.`
+        : `No fight, but nobody on the other bench mistook it for a quiet night: ${pim} penalty minutes and every one of them on purpose.`,
+      { teamId: this.userTeamId as string, salience: 58 })
+  }
+
+  /** Line nicknames: a forward trio that plays together and produces earns a name. */
+  private trackNamedLines(res: GameOutcome): void {
+    if (this.phase !== 'regularSeason' && this.phase !== 'playoffs') return
+    const stat = res.playerStats
+    for (const trio of this.userTeam.lines.forwards) {
+      const ids = trio.map((x) => x as string).filter(Boolean)
+      if (ids.length !== 3 || new Set(ids).size !== 3) continue
+      if (!ids.every((id) => (stat.get(asPlayerId(id))?.toi ?? 0) > 0)) continue
+      const key = [...ids].sort().join('|')
+      const cur = this.lineTogether.get(key) ?? { gp: 0, pts: 0 }
+      cur.gp++
+      cur.pts += ids.reduce((n, id) => { const s = stat.get(asPlayerId(id)); return n + (s ? s.goals + s.assists : 0) }, 0)
+      this.lineTogether.set(key, cur)
+      const named = this.namedLines.find((l) => l.key === key)
+      if (named) {
+        if (!named.active) {
+          named.active = true
+          this.pushNews('result', `${named.name.charAt(0).toUpperCase()}${named.name.slice(1)}, reunited`,
+            `Back together, and it looked like they had never been apart.`, { teamId: this.userTeamId as string, salience: 45 })
+        }
+        continue
+      }
+      if (cur.gp < NICKNAME_MIN_GP || cur.pts / cur.gp < NICKNAME_MIN_PPG) continue
+      // A named line with a new winger is the same line, not a new one.
+      if (this.namedLines.some((l) => l.ids.filter((x) => ids.includes(x)).length >= 2)) continue
+      const mates = ids.map((id) => this.data.players.get(asPlayerId(id))).filter((p): p is Player => !!p)
+      const name = lineNickname(mates.map((p) => ({ id: p.id as string, name: p.name, age: p.age, nationality: p.nationality })))
+      if (this.namedLines.some((l) => l.active && l.name === name)) continue
+      this.namedLines.push({ key, ids: [...ids], name, year: this.year, active: true })
+      if (this.namedLines.length > 12) this.namedLines = this.namedLines.slice(-12)
+      for (const p of mates) p.morale = Math.min(100, p.morale + 3)
+      this.pushNews('result', `They're calling it ${name}`,
+        `${mates.map((p) => p.name).join(', ')}: ${cur.pts} points in ${cur.gp} games together. The city has given the line a name, which is how you know it has arrived. Break it up and people will ask why.`,
+        { teamId: this.userTeamId as string, salience: 62 })
+    }
+  }
+
+  /** A named line broken up by the GM (all three healthy and still here) is
+   *  noticed: the fans ask why, and the three of them feel it. */
+  private checkNamedLineBreakups(): void {
+    const trios = new Set(this.userTeam.lines.forwards.map((t) => t.map((x) => x as string).sort().join('|')))
+    const roster = new Set(this.userTeam.roster.map((id) => id as string))
+    for (const l of this.namedLines) {
+      if (!l.active || trios.has(l.key)) continue
+      const ps = l.ids.map((id) => this.data.players.get(asPlayerId(id)))
+      const allHere = ps.every((p) => !!p && roster.has(p.id as string) && p.injuryStatus === null)
+      l.active = false
+      if (!allHere) continue // injuries and trades break lines; that is nobody's decision
+      for (const p of ps) if (p) p.morale = Math.max(0, p.morale - 3)
+      this.pushNews('result', `${l.name.charAt(0).toUpperCase()}${l.name.slice(1)} is broken up`,
+        `The coaching staff split ${l.name} this week. The fans noticed before the lineup card was dry, and so did the three of them. Put them back together and the grumbling stops.`,
+        { teamId: this.userTeamId as string, salience: 52 })
+    }
+  }
+
+  /** Every playoff game feeds the Conn Smythe race. */
+  private accumulatePlayoffLines(res: GameOutcome): void {
+    const home = new Set((this.data.teams.get(res.homeTeamId)?.roster ?? []).map((id) => id as string))
+    for (const [pid, s] of res.playerStats) {
+      if (s.toi <= 0) continue
+      const p = this.data.players.get(pid)
+      if (!p) continue
+      const cur = this.playoffLinesAcc.get(pid as string) ?? {
+        id: pid as string, name: p.name, teamId: (home.has(pid as string) ? res.homeTeamId : res.awayTeamId) as string,
+        position: p.position, gp: 0, goals: 0, assists: 0, saves: 0, shotsAgainst: 0,
+      }
+      cur.gp++; cur.goals += s.goals; cur.assists += s.assists; cur.saves += s.saves; cur.shotsAgainst += s.shotsAgainst
+      this.playoffLinesAcc.set(pid as string, cur)
+    }
+  }
+
+  /** The Cup is won: the Conn Smythe, and (for your club) the summer with the Cup. */
+  private cupTraditions(championId: TeamId, day: number): void {
+    const cs = connSmythe([...this.playoffLinesAcc.values()], championId as string)
+    if (cs) {
+      const team = this.data.teams.get(asTeamId(cs.winner.teamId))
+      const ours = cs.winner.teamId === (this.userTeamId as string)
+      this.pushNews('award', `${cs.winner.name} wins the Conn Smythe`,
+        `The playoff MVP: ${cs.winner.name} of the ${team?.name ?? 'champions'}, ${cs.why}. ${ours ? 'Yours. Nobody can take it off the wall.' : 'The trophy you only get to hold in the spring that matters.'}`,
+        { playerId: cs.winner.id, teamId: cs.winner.teamId, salience: ours ? 80 : 60 })
+      chronicleEvent(this.chronicle, {
+        year: this.year, day, kind: 'award', teamIds: [cs.winner.teamId], playerIds: [cs.winner.id],
+        headline: `${cs.winner.name} wins the ${this.year} Conn Smythe Trophy`, userInvolved: ours,
+      })
+      if (ours) {
+        const p = this.data.players.get(asPlayerId(cs.winner.id))
+        if (p) p.morale = Math.min(100, p.morale + 6)
+      }
+    }
+    if (championId === this.userTeamId) {
+      const captain = this.userTeam.captainId as string | undefined
+      const best = this.userTeam.roster
+        .map((id) => this.data.players.get(id))
+        .filter((p): p is Player => !!p)
+        .sort((a, b) => this.seasonLineOf(b.id).pts - this.seasonLineOf(a.id).pts)
+      const order = [...(captain ? [captain] : []), ...best.map((p) => p.id as string)].filter((id, i, a) => a.indexOf(id) === i)
+      this.cupSummer = order.slice(0, 4)
+    }
+  }
+
+  /** One day with the Cup per free-agency day, for your champions. */
+  private releaseCupDay(faDay: number): void {
+    const id = this.cupSummer.shift()
+    if (!id) return
+    const p = this.data.players.get(asPlayerId(id))
+    if (!p) return
+    this.pushNews('league', `${p.name}'s day with the Cup`, dayWithTheCup(p.name, p.nationality, faDay),
+      { playerId: id, teamId: this.userTeamId as string, salience: 55 })
+  }
+
+  /** The EBUG: down to one healthy goaltender on a game day, the club dresses a local. */
+  private maybeEbug(day: number): void {
+    if (this.ebugYear === this.year) return
+    if (!this.userGameDays().has(day)) return
+    const healthyG = this.userTeam.roster
+      .map((id) => this.data.players.get(id))
+      .filter((p) => !!p && p.position === 'G' && p.injuryStatus === null).length
+    if (healthyG > 1) return
+    this.ebugYear = this.year
+    const v = ebugVignette({ club: this.userTeam.name, city: this.userTeam.city, seed: (this.seed + this.year * 7 + day) >>> 0 })
+    this.pushNews('league', `An emergency backup dresses: ${v.name}`, v.text, { teamId: this.userTeamId as string, salience: 57 })
+  }
+
+  /** The handshake line's captain (or best healthy skater) on each side. */
+  private captainOf(teamId: TeamId): string {
+    const team = this.data.teams.get(teamId)
+    if (!team) return 'the captain'
+    const cap = team.captainId ? this.data.players.get(team.captainId) : undefined
+    if (cap) return cap.name
+    const best = team.roster.map((id) => this.data.players.get(id)).filter((p): p is Player => !!p && p.position !== 'G')
+      .sort((a, b) => ratedOverall(b) - ratedOverall(a))[0]
+    return best?.name ?? 'the captain'
+  }
+
   /* ═══════════════════════════ THE WEEK ═══════════════════════════ */
   // The season is lived a week at a time (depth audit §3): the plan on the
   // dashboard, a practice load with real costs, the coach's weekly read, and
@@ -22919,6 +23212,14 @@ export class Career {
       else if (race.magic !== undefined && race.magic <= 12) cands.push({ priority: 72, title: `Magic number: ${race.magic}`, text: `Any combination of our points and ${race.vsTeam} dropped points totalling ${race.magic} puts us out of their reach.` })
       else if (race.tragic !== undefined && race.tragic <= 12) cands.push({ priority: 72, title: `Tragic number: ${race.tragic}`, text: `${race.tragic} more points of our dropped points and ${race.vsTeam} wins, and they are out of our reach. Every night is a playoff game now.` })
       else cands.push({ priority: 55, title: 'The race', text: inOut })
+    }
+    // Hockey soul: a rematch with the club that hurt one of ours.
+    const owed = games.find((g) => this.codeDebts.some((d) => d.year === this.year && d.oppId === g.opponentId))
+    if (owed) {
+      const debt = this.codeDebts.find((d) => d.year === this.year && d.oppId === owed.opponentId)!
+      const hitter = this.data.players.get(asPlayerId(debt.hitterId))?.name ?? 'their man'
+      const victim = this.data.players.get(asPlayerId(debt.victimId))?.name ?? 'one of ours'
+      cands.push({ priority: 70, title: `Unfinished business: ${owed.opponentName}`, text: `The first meeting since ${hitter}'s hit on ${victim}. The room has not forgotten.` })
     }
     const big = games.find((g) => g.tag)
     if (big) cands.push({ priority: 50, title: `${big.tag}: ${big.opponentName}`, text: `${big.home ? 'At home to' : 'Away at'} ${big.opponentName} on ${this.weekdayOf(big.dateISO)}. Circle it.` })
@@ -30676,6 +30977,17 @@ export class Career {
       ownerRequest: this.ownerRequest ? { ...this.ownerRequest } : undefined,
       gmRelationships: [...this.gmRelationships.entries()],
       gmReputation: structuredClone(this.gmRep),
+      hockeySoul: {
+        codeDebts: structuredClone(this.codeDebts),
+        codeHeat: this.codeHeat ? { ...this.codeHeat } : null,
+        codeSettled: this.codeSettled.map((x) => ({ ...x })),
+        lineTogether: [...this.lineTogether.entries()].map(([k, v]) => [k, { ...v }] as [string, { gp: number; pts: number }]),
+        namedLines: structuredClone(this.namedLines),
+        playoffLines: [...this.playoffLinesAcc.values()].map((l) => ({ ...l })),
+        cupSummer: [...this.cupSummer],
+        ebugYear: this.ebugYear,
+        cupTraditionsDone: this.cupTraditionsDone,
+      },
       ...(this.draftCallsLog.length ? { draftCallsLog: structuredClone(this.draftCallsLog) } : {}),
       mentorships: [...this.mentorships.entries()],
       clubDirection: this.clubDirection,
@@ -30869,6 +31181,18 @@ export class Career {
     career.ownerRequest = snapshot.ownerRequest ? { ...snapshot.ownerRequest } : null
     career.gmRelationships = new Map(snapshot.gmRelationships ?? [])
     career.gmRep = snapshot.gmReputation ? structuredClone(snapshot.gmReputation) : createGmReputation()
+    {
+      const hs = snapshot.hockeySoul
+      career.codeDebts = hs ? structuredClone(hs.codeDebts) : []
+      career.codeHeat = hs?.codeHeat ? { ...hs.codeHeat } : null
+      career.codeSettled = (hs?.codeSettled ?? []).map((x) => ({ ...x }))
+      career.lineTogether = new Map((hs?.lineTogether ?? []).map(([k, v]) => [k, { ...v }]))
+      career.namedLines = hs ? structuredClone(hs.namedLines) : []
+      career.playoffLinesAcc = new Map((hs?.playoffLines ?? []).map((l) => [l.id, { ...l }]))
+      career.cupSummer = [...(hs?.cupSummer ?? [])]
+      career.ebugYear = hs?.ebugYear ?? -1
+      career.cupTraditionsDone = hs?.cupTraditionsDone ?? false
+    }
     career.draftCallsLog = snapshot.draftCallsLog ? structuredClone(snapshot.draftCallsLog) : []
     career.mentorships = new Map(snapshot.mentorships ?? [])
     career.clubDirection = snapshot.clubDirection ?? 'compete'

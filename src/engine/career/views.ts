@@ -2915,6 +2915,19 @@ export interface CareerSnapshot {
   gmPersonas?: Array<[string, GmPersona]>
   /** GM reputation state (anti-cheese). Optional/additive — absent = a fresh name. */
   gmReputation?: import('./gmReputation').GmReputationState
+  /** Hockey soul state (the code, named lines, Conn Smythe race, Cup summer,
+   *  EBUG latch). Optional/additive — absent = a fresh start. */
+  hockeySoul?: {
+    codeDebts: Array<{ year: number; day: number; oppId: string; victimId: string; hitterId: string; raised: boolean; interactionId?: string; answered?: boolean }>
+    codeHeat: { year: number; oppId: string } | null
+    codeSettled?: Array<{ year: number }>
+    lineTogether: Array<[string, { gp: number; pts: number }]>
+    namedLines: Array<{ key: string; ids: string[]; name: string; year: number; active: boolean }>
+    playoffLines: import('../story/hockeySoul').PlayoffLine[]
+    cupSummer: string[]
+    ebugYear: number
+    cupTraditionsDone: boolean
+  }
   /** Scout track record: each draft's calls on file. Optional/additive. */
   draftCallsLog?: Array<{ year: number; publicTop: string[]; scouts: Array<[string, string[]]> }>
   /** Pending preseason board-meeting year (Season Rhythm M1). Optional/additive. */
