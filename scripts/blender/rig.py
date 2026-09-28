@@ -23,6 +23,31 @@ RIG = dict(
 )
 H = RIG['thigh'] + RIG['shin'] + RIG['skate']  # REST_HIP_Y = 3.33
 
+# ── proportion profile ─────────────────────────────────────────────────────
+# The Blender athletes are built on RIG. An OWNER import (import_owner_assets.py)
+# re-authors the same clips on its own skeleton: set_profile() swaps in that
+# body's rest offsets and segment lengths so posekit solves every pose (auto hip
+# height, arm IK, stick reach) for THOSE proportions; reset_profile() restores RIG.
+_DEFAULT_RIG = dict(RIG)
+_PROFILE = {'offsets': None}
+
+
+def set_profile(offsets, dims):
+    """offsets: bone → (x, y, z) rest offset from its parent (renderer space);
+    dims: any RIG keys to override (upperArm, forearm, thigh, shin, skate, stickLen)."""
+    global H
+    RIG.update(dims)
+    _PROFILE['offsets'] = {k: tuple(v) for k, v in offsets.items()}
+    H = offsets['hips'][1]
+
+
+def reset_profile():
+    global H
+    RIG.clear()
+    RIG.update(_DEFAULT_RIG)
+    _PROFILE['offsets'] = None
+    H = RIG['thigh'] + RIG['shin'] + RIG['skate']
+
 BONE_NAMES = [
     'root', 'hips', 'spine', 'chest', 'neck', 'head',
     'shoulder_L', 'upperarm_L', 'forearm_L', 'hand_L',
@@ -42,6 +67,8 @@ PARENT = {
 
 
 def rest_offsets(goalie):
+    if _PROFILE['offsets'] is not None and not goalie:
+        return dict(_PROFILE['offsets'])
     sw = 0.95 if goalie else RIG['shoulderHalfWidth']
     ua, fa, th, sh = RIG['upperArm'], RIG['forearm'], RIG['thigh'], RIG['shin']
     hw = RIG['hipHalfWidth']

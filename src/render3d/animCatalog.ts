@@ -32,6 +32,11 @@ export interface ClipMeta {
   hold?: number
   /** Chain into this clip when finished (hit_fall → getup). */
   next?: string
+  /**
+   * Which hands hold the stick while this clip plays (hands 'stick' clips):
+   * the renderer locks them onto the shaft (athlete.ts lockGrips). Default both.
+   */
+  grip?: 'both' | 'R'
   goalie?: boolean
   /**
    * Slot only an OWNER import fills (scripts/blender/import_owner_assets.py);
@@ -50,13 +55,24 @@ export const CLIPS: Record<string, ClipMeta> = {
   skate_crossover_L: { mask: 'lower', hands: 'stick', loop: true, fadeIn: 0.2, fadeOut: 0.25 },
   skate_crossover_R: { mask: 'lower', hands: 'stick', loop: true, fadeIn: 0.2, fadeOut: 0.25 },
   skate_back: { mask: 'lower', hands: 'stick', loop: true, fadeIn: 0.25, fadeOut: 0.25 },
-  hockey_stop: { mask: 'full', hands: 'stick', fadeIn: 0.2, fadeOut: 0.25 },
+  // (owner imports fill these with one-handed skating clips: only the top hand is locked)
+  hockey_stop: { mask: 'full', hands: 'stick', grip: 'R', fadeIn: 0.2, fadeOut: 0.25 },
   stickhandle: { mask: 'upper', hands: 'stick', loop: true, fadeIn: 0.2, fadeOut: 0.2 },
   // ── puck skills ──
+  // shots: two variants per release type (shotClipFor); film study item 12
   shot_wrist: { mask: 'upper', hands: 'stick', contact: f(9), fadeIn: 0.12, fadeOut: 0.2 },
+  shot_wrist_b: { mask: 'upper', hands: 'stick', contact: f(8), fadeIn: 0.12, fadeOut: 0.2 },
+  shot_snap: { mask: 'upper', hands: 'stick', contact: f(5), fadeIn: 0.08, fadeOut: 0.18 },
+  shot_snap_b: { mask: 'upper', hands: 'stick', contact: f(5), fadeIn: 0.08, fadeOut: 0.18 },
   shot_slap: { mask: 'full', hands: 'stick', contact: f(19), fadeIn: 0.1, fadeOut: 0.22 },
+  shot_slap_b: { mask: 'full', hands: 'stick', contact: f(20), fadeIn: 0.1, fadeOut: 0.22 },
   shot_onetimer: { mask: 'upper', hands: 'stick', contact: f(7), fadeIn: 0.12, fadeOut: 0.2 },
+  shot_onetimer_knee: { mask: 'full', hands: 'stick', contact: f(8), fadeIn: 0.12, fadeOut: 0.3 },
+  shot_backhand: { mask: 'upper', hands: 'stick', contact: f(8), fadeIn: 0.1, fadeOut: 0.2 },
+  shot_tip: { mask: 'upper', hands: 'stick', contact: f(4), fadeIn: 0.08, fadeOut: 0.18 },
   pass: { mask: 'upper', hands: 'stick', contact: f(6), fadeIn: 0.15, fadeOut: 0.18 },
+  // one-handed lunge with the stick at full reach (film P2)
+  poke: { mask: 'full', hands: 'stick', grip: 'R', contact: f(6), fadeIn: 0.08, fadeOut: 0.25 },
   // dekes — `contact` = the moment the blade crosses the man (the move "beats" him there)
   deke_fb: { mask: 'upper', hands: 'stick', contact: f(9), fadeIn: 0.1, fadeOut: 0.2 },
   deke_toedrag: { mask: 'upper', hands: 'stick', contact: f(10), fadeIn: 0.1, fadeOut: 0.2 },
@@ -64,6 +80,8 @@ export const CLIPS: Record<string, ClipMeta> = {
   deke_wide: { mask: 'upper', hands: 'stick', contact: f(5), fadeIn: 0.12, fadeOut: 0.2 },
   faceoff_crouch: { mask: 'full', hands: 'stick', loop: true, fadeIn: 0.3, fadeOut: 0.15 },
   faceoff_draw: { mask: 'full', hands: 'stick', contact: f(4), fadeIn: 0.1, fadeOut: 0.2 },
+  faceoff_tieup: { mask: 'full', hands: 'stick', contact: f(4), fadeIn: 0.1, fadeOut: 0.2 },
+  faceoff_wing: { mask: 'full', hands: 'stick', loop: true, fadeIn: 0.35, fadeOut: 0.2 },
   // ── hitting ──
   check: { mask: 'full', hands: 'stick', contact: f(8), fadeIn: 0.1, fadeOut: 0.2 },
   check_boards: { mask: 'full', hands: 'clip', contact: f(8), fadeIn: 0.1, fadeOut: 0.3 },
@@ -90,7 +108,7 @@ export const CLIPS: Record<string, ClipMeta> = {
 
   // owner-import slots (the Blender fallback covers them otherwise)
   skate_idle: { mask: 'lower', hands: 'stick', loop: true, fadeIn: 0.3, fadeOut: 0.3, ownerOnly: true, fallback: 'skate_glide' },
-  skate_start: { mask: 'full', hands: 'stick', fadeIn: 0.2, fadeOut: 0.3, ownerOnly: true },
+  skate_start: { mask: 'full', hands: 'stick', grip: 'R', fadeIn: 0.2, fadeOut: 0.3, ownerOnly: true },
   g_pad_save_L: { mask: 'full', hands: 'clip', contact: f(4), fadeIn: 0.05, fadeOut: 0.3, goalie: true, ownerOnly: true, fallback: 'g_pad_save' },
   g_pad_save_R: { mask: 'full', hands: 'clip', contact: f(4), fadeIn: 0.05, fadeOut: 0.3, goalie: true, ownerOnly: true, fallback: 'g_pad_save' },
   g_skate_fwd: { mask: 'lower', hands: 'clip', loop: true, fadeIn: 0.3, fadeOut: 0.3, goalie: true, ownerOnly: true },
@@ -152,19 +170,39 @@ export function hash01(id: string): number {
   return ((h >>> 0) % 10007) / 10007
 }
 
+export type ShotClip =
+  | 'shot_wrist' | 'shot_wrist_b' | 'shot_snap' | 'shot_snap_b' | 'shot_slap' | 'shot_slap_b'
+  | 'shot_onetimer' | 'shot_onetimer_knee' | 'shot_backhand' | 'shot_tip'
+
+/** The clip variants for each release type the agent engine names (shot.shotType). */
+export const SHOT_VARIANTS: Readonly<Record<string, readonly ShotClip[]>> = {
+  wrist: ['shot_wrist', 'shot_wrist_b'],
+  snap: ['shot_snap', 'shot_snap_b'],
+  slap: ['shot_slap', 'shot_slap_b'],
+  oneTimer: ['shot_onetimer', 'shot_onetimer_knee'],
+  backhand: ['shot_backhand'],
+  tip: ['shot_tip'],
+}
+
 /**
- * Shot type from where it's taken: a pass that arrives within `oneTimerWindow`
- * seconds before the shot is a one-timer; from the point (>= 45 ft out) a
- * slapshot; everything else a wrist shot.
+ * The shot clip. The agent engine names the release type (`shotType`); the
+ * classic engine doesn't, so it is inferred: a pass that arrives within
+ * `oneTimerWindow` seconds before the shot is a one-timer, from the point
+ * (>= 45 ft out) a slapshot, a quick release in close a snap, else a wrist shot.
+ * `key` (player + shot) picks a variant deterministically — replays look the same.
  */
-export function shotClipFor(distToNetFt: number, sincePassS: number | null, oneTimerWindow = 0.8, shotType?: string): 'shot_onetimer' | 'shot_slap' | 'shot_wrist' {
-  // the engine's own release type when it has one (agent engine)
-  if (shotType === 'slap') return 'shot_slap'
-  if (shotType === 'oneTimer') return 'shot_onetimer'
-  if (shotType) return 'shot_wrist'
-  if (sincePassS !== null && sincePassS >= 0 && sincePassS <= oneTimerWindow) return 'shot_onetimer'
-  if (distToNetFt >= 45) return 'shot_slap'
-  return 'shot_wrist'
+export function shotClipFor(distToNetFt: number, sincePassS: number | null, oneTimerWindow = 0.8, shotType?: string, key = ''): ShotClip {
+  let type = shotType && SHOT_VARIANTS[shotType] ? shotType : undefined
+  if (!type) {
+    if (shotType === 'deflection') type = 'tip'
+    else if (sincePassS !== null && sincePassS >= 0 && sincePassS <= oneTimerWindow) type = 'oneTimer'
+    else if (distToNetFt >= 45) type = 'slap'
+    else if (key && distToNetFt < 25 && hash01(key + '#snap') < 0.4) type = 'snap'
+    else type = 'wrist'
+  }
+  const v = SHOT_VARIANTS[type]!
+  // the second variant is the rarer one (a one-knee one-timer, a point slapper's big wind-up)
+  return v.length > 1 && key && hash01(key + '#v') < 0.35 ? v[1]! : v[0]!
 }
 
 /**

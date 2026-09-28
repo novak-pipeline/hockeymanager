@@ -133,7 +133,7 @@ export function planCues(cues: ActionCue[], contactOf: (clip: string) => number 
       const wz = normYtoWorld(cue.ny)
       const dist = Math.hypot(wx - Math.sign(wx || 1) * NET_X, wz)
       const pt = lastPassTo.get(cue.actorId)
-      clip = shotClipFor(dist, pt === undefined ? null : cue.absT - pt, undefined, cue.shotType)
+      clip = shotClipFor(dist, pt === undefined ? null : cue.absT - pt, undefined, cue.shotType, `${cue.actorId}@${cue.absT.toFixed(2)}`)
     } else if (cue.kind === 'hit') {
       clip = hitPlan(12, distToBoards(normXtoWorld(cue.nx), normYtoWorld(cue.ny)), cue.force, cue.hitKind).hitter
     } else if (cue.kind === 'deke') {
@@ -232,6 +232,8 @@ export function smoothWeights(cur: Record<string, number>, target: Record<string
 }
 
 export type LocoMode = 'code' | 'clip' | 'hybrid'
+
+const NO_GRIP = { L: 0, R: 0 }
 
 interface Pending {
   at: number
@@ -380,13 +382,10 @@ export class Choreographer {
   private celebrate(c: ActionCue): void {
     const scorer = this.find(c.actorId)
     if (scorer?.layer) {
-      // the shot's follow-through ends here: its IK re-grip would pin the arms to the stick
+      // the shot's follow-through ends here (its grip lock would hold the hands on the stick)
       for (const n of scorer.layer.playing) if (n.startsWith('shot_') || n === 'pass') scorer.layer.stop(n)
-      // Owner rigs: the retargeted fist pump reads as a clench at the chest and
-      // full-weight arms-up puts the gloves on the helmet — arms-up at partial
-      // weight (the skating arms still blend under it) is a real arms-raised celebration
-      if (this.ownerLoco) scorer.layer.play('celly_armsup', { weight: celebrationFor(c.actorId) === 'celly_armsup' ? 0.92 : 0.85 })
-      else scorer.layer.play(celebrationFor(c.actorId))
+      // owner rigs play celebrations baked on their own skeleton (import_owner_assets.py)
+      scorer.layer.play(celebrationFor(c.actorId))
     }
     if (scorer) {
       // linemates who are close join in for a hug a beat later
@@ -499,9 +498,10 @@ export class Choreographer {
         actor.layer?.blendStick(B)
       },
       arms: (B) => {
-        if (owner) skate(B, 'arms', 1 - (actor.layer?.ikArmsWeight() ?? 0))
+        if (owner) skate(B, 'arms')
         actor.layer?.blendArms(B)
       },
+      grip: () => actor.layer?.gripWeights() ?? NO_GRIP,
     }
   }
 }

@@ -33,8 +33,15 @@ def mirror_leg(lg):
     return dict(lg)
 
 
+# Owner imports bake only the slots their own files don't fill (None = all).
+ONLY = None
+SKIP = set()
+
+
 def author(arm, name, keys, goalie):
     """keys: [(frame, pose dict)] → a Blender action on its own muted NLA track."""
+    if (ONLY is not None and name not in ONLY) or name in SKIP:
+        return None
     ad = arm.animation_data or arm.animation_data_create()
     act = bpy.data.actions.new(name)
     act.use_fake_user = True
@@ -128,14 +135,43 @@ def skater_clips(arm):
     sh = lambda f, bx, yaw, byaw: (f, P(yaw=yaw, stick=dict(blade=(bx, 0.02, 2.9), yaw=byaw), look=(0.25, 0.0)))
     A('stickhandle', [sh(0, 1.7, 0.08, -0.35), sh(5, 1.0, 0.0, -0.1), sh(10, 0.3, -0.08, 0.3), sh(15, 1.0, 0.0, -0.1), sh(20, 1.7, 0.08, -0.35)])
 
-    # ── shots & passes (upper body; hands re-gripped on the stick at runtime) ──
+    # ── shots & passes (upper body; the arms are solved onto the stick here and the renderer only locks the grips) ──
     top = lambda x, dy, z: (x, hipY + dy, z)
+    # Film study P3-P5 (docs/FILM-STUDY.md item 12): wrist / snap shots have a
+    # SHORT blade path (2-3 ft, from beside the back foot to ahead of the front
+    # foot) and a LOW finish at the target; only slap shots and one-timers load
+    # the blade to shoulder height and finish above the head. Two variants per
+    # type (animCatalog.shotClipFor picks one per player + shot).
     A('shot_wrist', [
         (0, P(stick=carry(0.0))),
-        (5, P(yaw=0.42, lean=0.62, stick=dict(blade=(1.75, 0.02, 0.5), top=top(0.05, 0.62, 0.95), lowGrip=0.5, yaw=-0.1))),
-        (9, P(yaw=0.0, lean=0.55, stick=dict(blade=(0.9, 0.03, 2.5), top=top(-0.2, 0.45, 1.05), lowGrip=0.5, yaw=-0.35))),
-        (13, P(yaw=-0.38, lean=0.45, stick=dict(blade=(-0.25, 1.5, 3.7), top=top(-0.75, 0.95, 0.5), lowGrip=0.5, yaw=-0.9, open=0.4))),
+        (5, P(yaw=0.4, lean=0.62, stick=dict(blade=(1.9, 0.02, 0.5), top=top(0.2, 0.5, 1.5), lowGrip=0.5, yaw=-0.05))),
+        (9, P(yaw=0.0, lean=0.55, stick=dict(blade=(1.0, 0.03, 2.9), top=top(-0.2, 0.45, 1.1), lowGrip=0.5, yaw=-0.4))),
+        (13, P(yaw=-0.3, lean=0.55, stick=dict(blade=(0.1, 0.7, 4.0), top=top(-0.55, 0.6, 0.9), lowGrip=0.5, yaw=-0.8, open=0.35))),
         (20, P(stick=carry(0.0))),
+    ])
+    # in-stride drag: the puck pulled in from wide, released off the front foot
+    A('shot_wrist_b', [
+        (0, P(stick=carry(0.0))),
+        (4, P(yaw=0.3, lean=0.7, look=(0.25, 0.0), stick=dict(blade=(2.0, 0.02, 2.1), top=top(0.05, 0.55, 1.0), lowGrip=0.5, yaw=-0.3))),
+        (8, P(yaw=-0.05, lean=0.62, stick=dict(blade=(0.7, 0.05, 3.0), top=top(-0.25, 0.45, 1.1), lowGrip=0.5, yaw=-0.5))),
+        (12, P(yaw=-0.3, lean=0.58, stick=dict(blade=(-0.1, 0.5, 3.8), top=top(-0.55, 0.55, 0.95), lowGrip=0.5, yaw=-0.85, open=0.3))),
+        (19, P(stick=carry(0.0))),
+    ])
+    # snap: a short cock of the blade just off the ice, a punchy release, little follow-through
+    A('shot_snap', [
+        (0, P(stick=carry(0.0))),
+        (3, P(yaw=0.22, lean=0.6, stick=dict(blade=(1.35, 0.35, 2.0), top=top(0.0, 0.55, 1.0), lowGrip=0.45, yaw=-0.15))),
+        (5, P(yaw=-0.05, lean=0.58, stick=dict(blade=(1.0, 0.03, 2.9), top=top(-0.2, 0.45, 1.1), lowGrip=0.45, yaw=-0.4))),
+        (8, P(yaw=-0.15, lean=0.58, stick=dict(blade=(0.7, 0.45, 3.5), top=top(-0.35, 0.5, 1.0), lowGrip=0.45, yaw=-0.5, open=0.2))),
+        (14, P(stick=carry(0.0))),
+    ])
+    # snap from a set stance (on the dot): feet wide, the load a touch further back
+    A('shot_snap_b', [
+        (0, P(stick=carry(0.0))),
+        (3, P(yaw=0.3, lean=0.55, L=leg(0.55, 0.3, 0.95), R=leg(0.55, 0.3, 0.95), stick=dict(blade=(1.6, 0.4, 1.7), top=top(0.05, 0.6, 0.95), lowGrip=0.45, yaw=-0.1))),
+        (5, P(yaw=0.0, lean=0.55, L=leg(0.6, 0.3, 1.0), R=leg(0.5, 0.3, 0.9), stick=dict(blade=(1.1, 0.03, 2.6), top=top(-0.15, 0.45, 1.1), lowGrip=0.45, yaw=-0.35))),
+        (8, P(yaw=-0.2, lean=0.55, stick=dict(blade=(0.8, 0.35, 3.2), top=top(-0.35, 0.5, 1.0), lowGrip=0.45, yaw=-0.5, open=0.2))),
+        (13, P(stick=carry(0.0))),
     ])
     A('shot_slap', [
         (0, P(stick=carry(0.0))),
@@ -145,24 +181,78 @@ def skater_clips(arm):
                stick=dict(blade=(1.7, 1.3, 0.4), top=top(0.1, 0.85, 0.7), lowGrip=0.42, yaw=0.0))),
         (19, P(yaw=0.0, lean=0.6, L=leg(0.6, 0.38, 1.0), R=leg(0.45, 0.38, 0.8),
                stick=dict(blade=(0.85, 0.03, 2.0), top=top(-0.15, 0.4, 0.9), lowGrip=0.42, yaw=-0.3))),
-        (24, P(yaw=-0.55, lean=0.45, L=leg(0.55, 0.3, 0.9), R=leg(0.35, 0.3, 0.6),
-               stick=dict(blade=(-0.7, 2.7, 3.7), top=top(-0.85, 0.95, 0.4), lowGrip=0.42, yaw=-1.0, open=0.4))),
+        (24, P(yaw=-0.55, lean=0.4, L=leg(0.55, 0.3, 0.9), R=leg(0.35, 0.3, 0.6),
+               stick=dict(blade=(-0.9, 4.3, 3.0), top=top(-0.9, 1.3, 0.5), lowGrip=0.42, yaw=-1.0, open=0.4))),
         (32, P(stick=carry(0.0))),
     ])
+    # from the point: a bigger wind-up over the shoulder, feet wide, a high finish
+    A('shot_slap_b', [
+        (0, P(stick=carry(0.0))),
+        (10, P(yaw=0.75, lean=0.3, L=leg(0.45, 0.45, 0.85), R=leg(0.4, 0.45, 0.8),
+               stick=dict(blade=(2.4, 4.4, -1.6), top=top(0.3, 1.45, 0.2), lowGrip=0.4, yaw=0.35))),
+        (17, P(yaw=0.4, lean=0.5, L=leg(0.55, 0.42, 0.95), R=leg(0.5, 0.42, 0.9),
+               stick=dict(blade=(1.8, 1.2, 0.5), top=top(0.1, 0.85, 0.7), lowGrip=0.4, yaw=0.0))),
+        (20, P(yaw=0.0, lean=0.62, L=leg(0.65, 0.42, 1.05), R=leg(0.45, 0.42, 0.8),
+               stick=dict(blade=(0.9, 0.03, 2.1), top=top(-0.15, 0.4, 0.9), lowGrip=0.4, yaw=-0.3))),
+        (26, P(yaw=-0.6, lean=0.4, L=leg(0.55, 0.35, 0.9), R=leg(0.3, 0.35, 0.55),
+               stick=dict(blade=(-0.9, 4.5, 3.2), top=top(-0.9, 1.35, 0.5), lowGrip=0.4, yaw=-1.0, open=0.4))),
+        (34, P(stick=carry(0.0))),
+    ])
     A('shot_onetimer', [
-        (0, P(yaw=0.45, lean=0.5, stick=dict(blade=(2.0, 2.2, -0.6), top=top(0.12, 1.1, 0.35), lowGrip=0.45, yaw=0.2))),
+        (0, P(yaw=0.45, lean=0.5, stick=dict(blade=(2.0, 3.2, -0.4), top=top(0.12, 1.15, 0.35), lowGrip=0.45, yaw=0.2))),
         (7, P(yaw=0.0, lean=0.6, stick=dict(blade=(0.85, 0.03, 2.2), top=top(-0.15, 0.42, 0.95), lowGrip=0.45, yaw=-0.3))),
-        (12, P(yaw=-0.42, lean=0.45, stick=dict(blade=(-0.4, 2.0, 3.6), top=top(-0.8, 0.95, 0.45), lowGrip=0.45, yaw=-0.95, open=0.4))),
+        (12, P(yaw=-0.45, lean=0.42, stick=dict(blade=(-0.6, 3.9, 3.4), top=top(-0.85, 1.2, 0.5), lowGrip=0.45, yaw=-0.95, open=0.4))),
         (18, P(stick=carry(0.0))),
+    ])
+    # the one-knee one-timer (film P6): back knee near the ice, hips ~1.5 ft down
+    knee = lambda: dict(hip=(0.0, rig.H - 1.45, -0.2), L=leg(1.25, 0.25, 1.45), R=leg(-0.15, 0.3, 1.55, ankle=-0.6))  # noqa: E731
+    A('shot_onetimer_knee', [
+        (0, P(lean=0.6, stick=carry(0.0))),
+        (5, P(yaw=0.5, lean=0.45, **knee(), stick=dict(blade=(2.1, 2.4, -0.2), top=top(0.15, 0.6, 0.35), lowGrip=0.45, yaw=0.2))),
+        (8, P(yaw=0.0, lean=0.55, **knee(), stick=dict(blade=(0.9, 0.03, 2.1), top=top(-0.15, -0.1, 0.95), lowGrip=0.45, yaw=-0.3))),
+        (13, P(yaw=-0.45, lean=0.4, **knee(), stick=dict(blade=(-0.4, 3.2, 3.3), top=top(-0.8, 0.7, 0.5), lowGrip=0.45, yaw=-0.95, open=0.4))),
+        (22, P(lean=0.6, stick=carry(0.0))),
+    ])
+    # backhand: the blade on the backhand side, pulled and LIFTED across the body
+    A('shot_backhand', [
+        (0, P(stick=carry(0.0))),
+        (4, P(yaw=-0.45, lean=0.65, look=(0.2, -0.2), stick=dict(blade=(-1.3, 0.02, 1.3), top=top(-0.1, 0.55, 0.9), lowGrip=0.5, yaw=-1.25))),
+        (8, P(yaw=-0.1, lean=0.6, stick=dict(blade=(-0.5, 0.3, 2.8), top=top(-0.3, 0.55, 1.0), lowGrip=0.5, yaw=-1.05, open=-0.3))),
+        (12, P(yaw=0.2, lean=0.5, stick=dict(blade=(0.4, 1.6, 3.4), top=top(-0.1, 0.8, 0.9), lowGrip=0.5, yaw=-0.6, open=-0.4))),
+        (18, P(stick=carry(0.0))),
+    ])
+    # tip / deflection: the stick held low in front of the net, a small quick redirect
+    A('shot_tip', [
+        (0, P(lean=0.6, stick=dict(blade=(0.9, 0.3, 3.2), top=top(-0.1, 0.3, 1.1), lowGrip=0.5, yaw=-0.15))),
+        (2, P(lean=0.62, stick=dict(blade=(0.9, 0.35, 3.3), top=top(-0.1, 0.3, 1.1), lowGrip=0.5, yaw=-0.1))),
+        (4, P(lean=0.62, yaw=-0.08, stick=dict(blade=(0.5, 0.1, 3.4), top=top(-0.2, 0.3, 1.1), lowGrip=0.5, yaw=-0.6))),
+        (9, P(lean=0.6, stick=dict(blade=(0.6, 0.25, 3.2), top=top(-0.15, 0.35, 1.05), lowGrip=0.5, yaw=-0.4))),
+        (14, P(stick=carry(0.0))),
     ])
     A('pass', [
         (0, P(stick=carry(0.0))),
-        (3, P(yaw=0.25, stick=dict(blade=(1.55, 0.02, 1.3), top=top(0.0, 0.55, 1.0), yaw=-0.15))),
-        (6, P(yaw=-0.05, stick=dict(blade=(0.6, 0.02, 2.7), top=top(-0.2, 0.5, 1.05), yaw=-0.45))),
-        (9, P(yaw=-0.22, stick=dict(blade=(-0.05, 0.45, 3.1), top=top(-0.45, 0.6, 0.9), yaw=-0.8, open=0.25))),
+        (3, P(yaw=0.2, stick=dict(blade=(1.5, 0.02, 1.6), top=top(0.0, 0.55, 1.0), yaw=-0.15))),
+        (6, P(yaw=-0.05, stick=dict(blade=(0.7, 0.02, 2.9), top=top(-0.2, 0.5, 1.05), yaw=-0.45))),
+        (9, P(yaw=-0.2, stick=dict(blade=(0.1, 0.3, 3.4), top=top(-0.4, 0.55, 0.95), yaw=-0.8, open=0.25))),
         (14, P(stick=carry(0.0))),
     ])
-    # ── dekes (upper body; hands re-gripped on the stick at runtime) ──
+    # poke check (film P2): one hand, the arm and stick at full extension toward
+    # the puck, a lunge on the front leg; the free hand out for balance
+    L_ = rig.RIG['stickLen'] - 0.4
+    poke_dir = lambda y: Vector((0.1, y, -1.0)).normalized()  # noqa: E731  heel → knob: the blade far out front
+    A('poke', [
+        (0, P(stick=carry(0.0))),
+        (3, P(lean=0.75, yaw=0.15, handR=(-0.35, hipY + 0.35, 1.6), handL=(1.0, hipY + 0.6, 0.6),
+              stick=dict(hand='R', dir=tuple(poke_dir(0.62)), grip=L_ - 0.4, yaw=-0.3))),
+        (6, P(lean=0.95, yaw=-0.1, hip=(0.0, None, 0.45), L=leg(1.2, 0.2, 1.5), R=leg(0.1, 0.35, 0.3, ankle=-0.1),
+              handR=(-0.3, hipY - 0.35, 2.4), handL=(1.3, hipY + 0.9, 0.1), shrugR=0.15,
+              stick=dict(hand='R', dir=tuple(poke_dir(0.5)), grip=L_, yaw=-0.3))),
+        (10, P(lean=0.85, yaw=-0.05, hip=(0.0, None, 0.3), L=leg(1.0, 0.2, 1.35), R=leg(0.3, 0.3, 0.6),
+               handR=(-0.35, hipY + 0.05, 2.0), handL=(1.2, hipY + 0.8, 0.3),
+               stick=dict(hand='R', dir=tuple(poke_dir(0.55)), grip=L_, yaw=-0.3))),
+        (18, P(stick=carry(0.0))),
+    ])
+    # ── dekes (upper body) ──
     # Film-study targets: the puck comes in to ~1 ft under pressure, the shoulder
     # sells the move, the blade crosses the body in ~0.3 s.
     dk = lambda f, bx, bz, byaw, yaw, lean=0.7, look=(0.2, 0.0), hip=0.0: (
@@ -197,7 +287,7 @@ def skater_clips(arm):
         dk(11, 2.3, 3.4, -0.3, 0.25, lean=0.75, look=(0.3, 0.0), hip=0.12),
         (17, P(stick=carry(0.0))),
     ])
-    fo = lambda f, bob: (f, P(lean=1.0, look=(-0.55, 0.0), hip=(0, None, -0.1), L=leg(0.95, 0.34, 1.55 + bob), R=leg(0.95, 0.34, 1.55 + bob),
+    fo = lambda f, bob: (f, P(lean=1.15, look=(-0.6, 0.0), hip=(0, None, -0.1), L=leg(0.95, 0.34, 1.55 + bob), R=leg(0.95, 0.34, 1.55 + bob),
                               stick=dict(blade=(0.35, 0.02, 2.3), top=top(-0.35, -0.2, 1.25), lowGrip=0.32, yaw=-0.25)))
     A('faceoff_crouch', [fo(0, 0.0), fo(15, 0.05), fo(30, 0.0)])
     A('faceoff_draw', [
@@ -208,6 +298,20 @@ def skater_clips(arm):
               stick=dict(blade=(1.5, 0.02, -0.2), top=top(0.05, 0.2, 0.8), lowGrip=0.35, yaw=0.9))),
         (16, P(stick=carry(0.0))),
     ])
+
+    # faceoff battle: the sticks tie up and the centre leans his shoulder in
+    A('faceoff_tieup', [
+        fo(0, 0.0),
+        (4, P(lean=0.9, yaw=0.35, roll=-0.12, look=(-0.4, 0.0), hip=(0, None, 0.25), shrugL=0.2, L=leg(0.9, 0.34, 1.45), R=leg(0.9, 0.34, 1.45),
+              stick=dict(blade=(-0.3, 0.05, 2.1), top=top(-0.4, -0.1, 1.2), lowGrip=0.32, yaw=0.4))),
+        (10, P(lean=0.92, yaw=0.45, roll=-0.15, look=(-0.4, 0.0), hip=(0, None, 0.3), shrugL=0.25, L=leg(0.92, 0.34, 1.5), R=leg(0.88, 0.34, 1.42),
+               stick=dict(blade=(0.05, 0.05, 1.9), top=top(-0.35, -0.1, 1.2), lowGrip=0.32, yaw=0.55))),
+        (16, P(lean=0.8, yaw=0.3, L=leg(0.8, 0.3, 1.3), R=leg(0.8, 0.3, 1.3), stick=carry(0.0, 2.4))),
+    ])
+    # wingers set on the hashes: a lighter crouch, stick on the ice
+    wg = lambda f, bob: (f, P(lean=0.75, look=(-0.3, 0.0), L=leg(0.8, 0.3, 1.25 + bob), R=leg(0.8, 0.3, 1.25 + bob),  # noqa: E731
+                              stick=dict(blade=(1.2, 0.02, 2.7), top=top(-0.2, 0.2, 1.1), lowGrip=0.45, yaw=-0.25)))
+    A('faceoff_wing', [wg(0, 0.0), wg(20, 0.04), wg(40, 0.0)])
 
     # ── hitting ──
     A('check', [
