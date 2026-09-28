@@ -72,7 +72,7 @@ import {
   type Puck
 } from './physics'
 import { BLUE_X, DOT_EZ_X, DOT_NZ_X, DOT_Y, GOAL_X, HALF_X, HALF_Y, NET_HALF_W, boardsClamp, distToBoards } from './rink'
-import { DEKE, DEKE_LEVEL, REACH, blockChance, decideCarrier, dekeDefRead, dekeGoalieRead, dekeSkill, pressureOn, realPressure, thinkSide, xgAt, type ThinkOut } from './brain'
+import { SHAPE_TUNING, DEKE, DEKE_LEVEL, REACH, blockChance, decideCarrier, dekeDefRead, dekeGoalieRead, dekeSkill, pressureOn, realPressure, thinkSide, xgAt, type ThinkOut } from './brain'
 import { decideHit, resolveHit, type HitIntent } from './physical'
 import { emptyAgentTelemetry, type AgentTelemetry } from './telemetry'
 import { LEVEL, levelDefOffset, levelOffset, rDef, rLevel, type CarrierAction, type Side, type World } from './world'
@@ -83,6 +83,13 @@ const r01 = rLevel
 export const FRAME_DT = 0.25
 const SUBSTEPS = 5
 const DT = FRAME_DT / SUBSTEPS
+/** A received puck farther than this from the blade glides on (ft); at speed (ft/s, floor). */
+const RECV_SNAP = 1.0
+const RECV_SPEED = 30
+/** A puck just won can't be taken straight back for this long (s). */
+const SETTLE_S = 0.2
+/** A knocked-down / pinned man is in the picture at least this long (s): the fall and the get-up. */
+const DOWN_S = { knockdown: 1.8, pinned: 1.5 }
 
 // ---------------------------------------------------------------------------
 // Calibration constants (measured against the engine, then frozen — retune
@@ -90,7 +97,7 @@ const DT = FRAME_DT / SUBSTEPS
 // ---------------------------------------------------------------------------
 export const AGENT_TUNING = {
   /** Reconciles the empirical xG with this engine's shot mix → goals/game. */
-  finishK: 0.66,
+  finishK: 0.76,
   /** Base share of unblocked attempts that miss the net. */
   missBase: 0.3,
   /** Poke-check success scale (takeaways). */
@@ -270,6 +277,13 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   let codeDue: { answerer: Body; hitter: Body; side: Side } | null = null
   let battle: { start: number; x: number; y: number; kind: 'boards' | 'netFront' | 'loosePuck'; players: Set<Body>; last: number } | null = null
   let gotAt = 0
+  /**
+   * A reception in progress: the stick has the puck (control is decided) but
+   * the puck is still travelling the last feet onto the blade. It glides there
+   * (a few hundredths of a second) and the frames name the new carrier only
+   * once it has arrived — a carrier change always follows the puck.
+   */
+  let recv = null as Body | null
   let gotHow = 'faceoff'
   let flightKindAtGain = 'faceoff'
   let gotPos: XY = { x: 0, y: 0 }
@@ -397,6 +411,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const sw = ch.swaps[i]
         const b = sw.out
         if (b === w.carrier) continue // he gets rid of it first
+        if ((downUntil.get(b) ?? -1) > now) continue // gets up first
         const dg = Math.hypot(b.x - gate.x, b.y - gate.y)
         // They've turned it over and are coming: a man still far from the
         // door stays on and plays (a change is abandoned, not completed into
@@ -440,7 +455,28 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     }
   }
 
+  /**
+   * A man knocked down or pinned stays on the ice through his fall and get-up:
+   * a line change that would take him off waits until he is back on his skates
+   * (a penalty whistle on the hit does not make him vanish mid-fall).
+   */
+  const downUntil = new Map<Body, number>()
+  const deferredDeploy = new Map<Side, { announce: boolean; onTheFly: boolean }>()
+  const downOn = (s: Side): boolean => s.skaters.some((b) => (downUntil.get(b) ?? -1) > now)
+  const runDeferredDeploys = (): void => {
+    for (const [s, d] of [...deferredDeploy]) {
+      if (downOn(s)) continue
+      deferredDeploy.delete(s)
+      deploySide(s, d.announce, d.onTheFly)
+    }
+  }
   const deploySide = (s: Side, announce: boolean, onTheFly = false): void => {
+    if (downOn(s)) {
+      const prev = deferredDeploy.get(s)
+      deferredDeploy.set(s, { announce: announce || !!prev?.announce, onTheFly: onTheFly && (prev?.onTheFly ?? true) })
+      return
+    }
+    deferredDeploy.delete(s)
     changing.delete(s)
     const opp = oppOf(s)
     const d = desiredFor(s.sim, opp.sim)
@@ -639,7 +675,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const hC = H.skaters[takerIdxOf(H.sim.unit)]
     const aC = A.skaters[takerIdxOf(A.sim.unit)]
     // Everybody set before the drop (the linesman waits for them).
-    let set = waited >= FACEOFF_MIN_WAIT && !!hC && !!aC
+    let set = waited >= FACEOFF_MIN_WAIT && !!hC && !!aC && deferredDeploy.size === 0
     if (set) {
       for (const s of sides) {
         const spots = faceoffSpots(s, p.dot)
@@ -737,6 +773,10 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     puck.carrier = b
     w.control = s
     w.lastTouch = s
+    {
+      const bp0 = bladePoint(b, now, 0)
+      recv = Math.hypot(puck.x - bp0.x, puck.y - bp0.y) > RECV_SNAP ? b : null
+    }
     puck.z = 0
     puck.vz = 0
     if (flight?.passEv && flight.passEv.completed === undefined as unknown as boolean) {
@@ -1442,6 +1482,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       }
     }
 
+    if (deferredDeploy.size > 0) runDeferredDeploys()
     // ---- Emit the frame for the state at `now`. ----
     if (now > lastFrameT + 1e-6) {
       for (const s of sides) {
@@ -1467,7 +1508,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         homeGoalie: { player: H.goalie.player.id, pos: { x: H.goalie.x / HALF_X, y: H.goalie.y / HALF_Y } },
         awayGoalie: { player: A.goalie.player.id, pos: { x: A.goalie.x / HALF_X, y: A.goalie.y / HALF_Y } },
         puck: { x: clamp(pk.x / HALF_X, -1, 1), y: clamp(pk.y / HALF_Y, -1, 1) },
-        puckCarrier: deadAt === null && !pending && w.carrier ? w.carrier.player.id : null,
+        puckCarrier: deadAt === null && !pending && w.carrier && recv !== w.carrier ? w.carrier.player.id : null,
         ...(deadAt === null && puck.z > 0.05 ? { puckZ: Math.round(puck.z * 10) / 10 } : {})
       })
       lastFrameT = now
@@ -1555,9 +1596,12 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       // (poke, lift, sweep), then needs a moment to reload. A carrier who is
       // standing still in front of him is easy pickings — nobody stands off
       // a slow carrier in stick reach for long.
+      // A puck just won is settled on the blade before anybody can take it back
+      // (no carrier flip-flopping frame to frame in a scramble).
+      const settling = now - gotAt < SETTLE_S
       for (const pk of out.pokes) {
         const c = w.carrier
-        if (!c || !w.control) break
+        if (!c || !w.control || settling) break
         if (pk.stun > 0) continue // beaten on the deke: no stick on it
         const dp = Math.hypot(pk.x - puck.x, pk.y - puck.y)
         if (dp > REACH) continue
@@ -1618,7 +1662,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         for (const o of os.skaters) if (o.stun <= 0 && Math.hypot(o.x - c.x, o.y - c.y) < 3.3 && speedOf(o) < 7.3) tier = o
         if (tier && speedOf(c) < 7.3) {
           if (!tieUp || tieUp.c !== c || tieUp.o !== tier) tieUp = { c, o: tier, since: now }
-          else if (now - tieUp.since > TIE_UP_S) {
+          else if (now - tieUp.since > TIE_UP_S && !settling) {
             const atk = r01(c.player.ratings.physical.strength) * 0.5 + r01(c.player.composites.puckControl) * 0.5
             const dfn = r01(tier.player.composites.takeaway) * 0.55 + rDef(tier.player.ratings.defensive.checking) * 0.2 + r01(tier.player.ratings.physical.strength) * 0.25
             tieUp = null
@@ -1639,7 +1683,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         } else tieUp = null
       }
       // Fumbles under pressure (unforced).
-      if (w.carrier && w.control && !pending) {
+      if (w.carrier && w.control && !pending && !settling) {
         const c = w.carrier
         const pr = pressureOn(c, oppOf(w.control).skaters)
         const pc = r01(c.player.composites.puckControl)
@@ -1723,7 +1767,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           let ty = raw.ty
           const sm = smooth.get(b)
           if (raw.urgency < 0.85 && b !== w.carrier && sm && !pending) {
-            const f = DT / 0.45
+            const f = DT / SHAPE_TUNING.smooth
             sm.x += (raw.tx - sm.x) * f
             sm.y += (raw.ty - sm.y) * f
             tx = sm.x
@@ -1769,6 +1813,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           ...(r.pinned ? { pinned: true } : {})
         })
         if (tm) tm.noteHit(r)
+        if (r.knockdown || r.pinned) downUntil.set(r.victim, now + Math.max(r.victim.stun, r.knockdown ? DOWN_S.knockdown : DOWN_S.pinned))
         if (r.loosePuck && w.carrier === r.victim) {
           const ang = Math.atan2(r.victim.vy, r.victim.vx) + rng.float(-1, 1)
           loosen(Math.cos(ang) * rng.float(4, 10) + r.victim.vx * 0.3, Math.sin(ang) * rng.float(4, 10) + r.victim.vy * 0.3, null)
@@ -1800,8 +1845,23 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           }
         }
         const bp = bladePoint(c, now, speedOf(c) < 6 ? 1.3 : 0.8)
-        puck.x = bp.x
-        puck.y = bp.y
+        if (recv === c) {
+          // Still arriving: it slides onto the blade at its own pace (never
+          // slower than a soft pass), then sits there.
+          const dx = bp.x - puck.x
+          const dy = bp.y - puck.y
+          const d = Math.hypot(dx, dy)
+          const step = Math.max(RECV_SPEED, Math.hypot(puck.vx - c.vx, puck.vy - c.vy)) * DT
+          if (d <= step + RECV_SNAP * 0.5) recv = null
+          else {
+            puck.x += (dx / d) * step
+            puck.y += (dy / d) * step
+          }
+        } else recv = null
+        if (recv !== c) {
+          puck.x = bp.x
+          puck.y = bp.y
+        }
         puck.vx = c.vx
         puck.vy = c.vy
         // Offside: the puck carried over the blue line with a teammate ahead of it.

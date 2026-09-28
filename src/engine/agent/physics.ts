@@ -59,8 +59,8 @@ export function capsFor(p: Player): Caps {
     top,
     topBack: top * 0.68,
     accel: 10 + r100(ph.acceleration) * 0.08,
-    brake: 12 + r100(ph.agility) * 0.07,
-    grip: 16 + r100(ph.agility) * 0.08,
+    brake: PHYS.brakeBase + r100(ph.agility) * 0.07,
+    grip: PHYS.gripBase + r100(ph.agility) * 0.08,
     yaw: 6 + r100(ph.agility) * 0.03
   }
 }
@@ -175,7 +175,10 @@ export function stepBody(b: Body, cmd: MoveCmd, dt: number): void {
   // speed off with an edge (within the normal limits) instead of the boards
   // stopping him dead. A man finishing a check skates through.
   if (!cmd.boardsOk) {
-    const pr = boardsClamp(b.x + b.vx * 0.45, b.y + b.vy * 0.45, b.radius + 0.3)
+    // Look far enough ahead to stop with an edge: the stopping distance grows
+    // with the square of the speed.
+    const look = Math.max(0.45, speedOf(b) / (1.6 * b.caps.brake))
+    const pr = boardsClamp(b.x + b.vx * look, b.y + b.vy * look, b.radius + 0.3)
     if (pr.hit) {
       const vn = vdx * pr.nx + vdy * pr.ny
       if (vn > 0) {
@@ -185,9 +188,27 @@ export function stepBody(b: Body, cmd: MoveCmd, dt: number): void {
     }
   }
 
-  const tau = 1.6 - 1.25 * clamp(cmd.urgency, 0, 1)
+  const tau = PHYS.tau0 - PHYS.tauU * clamp(cmd.urgency, 0, 1)
   let ax = (vdx - b.vx) / tau
   let ay = (vdy - b.vy) / tau
+  // A man drifting into position (low urgency) does not keep pushing and
+  // checking: a small velocity error is left to the glide, and he corrects
+  // with easy strides, not full thrust.
+  {
+    const u = clamp(cmd.urgency, 0, 1)
+    const err = Math.hypot(vdx - b.vx, vdy - b.vy)
+    if (u < 0.85 && err < PHYS.glideDeadband) {
+      ax = 0
+      ay = 0
+    } else if (u < 0.85) {
+      const lim = PHYS.easyAccel + (b.caps.accel - PHYS.easyAccel) * u * u
+      const m = Math.hypot(ax, ay)
+      if (m > lim) {
+        ax *= lim / m
+        ay *= lim / m
+      }
+    }
+  }
   const sp = speedOf(b)
   const energyF = 0.7 + 0.3 * b.energy
   let thrust = 0
@@ -304,9 +325,9 @@ export interface Contact {
  * (inelastic). Returns the contacts where the pair was closing.
  */
 /** Share of a contact impulse applied per substep (1 = instantaneous). */
-export const CONTACT_SOFT = { k: 0.3 }
+export const CONTACT_SOFT = { k: 0.2 }
 /** Friction circle: total edge force as a multiple of the lateral grip. */
-export const PHYS = { circle: 1.0, backThrust: 0.7, backGrip: 0.8 }
+export const PHYS = { circle: 1.0, backThrust: 0.7, backGrip: 0.8, brakeBase: 10, gripBase: 13, tau0: 1.6, tauU: 1.25, glideDeadband: 4, easyAccel: 4.5 }
 
 export function resolveBodies(bodies: readonly Body[], out: Contact[]): void {
   const n = bodies.length

@@ -756,6 +756,36 @@
       "source": "design",
       "confidence": "design"
     },
+    "motion.puckOffBladeShare": {
+      "value": 0,
+      "band": [
+        0,
+        0.01
+      ],
+      "source": "design",
+      "confidence": "design",
+      "note": "stream consistency: while puckCarrier is X the puck is on X's blade (renderers draw it there); a carrier change follows the puck's arrival"
+    },
+    "motion.puckBladeP90": {
+      "value": null,
+      "band": [
+        0,
+        1.2
+      ],
+      "source": "design",
+      "confidence": "design",
+      "note": "stickhandling wobble only"
+    },
+    "motion.downVanishShare": {
+      "value": 0,
+      "band": [
+        0,
+        0
+      ],
+      "source": "design",
+      "confidence": "design",
+      "note": "a knocked-down or pinned man stays in the frames through his fall and get-up (no line change mid-fall)"
+    },
     "motion.overlapPerFrame": {
       "value": 0,
       "band": [

@@ -29,6 +29,20 @@ import type { XY } from '@domain'
 
 export type ShapeStrength = '5v5' | '5v4'
 
+/**
+ * The game SITUATION a template depicts. A template only scores frames in its
+ * own situation — the puck at the point during an entry is a rush, not point
+ * possession; the puck just outside the blue line on the way in is a rush,
+ * not a regroup. Classified by the analyzer from the stream alone:
+ *   breakout  — possession in the team's own zone, settled (≥ 1 s)
+ *   regroup   — puck in the neutral zone / own blue line, the carrier NOT
+ *               skating up ice (holding, circling back, D-to-D), with
+ *               possession ≥ 2 s (right after a turnover it is a transition)
+ *   rush      — the first 2 s after a zone entry off a transition
+ *   settledOz — in their zone ≥ 4 s after the entry (cycle, point, PP set-up)
+ */
+export type ShapeSituation = 'breakout' | 'regroup' | 'rush' | 'settledOz'
+
 export interface RolePoint {
   role: string
   x: number
@@ -45,6 +59,8 @@ export interface ShapeTemplate {
   puck: XY
   /** A frame matches when its puck is within this many feet of `puck`. */
   radiusFt: number
+  /** The situation it depicts (absent: any frame with the puck in radius). */
+  situation?: ShapeSituation
   /** The possessing team's skaters. */
   attack: RolePoint[]
   /** The defending team's skaters (same frame). */
@@ -54,6 +70,7 @@ export interface ShapeTemplate {
 export const SHAPE_TEMPLATES: readonly ShapeTemplate[] = [
   {
     id: 'breakoutWall',
+    situation: 'breakout',
     label: 'Breakout up the wall vs 1-2-2 forecheck',
     system: 'D retrieval, wall-side winger on the half-wall, C swinging low; forecheck 1-2-2',
     strength: '5v5',
@@ -76,6 +93,7 @@ export const SHAPE_TEMPLATES: readonly ShapeTemplate[] = [
   },
   {
     id: 'ozLowCycle',
+    situation: 'settledOz',
     label: 'Low cycle vs box+1 zone coverage',
     system: 'F1 on the wall low, F2 low support, F3 net-front, D at the points; box+1 D-zone',
     strength: '5v5',
@@ -98,6 +116,7 @@ export const SHAPE_TEMPLATES: readonly ShapeTemplate[] = [
   },
   {
     id: 'ozPointShot',
+    situation: 'settledOz',
     label: 'Point possession vs collapsing box',
     system: 'D walks the line, net-front screen, wall and weak-side low support; wingers take point lanes',
     strength: '5v5',
@@ -120,6 +139,7 @@ export const SHAPE_TEMPLATES: readonly ShapeTemplate[] = [
   },
   {
     id: 'nzRegroup',
+    situation: 'regroup',
     label: 'Neutral-zone regroup vs 1-2-2',
     system: 'D-to-D regroup, forwards swinging with speed across the lanes; 1-2-2 neutral-zone forecheck',
     strength: '5v5',
@@ -142,6 +162,7 @@ export const SHAPE_TEMPLATES: readonly ShapeTemplate[] = [
   },
   {
     id: 'rushEntry',
+    situation: 'rush',
     label: 'Three-lane rush entering vs 2 D + backcheck',
     system: 'Wide-lane carrier, middle-lane drive to the net, far-lane driver, trailer; D gap up, F backcheck',
     strength: '5v5',
@@ -164,6 +185,7 @@ export const SHAPE_TEMPLATES: readonly ShapeTemplate[] = [
   },
   {
     id: 'pp131',
+    situation: 'settledOz',
     label: 'Power play 1-3-1 vs PK box',
     system: 'Half-wall flank, top (Q), weak-side one-timer flank, bumper, net-front; 4-man box shading strong side',
     strength: '5v4',
@@ -185,6 +207,7 @@ export const SHAPE_TEMPLATES: readonly ShapeTemplate[] = [
   },
   {
     id: 'ppUmbrella',
+    situation: 'settledOz',
     label: 'Power play umbrella vs PK diamond',
     system: 'Three across the top (point + two flanks), net-front, low bumper; diamond PK',
     strength: '5v4',
@@ -287,7 +310,8 @@ export function scoreShapes(
   attack: readonly XY[],
   defend: readonly XY[],
   accums: Record<string, ShapeAccum>,
-  templates: readonly ShapeTemplate[] = SHAPE_TEMPLATES
+  templates: readonly ShapeTemplate[] = SHAPE_TEMPLATES,
+  situation: ShapeSituation | null = null
 ): void {
   const flip = puck.y < 0 ? -1 : 1
   const pk = { x: puck.x, y: puck.y * flip }
@@ -296,6 +320,7 @@ export function scoreShapes(
   if (!strength) return
   for (const t of templates) {
     if (t.strength !== strength) continue
+    if (t.situation && situation !== null && t.situation !== situation) continue
     if (Math.hypot(pk.x - t.puck.x, pk.y - t.puck.y) > t.radiusFt) continue
     const a = attack.map((p) => ({ x: p.x, y: p.y * flip }))
     const d = defend.map((p) => ({ x: p.x, y: p.y * flip }))

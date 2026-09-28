@@ -76,7 +76,9 @@ export const VAL = { oz: 0.11, kPos: 0.15, shoot: 0.56, keep: 0.18, noise: 0.5, 
  */
 export const D_SAFETY = { look: 2, gap: 12, gapPerV: 0.5, stepUpMargin: 1.3, pinchMaxX: 55, gapLead: 0.5, looseGuard: 1 }
 /** Support-skater motion loops around a spot: radius (ft) and angular speed (rad/s). */
-export const DRIFT = { rAtk: 12, rDef: 5, omAtk: 1.1, omDef: 0.9 }
+/** Shape tuning: where the breakout hands over to the neutral-zone lanes (x in the attack frame), and the target-smoothing time constant (s). */
+export const SHAPE_TUNING = { breakoutX: -25, smooth: 0.45 }
+export const DRIFT = { rAtk: 15, rDef: 6, omAtk: 0.75, omDef: 0.6 }
 /**
  * In close: the radius (ft) around their net where a carrier may not dawdle,
  * the seconds he may hold it there before he must act, the per-second cost of
@@ -662,7 +664,7 @@ function supportTable(w: World, me: Side, withPuck: boolean): RoleSpot[] {
   const m = opp.skaters.length
   if (withPuck) {
     if (me.powerPlay && px > BLUE_X) return n - m >= 2 ? PP_5V3 : powerPlay(me.tactics.specialTeams.powerPlay)
-    if (px < -BLUE_X) return BREAKOUT
+    if (px < SHAPE_TUNING.breakoutX) return BREAKOUT
     if (px < BLUE_X) return TRANSITION
     if (w.t - me.entryAt < RUSH_WINDOW) return RUSH
     // 4-on-4: more ice — two D up top, two forwards working low and the slot.

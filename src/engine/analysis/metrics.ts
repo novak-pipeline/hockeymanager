@@ -200,6 +200,9 @@ export const METRICS: readonly MetricDef[] = [
   // --- Motion quality (analyzer side) -----------------------------------------------------
   { id: 'motion.teleportsLive', group: 'motion', label: 'Position teleports in live play per game (>45 ft/s)', unit: '/game', digits: 2, headline: true, compute: (g) => ratio(g.counts['motion.teleportsLive'], g.games) },
   { id: 'motion.teleportsDead', group: 'motion', label: 'Position jumps during stoppages per game', unit: '/game', digits: 2, compute: (g) => ratio(g.counts['motion.teleportsDead'], g.games) },
+  { id: 'motion.puckOffBladeShare', group: 'motion', label: 'Carried frames with the puck > 1.5 ft off the carrier blade', unit: 'share', digits: 3, headline: true, compute: (g) => ratio(g.counts['motion.puckOffBlade'], g.counts['motion.carriedFrames']) },
+  { id: 'motion.puckBladeP90', group: 'motion', label: 'Carried puck distance from the carrier blade, 90th pct', unit: 'ft', digits: 2, compute: (g) => q(g.hists['motion.puckBladeFt'], 0.9) },
+  { id: 'motion.downVanishShare', group: 'motion', label: 'Knocked-down / pinned men gone from the frames before getting up', unit: 'share', digits: 3, compute: (g) => ratio(g.counts['motion.downVanish'], g.counts['hit.downs']) },
   { id: 'motion.overlapPerFrame', group: 'motion', label: 'Overlapping skater pairs (<2.5 ft) per live frame', unit: '/frame', digits: 3, compute: (g) => ratio(g.counts['motion.overlapPairs'], g.counts['motion.liveFrames']) },
 
   // --- Shape similarity vs coaching templates -------------------------------------------------
