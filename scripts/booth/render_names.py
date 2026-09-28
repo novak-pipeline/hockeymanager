@@ -42,12 +42,12 @@ sys.path.insert(0, HERE)
 import audio_util as au  # noqa: E402
 
 CONFIG = json.load(open(os.path.join(ROOT, "src/render2d/broadcast/booth.config.json"), encoding="utf-8"))
-BREAK = ' <break time="0.5s"/> '
+BREAK = ' <break time="0.6s"/> '
 DEFAULT_VARIANTS = "pbp:excited,pbp:neutral,color:neutral"
 MIN_SIM = 0.45
 # Words of the carrier phrases: hearing one inside a name clip means the cut
 # kept a scrap of "It's" / "That's".
-CARRIER_WORDS = {"its", "it's", "thats", "that's", "is", "it"}  # phonetic similarity of Whisper's hearing vs the text
+CARRIER_WORDS = {"great", "shot", "nice", "work", "its", "it's", "thats", "that's", "is", "it"}  # phonetic similarity of Whisper's hearing vs the text
 
 
 def job_key(seat: str, style: str, text: str) -> str:
@@ -55,7 +55,18 @@ def job_key(seat: str, style: str, text: str) -> str:
 
 
 def carrier(style: str, text: str) -> str:
+    """The carrier phrase a name is cut from ("Great shot, McDavid!")."""
     return CONFIG["nameCarriers"][style].replace("{name}", text)
+
+
+NAME_BREAK = '<break time="0.25s"/>'
+
+
+def carrier_render(style: str, text: str) -> str:
+    """The carrier as sent to the engine: a forced pause in front of the name.
+    An excited read runs "shot" straight into the name, and the cut kept the
+    word ("Shot Murphy"). Alignment is by Whisper, so the pause costs nothing."""
+    return CONFIG["nameCarriers"][style].replace("{name}", f"{NAME_BREAK} {text}")
 
 
 def build_jobs(jobs_file: dict, variants: List[Tuple[str, str]], tiers) -> List[dict]:
@@ -73,29 +84,54 @@ def build_jobs(jobs_file: dict, variants: List[Tuple[str, str]], tiers) -> List[
     return out
 
 
-def split_batch(wav: np.ndarray, ts: List[Tuple[str, float]], batch: List[dict]):
-    """Cut each name out of 'It's A! <break/> It's B! ...' using the model's word
-    starts. The name begins at its first word (Dia2 stamps a word slightly late,
-    so the cut is the quietest frame just before it); it ends at the middle of
-    the pause before the next carrier. Returns [(start, end, trusted)] or None
-    when the word stream doesn't line up."""
-    words = [(w, t) for (w, t) in ts if w.strip()]
-    per = [len(carrier(j["style"], j["text"]).split()) for j in batch]
-    lead = [n - len(j["text"].split()) for n, j in zip(per, batch)]
-    if len(words) != sum(per):
-        return None
+def _match(word: str, target: str) -> bool:
+    """A carrier word as Whisper spells it. Strict: the loose name similarity
+    matched "Barkoff" and "Ovechkin" to "work,"."""
+    return au._norm_word(word) == au._norm_word(target) or au.similarity(target, word) >= 0.9
+
+
+def split_batch(wav: np.ndarray, ww: List[Tuple[str, float, float]], batch: List[dict]):
+    """Cut each name out of 'Great shot, A! <break/> Great shot, B! ...'.
+
+    Dia2's own word stamps drift by a variable amount against the audio (worst
+    around <break/>s): cuts placed on them clipped name onsets ("Crosby" came
+    out "Crossbeast") and kept carrier scraps ("Work Matthews"). So the batch is
+    aligned with Whisper instead: the carrier words are reliable anchors, the
+    name is whatever Whisper hears between one carrier and the next, and each
+    edge snaps to the longest pause in the gap around it.
+
+    Returns per job (start, end, heard) or None for that job."""
     dur = len(wav) / au.SR
-    res, i = [], 0
-    for j, n, ld in zip(batch, per, lead):
-        t_name = words[i + ld][1]
-        s = au.quietest_point(wav, max(0.0, t_name - 0.05), 0.09)
-        if i + n < len(words):
-            e, quiet = au.silence_boundary(wav, t_name + 0.2, words[i + n][1] + 0.05)
+    lead_words = [w for w in CONFIG["nameCarriers"][batch[0]["style"]].split("{name}")[0].split() if w]
+    # Anchor on the carrier's LAST word before the name ("shot," / "work,"):
+    # Whisper sometimes doubles or drops the first ("Nice, nice work").
+    key, before = lead_words[-1], lead_words[:-1]
+    anchors = [i for i, (w, _s, _e) in enumerate(ww) if _match(w, key)]
+    if len(anchors) != len(batch):
+        return [None] * len(batch)
+    out = []
+    for k, a in enumerate(anchors):
+        first = a + 1
+        last = (anchors[k + 1] if k + 1 < len(anchors) else len(ww)) - 1
+        # The next carrier's opening words ("Great") belong to the next unit.
+        while k + 1 < len(anchors) and last >= first and any(_match(ww[last][0], b) for b in before):
+            last -= 1
+        if last < first:
+            out.append(None)
+            continue
+        name_words = ww[first:last + 1]
+        heard = " ".join(w for (w, _s, _e) in name_words)
+        # Whisper's word EDGES are loose (±0.1 s), its word ORDER is not: search
+        # wide windows for the real pauses. In front of the name that is the
+        # comma pause after "shot," (window from inside the carrier word);
+        # behind it, the 0.6 s <break/> before the next carrier.
+        s0, _ = au.silence_boundary(wav, ww[a][1] + 0.1, name_words[0][1] + 0.05)
+        if last + 1 < len(ww):
+            e0, _ = au.silence_boundary(wav, name_words[0][1] + 0.25, ww[last + 1][1] + 0.02)
         else:
-            e, quiet = dur, 1.0
-        res.append((s, e, quiet >= 0.15))
-        i += n
-    return res
+            e0 = dur
+        out.append((s0, max(e0, s0 + 0.1), heard))
+    return out
 
 
 def main() -> None:
@@ -106,14 +142,15 @@ def main() -> None:
     ap.add_argument("--variants", default=DEFAULT_VARIANTS)
     ap.add_argument("--tiers", default="")
     ap.add_argument("--limit", type=int, default=0, help="render at most N clips this run")
-    ap.add_argument("--batch", type=int, default=24)
+    # Long batches of unusual words make Dia2 drift into gibberish (a 16-name
+    # excited batch fell apart completely); 10 keeps it on script.
+    ap.add_argument("--batch", type=int, default=10)
     ap.add_argument("--max-minutes", type=float, default=0)
     ap.add_argument("--estimate", action="store_true", help="print the work left + time estimate and exit")
+    ap.add_argument("--retry-failed", action="store_true", help="give the names marked failed another go")
     args = ap.parse_args()
 
     pair = CONFIG["pairs"][args.pair]
-    if pair["engine"] != "dia2":
-        sys.exit("render_names.py renders the Dia2 bank; the Chatterbox pair ships stems only (see docs/COMMENTARY-BOOTH.md)")
     variants = [tuple(v.split(":")) for v in args.variants.split(",") if v]
     tiers = {int(t) for t in args.tiers.split(",") if t != ""} or None
     jobs_file = json.load(open(args.jobs, encoding="utf-8"))
@@ -126,6 +163,10 @@ def main() -> None:
         index = dict(version=1, pair=args.pair, voices=voices, format="ogg", entries={})
     state = json.load(open(st_path, encoding="utf-8")) if os.path.exists(st_path) else dict(attempts={}, failed={}, check={}, perf=[])
 
+    if args.retry_failed:
+        for k in state["failed"]:
+            state["attempts"][k] = 0
+        state["failed"] = {}
     jobs = [j for j in build_jobs(jobs_file, variants, tiers)
             if j["key"] not in index["entries"] and j["key"] not in state["failed"]]
     sec_per_clip = (sum(p[0] for p in state["perf"]) / max(1, sum(p[1] for p in state["perf"]))) if state["perf"] else 1.45
@@ -140,8 +181,15 @@ def main() -> None:
     if args.limit:
         jobs = jobs[: args.limit]
 
-    from dia2_engine import Dia2Booth
-    booth = Dia2Booth()
+    if pair["engine"] == "dia2":
+        from dia2_engine import Dia2Booth
+        booth = Dia2Booth()
+        generate = booth.generate
+    else:
+        # Chatterbox (its own venv, as a child process). Splitting is by
+        # Whisper anyway, so the same carrier batches work for it.
+        from render_stems import ChatterboxRenderer
+        generate = ChatterboxRenderer().render
     t_start = time.time()
     done_this_run = 0
     retry: List[dict] = []
@@ -160,30 +208,26 @@ def main() -> None:
         batch = [j for j in queue if j["seat"] == head["seat"] and j["style"] == head["style"]][: args.batch]
         ids = {id(j) for j in batch}
         queue = [j for j in queue if id(j) not in ids]
-        text = BREAK.join(carrier(j["style"], j["text"]) for j in batch)
+        text = BREAK.join(carrier_render(j["style"], j["text"]) for j in batch)
         seed = 1000 + sum(state["attempts"].get(j["key"], 0) for j in batch) * 7 + len(index["entries"])
         t0 = time.time()
-        wav, ts = booth.generate(text, head["seat"], head["style"], seed)
-        spans = split_batch(wav, ts, batch)
+        wav, ts = generate(text, head["seat"], head["style"], seed)
         from dia2_engine import whisper_words
-        wwords = whisper_words(wav, au.SR)  # QA: did it say the name?
+        spans = split_batch(wav, whisper_words(wav, au.SR), batch)
         ok = 0
         for k, j in enumerate(batch):
             state["attempts"][j["key"]] = state["attempts"].get(j["key"], 0) + 1
             reason = ""
             clip = None
-            if spans is None:
-                reason = "word-stream mismatch"
+            if spans[k] is None:
+                reason = "could not align the batch"
             else:
-                s, e, trusted = spans[k]
-                seg = au.cut(wav, s, e)
-                heard_txt = au.words_in_span(wwords, s, e)
-                sim = au.similarity(j["text"], heard_txt)
-                d = len(au.trim_silence(seg)) / au.SR
+                s, e, heard_txt = spans[k]
+                seg = au.clean_edges(au.trim_silence(au.cut(wav, s, e)))
+                d = len(seg) / au.SR
                 max_d = 3.2 if j["form"] == "full" else 2.2
-                if not trusted:
-                    reason = "no pause after the name"
-                elif d < 0.18 or d > max_d:
+                sim = au.similarity(j["text"], heard_txt)
+                if d < 0.25 or d > max_d:
                     reason = f"duration {d:.2f}s"
                 elif any(au._norm_word(w) in CARRIER_WORDS for w in heard_txt.split()):
                     reason = f"carrier bleed: heard '{heard_txt}'"
@@ -199,9 +243,11 @@ def main() -> None:
                 index["entries"][j["key"]] = fn
                 ok += 1
                 done_this_run += 1
-            elif state["attempts"][j["key"]] >= 2:
+            elif state["attempts"][j["key"]] >= 3:
                 state["failed"][j["key"]] = reason
             else:
+                state.setdefault("retried", {})[j["key"]] = reason
+            if clip is None and state["attempts"][j["key"]] < 3:
                 retry.append(j)
         dt = time.time() - t0
         state["perf"] = (state["perf"] + [[round(dt, 2), len(batch)]])[-200:]

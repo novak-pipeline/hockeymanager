@@ -69,31 +69,70 @@ $PY scripts/booth/render_names.py --jobs .cache/booth/nhl-ehm-jobs.json \
 ```
 
 ### Why Dia2 needs the extra machinery
-- **Dia2 cannot say a lone word.** In the lab every isolated name clip came out
-  as mumble. So:
-  - **Names** are rendered inside a carrier phrase and cut out. The carriers
-    are "It's {name}!" (excited), "That's {name}." (neutral) and
-    "Is it {name}?" (rising), set in `booth.config.json → nameCarriers`.
-  - **Stems** with a name slot are rendered with a placeholder surname
-    ("Big save, Jackson!") and cut at the placeholder. The stem then carries a
-    real lead-in to a name, which is why the seam sounds spoken rather than
-    pasted.
-  - The cut points come from Dia2's own per-word timestamps
-    (`GenerationResult.timestamps`), each refined to the quietest 10 ms frame
-    nearby.
+Every rule below was learned from a failed render, and every one is measured in
+the render logs.
+
+- **Dia2 cannot say a lone word.** Every isolated name clip in the lab was
+  mumble. A **name** is therefore rendered inside a carrier phrase and cut out.
+  - The carriers are "Great shot, {name}!" (excited), "Nice work, {name}."
+    (neutral) and "Wait, {name}?" (rising), set in
+    `booth.config.json → nameCarriers`.
+  - Each carrier ends in a stop consonant plus a comma, which leaves a gap in
+    front of the name. "It's {name}" left the hiss of its "s" on the clip
+    (Whisper heard "It's McDavid" in a stitched call).
+- **Every stem is read whole, never cut.**
+  - **Lead slot.** Dia2 garbles the first word of a verb-first fragment:
+    "shoots, and scores!" came out "Fruits and scores" or "Foot and scores" in
+    every take. A lead-slot line is therefore written so that what follows the
+    name is a whole sentence of its own, `"{name}! He shoots, and scores!"`, and
+    the stem is that sentence. A test enforces this.
+  - **Tail slot.** Cutting the placeholder off "Big save, <break/> Jackson!"
+    kept dropping the weak word right before the name ("…absolutely robbed by"
+    lost its "by"). A tail stem ("Oh, what a save by") is now read on its own.
+  - A tail stem is judged **stitched** to a reference name clip from the bank
+    ("Murphy"), exactly as the game plays it. Heard on its own, Whisper drops a
+    stem's trailing "for"/"by"/"on" nearly every time, so an isolated score says
+    nothing.
+- **Cuts are aligned with Whisper, not with Dia2's word stamps.**
+  - Dia2's per-word stamps drift against the audio by a variable amount, worst
+    around `<break/>`s.
+  - Cuts placed on them clipped name onsets ("Crosby" came out "Crossbeast"),
+    kept carrier scraps ("Work Matthews") and dropped a stem's last word ("…a
+    milestone night for" lost its "for").
+  - Now Whisper-large-v3 transcribes the render, with word timings:
+    - the carrier words are the anchors;
+    - the name is what is heard between one carrier and the next;
+    - every edge snaps to the longest pause in the gap around it.
+  - Dia2's stamps are still used to split a multi-line stem batch at its 0.9 s
+    breaks. Every clip is QA'd afterwards, so a bad split is caught.
+  - A last pass (`clean_edges`) drops a short burst that a ≥ 0.15 s pause cuts
+    off from the rest of a name clip, such as the "t" of "shot" in front of
+    "Doyle". A name has no pause that long inside it.
+- **Every shipped clip is QA'd by Whisper-large-v3 against its exact text.**
+  - A scrap of the conditioning prefix before the first word ("Well, the puck
+    is down…") is trimmed.
+  - Stems keep the best of 2–3 takes.
+  - Clips whose word error rate is over 0.10 are re-rendered one line per call
+    (`--recheck 0.1`).
 - **Batching.**
-  - Each Dia2 call pays a fixed cost of about 10 s on Windows for CUDA-graph
-    capture.
-  - Stems are rendered about 6 lines per call and names 24 per call, separated
-    by `<break/>` pauses. The per-word timestamps split the batch back into
-    clips exactly.
-  - A batch whose word count doesn't line up is re-rendered one line at a time.
+  - Each Dia2 call pays a fixed cost of about 10–12 s on Windows (CUDA-graph
+    capture and set-up).
+  - Stems are rendered about 6 lines per call, separated by 0.9 s breaks.
+  - Names are rendered **10 per call**: a 16-name excited batch drifted into
+    gibberish.
+  - Neighbouring clips share one split point, so neither keeps a scrap of the
+    other. A split with no real pause is re-rendered solo, or retried with a new
+    seed.
+- **Respellings are one plain word per name.** `pronunciation.ts` turns
+  "NEH-chahs" into "Nehchahs". Hyphenated respellings were spelled out by Dia2
+  ("pahs-ter-nyahk" came out "Pops. Turn it."), and ALL-CAPS syllables are read
+  letter by letter by every engine.
 - **Prefix reuse.**
   - Dia2 re-feeds the seat's prefix through the transformer on every call. This
     is eager and kernel-launch-bound, about 20–25 s.
   - `dia2_engine.py` runs that warm-up once per seat, keeps the KV rows it
-    wrote, and restores them on later calls. It still replays the cheap text
-    state machine.
+    wrote, and restores them on later calls, while still replaying the cheap
+    text state machine.
   - Result: a 3 s line went from 28.6 s to 13.3 s.
 - **Whisper** transcribes each prefix only once. The transcripts are cached in
   `scripts/booth/voices/transcripts.json`. After that, Whisper is only used for
@@ -102,7 +141,8 @@ $PY scripts/booth/render_names.py --jobs .cache/booth/nhl-ehm-jobs.json \
   −19 dBFS RMS (excited +1.5 dB), and peak-limited to −1 dBFS. A name next to a
   stem never jumps out.
 - **Format.** Ogg/Opus, 24 kHz mono, about 32 kbps (libsndfile
-  `compression_level=0.9`), which Chromium's `decodeAudioData` reads natively.
+  `compression_level=0.9`), which Chromium's `decodeAudioData` reads natively
+  (verified in the dev harness).
 
 ## 3. Name banks
 
@@ -128,9 +168,9 @@ A bank maps `"<seat>|<style>|<spoken text>"` to a clip (`NameBankIndex` in
   The main process merges every mod's `pronunciations.json` and hands the result
   to the booth.
 - **Fixing a hard name:**
-  1. Add a respelling to `mods/<mod>/pronunciations.json`, in lowercase
-     hyphenated syllables with stress in CAPS ("kah-PREE-zoff"; the engine gets
-     it lowercased).
+  1. Add a respelling to `mods/<mod>/pronunciations.json`, in hyphenated
+     syllables with stress in CAPS ("kah-PREE-zoff"). The engine gets one plain
+     word, "Kahpreezoff".
   2. Re-run `export-names.mjs`, then `render_names.py`. Only the changed key is
      rendered, because the key is the spoken text.
 - **QA.**

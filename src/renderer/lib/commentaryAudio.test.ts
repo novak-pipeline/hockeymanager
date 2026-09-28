@@ -38,7 +38,7 @@ describe('booth name banks', () => {
   it('a respelling in the mod pronunciation file changes the key the booth looks for', () => {
     const p = { id: '4', name: 'Adam Hronek', externalId: 'x-4' }
     const file = { version: 1 as const, byExternalId: { 'x-4': 'AH-dum HRAW-nek' } }
-    const hit = resolveBankEntry(bank([bankKey('pbp', 'excited', 'hraw-nek')]), p, 'surname', 'excited', 'pbp', file)
+    const hit = resolveBankEntry(bank([bankKey('pbp', 'excited', 'Hrawnek')]), p, 'surname', 'excited', 'pbp', file)
     expect(hit).not.toBeNull()
   })
 })

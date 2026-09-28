@@ -85,20 +85,20 @@ describe('booth line library', () => {
 describe('pronunciation', () => {
   it('explicit respelling wins', () => {
     const s = spokenName({ id: '1', name: 'Martin Nečas', nationality: 'Czech Republic', pronunciation: 'MAR-tin NEH-chahs' })
-    expect(s.full).toBe('mar-tin neh-chahs')
-    expect(s.surname).toBe('neh-chahs')
+    expect(s.full).toBe('Martin Nehchahs')
+    expect(s.surname).toBe('Nehchahs')
   })
 
   it('community file by external id and by surname', () => {
     const file = { version: 1 as const, byExternalId: { 'nhl-1': 'KEE-rill kah-PREE-zoff' }, byName: { 'Hughes': 'HYOOZ' } }
-    expect(spokenName({ id: '1', name: 'Kirill Kaprizov', externalId: 'nhl-1' }, file).surname).toBe('kah-pree-zoff')
-    expect(spokenName({ id: '2', name: 'Jack Hughes' }, file).surname).toBe('hyooz')
+    expect(spokenName({ id: '1', name: 'Kirill Kaprizov', externalId: 'nhl-1' }, file).surname).toBe('Kahpreezoff')
+    expect(spokenName({ id: '2', name: 'Jack Hughes' }, file).surname).toBe('Hyooz')
   })
 
   it('shipped defaults cover the hard ones', () => {
-    expect(spokenName({ id: '1', name: 'Samuel Söderblom', nationality: 'Sweden' }).surname).toBe('suh-der-bloom')
-    expect(spokenName({ id: '2', name: 'Oliver Ekman-Larsson', nationality: 'Sweden' }).surname).toBe('ek-mun lar-son')
-    expect(spokenName({ id: '3', name: 'Rasmus Dahlin', nationality: 'Sweden' }).surname).toBe('dah-leen')
+    expect(spokenName({ id: '1', name: 'Samuel Söderblom', nationality: 'Sweden' }).surname).toBe('Suhderbloom')
+    expect(spokenName({ id: '2', name: 'Oliver Ekman-Larsson', nationality: 'Sweden' }).surname).toBe('Ekmun Larson')
+    expect(spokenName({ id: '3', name: 'Rasmus Dahlin', nationality: 'Sweden' }).surname).toBe('Dahleen')
   })
 
   it('nationality letter rules handle diacritics and clusters', () => {
@@ -111,8 +111,9 @@ describe('pronunciation', () => {
     expect(applyLetterRules('Côté')).toBe('Cote')
   })
 
-  it('respelling lowercases stress caps (caps are read as letters)', () => {
-    expect(respellingToSpeech('NEH-chahs')).toBe('neh-chahs')
+  it('respelling becomes one plain word per name (no hyphens, no stress caps)', () => {
+    expect(respellingToSpeech('NEH-chahs')).toBe('Nehchahs')
+    expect(respellingToSpeech('EK-mun LAR-son')).toBe('Ekmun Larson')
   })
 
   it('a respelling changes the spoken text (and so the name-bank key)', () => {
@@ -125,10 +126,10 @@ describe('pronunciation', () => {
 
 describe('pronunciation — names as the imported DB spells them', () => {
   it('diacritic-free spellings and a two-word surname still resolve', () => {
-    expect(spokenName({ id: '1', name: 'Martin Necas', nationality: 'Czech Republic' }).surname).toBe('neh-chahs')
-    expect(spokenName({ id: '2', name: 'Andrei Vasilevsky', nationality: 'Russia' }).surname).toBe('vas-ih-lef-skee')
+    expect(spokenName({ id: '1', name: 'Martin Necas', nationality: 'Czech Republic' }).surname).toBe('Nehchahs')
+    expect(spokenName({ id: '2', name: 'Andrei Vasilevsky', nationality: 'Russia' }).surname).toBe('Vasihlefskee')
     const oel = spokenName({ id: '3', name: 'Oliver Ekman Larsson', nationality: 'Sweden' })
-    expect(oel.surname).toBe('ek-mun lar-son')
-    expect(oel.full).toBe('ol-ih-ver ek-mun lar-son')
+    expect(oel.surname).toBe('Ekmun Larson')
+    expect(oel.full).toBe('Olihver Ekmun Larson')
   })
 })

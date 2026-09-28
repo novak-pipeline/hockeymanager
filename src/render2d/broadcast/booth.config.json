@@ -43,10 +43,10 @@
     }
   },
   "nameCarriers": {
-    "$comment": "Dia2 cannot say a lone word, so every name clip is cut out of a carrier phrase. The carrier sets the inflection.",
-    "excited": "It's {name}!",
-    "neutral": "That's {name}.",
-    "rising": "Is it {name}?"
+    "$comment": "Dia2 cannot say a lone word, so every name clip is cut out of a carrier phrase, which sets the inflection. Each carrier ends in a stop consonant plus a comma ('shot,' / 'work,'), which leaves a clean gap in front of the name. 'It's {name}' left the hiss of its 's' on the clip.",
+    "excited": "Great shot, {name}!",
+    "neutral": "Nice work, {name}.",
+    "rising": "Wait, {name}?"
   },
   "stemPlaceholder": "Jackson"
 }

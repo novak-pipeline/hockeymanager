@@ -196,3 +196,34 @@ def silence_boundary(a: np.ndarray, t0: float, t1: float, rel_db: float = -32.0)
         i = lo + int(np.argmin(r[lo:hi]))
         return (i * FRAME + FRAME / 2) / SR, 0.0
     return best_mid * FRAME / SR, best_len * FRAME / SR
+
+
+def clean_edges(a: np.ndarray, min_gap: float = 0.15, max_scrap: float = 0.22, rel_db: float = -32.0) -> np.ndarray:
+    """Drop a stray scrap at either end of a cut clip: a short burst (at most
+    `max_scrap` s) cut off from the rest by a pause of at least `min_gap` s is a
+    piece of the neighbouring carrier word ("…t" of "shot" + pause + "Doyle"),
+    not the name. A name has no pause that long inside it."""
+    r = frame_rms(a)
+    if r.size < 10:
+        return a
+    quiet = r < r.max() * (10 ** (rel_db / 20.0))
+    need = int(min_gap * SR / FRAME)
+    scrap = int(max_scrap * SR / FRAME)
+    runs, st = [], None
+    for i, q in enumerate(list(quiet) + [False]):
+        if q and st is None:
+            st = i
+        elif not q and st is not None:
+            if i - st >= need:
+                runs.append((st, i))
+            st = None
+    n = len(r)
+    lo, hi = 0, n
+    for s0, e0 in runs:
+        if 0 < s0 <= scrap and e0 < n:
+            lo = max(lo, e0)
+        if s0 > 0 and 0 < n - e0 <= scrap:
+            hi = min(hi, s0)
+    if lo == 0 and hi == n or hi - lo < int(0.2 * SR / FRAME):
+        return a
+    return trim_silence(a[lo * FRAME: hi * FRAME])

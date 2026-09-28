@@ -80,10 +80,14 @@ def units_for(lines: list, placeholder: str) -> List[dict]:
                 units.append(dict(clip=f"stem.{l['id']}", seat=l["speaker"], style=style, text=l["stem"],
                                   cut=None, stem=l["stem"]))
             else:
-                head = l["text"].rsplit("{name}", 1)[0].rstrip()
-                render = f"{head} {SLOT_BREAK} {placeholder}!"
-                units.append(dict(clip=f"stem.{l['id']}", seat=l["speaker"], style=style, text=txt,
-                                  render=render, cut=l["slot"], stem=l["stem"]))
+                # A tail stem ("Big save,") is read on its own too. Cutting it
+                # off "Big save, Jackson!" kept dropping the weak word right
+                # before the name ("…robbed by" lost "by"), because neither the
+                # model's word stamps nor Whisper's place that word reliably.
+                # It is judged STITCHED to a reference name (qa_score).
+                units.append(dict(clip=f"stem.{l['id']}", seat=l["speaker"], style=style, text=l["stem"],
+                                  cut=None, qa_tail=True, stem=l["stem"],
+                                  nstyle=l.get("nameStyle") or "neutral"))
             units.append(dict(clip=f"bare.{l['id']}", seat=l["speaker"], style=style, text=l["bare"], cut=None,
                               stem=l["bare"]))
         else:
@@ -147,52 +151,77 @@ def unit_spans(wav: np.ndarray, ts: List[Tuple[str, float]], batch: List[dict]):
 
 
 def cut_placeholder(seg: np.ndarray, words: List[Tuple[str, float]], cut: str, placeholder: str) -> Optional[np.ndarray]:
-    """Remove the placeholder name from a rendered named line.
+    """Cut the placeholder name off the end of a tail-slot line ("Big save,
+    <break/> Jackson!" -> "Big save,"). Lead-slot stems are rendered whole and
+    never come here.
 
-    Where the placeholder starts/ends comes from Whisper's word timings on this
-    very clip (they mark word ENDS too, which the model's own stream doesn't),
-    then the cut snaps to the quietest frame in the gap. There is often no
-    pause at all between a name and the verb after it ("Jackson shoots"), so a
-    cut from word starts alone left a "-son" on the stem. The model's word
-    starts are the fallback."""
-    # 1) The forced <break/> at the slot leaves a real pause: split in its
-    #    middle, located between the model's own word starts.
-    idx = next((i for i, (w, _) in enumerate(words) if placeholder.lower() in w.lower().strip(",.!?")), None)
-    if idx is not None:
-        if cut == "lead" and idx + 1 < len(words):
-            c, quiet = au.silence_boundary(seg, words[idx][1] + 0.3, words[idx + 1][1] + 0.05)
-            if quiet >= 0.1:
-                return seg[int(c * au.SR):]
-        if cut == "tail" and idx > 0:
-            c, quiet = au.silence_boundary(seg, words[idx - 1][1] + 0.15, words[idx][1] + 0.05)
-            if quiet >= 0.1:
-                return seg[: int(c * au.SR)]
-    # 2) No pause (Chatterbox, or Dia2 ignored the break): Whisper's timings.
+    Aligned with Whisper, not Dia2's word stamps: those drift against the audio
+    around a <break/> and cut the last word off ("...a milestone night for"
+    lost its "for"). The cut snaps to the longest pause between the end of the
+    word before the placeholder and the placeholder's start."""
+    if cut != "tail":
+        return None
     ww = au_whisper(seg)
     widx = max(range(len(ww)), key=lambda i: au.similarity(placeholder, ww[i][0]), default=None)
-    if widx is not None and au.similarity(placeholder, ww[widx][0]) >= 0.6:
-        _, p_start, p_end = ww[widx]
-        if cut == "tail":
-            prev_end = ww[widx - 1][2] if widx > 0 else max(0.0, p_start - 0.1)
-            lo, hi = min(prev_end, p_start), p_start + 0.02
-            c = au.quietest_point(seg, (lo + hi) / 2, max(0.02, (hi - lo) / 2 + 0.02))
-            return seg[: int(c * au.SR)]
-        if widx + 1 >= len(ww):
-            return None
-        nxt = ww[widx + 1][1]
-        lo, hi = p_end - 0.02, max(p_end, nxt) + 0.02
-        c = au.quietest_point(seg, (lo + hi) / 2, max(0.02, (hi - lo) / 2))
-        return seg[int(c * au.SR):]
-    # 3) Last resort: the model's own word starts.
-    if idx is None:
+    if widx is None or widx == 0 or au.similarity(placeholder, ww[widx][0]) < 0.6:
         return None
-    if cut == "tail":
-        c = au.quietest_point(seg, max(0.0, words[idx][1] - 0.06), 0.1)
-        return seg[: int(c * au.SR)]
-    if idx + 1 >= len(words):
-        return None
-    c = au.quietest_point(seg, max(0.0, words[idx + 1][1] - 0.02), 0.08)
-    return seg[int(c * au.SR):]
+    prev_end, p_start = ww[widx - 1][2], ww[widx][1]
+    c, _ = au.silence_boundary(seg, prev_end - 0.03, max(prev_end, p_start) + 0.05)
+    return seg[: int(c * au.SR)]
+
+
+REF_NAME = "Murphy"  # a names.ts surname Whisper knows: the fictional bank has it
+_ref_cache: Dict[tuple, Optional[np.ndarray]] = {}
+
+
+def _ref_name(pair: str, seat: str, style: str) -> Optional[np.ndarray]:
+    k = (pair, seat, style)
+    if k not in _ref_cache:
+        import soundfile as sf
+        d = os.path.join(ROOT, "src", "renderer", "public", "commentary", pair, "names")
+        try:
+            idx = json.load(open(os.path.join(d, "index.json"), encoding="utf-8"))["entries"]
+            f = idx.get(f"{seat}|{style}|{REF_NAME}")
+            _ref_cache[k] = sf.read(os.path.join(d, f), dtype="float32")[0] if f else None
+        except Exception:
+            _ref_cache[k] = None
+    return _ref_cache[k]
+
+
+def qa_score(u: dict, clip: np.ndarray, pair: str, ww=None) -> Tuple[str, float]:
+    """(heard, word error rate) for a clip as the PLAYER hears it.
+
+    A tail stem ends on a weak word right before the name ("…a milestone night
+    for"). Heard on its own, Whisper drops that word nearly every time, so the
+    stem is judged STITCHED to a reference name clip from the bank, exactly as
+    the game plays it."""
+    if u.get("qa_tail"):
+        ref = _ref_name(pair, u["seat"], u.get("nstyle", "neutral"))
+        if ref is not None:
+            gap = np.zeros(int(au.SR * 0.03), dtype=np.float32)
+            words = au_whisper(np.concatenate([clip, gap, ref]))
+            heard = " ".join(w for (w, _s, _e) in words)
+            return heard, au.wer(f"{u['stem']} {REF_NAME}", heard)
+    words = ww if ww is not None else au_whisper(clip)
+    heard = " ".join(w for (w, _s, _e) in words)
+    return heard, au.wer(u["stem"], heard)
+
+
+def requalify(pair: str, units: List[dict], manifest: dict, qa: dict, qa_path: str) -> None:
+    """Re-score the clips already rendered (no GPU rendering)."""
+    import soundfile as sf
+    out_dir = os.path.join(ROOT, "src", "renderer", "public", "commentary", pair)
+    for u in units:
+        e = manifest["clips"].get(u["clip"])
+        if not e:
+            continue
+        clip = sf.read(os.path.join(out_dir, e["file"]), dtype="float32")[0]
+        heard, score = qa_score(u, clip, pair)
+        prev = qa.get(u["clip"], {})
+        qa[u["clip"]] = dict(prev, text=u["stem"], heard=heard, wer=round(score, 3),
+                             status="ok" if score <= 0.25 else "check", scoredStitched=bool(u.get("qa_tail")))
+        print(f"  {u['clip']}: wer {score:.2f}  '{heard}'", flush=True)
+    au.atomic_json(qa_path, qa)
 
 
 def trim_leading_scrap(clip: np.ndarray, ww, expected: str):
@@ -252,9 +281,9 @@ class ChatterboxRenderer:
         if sr != au.SR:
             import torch, torchaudio
             a = torchaudio.functional.resample(torch.from_numpy(a), sr, au.SR).numpy()
-        # No native word timings: Whisper provides them (start times).
-        words = au_whisper(a)
-        return a, [(w, s) for (w, s, e) in words]
+        # No native word timings. Lines are rendered one per call, so none are
+        # needed to split; the placeholder cut falls back to Whisper's timings.
+        return a, []
 
 
 def au_whisper(a: np.ndarray):
@@ -271,6 +300,8 @@ def main() -> None:
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--no-qa", action="store_true")
     ap.add_argument("--solo", action="store_true", help="one line per call (slower; cleanest edges)")
+    ap.add_argument("--requalify", action="store_true", help="re-score the rendered clips (no rendering)")
+    ap.add_argument("--kind", choices=["all", "stem", "bare"], default="all", help="render only stem.* or bare.* clips")
     ap.add_argument("--recheck", type=float, default=0.0,
                     help="re-render (solo) every clip whose QA word error rate is above this")
     args = ap.parse_args()
@@ -289,6 +320,9 @@ def main() -> None:
     qa = json.load(open(qa_path, encoding="utf-8")) if os.path.exists(qa_path) else {}
 
     lines = load_lines()
+    if args.requalify:
+        requalify(args.pair, units_for(lines, CONFIG["stemPlaceholder"]), manifest, qa, qa_path)
+        return
     only = {s.strip() for s in args.only.split(",") if s.strip()}
     if args.recheck:
         only |= {k.split(".", 1)[1] for k, v in qa.items() if v.get("wer", 1.0) > args.recheck or v.get("status") == "failed"}
@@ -298,6 +332,7 @@ def main() -> None:
             return
     units = [u for u in units_for(lines, CONFIG["stemPlaceholder"])
              if (not only or u["clip"].split(".", 1)[1] in only)
+             and (args.kind == "all" or u["clip"].startswith(args.kind + "."))
              and (args.force or u["clip"] not in manifest["clips"])]
     print(f"[stems:{args.pair}] {len(units)} clips to render, {args.takes} take(s) each", flush=True)
     if not units:
@@ -364,8 +399,7 @@ def main() -> None:
                 # scrap of a neighbour or a leftover placeholder scores badly).
                 ww = au_whisper(clip)
                 clip, ww = trim_leading_scrap(clip, ww, u["stem"])
-                heard = " ".join(w for (w, s, e) in ww)
-                score = au.wer(u["stem"], heard)
+                heard, score = qa_score(u, clip, args.pair, ww)
             cands.append((score, -float(np.sqrt(np.mean(clip ** 2))), c["take"], clip, heard))
         if not cands:
             print(f"  ! {u['clip']}: no usable take", flush=True)
@@ -378,6 +412,7 @@ def main() -> None:
         ms = au.write_ogg(os.path.join(out_dir, rel), final)
         manifest["clips"][u["clip"]] = dict(file=rel, durationMs=ms, speaker=u["seat"], text=u["stem"])
         qa[u["clip"]] = dict(text=u["stem"], heard=heard, wer=round(score, 3), take=take, style=u["style"],
+                             scoredStitched=bool(u.get("qa_tail")),
                              status="ok" if score <= 0.25 else "check")
         au.atomic_json(man_path, manifest)
         au.atomic_json(qa_path, qa)
