@@ -149,6 +149,7 @@ import { farmSplit } from '@engine/career/farmReassign'
 import { runDrills, showingOf, gradeOf, citeWeek, readinessOf, choicesFor, staffRead, type DrillResult, type DevGroup, type Readiness, type ChoiceSet } from '@engine/career/devCamp'
 import { detectBattles, rankBattle, battleRead, type CampCandidate, type CampGroup } from '@engine/career/campBattles'
 import { seasonSpans, devCampDateISO, resignDateISO, faDateISO, campDateISO, boardMeetingDateISO, inHolidayFreeze, allStarBreakDay, HOLIDAY_FREEZE, FREE_AGENCY, ARBITRATION, TRAINING_CAMP } from '@engine/career/seasonSpans'
+import { createGmReputation, callsThisWeek, recordContact, adjustStanding, driftStanding, standingTilt, standingLabel, FREE_PER_WEEK, type GmReputationState, type ContactKind } from '@engine/career/gmReputation'
 import { WEEK_LOADS, WEEK_LOAD_ORDER, staffWeekLoad, countBackToBacks, raceNumbers, buildStaffRead, pickStoryline, type WeekLoad, type StorylineCandidate } from '@engine/career/theWeek'
 import { buildNeeds, leagueBenchmark, type DepthEntry, type NeedsCandidate, type NeedGroup } from '@engine/career/offseasonNeeds'
 import { buildOppositionReport } from '@engine/career/oppositionReport'
@@ -4920,6 +4921,11 @@ export class Career {
   /** Write a settled promise into the permanent chronicle. */
   private chroniclePromise(pr: PlayerPromise, day: number): void {
     const p = this.data.players.get(asPlayerId(pr.playerId))
+    // Agents talk: a kept word travels as an UPSIDE. A broken one stays the
+    // room's business (morale, the arc, the agent's grudge already answer it):
+    // league-wide standing is the anti-cheese system, and a promise the season
+    // made impossible to keep is not an exploit.
+    if (pr.status === 'kept') this.creditStanding(1, `Kept your word to ${p?.name ?? 'a player'}.`)
     chronicleEvent(this.chronicle, {
       year: this.year,
       day,
@@ -9287,6 +9293,7 @@ export class Career {
     // THE WEEK: the practice load on the days without a game (fatigue now, a
     // development multiplier for the next pass).
     if (this.phase === 'regularSeason') this.applyWeekLoad(day)
+    driftStanding(this.gmRep, this.year, day)
     // #170 weekly practice: the user's regimen shifts fatigue. A hard focus tires
     // the roster (the price of sharper development); a recovery week freshens
     // legs at the cost of growth. Only the user's club runs a chosen regimen.
@@ -19327,7 +19334,29 @@ export class Career {
       agmTone: agm.tone,
       partnerVerdict,
       partnerLine,
+      ...((): { callsLine?: string; callsNear?: boolean } => {
+        const c = this.callsLine(asTeamId(proposal.partnerTeamId))
+        return c ? { callsLine: c.line, callsNear: c.near } : {}
+      })(),
     }
+  }
+
+  /** GM reputation, telegraphed: how many times you have called this club this
+   *  week, shown BEFORE a call could cost anything. Null while it is nowhere
+   *  near the line (two calls or fewer of each kind). */
+  private callsLine(teamId: TeamId): { line: string; near: boolean } | null {
+    const u = callsThisWeek(this.gmRep, { teamId: teamId as string, year: this.year, day: this.currentDay })
+    if (u.gauge <= 2 && u.offer <= 2) return null
+    const name = this.data.teams.get(teamId)?.abbreviation ?? 'them'
+    const near = u.gauge >= FREE_PER_WEEK.gauge - 1 || u.offer >= FREE_PER_WEEK.offer - 1
+    const past = u.gauge >= FREE_PER_WEEK.gauge || u.offer >= FREE_PER_WEEK.offer
+    const counts = `${u.gauge} read${u.gauge === 1 ? '' : 's'} and ${u.offer} offer${u.offer === 1 ? '' : 's'} to ${name} this week`
+    const line = past
+      ? `${counts}. You are at the line: another call this week costs goodwill, and his reads go vague. It resets as the week rolls.`
+      : near
+        ? `${counts}. You're close to the line with ${name} (${FREE_PER_WEEK.gauge} reads / ${FREE_PER_WEEK.offer} offers a week is normal business).`
+        : `${counts}.`
+    return { line, near: near || past }
   }
 
   /**
@@ -19382,7 +19411,7 @@ export class Career {
     const misread = (weekRng.float(-1, 1) + weekRng.float(-1, 1)) * sigma
     const evaln = evaluateProposal({
       give, receive, partnerTeam: partner, partnerPlayers: this.data.players, rng, waivedNtcIds, nonRosterIds,
-      relationship: Math.max(0, Math.min(100, this.relationshipWith(partnerId as string) + misread)),
+      relationship: Math.max(0, Math.min(100, this.tableRelationship(partnerId as string) + misread)),
       philosophy: personaPhilosophy(gm, posture.posture),
       context: {
         posture: posture.posture,
@@ -19434,10 +19463,21 @@ export class Career {
     const charSum = (s: string): number => { let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return h }
     const stableKey = [...proposal.givePlayerIds, ...proposal.givePickIds, ...proposal.receivePlayerIds, ...proposal.receivePickIds]
       .reduce((h, s) => (h * 31 + charSum(s)) | 0, 7)
+    // GM reputation: a gauge is a real call to a real man. Past the week's line
+    // he stops telling you what he thinks — a stock answer, not his verdict —
+    // so the gauge can never be worked like a slot machine (the verdict-peek).
+    const call = this.noteContact(partnerId, 'gauge')
+    if (call === 'strike') {
+      return {
+        gmName,
+        lean: 'tepid',
+        line: `${gmName}: "I've given you my read on our guys a few times this week. Put a real offer on the table and I'll give it a real answer."`,
+      }
+    }
     const rng = this.rngFor(7010, this.currentDay, stableKey)
     const evaln = evaluateProposal({
       give, receive, partnerTeam: partner, partnerPlayers: this.data.players, rng, waivedNtcIds, nonRosterIds,
-      relationship: this.relationshipWith(partnerId as string),
+      relationship: this.tableRelationship(partnerId as string),
       philosophy: personaPhilosophy(this.gmPersonaFor(partnerId), this.clubPostureFor(partnerId).posture),
       context: {
         posture: this.clubPostureFor(partnerId).posture,
@@ -19470,7 +19510,8 @@ export class Career {
       seedKey: `${gKey}#${stableKey}`,
       persist: false,
     })
-    return { gmName, lean, line: `${gmName}: "${said}"` }
+    const aside = call === 'warn' ? ` And look — that's a few calls this week. I have a club to run.` : ''
+    return { gmName, lean, line: `${gmName}: "${said}${aside}"` }
   }
 
   /* ───────────────── negotiation threads + spoken dialogue ─────────────────
@@ -19734,6 +19775,9 @@ export class Career {
       }
     }
     const nonRosterIds = this.farmIdsIn(give.players, receive.players, partnerId)
+    // GM reputation: an offer is a call. Never a lockout: past the line he
+    // still answers, but each one costs a little goodwill with his club.
+    this.noteContact(partnerId, 'offer')
     const rng = this.rngFor(7006, this.currentDay, this.offerCounter)
     const evaln = evaluateProposal({
       give,
@@ -19743,7 +19787,7 @@ export class Career {
       rng,
       waivedNtcIds,
       nonRosterIds,
-      relationship: this.relationshipWith(partnerId as string),
+      relationship: this.tableRelationship(partnerId as string),
       // Living World LW3: the partner's stance flows from his GM's persona +
       // the club's live posture, not a static hash.
       philosophy: personaPhilosophy(this.gmPersonaFor(partnerId), this.clubPostureFor(partnerId).posture),
@@ -20135,6 +20179,7 @@ export class Career {
       incomingPicks: receive.picks,
     })
     this.adjustRelationship(partnerId as string, 6)
+    this.creditStanding(1, `A deal done with ${partner.name}.`)
     return { ok: true }
   }
 
@@ -25793,6 +25838,53 @@ export class Career {
     return this.gmRelationships.get(teamId) ?? 50
   }
 
+  /* ── GM reputation: the anti-cheese system (gmReputation.ts has the laws) ── */
+
+  /** League-wide standing + the rolling call log. Serialized additively. */
+  private gmRep: GmReputationState = createGmReputation()
+
+  /** How a rival reads you at the table: your history with his club, tilted
+   *  a little by your name around the league (the upside of a good one). */
+  private tableRelationship(teamId: string): number {
+    return Math.max(0, Math.min(100, this.relationshipWith(teamId) + standingTilt(this.gmRep.standing)))
+  }
+
+  /**
+   * Log a call to a rival front office. Free up to the line; AT the line his
+   * GM says so and your AGM passes it on (no cost); past it the call costs a
+   * little goodwill with that club, and a pattern across several clubs costs
+   * standing league-wide. Returns what happened so a gauge can go vague.
+   */
+  private noteContact(teamId: TeamId, kind: ContactKind): 'ok' | 'warn' | 'strike' {
+    const v = recordContact(this.gmRep, { teamId: teamId as string, kind, year: this.year, day: this.currentDay })
+    if (v.kind === 'ok') return 'ok'
+    const team = this.data.teams.get(teamId)
+    const gm = this.gmPersonaFor(teamId)
+    const agm = this.getTeamStaff(this.userTeamId as string).assistantGM?.name ?? 'Your assistant GM'
+    const what = kind === 'gauge' ? 'sounding him out' : 'sending offers'
+    if (v.kind === 'warn') {
+      this.pushNews('trade', `${gm.name} has noticed the phone ringing`,
+        `${agm}: "That's ${FREE_PER_WEEK[kind]} times this week we've been ${what} to ${team?.name ?? 'them'}. ` +
+          `${gm.name} was polite about it, but he said it. Another call like that this week and he starts ` +
+          `giving us stock answers and remembering who wasted his time."`,
+        { teamId: teamId as string, salience: 55 })
+      return 'warn'
+    }
+    this.adjustRelationship(teamId as string, v.relationship)
+    if (v.wordGetsAround) {
+      this.pushNews('trade', 'Word gets around',
+        `${agm}: "Three front offices have now told me the same thing about us: we call too much and mean too little. ` +
+          `It will fade if we stop. Until then, expect a little less benefit of the doubt everywhere."`,
+        { teamId: this.userTeamId as string, salience: 62 })
+    }
+    return 'strike'
+  }
+
+  /** A deal done (or a promise kept) is the currency of a good name. */
+  private creditStanding(delta: number, text: string): void {
+    adjustStanding(this.gmRep, delta, this.year, this.currentDay, text)
+  }
+
   /** Nudge the relationship with a club, clamped to [0,100]. */
   private adjustRelationship(teamId: string, delta: number): void {
     const next = Math.max(0, Math.min(100, this.relationshipWith(teamId) + delta))
@@ -25828,7 +25920,19 @@ export class Career {
       })
       .filter((r) => r.teamName)
       .sort((a, b) => b.standing - a.standing)
-    return { rows }
+    const r = this.gmRep
+    const now = this.year * 1000 + this.currentDay
+    return {
+      rows,
+      reputation: {
+        standing: Math.round(r.standing),
+        label: standingLabel(r.standing),
+        tilt: Math.round(standingTilt(r.standing) * 10) / 10,
+        strikes30: r.strikes.filter((x) => now - (x.year * 1000 + x.day) < 30).length,
+        notes: r.notes.slice(-8).reverse().map((n) => ({ dateISO: dayToDateISO(n.year, Math.max(1, n.day)), delta: n.delta, text: n.text })),
+        rules: `Calls are free. Up to ${FREE_PER_WEEK.gauge} reads and ${FREE_PER_WEEK.offer} offers a week to one club is normal business; past that, that GM warms to you more slowly and stops giving straight reads. A pattern across three clubs travels. A bad name heals a point a week.`,
+      },
+    }
   }
 
   /* ────────────────────────── mentorship ────────────────────────── */
@@ -30485,6 +30589,7 @@ export class Career {
       gmJobMarket: this.gmJobMarket ? this.gmJobMarket.map((o) => ({ ...o })) : undefined,
       ownerRequest: this.ownerRequest ? { ...this.ownerRequest } : undefined,
       gmRelationships: [...this.gmRelationships.entries()],
+      gmReputation: structuredClone(this.gmRep),
       mentorships: [...this.mentorships.entries()],
       clubDirection: this.clubDirection,
       fanInterest: this.fanInterest,
@@ -30676,6 +30781,7 @@ export class Career {
     career.gmJobMarket = snapshot.gmJobMarket ? snapshot.gmJobMarket.map((o) => ({ ...o })) : null
     career.ownerRequest = snapshot.ownerRequest ? { ...snapshot.ownerRequest } : null
     career.gmRelationships = new Map(snapshot.gmRelationships ?? [])
+    career.gmRep = snapshot.gmReputation ? structuredClone(snapshot.gmReputation) : createGmReputation()
     career.mentorships = new Map(snapshot.mentorships ?? [])
     career.clubDirection = snapshot.clubDirection ?? 'compete'
     career.fanInterest = snapshot.fanInterest ?? 60

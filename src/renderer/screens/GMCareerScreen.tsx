@@ -159,6 +159,43 @@ export function GMCareerScreen(): JSX.Element {
 
       {market.data && <JobMarketPanel market={market.data} onRefetch={() => { market.refetch(); profile.refetch() }} />}
 
+      {rel.data?.reputation && (
+        <Panel title="Your name around the league">
+          <div className="row" style={{ gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+            <div style={{ minWidth: 150 }}>
+              <div className="muted small">Standing</div>
+              <div style={{ fontSize: 22, fontWeight: 700 }}>{rel.data.reputation.standing}</div>
+              <div className={`chip ${rel.data.reputation.standing >= 58 ? 'chip-success' : rel.data.reputation.standing < 43 ? 'chip-danger' : ''}`}>{rel.data.reputation.label}</div>
+              <div className="muted small" style={{ marginTop: 6 }}>
+                {rel.data.reputation.tilt === 0
+                  ? 'No edge either way at the table.'
+                  : rel.data.reputation.tilt > 0
+                    ? `+${rel.data.reputation.tilt} goodwill at every table.`
+                    : `${rel.data.reputation.tilt} goodwill at every table.`}
+              </div>
+              {rel.data.reputation.strikes30 > 0 && (
+                <div className="small" style={{ marginTop: 4, color: 'var(--amber)', display: 'flex', gap: 4, alignItems: 'center' }}>
+                  <Icon size={14}><Icons.Warning /></Icon> {rel.data.reputation.strikes30} call{rel.data.reputation.strikes30 === 1 ? '' : 's'} past the line this month
+                </div>
+              )}
+            </div>
+            <div style={{ flex: 1, minWidth: 260 }}>
+              <div className="muted small" style={{ marginBottom: 4 }}>What people are saying</div>
+              {rel.data.reputation.notes.length === 0 ? (
+                <div className="muted small">Nothing yet. A name is built one deal and one kept promise at a time.</div>
+              ) : rel.data.reputation.notes.map((n, i) => (
+                <div key={i} className="small" style={{ display: 'flex', gap: 8, padding: '2px 0' }}>
+                  <span className="muted" style={{ width: 78, flexShrink: 0 }}>{n.dateISO}</span>
+                  <span style={{ width: 34, flexShrink: 0, color: n.delta >= 0 ? 'var(--green)' : 'var(--red)' }}>{n.delta > 0 ? `+${n.delta}` : n.delta}</span>
+                  <span>{n.text}</span>
+                </div>
+              ))}
+              <div className="muted small" style={{ marginTop: 8 }}>{rel.data.reputation.rules}</div>
+            </div>
+          </div>
+        </Panel>
+      )}
+
       {rel.data && rel.data.rows.length > 0 && (
         <Panel title="Around the league — GM relationships">
           <div className="muted small" style={{ marginBottom: 8 }}>

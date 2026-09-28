@@ -45,6 +45,10 @@ function findLiveTalks(c: Career, data: ReturnType<typeof generateLeague>, userI
           receivePickIds: [] as string[],
         }
         // 'tepid' is the counter lean — he wants more, he isn't shaking on it.
+        // This probe gauges hundreds of packages — exactly the slot-machine
+        // pattern GM reputation answers with stock replies — so it clears the
+        // call log between reads: it is a lab instrument, not a GM.
+        ;(c as unknown as { gmRep: { contacts: unknown[] } }).gmRep.contacts = []
         if (c.gaugeTradeInterest(proposal).lean !== 'tepid') continue
         if (c.proposeTrade(proposal).verdict !== 'pending') continue
         return { pid: pid as string, give: give.id as string, recv: R.id as string }
