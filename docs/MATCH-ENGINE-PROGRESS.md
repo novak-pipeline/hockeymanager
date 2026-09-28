@@ -216,3 +216,56 @@ The agent was scored on 30 imported-league games. The director figures come from
 - **Kinematics.** Mean skater speed is slightly under the band (7.2 mph, about 6 mi/60 skated), and p99 acceleration is 28 ft/s² against a limit of 25.
 - **Shape errors.** The neutral-zone regroup, the rush and the power-play set-ups sit 25–40 ft off the textbook positions.
 - **Not started:** 4v4 and 5v3 shapes, and an attribute-correlation gate test.
+
+## Pass 2 (2026-09-28): shot location, gap control, dekes, physics hits, tactic robustness
+
+Measured on the imported real-roster league (the scorecard, 60 games) unless
+noted. Before = the agent engine at fc59998.
+
+| metric | before | after | NHL band |
+|---|---|---|---|
+| scorecard pass / fail (director: 50 / 42) | 68 / 24 | 69–70 / 22–23 | — |
+| mean shot distance | 16.7 ft | 35–37 ft | 30–38 |
+| D share of shots on goal | ~10% | ~29% | ~30% |
+| odd-man rushes / team-game | 13.1 | 3.5 | 1–6 |
+| SOG / goals / blocked share | 30.6 / 3.28 / 0.28 | 30–32 / 3.0–3.25 / 0.31 | 26–34 / 2.7–3.4 / 0.23–0.33 |
+| offside / icing per game | 11 / 9 | 5 / 7–8 | 5–7 / 6–8 |
+| loose-puck skate-pasts / game | ~270 | ~95–130 | — |
+| near-net carry s / team-game, stint p90, circling | 147, 5.3 s, 5.2 | 82, 1.75 s, 0.55 | ≤90, ≤2.5 s, ≤0.5 |
+| dekes / team-game (success) | 0 | ~20 (~50%) | 8–20 |
+| knockdowns / pins per team-game | 0 / 0 | 1.7 / 6.5 | — |
+| attribute gates r (hits, takeaways, giveaways, pass%) | — | 0.4 / 0.37 / −0.54 / 0.7 | ≥0.3 |
+
+What changed (see the commits on `play-realism` for detail):
+- **Value model** (`brain.ts` `VAL`): holding the puck in their zone is worth
+  the possession's continuation; a shot is worth its finish plus what it keeps
+  (rebounds, tips, and from the point the four men below the shot), minus the
+  turnover a block hands back; shooters read lanes with the sim's own block
+  odds. Carriers no longer stall at the crease; point shots are real.
+- **D gap discipline** (`D_SAFETY`): D stay goal-side of every attacker's
+  projected position and of a chip coming up the ice; a D steps up for a loose
+  puck above that line only when he clearly wins the race; no pinch below the
+  circles; the NZ gap is held on where the carrier is going.
+- **In close**: a carrier has 1 s within 30 ft of the net to shoot, deke, pass
+  or curl out; behind the net is worth less than in front; tie-ups get settled.
+- **Dekes**: additive `deke` event; hands vs the defender's / goalie's read,
+  both against tonight's average (scale-invariant across leagues).
+- **Stick checks**: additive `pokeCheck` event with a reload between attempts.
+- **Hits**: momentum exchange along the line of impact; `knockdown` when the
+  shove beats balance + strength; `pinned` against the boards (a board battle).
+- **Faceoffs**: `setAt` (everyone set; a 0.6–1.2 s hold before the drop) and
+  `tieUp`.
+- **Shapes**: 4v4 (2-2 attack, box defence), 5v3 (2-2-1) and the 3-man PK
+  triangle; forward roles are dropped first when a unit is short.
+- **Ratings on the game's level** (`world.ts` `LEVEL`, `shared/ratingLevel.ts`):
+  both watched engines and the quick sim read ratings against the level of the
+  rosters on the ice, so the imported league (~9 points higher) and the
+  generated one play the same hockey.
+- **Tactic robustness** (`fullSim.budgetTactics`, `tacticsRobust.test.ts`):
+  any slider mix stays inside NHL extremes (≤42 SOG, ≤4.5 goals a team-game).
+
+Still open: shape errors vs the textbook templates (20–38 ft; the matcher keys
+on puck location only, so transitions are scored as set plays); shot-location
+TVD 0.3; accel p99 ~28 ft/s² (hits and contacts are real impulses now); carrier
+speed in close (median ~7 mph against ≥ 9); standoffs ~2–4 per game; 22+ mph
+bursts; neutral-zone back passes 0.04 (band ≥ 0.05).

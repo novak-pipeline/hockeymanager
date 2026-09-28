@@ -203,13 +203,17 @@ export function stepBody(b: Body, cmd: MoveCmd, dt: number): void {
       at = -b.caps.brake
       an = 0
     } else {
-      const avail = b.caps.accel * energyF * Math.max(0.12, 1 - (sp / Math.max(cap, 1)) ** 2)
+      // Skating backward (facing against the travel): less push and less edge.
+      const back = (ux * b.hx + uy * b.hy) < -0.34
+      const bk = back ? PHYS.backThrust : 1
+      const bg = back ? PHYS.backGrip : 1
+      const avail = b.caps.accel * bk * energyF * Math.max(0.12, 1 - (sp / Math.max(cap, 1)) ** 2)
       at = clamp(at, -b.caps.brake, avail)
-      an = clamp(an, -b.caps.grip, b.caps.grip)
+      an = clamp(an, -b.caps.grip * bg, b.caps.grip * bg)
       // Friction circle: carving and driving share the same edges (crossovers
       // keep some thrust through a turn, but not all of it).
       const tot = Math.hypot(at, an)
-      const lim = b.caps.grip * PHYS.circle
+      const lim = b.caps.grip * bg * PHYS.circle
       if (tot > lim) {
         at *= lim / tot
         an *= lim / tot
@@ -302,7 +306,7 @@ export interface Contact {
 /** Share of a contact impulse applied per substep (1 = instantaneous). */
 export const CONTACT_SOFT = { k: 0.3 }
 /** Friction circle: total edge force as a multiple of the lateral grip. */
-export const PHYS = { circle: 1.0 }
+export const PHYS = { circle: 1.0, backThrust: 0.7, backGrip: 0.8 }
 
 export function resolveBodies(bodies: readonly Body[], out: Contact[]): void {
   const n = bodies.length

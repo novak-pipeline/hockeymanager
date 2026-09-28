@@ -112,7 +112,9 @@ const PENALTY_SECONDS = 120
 // PP/PK shot-rate multipliers. With a REAL man advantage on the ice (5v4 units)
 // part of the historical 1.6×/0.7× imbalance now emerges from the extra/missing
 // skater itself, so the explicit multipliers are retuned smaller.
-const PP_SHOT_MULT = 1.45
+const PP_SHOT_MULT = 2.0
+/** Power-play finishing edge over even strength (see tryShoot). */
+const PP_FINISH_MULT = 2.05
 const PK_SHOT_MULT = 0.75
 // A 6th attacker (goalie pulled) tilts the ice without a penalty.
 const EXTRA_ATTACKER_SHOT_MULT = 1.25
@@ -157,7 +159,7 @@ const ON_GOAL_SHARE = RATES.shotsOnGoal / (RATES.shotsOnGoal + RATES.blockedShot
 // match-engine plan: carriers with a clear lane now attack the slot instead of
 // passing back to the point, so the average attempt is more dangerous; goals
 // landed 3.54 → 3.81/team/game at 0.6, re-reconciled here.)
-const FINISH_K = 0.59
+const FINISH_K = 0.52
 
 /** Share of director-offered (non-rebound, non-one-timer) shot chances actually taken. */
 const SHOT_VOLUME = 0.8
@@ -1079,7 +1081,7 @@ function simPeriod(
     // (~36 SOG a team-game on both leagues); a share of the chances the
     // director offers is passed up (the carrier keeps working it).
     // (Never on a breakaway or an odd-man rush: those shots are always taken.)
-    if (kind !== 'rebound' && kind !== 'onetimer' && !oddMan && !(bkEp && bkEp.team === possession) && !ctx.rng.chance(Math.min(1, SHOT_VOLUME * scoreEffectMult(possession.goals - otherOf(possession).goals, (period - 1 + clk.t / lengthSeconds) / 3)))) return
+    if (kind !== 'rebound' && kind !== 'onetimer' && !oddMan && !(bkEp && bkEp.team === possession) && goalStrengthNow(possession, otherOf(possession)) !== 'pp' && !ctx.rng.chance(Math.min(1, SHOT_VOLUME * scoreEffectMult(possession.goals - otherOf(possession).goals, (period - 1 + clk.t / lengthSeconds) / 3)))) return
     const atk = possession
     const def = otherOf(atk)
     const a = atk.attackSign()
@@ -1170,12 +1172,15 @@ function simPeriod(
     const cf = atk.team.coachFit === undefined ? 1 : coachFitMultiplier(atk.team.coachFit)
     // def.goalieNight (mean 1.0) is the goalie's night: a hot one eats goals, an
     // off night coughs them up. Empty net is nobody's fault, so it's exempt.
+    const gs = goalStrengthNow(atk, def)
+    // A power play finishes better than even strength (NHL: ~13% vs ~8.5% of
+    // shots) — the passing lanes are open and the goalie is moving side to side.
+    const ppFinish = gs === 'pp' ? PP_FINISH_MULT : 1
     const pGoal = netEmpty
       ? EN_GOAL_P
-      : clamp(eff * FINISH_K * finish * (1 - goalieEdge) * cf * def.goalieNight * (ctx.scoringMult ?? 1), 0.004, 0.9)
+      : clamp(eff * FINISH_K * finish * (1 - goalieEdge) * cf * def.goalieNight * (ctx.scoringMult ?? 1) * ppFinish, 0.004, 0.9)
     const isGoal = rng.chance(pGoal)
     const assists = isGoal ? pickAssists(rng, atk.unit.skaters, shooterSk.player.id) : []
-    const gs = goalStrengthNow(atk, def)
 
     const net: XY = { x: a * 0.89, y: rng.float(-0.045, 0.045) }
     const speed = SHOT_SPEED_MIN + (clamp(shooterSk.player.composites.scoring, 0, 100) / 100) * SHOT_SPEED_RANGE
