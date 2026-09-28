@@ -156,7 +156,7 @@ const ON_GOAL_SHARE = RATES.shotsOnGoal / (RATES.shotsOnGoal + RATES.blockedShot
 // match-engine plan: carriers with a clear lane now attack the slot instead of
 // passing back to the point, so the average attempt is more dangerous; goals
 // landed 3.54 → 3.81/team/game at 0.6, re-reconciled here.)
-const FINISH_K = 0.54
+const FINISH_K = 0.62
 
 /** Share of director-offered (non-rebound, non-one-timer) shot chances actually taken. */
 const SHOT_VOLUME = 0.83
