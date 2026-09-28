@@ -229,7 +229,7 @@ export function FreeAgentMarketScreen(): JSX.Element {
 
       <CapLine finance={finance ?? null} />
 
-      <NeedsBoard focus="fa" />
+      <NeedsBoard context="fa" />
 
       <StandingOffersPanel hub={hub} />
 

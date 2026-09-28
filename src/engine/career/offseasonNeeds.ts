@@ -191,19 +191,79 @@ function candidatesFor(gap: Gap, pool: NeedsCandidate[], used: Set<string>, capR
     return add + handBonus - overRoom * 1.5 - (c.kind === 'trade' ? 0.5 : 0)
   }
   const sorted = [...fits].sort((a, b) => rank(b) - rank(a) || b.overall - a.overall)
-  // Mix: the best of each kind first, then fill by rank.
-  const picked: NeedsCandidate[] = []
-  for (const kind of ['resign', 'fa', 'trade'] as const) {
-    const first = sorted.find((c) => c.kind === kind)
-    if (first) picked.push(first)
+  // Up to five answers from EACH market — the free-agent side (the open
+  // market and your own expiring men) and the trade side — so every screen
+  // that shows the board has a full set of its own kind (see needsFor).
+  const out: NeedsCandidate[] = []
+  for (const side of [SIGNING_KINDS, TRADE_KINDS]) {
+    const mine = sorted.filter((c) => side.has(c.kind))
+    // Your own man first when he fits: the cheapest fix is often in the room.
+    const own = mine.find((c) => c.kind === 'resign')
+    const picked = own ? [own, ...mine.filter((c) => c !== own)] : mine
+    out.push(...picked.slice(0, MAX_CANDIDATES))
   }
-  for (const c of sorted) {
-    if (picked.length >= MAX_CANDIDATES) break
-    if (!picked.includes(c)) picked.push(c)
-  }
-  const out = picked.slice(0, MAX_CANDIDATES).sort((a, b) => rank(b) - rank(a))
   for (const c of out) used.add(c.playerId)
   return out.map(({ group: _g, ...c }) => ({ ...c, fit: fitLine(c as NeedsCandidate, gap) }))
+}
+
+/** Answers you SIGN (the open market, your own expiring men). */
+const SIGNING_KINDS: ReadonlySet<NeedCandidateView['kind']> = new Set(['fa', 'resign'])
+/** Answers you TRADE for (other clubs' players, your contracts to move). */
+const TRADE_KINDS: ReadonlySet<NeedCandidateView['kind']> = new Set(['trade', 'move'])
+
+/** Where the board is shown: the Free Agents desk, the Trade Centre, or the
+ *  offseason overview (both, grouped). */
+export type NeedsContext = 'fa' | 'trade' | 'all'
+
+export interface NeedsGroup {
+  kind: 'fa' | 'trade'
+  /** "Free agents" / "Trade targets". */
+  title: string
+  candidates: NeedCandidateView[]
+}
+
+/** One need as a screen shows it: its answers of the screen's kind, grouped,
+ *  and — when a group is empty — where to look instead. The need itself is
+ *  never dropped: a hole is still a hole on the desk that can't fill it. */
+export interface NeedInContext extends OffseasonNeedView {
+  groups: NeedsGroup[]
+  /** No answer of this screen's kind: say so, and point to the other desk. */
+  elsewhere?: { text: string; screen: 'faMarket' | 'trades' }
+}
+
+/**
+ * The needs board, filtered to where it is shown. The Free Agents desk shows
+ * only free agents and your own re-sign candidates; the Trade Centre only
+ * trade targets and, for a cap need, the contracts that would clear it; the
+ * offseason overview shows both, grouped.
+ */
+export function needsFor(needs: OffseasonNeedView[], context: NeedsContext): NeedInContext[] {
+  return needs.map((n) => {
+    const signing = n.candidates.filter((c) => SIGNING_KINDS.has(c.kind)).slice(0, MAX_CANDIDATES)
+    const trading = n.candidates.filter((c) => TRADE_KINDS.has(c.kind)).slice(0, MAX_CANDIDATES)
+    const faGroup: NeedsGroup = { kind: 'fa', title: 'Free agents', candidates: signing }
+    const trGroup: NeedsGroup = { kind: 'trade', title: n.kind === 'cap' ? 'Contracts that would clear it' : 'Trade targets', candidates: trading }
+    if (context === 'fa') {
+      return {
+        ...n,
+        groups: [faGroup],
+        ...(signing.length === 0
+          ? { elsewhere: n.kind === 'cap'
+              ? { text: 'Cap room is cleared by moving a contract — see the Trade Centre.', screen: 'trades' as const }
+              : { text: 'No free agents fit — see the Trade Centre.', screen: 'trades' as const } }
+          : {}),
+      }
+    }
+    if (context === 'trade') {
+      return {
+        ...n,
+        groups: [trGroup],
+        ...(trading.length === 0 ? { elsewhere: { text: 'No trade target fits — see Free Agents.', screen: 'faMarket' as const } } : {}),
+      }
+    }
+    const groups = [faGroup, trGroup].filter((g) => g.candidates.length > 0)
+    return { ...n, groups, ...(groups.length === 0 ? { elsewhere: { text: 'No real answer on the market today — nobody out there is better than who you have.', screen: 'faMarket' as const } } : {}) }
+  })
 }
 
 const money = (n: number): string => `$${(n / 1e6).toFixed(1)}M`

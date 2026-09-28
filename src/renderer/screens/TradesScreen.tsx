@@ -1939,7 +1939,7 @@ export function TradesScreen(): JSX.Element {
           </div>
 
           {tab === 'needs' && (
-            <NeedsBoard focus="trade" onBrowse={() => setTab('block')} browseLabel="Browse the whole trade block" />
+            <NeedsBoard context="trade" onBrowse={() => setTab('block')} browseLabel="Browse the whole trade block" />
           )}
 
           {tab === 'offers' && (
