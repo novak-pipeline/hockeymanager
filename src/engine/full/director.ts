@@ -135,7 +135,7 @@ export class Director {
     // Measured against the engine, then frozen.
     this.pRushAfterEntry = clamp(((seq.rushShotShare * attemptsPerTeam) / entriesPerTeam) * 0.62, 0.05, 0.5)
     this.freezeBase = clamp(seq.stoppagesPerGame.goalieFreeze / savesPerGame, 0.05, 0.5)
-    this.cycleShotPerTick = 0.005
+    this.cycleShotPerTick = 0.0043
   }
 
   /** P(goalie eats the puck) given net-front traffic (0..1) and rebound chaos. */

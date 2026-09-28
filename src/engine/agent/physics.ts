@@ -49,7 +49,7 @@ export interface Caps {
 }
 
 export const MIN_TOP_FT = 24
-export const MAX_TOP_FT = 34
+export const MAX_TOP_FT = 34.5
 
 export function capsFor(p: Player): Caps {
   const skating = r100(p.composites.skating)
@@ -120,6 +120,8 @@ export interface MoveCmd {
   /** Face this point instead of the direction of travel (backward skating, reading the play). */
   faceX?: number | undefined
   faceY?: number | undefined
+  /** Finishing a check: skate through the man into the boards (no edge before the wall). */
+  boardsOk?: boolean | undefined
 }
 
 const GLIDE_DECEL = 0.7
@@ -166,8 +168,22 @@ export function stepBody(b: Body, cmd: MoveCmd, dt: number): void {
   if (d < 0.5) want = 0
   const cap = currentCap(b)
   want = Math.min(want, cap)
-  const vdx = d > 1e-6 ? (dx / d) * want : 0
-  const vdy = d > 1e-6 ? (dy / d) * want : 0
+  let vdx = d > 1e-6 ? (dx / d) * want : 0
+  let vdy = d > 1e-6 ? (dy / d) * want : 0
+  // Skaters see the boards coming: the part of the wanted velocity that
+  // runs INTO the boards is dropped half a second out, so the legs take the
+  // speed off with an edge (within the normal limits) instead of the boards
+  // stopping him dead. A man finishing a check skates through.
+  if (!cmd.boardsOk) {
+    const pr = boardsClamp(b.x + b.vx * 0.45, b.y + b.vy * 0.45, b.radius + 0.3)
+    if (pr.hit) {
+      const vn = vdx * pr.nx + vdy * pr.ny
+      if (vn > 0) {
+        vdx -= vn * pr.nx
+        vdy -= vn * pr.ny
+      }
+    }
+  }
 
   const tau = 1.6 - 1.25 * clamp(cmd.urgency, 0, 1)
   let ax = (vdx - b.vx) / tau
@@ -193,7 +209,7 @@ export function stepBody(b: Body, cmd: MoveCmd, dt: number): void {
       // Friction circle: carving and driving share the same edges (crossovers
       // keep some thrust through a turn, but not all of it).
       const tot = Math.hypot(at, an)
-      const lim = b.caps.grip * 1.12
+      const lim = b.caps.grip * PHYS.circle
       if (tot > lim) {
         at *= lim / tot
         an *= lim / tot
@@ -219,10 +235,17 @@ export function stepBody(b: Body, cmd: MoveCmd, dt: number): void {
   }
   b.vx += ax * dt
   b.vy += ay * dt
-  const sp2 = speedOf(b)
+  let sp2 = speedOf(b)
   if (sp2 > cap) {
-    b.vx *= cap / sp2
-    b.vy *= cap / sp2
+    // Over the cap because the cap just FELL (he turned to skate backward,
+    // or tired): he bleeds the extra speed off at braking strength rather
+    // than losing it in one step (an impossible, jerky deceleration). Above
+    // his forward top speed it is a hard limit.
+    const hard = b.caps.top * 1.02
+    const target = sp2 > hard ? Math.max(cap, hard) : Math.max(cap, sp2 - b.caps.brake * dt)
+    b.vx *= target / sp2
+    b.vy *= target / sp2
+    sp2 = target
   }
   b.x += b.vx * dt
   b.y += b.vy * dt
@@ -276,6 +299,11 @@ export interface Contact {
  * Bodies occupy space: separate overlapping skaters and exchange momentum
  * (inelastic). Returns the contacts where the pair was closing.
  */
+/** Share of a contact impulse applied per substep (1 = instantaneous). */
+export const CONTACT_SOFT = { k: 0.3 }
+/** Friction circle: total edge force as a multiple of the lateral grip. */
+export const PHYS = { circle: 1.0 }
+
 export function resolveBodies(bodies: readonly Body[], out: Contact[]): void {
   const n = bodies.length
   for (let i = 0; i < n; i++) {
@@ -301,7 +329,9 @@ export function resolveBodies(bodies: readonly Body[], out: Contact[]): void {
       const closing = (a.vx - b.vx) * nx + (a.vy - b.vy) * ny
       if (closing > 0) {
         const e = 0.15
-        const jImp = ((1 + e) * closing) / sum
+        // Bodies absorb a contact over a few substeps (knees, shoulders, the
+        // glide), not in one instant: part of the impulse per step.
+        const jImp = (((1 + e) * closing) / sum) * CONTACT_SOFT.k
         a.vx -= jImp * ia * nx
         a.vy -= jImp * ia * ny
         b.vx += jImp * ib * nx

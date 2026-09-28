@@ -130,6 +130,30 @@ export function powerPlay(f: PowerPlayFormation): RoleSpot[] {
 }
 
 // ---------------------------------------------------------------------------
+// 5-on-3: the two-man advantage. Both points high, two flankers at the tops
+// of the circles for the one-timer, one man on the back post: a 2-2-1 that
+// stretches a three-man triangle until the seam opens.
+// ---------------------------------------------------------------------------
+export const PP_5V3: RoleSpot[] = [
+  S('P3_POST', 'F', 84, -8, 0, 0, 0.5),
+  S('P3_FLANK_S', 'F', 58, 24, 0, 0, 0.5),
+  S('P3_FLANK_W', 'F', 58, -24, 0, 0, 0.5),
+  S('P3_POINT_S', 'D', 34, 12, 0, 0, 0.5),
+  S('P3_POINT_W', 'D', 34, -12, 0, 0, 0.5)
+]
+
+/**
+ * 4-on-4 in their zone: a 2-2 — two D high (more ice to walk the line and
+ * shoot), one forward low on the puck side, one in the slot / weak post.
+ */
+export const FOUR_ATTACK: RoleSpot[] = [
+  S('F4_SLOT', 'F', 70, -8, 0, 0.3, 0.6),
+  S('F4_POINT_S', 'D', 32, 24, 0, 0, 0.5),
+  S('F4_POINT_W', 'D', 32, -20, 0, 0, 0.5),
+  S('F4_LOW', 'F', 30, 0, 0.6, 0.6, 0.6, 60, 90)
+]
+
+// ---------------------------------------------------------------------------
 // Without the puck. The ON-PUCK role (the man pressuring the carrier) is
 // assigned dynamically by the agents; these are everyone else.
 // ---------------------------------------------------------------------------
@@ -201,6 +225,21 @@ export function penaltyKill(f: PenaltyKillFormation): RoleSpot[] {
     S('PK_HIGH_W', 'F', -58, -14, 0, 0.1, 0.55)
   ]
 }
+
+/** 5-on-3 kill: a tight triangle — two low, one high in the middle. */
+export const PK_TRIANGLE: RoleSpot[] = [
+  S('PK3_LOW_S', 'D', -80, 8, 0, 0.3, 0.6),
+  S('PK3_LOW_W', 'D', -80, -8, 0, 0.1, 0.6),
+  S('PK3_TOP', 'any', -62, 0, 0, 0.4, 0.6)
+]
+
+/** 4-on-4 in our end: a box (two D low, two forwards high), shaded to the puck. */
+export const FOUR_DEFEND: RoleSpot[] = [
+  S('B4_LOW_S', 'D', -78, 9, 0, 0.35, 0.6),
+  S('B4_LOW_W', 'D', -78, -9, 0, 0.1, 0.6),
+  S('B4_HIGH_S', 'F', -56, 13, 0, 0.4, 0.6),
+  S('B4_HIGH_W', 'F', -56, -13, 0, 0.1, 0.6)
+]
 
 /** 3-on-3 overtime: possession game, one high safety. */
 export const OT_ATTACK: RoleSpot[] = [

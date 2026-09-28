@@ -156,7 +156,10 @@ const ON_GOAL_SHARE = RATES.shotsOnGoal / (RATES.shotsOnGoal + RATES.blockedShot
 // match-engine plan: carriers with a clear lane now attack the slot instead of
 // passing back to the point, so the average attempt is more dangerous; goals
 // landed 3.54 → 3.81/team/game at 0.6, re-reconciled here.)
-const FINISH_K = 0.53
+const FINISH_K = 0.62
+
+/** Share of director-offered (non-rebound, non-one-timer) shot chances actually taken. */
+const SHOT_VOLUME = 0.83
 
 // Non-shot events: per-game target → per-decision-tick probability. Hits and
 // takeaways are gated on the pressuring defender actually being near the puck
@@ -1071,6 +1074,11 @@ function simPeriod(
   // its danger comes from the real xG surface at the true origin.
   // ---------------------------------------------------------------------------
   const tryShoot = (shooterSk: RSkater, kind: ShotKind, oneTimer: boolean, oddMan: boolean): void => {
+    // Volume reconciliation: the beat sources together over-produce attempts
+    // (~36 SOG a team-game on both leagues); a share of the chances the
+    // director offers is passed up (the carrier keeps working it).
+    // (Never on a breakaway or an odd-man rush: those shots are always taken.)
+    if (kind !== 'rebound' && kind !== 'onetimer' && !oddMan && !(bkEp && bkEp.team === possession) && !ctx.rng.chance(Math.min(1, SHOT_VOLUME * scoreEffectMult(possession.goals - otherOf(possession).goals, (period - 1 + clk.t / lengthSeconds) / 3)))) return
     const atk = possession
     const def = otherOf(atk)
     const a = atk.attackSign()
@@ -1151,8 +1159,12 @@ function simPeriod(
       gStat.xgAgainst = (gStat.xgAgainst ?? 0) + xg
     }
 
-    const finish = shooterSk.player.composites.scoring / LEAGUE_AVG
-    const goalieEdge = (goalie.player.composites.goaltending - LEAGUE_AVG) / 220
+    const lvl = ctx.levelAvg ?? LEAGUE_AVG
+    // (Square-rooted: a star finishes better, but a league with a wider talent
+    // spread — the imported NHL rosters — must not out-score the calibration
+    // league just because its best shooters take the most shots.)
+    const finish = Math.sqrt(shooterSk.player.composites.scoring / lvl)
+    const goalieEdge = (goalie.player.composites.goaltending - lvl) / 220
     // Small coach roster-fit edge on finishing (neutral 1.0 when unset).
     const cf = atk.team.coachFit === undefined ? 1 : coachFitMultiplier(atk.team.coachFit)
     // def.goalieNight (mean 1.0) is the goalie's night: a hot one eats goals, an
@@ -1479,7 +1491,7 @@ function simPeriod(
     // protect the puck along the wall and keep working it instead (strong
     // puck handlers more so) — the low-to-high bail is the minority play.
     if (info[pick].back && !ownHalf) {
-      const keep = clamp(0.8 + (cs.player.composites.puckControl - LEAGUE_AVG) / 250, 0.65, 0.92)
+      const keep = clamp(0.8 + (cs.player.composites.puckControl - (ctx.levelAvg ?? LEAGUE_AVG)) / 250, 0.65, 0.92)
       if (rng.chance(keep)) return false
     }
     const toSk = mates[pick].r
@@ -1801,7 +1813,7 @@ function simPeriod(
     // of the safe dump — success still rides on puckControl/skating. Absent on
     // fictional/generated players (=> 0), so calibration is unaffected.
     const flairBoost = cs.player.flair !== undefined ? (cs.player.flair - 50) / 200 : 0
-    const skill = (cs.player.composites.puckControl + cs.player.composites.skating) / (2 * LEAGUE_AVG) + flairBoost
+    const skill = (cs.player.composites.puckControl + cs.player.composites.skating) / (2 * (ctx.levelAvg ?? LEAGUE_AVG)) + flairBoost
     // dumping > 0.5 compresses the effective gap (makes dump more attractive);
     // gapControl on the defending team also reduces effective gap.
     // Both are neutral at 0.5 (multiplier 1.0 → gap unchanged).
@@ -2586,6 +2598,51 @@ export function fullSimGame(
 }
 
 /**
+ * The TACTIC BUDGET. Every slider a watched engine reads (tempo, pinch, pass
+ * risk, gap, pressure, hitting, passing, shooting, dumping, aggressiveness)
+ * is a deviation from neutral 0.5. One or two pushed to the limit keep their
+ * full effect — that is a coach's identity and what the lever audit prices —
+ * but a staff that pushes EVERYTHING the same way (an AI coach profile moves
+ * the offence/risk sliders together) doesn't stack ten effects into 100-shot,
+ * 20-goal games: past TACTIC_BUDGET of total deviation, every deviation is
+ * scaled down together, so the combined tilt is bounded whatever the mix.
+ */
+export const TACTIC_BUDGET = { total: 1.2 }
+const BUDGET_SLIDERS = ['aggressiveness', 'gapControl', 'puckPressure', 'hitting', 'passing', 'shooting', 'dumping'] as const
+
+export function budgetTactics(team: Team): Team {
+  const t = team.tactics
+  const tempo = t.tempo
+  const devs: number[] = [tempo.pace, tempo.passRisk, tempo.shotEagerness, tempo.defensivePinch].map((v) => (v ?? 0.5) - 0.5)
+  for (const k of BUDGET_SLIDERS) devs.push(((t[k] as number | undefined) ?? 0.5) - 0.5)
+  const sum = devs.reduce((a, d) => a + Math.abs(d), 0)
+  if (sum <= TACTIC_BUDGET.total) return team
+  const g = TACTIC_BUDGET.total / sum
+  const sq = (v: number | undefined): number | undefined => (v === undefined ? undefined : 0.5 + (v - 0.5) * g)
+  const next = { ...t, tempo: { pace: sq(tempo.pace)!, passRisk: sq(tempo.passRisk)!, shotEagerness: sq(tempo.shotEagerness)!, defensivePinch: sq(tempo.defensivePinch)! } }
+  for (const k of BUDGET_SLIDERS) if (t[k] !== undefined) (next as Record<string, unknown>)[k] = sq(t[k] as number)
+  return { ...team, tactics: next }
+}
+
+/** Mean (scoring + puckControl + skating) / 3 of the generated calibration league's dressed skaters. */
+const CALIBRATION_LEVEL = 57.2
+
+/** LEAGUE_AVG shifted by how far tonight's dressed skaters sit from the calibration league. */
+export function gameLevelAvg(home: Team, away: Team, resolve: (id: PlayerId) => Player): number {
+  let s = 0
+  let n = 0
+  for (const t of [home, away]) {
+    for (const id of [...t.lines.forwards.flat(), ...t.lines.defensePairs.flat()]) {
+      const p = resolve(id)
+      if (!p) continue
+      s += (p.composites.scoring + p.composites.puckControl + p.composites.skating) / 3
+      n++
+    }
+  }
+  return n > 0 ? LEAGUE_AVG + (s / n - CALIBRATION_LEVEL) : LEAGUE_AVG
+}
+
+/**
  * The game shell shared by every watched-game engine: rosters, nightly goalie
  * form, fights/injury plans, regulation → OT (3v3 or playoff sudden death) →
  * shootout, and the outcome. `makePeriodSim` supplies the engine that plays
@@ -2604,13 +2661,14 @@ export function runGame(
   const injuryPlan = rollInGameInjury(opts.seed)
   const ctx: Ctx = {
     rng, stream: [], stats: new Map(), telemetry: opts.telemetry ?? null,
+    levelAvg: gameLevelAvg(home, away, resolve),
     scoringMult: playoffScoringMult(rules), intensity: opts.intensity,
     ...(fightTimes.length > 0 ? { fights: { times: fightTimes, next: 0, rng: fightRngFor(opts.seed) } } : {}),
     ...(injuryPlan ? { injury: { plan: injuryPlan, rng: inGameInjuryRngFor(opts.seed), done: false } } : {}),
   }
   const periodSim = makePeriodSim(ctx)
-  const homeSim = new TeamSim(home, resolve)
-  const awaySim = new TeamSim(away, resolve)
+  const homeSim = new TeamSim(budgetTactics(home), resolve)
+  const awaySim = new TeamSim(budgetTactics(away), resolve)
   homeSim.isHome = true // last change — enables line matching if the bench uses it
   // Roll each starter's nightly sharpness once (stable hash → no RNG-stream cost).
   homeSim.goalieNight = goalieNightFactor(opts.seed, home.lines.goalies[0] as string)

@@ -244,6 +244,9 @@ export class MatchTimeline {
       }
     }
     this.duration = this.frames.length ? this.frames[this.frames.length - 1].absT : 0
+    // A goal in the last instant of the game (after the final 4 Hz frame) still
+    // happens before the end: the timeline runs until it.
+    for (const g of this.goals) if (g.absT > this.duration) this.duration = g.absT
     let h = 0
     let a = 0
     for (const g of this.goals) g.home ? h++ : a++

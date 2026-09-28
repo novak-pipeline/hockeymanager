@@ -21,20 +21,23 @@ import { BLUE_X, distToBoards } from './rink'
 import type { HitKind } from '@domain'
 import type { Rng } from '@engine/shared/rng'
 import { speedOf, type Body, type Contact } from './physics'
-import { other, type Side, type World } from './world'
+import { other, rDef, rLevel, type Side, type World } from './world'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
-const r01 = (v: number | undefined): number => clamp((v ?? 50) / 100, 0, 1)
+const r01 = rLevel
 
 export const HIT_TUNING = {
   /** Per-think chance scale that a willing defender commits to a check. */
-  intentK: 0.013,
+  intentK: 0.0095,
   /** Contact closing speed (ft/s) needed for a collision to count as a hit when unplanned. */
   incidentalClosing: 19,
   /** Minimum closing speed for a planned hit to land as a hit. */
   plannedClosing: 4.5,
   /** Penalty scale on dangerous hits. */
-  penaltyK: 1.0
+  penaltyK: 2.0,
+  /** Hit-intent multipliers by where the target is: the hitter's offensive zone / own zone. */
+  forecheckK: 5,
+  ownZoneK: 0.45
 }
 
 export interface HitIntent {
@@ -78,9 +81,9 @@ function roleBoost(b: Body): number {
 export function hitAppetite(b: Body, side: Side, intensity: number): number {
   // The hitting composite is the player's physical identity (checking,
   // strength, aggression); appetite rises steeply with it, so hitters HIT.
-  const h = r01(b.player.composites.hitting)
+  const h = rDef(b.player.composites.hitting)
   const m = b.player.ratings.mental
-  const base = 0.1 + h * h * 2.4 + r01(m.aggression) * 0.25
+  const base = 0.06 + Math.pow(h, 2.6) * 3.2 + r01(m.aggression) * 0.2
   const slider = 0.5 + (side.tactics.hitting ?? 0.5)
   return base * roleBoost(b) * slider * (1 + intensity * 0.35) * (0.6 + 0.4 * b.energy)
 }
@@ -125,7 +128,10 @@ export function decideHit(w: World, s: Side, b: Body, intents: Map<Body, HitInte
   const withPuck = w.carrier === target ? 1 : 0.55
   // Defencemen finish their man in the corners and along their own wall.
   const dCorner = b.player.position === 'D' && target.x * s.a < -BLUE_X ? 1.7 : 1
-  const p = HIT_TUNING.intentK * hitAppetite(b, s, intensity) * boards * withPuck * dCorner
+  // The forecheck is where hits live (NHL: ~44% of hits are thrown in the
+  // hitter's offensive zone): finish the D retrieving the puck.
+  const zoneF = target.x * s.a > BLUE_X ? HIT_TUNING.forecheckK : target.x * s.a < -BLUE_X ? HIT_TUNING.ownZoneK : 1
+  const p = HIT_TUNING.intentK * hitAppetite(b, s, intensity) * boards * withPuck * dCorner * zoneF
   if (!w.rng.chance(clamp(p, 0, 0.8))) return null
   intents.set(b, { target, until: w.t + 1.3 })
   return target
@@ -169,7 +175,7 @@ export function resolveHit(w: World, ct: Contact, intents: Map<Body, HitIntent>,
     victim = hitter === ct.a ? ct.b : ct.a
     // A battle collision is only a hit when the man finishes it — physical
     // players do, finesse players mostly just bump.
-    if (!rng.chance(0.15 + r01(hitter.player.composites.hitting) * 0.85)) return null
+    if (!rng.chance(0.15 + rDef(hitter.player.composites.hitting) * 0.85)) return null
   }
   if (planned && ct.closing < HIT_TUNING.plannedClosing) return null
   intents.delete(hitter)
