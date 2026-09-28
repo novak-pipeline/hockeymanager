@@ -380,9 +380,11 @@ export function renownFloor(player: Player): number {
   else if (renown >= 136) base = 58
   else if (renown >= 124) base = 46
   else if (renown >= 110) base = 34
-  else base = 22
+  else base = RENOWN_FLOOR_MIN
   return base
 }
+/** The lowest knowledge floor renown can set (see renownFloor). */
+const RENOWN_FLOOR_MIN = 22
 
 /** How fast an unwatched player's knowledge fades toward his renown floor (per day). */
 export const KNOWLEDGE_DECAY_PER_DAY = 0.07
@@ -672,10 +674,28 @@ export function tickScouting(args: TickScoutingArgs): void {
     // the next opponent) gets watched closely; cover a whole nation/league and he's
     // spread thin — per-player progress dilutes. This is what makes a tight
     // assignment a real choice vs "just scout the biggest region".
-    const matched = targetIds.filter((pid) => {
-      const pl = players.get(pid as PlayerId)
-      return !!pl && passesFocus(pl, scout.focus) && passesPosition(pl, scout.positionFilter)
-    })
+    // PERF: one pass over the scope does the focus/position match AND the
+    // stride split, and the working set is only built as deep as the day can
+    // use. The pinned players are decided first (they never depended on the
+    // brief); then his own slice fills the day in scope order, and the
+    // second-opinion overflow is only ranked — by a partial top-N selection
+    // on the same (opinions, knowledge, scope order) key — when his slice
+    // runs short. The day's list is identical to sorting everything.
+    const group = briefGroups.get(briefKey(scout))!
+    const gSize = group.length
+    const gIdx = gSize > 1 ? group.indexOf(scout) : 0
+    const myHistory = history.get(scout.scoutId)
+    const iHaveSeen = (pid: string): boolean => myHistory?.has(pid) ?? false
+    // Pinned players first (least-known first, so the list levels up rather than
+    // re-reading the one name at the top), then his own brief in the rest of the day.
+    const pinned = watchIds
+      .filter((pid) => (kIndex.get(pid) ?? 0) < 100 || !iHaveSeen(pid))
+      .sort((a, b) => knowAt(a) - knowAt(b))
+      .slice(0, watchSlots)
+    const pinnedSet = new Set(pinned)
+    // The rest of the day draws at most this many names from the brief (the
+    // pinned ones are filtered out of it, so allow for each of them).
+    const need = SCOUT_CAPACITY + pinned.length
     // Working set = his STRIDE first (his slice of a shared brief), then — once his
     // slice is saturated — SPILL OVER to other in-scope players to add a SECOND
     // OPINION, preferring the ones the fewest scouts have seen. So scouts divide the
@@ -686,38 +706,46 @@ export function tickScouting(args: TickScoutingArgs): void {
     //  - An out-of-slice player is eligible for a second look if THIS scout hasn't
     //    seen him and he's under the opinion cap (a 4th scout on the same kid adds
     //    little — spread the looks around instead).
-    const group = briefGroups.get(briefKey(scout))!
-    const gSize = group.length
-    const gIdx = gSize > 1 ? group.indexOf(scout) : 0
-    const isMine = (i: number): boolean => gSize <= 1 || i % gSize === gIdx
-    const myHistory = history.get(scout.scoutId)
-    const iHaveSeen = (pid: string): boolean => myHistory?.has(pid) ?? false
     const mine: string[] = []
-    const overflow: string[] = []
-    matched.forEach((pid, i) => {
-      const learnable = knowAt(pid) < 100
-      if (isMine(i)) {
-        if (learnable || !iHaveSeen(pid)) mine.push(pid)
-      } else if (!iHaveSeen(pid) && opinions(pid) < SCOUT_MAX_OPINIONS) {
-        overflow.push(pid)
+    // Overflow candidates, kept as the best `need` by (opinions, knowledge, order).
+    const best: Array<{ pid: string; o: number; k: number; i: number }> = []
+    const worse = (a: { o: number; k: number; i: number }, b: { o: number; k: number; i: number }): boolean =>
+      a.o > b.o || (a.o === b.o && (a.k > b.k || (a.k === b.k && a.i > b.i)))
+    let matchedCount = 0
+    for (const pid of targetIds) {
+      const pl = players.get(pid as PlayerId)
+      if (!pl || !passesFocus(pl, scout.focus) || !passesPosition(pl, scout.positionFilter)) continue
+      const i = matchedCount++
+      if (mine.length >= need) continue // his own slice already fills the day
+      if (gSize <= 1 || i % gSize === gIdx) {
+        if (knowAt(pid) < 100 || !iHaveSeen(pid)) mine.push(pid)
+      } else if (!iHaveSeen(pid)) {
+        const o = opinions(pid)
+        if (o >= SCOUT_MAX_OPINIONS) continue
+        const cand = { pid, o, k: knowAt(pid), i }
+        if (best.length < need) {
+          best.push(cand)
+          for (let j = best.length - 1; j > 0 && worse(best[j - 1]!, best[j]!); j--) {
+            const t = best[j]!; best[j] = best[j - 1]!; best[j - 1] = t
+          }
+        } else if (worse(best[best.length - 1]!, cand)) {
+          best[best.length - 1] = cand
+          for (let j = best.length - 1; j > 0 && worse(best[j - 1]!, best[j]!); j--) {
+            const t = best[j]!; best[j] = best[j - 1]!; best[j - 1] = t
+          }
+        }
       }
-    })
-    overflow.sort((a, b) => opinions(a) - opinions(b) || knowAt(a) - knowAt(b))
-    // Pinned players first (least-known first, so the list levels up rather than
-    // re-reading the one name at the top), then his own brief in the rest of the day.
-    const pinned = watchIds
-      .filter((pid) => (kIndex.get(pid) ?? 0) < 100 || !iHaveSeen(pid))
-      .sort((a, b) => knowAt(a) - knowAt(b))
-      .slice(0, watchSlots)
-    const pinnedSet = new Set(pinned)
-    const rest = [...mine, ...overflow].filter((pid) => !pinnedSet.has(pid))
+    }
+    const rest: string[] = []
+    for (const pid of mine) if (!pinnedSet.has(pid)) rest.push(pid)
+    if (mine.length < need) for (const c of best) if (!pinnedSet.has(c.pid)) rest.push(c.pid)
     const inScope = [...pinned, ...rest].slice(0, SCOUT_CAPACITY)
     for (const pid of inScope) watchedToday.add(pid)
     // Bandwidth dilutes per-player gain by his RESPONSIBILITY LOAD (the size of his
     // slice of the brief), not the capped daily working set — so a tight brief (one
     // player, a team) reads fast, while a scout responsible for a whole nation /
     // draft class is spread thin and reads each player slower.
-    const strideCount = gSize <= 1 ? matched.length : Math.ceil(matched.length / gSize)
+    const strideCount = gSize <= 1 ? matchedCount : Math.ceil(matchedCount / gSize)
     const dilution = Math.max(SCOUT_DILUTION_FLOOR, Math.min(1, SCOUT_CAPACITY / Math.max(1, strideCount)))
 
     for (const pid of inScope) {
@@ -772,6 +800,9 @@ export function tickScouting(args: TickScoutingArgs): void {
   for (const entry of state.knowledge) {
     const pid = entry[0]
     if (watchedToday.has(pid) || protectedIds.has(pid) || pinnedSetAll.has(pid)) continue
+    // PERF: no floor is below RENOWN_FLOOR_MIN, so a read already at or under
+    // it cannot decay — skip the (costly) renown calculation.
+    if (entry[1] <= RENOWN_FLOOR_MIN) continue
     const player = players.get(pid as PlayerId)
     if (!player) continue
     const floor = renownFloor(player)
