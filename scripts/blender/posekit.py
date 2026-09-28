@@ -116,12 +116,15 @@ def arm_frames(sh, elbow, hand, pole):
     the elbow always bends in its own plane."""
     u = (elbow - sh).normalized()
     f = (hand - elbow).normalized()
-    z = f - u * f.dot(u)
-    if z.length < 1e-3:
-        pv = pole - sh
-        z = -(pv - u * pv.dot(u))
-        if z.length < 1e-6:
-            z = Vector((0, 0, 1)) - u * u.z
+    # the forearm's swing off the upper arm, plus a small steady share of the
+    # pole's side: a nearly straight arm never flips its twist between keys
+    pv = pole - sh
+    z0 = -(pv - u * pv.dot(u))
+    if z0.length < 1e-6:
+        z0 = Vector((0, 0, 1)) - u * u.z
+    z = (f - u * f.dot(u)) + z0.normalized() * 0.08
+    if z.length < 1e-6:
+        z = z0
     z.normalize()
     y = -u
     x = y.cross(z).normalized()

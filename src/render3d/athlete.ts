@@ -916,8 +916,8 @@ export class AthleteRig {
       const g = !this.goalie && overlay.grip ? overlay.grip() : null
       if (g && (g.L > 0.001 || g.R > 0.001)) this.lockGrips(g)
     }
-    if (this.rightHanded) {
-      this.mirrorPose()
+    if (this.mirrorW > 0.001) {
+      this.mirrorPose(Math.min(1, this.mirrorW))
       r.updateMatrixWorld(true)
     }
   }
@@ -932,79 +932,116 @@ export class AthleteRig {
    * own shaft as well, so the blade's toe points out on the right. Top hand =
    * hand_L, blade on his right.
    */
-  private mirrorPose(): void {
+  private mirrorPose(w: number): void {
     const B = this.bones
     const mq = (q: THREE.Quaternion) => q.set(q.x, -q.y, -q.z, q.w)
-    for (const n of MIRROR_CENTRE) mq(B[n].quaternion)
+    // w < 1: a rig handed over to a player who shoots the other way eases into
+    // the mirror (a quarter second) instead of snapping
+    const put = (q: THREE.Quaternion, m: THREE.Quaternion) => (w >= 1 ? q.copy(m) : q.slerp(m, w))
+    for (const n of MIRROR_CENTRE) put(B[n].quaternion, mq(_q1.copy(B[n].quaternion)))
     for (const [a, b] of MIRROR_PAIRS) {
       _q0.copy(B[a].quaternion)
-      B[a].quaternion.copy(B[b].quaternion)
-      mq(B[a].quaternion)
-      B[b].quaternion.copy(_q0)
-      mq(B[b].quaternion)
+      put(B[a].quaternion, mq(_q1.copy(B[b].quaternion)))
+      put(B[b].quaternion, mq(_q1.copy(_q0)))
     }
-    B.hips.position.x = -B.hips.position.x
+    B.hips.position.x *= 1 - 2 * w
     for (const n of ['stick', 'stick_blade'] as const) {
-      mq(B[n].quaternion).multiply(HALF_TURN_Y)
-      B[n].position.x = -B[n].position.x
+      put(B[n].quaternion, mq(_q1.copy(B[n].quaternion)).multiply(HALF_TURN_Y))
+      B[n].position.x *= 1 - 2 * w
     }
   }
 
-  /** Right-handed shooter: the pose is mirrored (see mirrorPose). */
+  /** Right-handed shooter: the pose is mirrored (see mirrorPose). The renderer eases mirrorW toward it. */
   rightHanded = false
+  /** 0 = the authored (left-handed) pose, 1 = fully mirrored. */
+  mirrorW = 0
 
   /** The hand at the top of the stick (the grip the stick pivots about). */
   get topHand(): THREE.Bone {
-    return this.rightHanded ? this.bones.hand_L : this.bones.hand_R
+    return this.mirrorW > 0.5 ? this.bones.hand_L : this.bones.hand_R
   }
 
   /** +1 when the blade is on his left (shoots left), −1 on his right. */
   get bladeSide(): 1 | -1 {
-    return this.rightHanded ? -1 : 1
+    return this.mirrorW > 0.5 ? -1 : 1
   }
 
   /**
    * Lock the gripping hands onto the shaft: each clip's baked arms were solved
    * with the hands on ITS stick, but the body under them (skating hips, a
-   * blended torso) moves the shoulders a little. The palm point is projected
-   * onto the shaft and the arm re-solved to reach it, with the clip's own elbow
-   * as the pole (the bend stays the clip's), blended by the clip's weight.
+   * blended torso) moves the shoulders a little. The correction is MINIMAL and
+   * keeps the clip's arm (its twist, its bend plane): first the elbow opens or
+   * closes about its own hinge until the palm is as far from the shoulder as
+   * the grip point, then the whole arm swings about the shoulder onto it.
+   * (A fresh two-bone solve chose its own elbow and flipped between frames.)
+   * The grip point is the shaft point nearest the palm — or the nearest one
+   * the shoulder can reach (the hand slides along the shaft). Weighted by the clip.
    */
+  private readonly lockDelta = { L: 0, R: 0 }
+
   private lockGrips(w: { L: number; R: number }): void {
     const B = this.bones
     const r = this.root
     _inv.copy(r.matrixWorld).invert()
+    const rootQi = r.getWorldQuaternion(new THREE.Quaternion()).invert()
     const heel = B.stick.getWorldPosition(new THREE.Vector3()).applyMatrix4(_inv)
     const dir = new THREE.Vector3(0, 1, 0).applyQuaternion(B.stick.quaternion).normalize()
     const len = this.dims.stickLen
+    const reach = (this.dims.upperArm + this.dims.forearm) * 0.95
     for (const h of ['R', 'L'] as const) {
       const k = w[h]
       if (k <= 0.001) continue
       const upper = B[`upperarm_${h}`]
       const fore = B[`forearm_${h}`]
       const hand = B[`hand_${h}`]
-      for (let it = 0; it < 3; it++) {
-        const S = upper.getWorldPosition(new THREE.Vector3()).applyMatrix4(_inv)
-        const E = fore.getWorldPosition(new THREE.Vector3()).applyMatrix4(_inv)
-        const Wr = hand.getWorldPosition(new THREE.Vector3()).applyMatrix4(_inv)
-        const P = hand.localToWorld(_v.copy(this.gripPalm[h])).applyMatrix4(_inv)
-        // the nearest point of the shaft to the palm — or, when the body under
-        // the clip has moved the shoulder out of reach of it, the nearest point
-        // that shoulder CAN reach (the hand slides along the shaft)
-        const want = Math.min(len - 0.1, Math.max(0.3, _w.copy(P).sub(heel).dot(dir)))
-        // (the palm sits past the wrist, but not along the arm: count the arm alone)
-        const palmReach = (this.dims.upperArm + this.dims.forearm) * 0.95
-        const g = gripOnShaft(toV3(heel), toV3(dir), toV3(S), want, palmReach, 0.3, len - 0.1)
-        const t = g.t
-        const G = heel.clone().addScaledVector(dir, t)
-        const delta = G.sub(P)
-        if (delta.lengthSq() < 1e-4) break
-        const target = Wr.addScaledVector(delta, k)
-        const { elbow, hand: hp } = solveTwoBone(toV3(S), toV3(target), this.dims.upperArm, this.dims.forearm, toV3(E))
-        this.aimArm(upper, fore, toV3(S), elbow, hp, toV3(E))
+      const palm = () => hand.localToWorld(new THREE.Vector3().copy(this.gripPalm[h])).applyMatrix4(_inv)
+      const S = upper.getWorldPosition(new THREE.Vector3()).applyMatrix4(_inv)
+      let P = palm()
+      const want = Math.min(len - 0.1, Math.max(0.3, P.clone().sub(heel).dot(dir)))
+      const t = gripOnShaft(toV3(heel), toV3(dir), toV3(S), want, reach, 0.3, len - 0.1).t
+      const G = heel.clone().addScaledVector(dir, t)
+      if (G.distanceToSquared(P) < 1e-4) continue
+      // 1) elbow: rotate forearm + hand about the hinge (the upper arm's local X, through the elbow)
+      const E = fore.getWorldPosition(new THREE.Vector3()).applyMatrix4(_inv)
+      const upQ = upper.getWorldQuaternion(new THREE.Quaternion()).premultiply(rootQi)
+      const ax = new THREE.Vector3(1, 0, 0).applyQuaternion(upQ)
+      const d = S.clone().sub(E)
+      const v = P.clone().sub(E)
+      const L = Math.min(S.distanceTo(G), d.length() + v.length() - 1e-3)
+      const av = ax.dot(v)
+      const A = d.dot(v) - av * ax.dot(d)
+      const Bq = d.dot(ax.clone().cross(v))
+      const C = av * ax.dot(d)
+      const K = (d.lengthSq() + v.lengthSq() - L * L) / 2
+      const R0 = Math.hypot(A, Bq)
+      if (R0 > 1e-6) {
+        const phi = Math.atan2(Bq, A)
+        const c = Math.acos(Math.max(-1, Math.min(1, (K - C) / R0)))
+        const w1 = wrapAngle3(phi + c)
+        const w2 = wrapAngle3(phi - c)
+        // a SMALL correction only: when the nearest fix is a big re-bend the two
+        // roots trade places frame to frame (the elbow flipped) — leave the bend
+        // to the clip and let the swing below do the work
+        // (the root nearest last frame's: the choice never flips between frames)
+        const prev = this.lockDelta[h]
+        const best = Math.abs(w1 - prev) < Math.abs(w2 - prev) ? w1 : w2
+        const delta = Math.max(-0.3, Math.min(0.3, best)) * k
+        this.lockDelta[h] = best
+        // in the upper arm's local frame the hinge is +X: premultiply the forearm's local rotation
+        fore.quaternion.premultiply(_q0.setFromAxisAngle(_u.set(1, 0, 0), delta))
+        fore.updateMatrixWorld(true)
       }
+      // 2) shoulder: swing the arm so the palm points at the grip
+      P = palm()
+      const q = _q1.setFromUnitVectors(P.clone().sub(S).normalize(), G.clone().sub(S).normalize())
+      if (k < 1) q.slerp(_q2.identity(), 1 - k)
+      // upper world (root space) ← q · upper world;  local = parent⁻¹ · that
+      const parentQ = upper.parent!.getWorldQuaternion(new THREE.Quaternion()).premultiply(rootQi)
+      upper.quaternion.copy(parentQ.invert().multiply(q.multiply(upQ)))
+      upper.updateMatrixWorld(true)
     }
   }
+
 
   /** Two-bone IK → bone-local rotations (bones keep their fixed lengths). */
   private placeArm(sh: V3, target: V3, upper: THREE.Bone, fore: THREE.Bone, side: 1 | -1): void {
@@ -1021,15 +1058,18 @@ export class AthleteRig {
    * shortest-arc aim gives the upper arm an arbitrary twist, so the skinned
    * elbow bent sideways or backwards.
    */
-  private aimArm(upper: THREE.Bone, fore: THREE.Bone, sh: V3, elbow: V3, hand: V3, pole: V3): void {
+  private aimArm(upper: THREE.Bone, fore: THREE.Bone, sh: V3, elbow: V3, hand: V3, pole: V3, prefZ?: V3): void {
     const u = norm(sub3(elbow, sh))
     const f = norm(sub3(hand, elbow))
-    let z = sub3(f, scale3(u, dot3(f, u)))
-    if (len3(z) < 1e-3) {
-      const pv = sub3(pole, sh)
-      z = scale3(sub3(pv, scale3(u, dot3(pv, u))), -1)
-      if (len3(z) < 1e-6) z = sub3({ x: 0, y: 0, z: 1 }, scale3(u, u.z))
-    }
+    // the bend direction: the forearm's swing off the upper arm, with a small
+    // steady share of the pole's side (or the arm's current crease) so a nearly
+    // straight arm never flips its twist from one frame to the next
+    const pv = sub3(pole, sh)
+    let z0 = scale3(sub3(pv, scale3(u, dot3(pv, u))), -1)
+    if (prefZ && len3(z0) < 0.2) z0 = sub3(prefZ, scale3(u, dot3(prefZ, u)))
+    if (len3(z0) < 1e-6) z0 = sub3({ x: 0, y: 0, z: 1 }, scale3(u, u.z))
+    let z = add3(sub3(f, scale3(u, dot3(f, u))), scale3(norm(z0), 0.08))
+    if (len3(z) < 1e-6) z = z0
     z = norm(z)
     const y = scale3(u, -1)
     const x = norm(cross3(y, z))
@@ -1081,6 +1121,7 @@ const add3 = (a: V3, b: V3): V3 => ({ x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }
 const scale3 = (a: V3, k: number): V3 => ({ x: a.x * k, y: a.y * k, z: a.z * k })
 const len3 = (a: V3) => Math.hypot(a.x, a.y, a.z)
 const dot3 = (a: V3, b: V3) => a.x * b.x + a.y * b.y + a.z * b.z
+const wrapAngle3 = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 const cross3 = (a: V3, b: V3): V3 => ({ x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x })
 const norm = (a: V3): V3 => {
   const l = len3(a) || 1

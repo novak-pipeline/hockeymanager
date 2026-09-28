@@ -184,7 +184,7 @@ const r = await page.evaluate(async (secs) => {
           const stickClip = [...(p.layer.playing ?? [])].some((n) => /^(shot_|pass|deke_|stickhandle|faceoff_|check$|poke)/.test(n))
           const gw0 = p.layer.gripWeights ? p.layer.gripWeights() : { L: stickClip ? 1 : 0, R: stickClip ? 1 : 0 }
           // clips are authored left-handed; a right-handed rig is the mirror (its top hand is hand_L)
-          const gw = p.rig.rightHanded ? { L: gw0.R, R: gw0.L } : gw0
+          const gw = (p.rig.mirrorW ?? (p.rig.rightHanded ? 1 : 0)) > 0.5 ? { L: gw0.R, R: gw0.L } : gw0
           B.stick.updateWorldMatrix(true, false)
           const e = B.stick.matrixWorld.elements
           const heel = { x: e[12], y: e[13], z: e[14] }
@@ -223,7 +223,7 @@ const r = await page.evaluate(async (secs) => {
           const len = Math.hypot(e[4], e[5], e[6]) || 1
           const dir = { x: e[4] / len, y: e[5] / len, z: e[6] / len }
           // owner rigs skate one-handed in their authored cycles: only the top hand must hold on
-          for (const h of p.rig.dims && p.rig.dims.upperArm !== 1.05 ? ['hand_R'] : ['hand_R', 'hand_L']) {
+          for (const h of p.rig.dims && p.rig.dims.upperArm !== 1.05 ? [(p.rig.mirrorW ?? 0) > 0.5 ? 'hand_L' : 'hand_R'] : ['hand_R', 'hand_L']) {
             const hp = wpos(B[h])
             const d = { x: hp.x - heel.x, y: hp.y - heel.y, z: hp.z - heel.z }
             const t = d.x * dir.x + d.y * dir.y + d.z * dir.z

@@ -98,6 +98,33 @@ export class OwnerKitPainter {
     return c
   }
 
+  /**
+   * An official's sweater: the team() sweater in white / black, with vertical
+   * black stripes over the sweater texels (U columns of the owner's unwrap run
+   * up the body) — no number, name or crest.
+   */
+  paintOfficial(atlas: HTMLCanvasElement, slot: number, kit: Kit, stripes = 16): void {
+    const src = this.src.skater!
+    const base = this.team('skater', kit)
+    const c = document.createElement('canvas')
+    c.width = c.height = src.size
+    const ctx0 = c.getContext('2d', { willReadFrequently: true })!
+    ctx0.drawImage(base, 0, 0)
+    const img = ctx0.getImageData(0, 0, src.size, src.size)
+    const o = img.data
+    for (let i = 0; i < o.length; i += 4) {
+      if (Math.round(src.k[i]! / 40) !== 1) continue // sweater body only
+      const u = ((i / 4) % src.size) / src.size
+      if (Math.floor(u * stripes * 2) % 2 === 0) continue
+      const sh = src.k[i + 1]! / 200
+      o[i] = o[i + 1] = o[i + 2] = 18 * sh
+    }
+    ctx0.putImageData(img, 0, 0)
+    const ctx = atlas.getContext('2d')!
+    const S = atlas.width / ATLAS_GRID
+    ctx.drawImage(c, (slot % ATLAS_GRID) * S, Math.floor(slot / ATLAS_GRID) * S, S, S)
+  }
+
   /** Paint one player's sweater into his slot of the kit atlas. */
   paint(atlas: HTMLCanvasElement, slot: number, role: Role, kit: Kit, num: number, name: string): void {
     const ctx = atlas.getContext('2d')!

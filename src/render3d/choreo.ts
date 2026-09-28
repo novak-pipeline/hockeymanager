@@ -32,6 +32,7 @@ import {
   goalieLocoWeights,
   hitPlan,
   hitPushDir,
+  hash01,
   locomotionWeights,
   saveClipFor,
   shotClipFor,
@@ -67,6 +68,10 @@ export interface ActionCue {
   dekeKind?: string
   /** poke: did it knock the puck free (agent pokeCheck.success; takeaways always did) */
   success?: boolean
+  /** faceoff (agent engine, additive): when the players started setting up (absolute s) */
+  setT?: number
+  /** faceoff (agent engine, additive): the centres tied up sticks before the draw was won */
+  tieUp?: boolean
 }
 
 /** The deke clip for each move the engine names (additive 'deke' event). */
@@ -80,6 +85,7 @@ export const DEKE_CLIP: Readonly<Record<string, string>> = {
 /** Every cue the choreographer can act on (a superset of math.extractCues). */
 export function extractActionCues(stream: GameStream): ActionCue[] {
   const out: ActionCue[] = []
+  let pendingSet: number | null = null
   let lastShot: { x: number; y: number; tx: number; ty: number } | null = null
   for (const ev of stream) {
     if (isEvent(ev, 'shot')) {
@@ -124,7 +130,18 @@ export function extractActionCues(stream: GameStream): ActionCue[] {
       // the defender's stick knocked it off him: a poke (both engines emit takeaways)
       out.push({ kind: 'poke', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.by, targetId: ev.from, success: true })
     } else if (isEvent(ev, 'faceoff')) {
-      out.push({ kind: 'faceoff', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.winner })
+      // additive agent-engine pacing (tolerant): `setAt` (period seconds the set began) and `tieUp`
+      const f = ev as unknown as { setAt?: unknown; tieUp?: unknown }
+      out.push({
+        kind: 'faceoff', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.winner,
+        ...(typeof f.setAt === 'number' ? { setT: absTime(ev.period, f.setAt) } : pendingSet !== null ? { setT: pendingSet } : {}),
+        ...(typeof f.tieUp === 'boolean' ? { tieUp: f.tieUp } : {}),
+      })
+      pendingSet = null
+    } else if ((ev as { type: string }).type === 'faceoffSet') {
+      // additive agent-engine event: the set begins for the next faceoff (tolerant read)
+      const d = ev as unknown as { period: number; t: number; pos?: { x: number; y: number } }
+      pendingSet = absTime(d.period, d.t)
     }
   }
   out.sort((a, b) => a.absT - b.absT)
@@ -136,8 +153,8 @@ export function extractActionCues(stream: GameStream): ActionCue[] {
   })
 }
 
-/** Seconds the faceoff crouch starts before the drop. */
-export const FACEOFF_LEAD_S = 1.1
+/** Seconds the faceoff set (crouch, wingers down) starts before the drop, when the engine doesn't say. */
+export const FACEOFF_LEAD_S = 1.5
 
 export interface PlannedCue {
   cue: ActionCue
@@ -176,7 +193,8 @@ export function planCues(cues: ActionCue[], contactOf: (clip: string) => number 
       clip = 'poke'
     } else if (cue.kind === 'faceoff') {
       clip = 'faceoff_crouch'
-      lead = FACEOFF_LEAD_S
+      // the engine's own set time when it has one (agent engine), within reason
+      lead = cue.setT !== undefined ? Math.min(4, Math.max(0.6, cue.absT - cue.setT)) : FACEOFF_LEAD_S
     } else if (cue.kind === 'save') {
       lead = contact('g_glove_save')
     }
@@ -289,6 +307,7 @@ export class Choreographer {
   private plans: PlannedCue[] = []
   private pending: Pending[] = []
   private faceoffCrouchers: ChoreoActor[] = []
+  private faceoffWingers: ChoreoActor[] = []
   /** Choreographer clock (sim seconds). */
   clock = 0
   /** Lateral offset (ft, + = goalie's left) of the last save planned. */
@@ -316,6 +335,7 @@ export class Choreographer {
   reset(): void {
     this.pending = []
     this.faceoffCrouchers = []
+    this.faceoffWingers = []
     for (const a of this.all()) {
       a.layer?.clear()
       a.faceOverride = null
@@ -366,8 +386,26 @@ export class Choreographer {
   private anticipate(p: PlannedCue, late: number): void {
     const c = p.cue
     if (c.kind === 'faceoff') {
+      // the centres crouch over the dot, squared up to each other; everyone
+      // else within ~30 ft sets in a lighter crouch (wingers on the hashes, D back)
+      const fx = normXtoWorld(c.nx)
+      const fz = normYtoWorld(c.ny)
       this.faceoffCrouchers = this.faceoffTakers(c)
-      for (const a of this.faceoffCrouchers) a.layer?.play('faceoff_crouch')
+      const until = c.absT + 0.3
+      for (const a of this.faceoffCrouchers) {
+        a.layer?.play('faceoff_crouch')
+        const o = this.faceoffCrouchers.find((b) => b !== a)
+        const tx = o ? o.worldX.pos : fx
+        const tz = o ? o.worldZ.pos : fz
+        a.faceOverride = { angle: Math.atan2(tx - a.worldX.pos, tz - a.worldZ.pos), until }
+      }
+      this.faceoffWingers = []
+      for (const a of this.all()) {
+        if (a.rig.goalie || !a.rig.visible || !a.layer || this.faceoffCrouchers.includes(a)) continue
+        if (Math.hypot(a.worldX.pos - fx, a.worldZ.pos - fz) > 32) continue
+        a.layer.play('faceoff_wing')
+        this.faceoffWingers.push(a)
+      }
       return
     }
     if (c.kind === 'save') {
@@ -392,12 +430,21 @@ export class Choreographer {
   private contact(p: PlannedCue): void {
     const c = p.cue
     if (c.kind === 'faceoff') {
+      // the draw is a battle: on a tie-up (the engine's, else ~40% of draws,
+      // stable per faceoff) both centres lock sticks and lean a shoulder in, and
+      // the winner pulls it back a beat later; otherwise he wins it clean
       const w = this.find(c.actorId)
+      const tie = c.tieUp ?? hash01(`${c.actorId}@${c.absT.toFixed(2)}#tie`) < 0.4
       for (const a of this.faceoffCrouchers) {
-        if (a === w) a.layer?.play('faceoff_draw', { at: CLIPS.faceoff_draw!.contact ?? 0 })
+        if (tie) {
+          a.layer?.play('faceoff_tieup')
+          if (a === w) this.pending.push({ at: this.clock + 0.35, run: () => a.layer?.play('faceoff_draw', { at: CLIPS.faceoff_draw!.contact ?? 0 }) })
+        } else if (a === w) a.layer?.play('faceoff_draw', { at: CLIPS.faceoff_draw!.contact ?? 0 })
         else a.layer?.stop('faceoff_crouch')
       }
+      for (const a of this.faceoffWingers) a.layer?.stop('faceoff_wing')
       this.faceoffCrouchers = []
+      this.faceoffWingers = []
       return
     }
     if (c.kind === 'hit') return this.resolveHit(c)

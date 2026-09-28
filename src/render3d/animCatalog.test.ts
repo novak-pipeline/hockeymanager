@@ -277,6 +277,21 @@ describe('cue planning (choreographer)', () => {
     expect(fo.lead).toBeGreaterThan(0.5)
   })
 
+  it('paces the faceoff set from the engine (setAt / faceoffSet) and reads tie-ups (tolerant)', () => {
+    const f = extractActionCues([
+      { type: 'faceoff', period: 1, t: 100, zone: 'neutral', winner: P('c1'), pos: { x: 0, y: 0 }, setAt: 97.5, tieUp: true } as unknown as GameStream[number],
+      { type: 'faceoffSet', period: 1, t: 198, pos: { x: 0.5, y: 0.3 } } as unknown as GameStream[number],
+      { type: 'faceoff', period: 1, t: 200, zone: 'offensive', winner: P('c2'), pos: { x: 0.5, y: 0.3 } },
+      { type: 'faceoff', period: 1, t: 300, zone: 'neutral', winner: P('c3'), pos: { x: 0, y: 0 } },
+    ]).filter((c) => c.kind === 'faceoff')
+    expect(f.map((c) => c.setT)).toEqual([97.5, 198, undefined])
+    expect(f[0]!.tieUp).toBe(true)
+    const plan = planCues(f)
+    expect(plan[0]!.lead).toBeCloseTo(2.5)
+    expect(plan[1]!.lead).toBeCloseTo(2)
+    expect(plan[2]!.lead).toBeCloseTo(1.5) // no set time: the crouch starts ~1.5 s before the drop
+  })
+
   it('pokes on the agent pokeCheck and on takeaways (one poke when both describe it)', () => {
     const pokes = extractActionCues([
       // agent engine: the poke, then the takeaway it produced
