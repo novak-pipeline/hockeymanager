@@ -11,6 +11,7 @@ import {
   DRAFT_CALL_EVENTS,
   FARM_TRIP_EVENTS,
   RACE_EVENTS,
+  CODE_EVENTS,
 } from './clubScenes'
 import type { DecisionOption } from './decisionEvents'
 
@@ -33,8 +34,9 @@ describe('club scenes — library integrity', () => {
     expect(ARRIVAL_EVENTS.length).toBeGreaterThan(0)
     expect(FARM_TRIP_EVENTS.length).toBeGreaterThan(0)
     expect(RACE_EVENTS.length).toBeGreaterThan(0)
+    expect(CODE_EVENTS.length).toBeGreaterThan(0)
     expect(CLUB_SCENES).toHaveLength(
-      DRAFT_CALL_EVENTS.length + ARRIVAL_EVENTS.length + FARM_TRIP_EVENTS.length + RACE_EVENTS.length
+      DRAFT_CALL_EVENTS.length + ARRIVAL_EVENTS.length + FARM_TRIP_EVENTS.length + RACE_EVENTS.length + CODE_EVENTS.length
     )
   })
 
@@ -81,7 +83,7 @@ describe('club scenes — library integrity', () => {
   })
 
   it('only uses slots the career layer actually fills', () => {
-    const known = new Set(['name', 'last', 'age', 'gp', 'team', 'pick', 'ahl', 'round', 'via'])
+    const known = new Set(['name', 'last', 'age', 'gp', 'team', 'pick', 'ahl', 'round', 'via', 'hitter', 'victim', 'opp'])
     for (const ev of CLUB_SCENES) {
       const text = [ev.scene, ...ev.options.map((o) => `${o.label} ${o.outcome}`)].join(' ')
       for (const m of text.matchAll(/\{(\w+)\}/g)) {
@@ -100,6 +102,7 @@ describe('club scenes — library integrity', () => {
       'ev.farm.playoff-trip',
       'ev.race.clinched',
       'ev.race.eliminated',
+      'ev.code.rematch',
     ]) {
       expect(CLUB_SCENES.some((e) => e.id === id), id).toBe(true)
     }
