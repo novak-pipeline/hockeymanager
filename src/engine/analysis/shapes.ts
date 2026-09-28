@@ -61,6 +61,12 @@ export interface ShapeTemplate {
   radiusFt: number
   /** The situation it depicts (absent: any frame with the puck in radius). */
   situation?: ShapeSituation
+  /**
+   * Who has the puck in the diagram (a D walking the line, a winger low on
+   * the wall). A frame whose carrier plays the other position is a different
+   * play and is not scored against this template.
+   */
+  carrier?: 'D' | 'F'
   /** The possessing team's skaters. */
   attack: RolePoint[]
   /** The defending team's skaters (same frame). */
@@ -71,6 +77,7 @@ export const SHAPE_TEMPLATES: readonly ShapeTemplate[] = [
   {
     id: 'breakoutWall',
     situation: 'breakout',
+    carrier: 'D',
     label: 'Breakout up the wall vs 1-2-2 forecheck',
     system: 'D retrieval, wall-side winger on the half-wall, C swinging low; forecheck 1-2-2',
     strength: '5v5',
@@ -94,6 +101,7 @@ export const SHAPE_TEMPLATES: readonly ShapeTemplate[] = [
   {
     id: 'ozLowCycle',
     situation: 'settledOz',
+    carrier: 'F',
     label: 'Low cycle vs box+1 zone coverage',
     system: 'F1 on the wall low, F2 low support, F3 net-front, D at the points; box+1 D-zone',
     strength: '5v5',
@@ -117,6 +125,7 @@ export const SHAPE_TEMPLATES: readonly ShapeTemplate[] = [
   {
     id: 'ozPointShot',
     situation: 'settledOz',
+    carrier: 'D',
     label: 'Point possession vs collapsing box',
     system: 'D walks the line, net-front screen, wall and weak-side low support; wingers take point lanes',
     strength: '5v5',
@@ -140,6 +149,7 @@ export const SHAPE_TEMPLATES: readonly ShapeTemplate[] = [
   {
     id: 'nzRegroup',
     situation: 'regroup',
+    carrier: 'D',
     label: 'Neutral-zone regroup vs 1-2-2',
     system: 'D-to-D regroup, forwards swinging with speed across the lanes; 1-2-2 neutral-zone forecheck',
     strength: '5v5',
@@ -163,6 +173,7 @@ export const SHAPE_TEMPLATES: readonly ShapeTemplate[] = [
   {
     id: 'rushEntry',
     situation: 'rush',
+    carrier: 'F',
     label: 'Three-lane rush entering vs 2 D + backcheck',
     system: 'Wide-lane carrier, middle-lane drive to the net, far-lane driver, trailer; D gap up, F backcheck',
     strength: '5v5',
@@ -311,7 +322,8 @@ export function scoreShapes(
   defend: readonly XY[],
   accums: Record<string, ShapeAccum>,
   templates: readonly ShapeTemplate[] = SHAPE_TEMPLATES,
-  situation: ShapeSituation | null = null
+  situation: ShapeSituation | null = null,
+  carrier: 'D' | 'F' | null = null
 ): void {
   const flip = puck.y < 0 ? -1 : 1
   const pk = { x: puck.x, y: puck.y * flip }
@@ -321,6 +333,7 @@ export function scoreShapes(
   for (const t of templates) {
     if (t.strength !== strength) continue
     if (t.situation && situation !== null && t.situation !== situation) continue
+    if (t.carrier && carrier !== null && t.carrier !== carrier) continue
     if (Math.hypot(pk.x - t.puck.x, pk.y - t.puck.y) > t.radiusFt) continue
     const a = attack.map((p) => ({ x: p.x, y: p.y * flip }))
     const d = defend.map((p) => ({ x: p.x, y: p.y * flip }))

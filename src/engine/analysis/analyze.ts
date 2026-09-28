@@ -427,6 +427,13 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
 
   const skatersOf = (f: FrameEv, side: Side) => (side === 'home' ? f.home : f.away)
 
+  /** The carrier's position group (null when the stream carries no positions). */
+  const carrierGroup = (id: string | null): 'D' | 'F' | null => {
+    if (!id) return null
+    const p = posOf(meta, id)
+    return p === undefined ? null : p === 'D' ? 'D' : 'F'
+  }
+
   // --- Frame handler ---------------------------------------------------------
   const onFrame = (f: FrameEv): void => {
     const t = abs(f)
@@ -691,7 +698,8 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
           skatersOf(f, other(possTeam)).map((s) => af(s.pos, a)),
           m.shapes,
           templates,
-          situation
+          situation,
+          carrierGroup(f.puckCarrier)
         )
       }
     }
