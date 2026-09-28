@@ -44,7 +44,10 @@ import audio_util as au  # noqa: E402
 CONFIG = json.load(open(os.path.join(ROOT, "src/render2d/broadcast/booth.config.json"), encoding="utf-8"))
 BREAK = ' <break time="0.5s"/> '
 DEFAULT_VARIANTS = "pbp:excited,pbp:neutral,color:neutral"
-MIN_SIM = 0.45  # phonetic similarity of Whisper's hearing vs the text
+MIN_SIM = 0.45
+# Words of the carrier phrases: hearing one inside a name clip means the cut
+# kept a scrap of "It's" / "That's".
+CARRIER_WORDS = {"its", "it's", "thats", "that's", "is", "it"}  # phonetic similarity of Whisper's hearing vs the text
 
 
 def job_key(seat: str, style: str, text: str) -> str:
@@ -90,7 +93,7 @@ def split_batch(wav: np.ndarray, ts: List[Tuple[str, float]], batch: List[dict])
             e, quiet = au.silence_boundary(wav, t_name + 0.2, words[i + n][1] + 0.05)
         else:
             e, quiet = dur, 1.0
-        res.append((s, e, quiet >= 0.06))
+        res.append((s, e, quiet >= 0.15))
         i += n
     return res
 
@@ -182,6 +185,8 @@ def main() -> None:
                     reason = "no pause after the name"
                 elif d < 0.18 or d > max_d:
                     reason = f"duration {d:.2f}s"
+                elif any(au._norm_word(w) in CARRIER_WORDS for w in heard_txt.split()):
+                    reason = f"carrier bleed: heard '{heard_txt}'"
                 elif sim < MIN_SIM:
                     reason = f"heard '{heard_txt}' ({sim:.2f})"
                 else:

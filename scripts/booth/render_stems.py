@@ -27,6 +27,7 @@ import argparse
 import json
 import os
 import random
+import re
 import subprocess
 import sys
 import time
@@ -42,7 +43,17 @@ import audio_util as au  # noqa: E402
 NODE = os.environ.get("NODE", "C:/Program Files/nodejs/node.exe")
 CONFIG = json.load(open(os.path.join(ROOT, "src/render2d/broadcast/booth.config.json"), encoding="utf-8"))
 BREAK = ' <break time="0.9s"/> '
-MAX_BATCH_WORDS = 55
+SLOT_BREAK = '<break time="0.25s"/>'
+_BREAK_RE = re.compile(r"<break[^>]*/>")
+
+
+def spoken_words(text: str) -> List[str]:
+    return _BREAK_RE.sub(" ", text).split()
+
+
+def render_text(u: dict) -> str:
+    return u.get("render", u["text"])
+MAX_BATCH_WORDS = 55  # ~6 lines: amortises Dia2's ~10 s per-call cost
 
 
 def load_lines() -> list:
@@ -58,8 +69,21 @@ def units_for(lines: list, placeholder: str) -> List[dict]:
         style = l["stemStyle"]
         if l["slot"]:
             txt = l["text"].replace("{name}", placeholder)
-            units.append(dict(clip=f"stem.{l['id']}", seat=l["speaker"], style=style, text=txt,
-                              cut=l["slot"], stem=l["stem"]))
+            # A short forced pause between the placeholder and the rest makes
+            # the cut clean: without it Dia2 runs "Jackson shoots" together and
+            # a scrap of the placeholder survives on the stem.
+            if l["slot"] == "lead":
+                # A lead stem ("shoots, and scores!") is read on its own. Cutting
+                # it off "Jackson shoots…" never came out clean: Dia2 runs the
+                # name into the verb, and its word stamps lead the audio by a
+                # variable amount, so a scrap of the placeholder survived.
+                units.append(dict(clip=f"stem.{l['id']}", seat=l["speaker"], style=style, text=l["stem"],
+                                  cut=None, stem=l["stem"]))
+            else:
+                head = l["text"].rsplit("{name}", 1)[0].rstrip()
+                render = f"{head} {SLOT_BREAK} {placeholder}!"
+                units.append(dict(clip=f"stem.{l['id']}", seat=l["speaker"], style=style, text=txt,
+                                  render=render, cut=l["slot"], stem=l["stem"]))
             units.append(dict(clip=f"bare.{l['id']}", seat=l["speaker"], style=style, text=l["bare"], cut=None,
                               stem=l["bare"]))
         else:
@@ -79,7 +103,7 @@ def batches(units: List[dict], rng: random.Random) -> List[List[dict]]:
         rng.shuffle(g)
         cur, n = [], 0
         for u in g:
-            w = len(u["text"].split())
+            w = len(spoken_words(render_text(u)))
             if cur and n + w > MAX_BATCH_WORDS:
                 out.append(cur)
                 cur, n = [], 0
@@ -98,7 +122,7 @@ def unit_spans(wav: np.ndarray, ts: List[Tuple[str, float]], batch: List[dict]):
     so no unit keeps a scrap of its neighbour. `trusted` is False when there was
     no real pause to split in. None when the word count doesn't line up."""
     words = [(w, t) for (w, t) in ts if w.strip()]
-    counts = [len(u["text"].split()) for u in batch]
+    counts = [len(spoken_words(render_text(u))) for u in batch]
     if len(words) != sum(counts):
         return None
     dur = len(wav) / au.SR
@@ -116,30 +140,75 @@ def unit_spans(wav: np.ndarray, ts: List[Tuple[str, float]], batch: List[dict]):
     spans = []
     for k in range(len(batch)):
         s, e = cuts[k][0], cuts[k + 1][0]
-        ok = cuts[k][1] >= 0.08 and cuts[k + 1][1] >= 0.08
+        ok = cuts[k][1] >= 0.2 and cuts[k + 1][1] >= 0.2
         ws = words[firsts[k]:lasts[k] + 1]
         spans.append((s, e, [(w, t - s) for (w, t) in ws], ok))
     return spans
 
 
 def cut_placeholder(seg: np.ndarray, words: List[Tuple[str, float]], cut: str, placeholder: str) -> Optional[np.ndarray]:
-    """Remove the placeholder name from a rendered named line."""
+    """Remove the placeholder name from a rendered named line.
+
+    Where the placeholder starts/ends comes from Whisper's word timings on this
+    very clip (they mark word ENDS too, which the model's own stream doesn't),
+    then the cut snaps to the quietest frame in the gap. There is often no
+    pause at all between a name and the verb after it ("Jackson shoots"), so a
+    cut from word starts alone left a "-son" on the stem. The model's word
+    starts are the fallback."""
+    # 1) The forced <break/> at the slot leaves a real pause: split in its
+    #    middle, located between the model's own word starts.
     idx = next((i for i, (w, _) in enumerate(words) if placeholder.lower() in w.lower().strip(",.!?")), None)
-    if idx is None:
-        idx = max(range(len(words)), key=lambda i: au.similarity(placeholder, words[i][0]), default=None)
-        if idx is None or au.similarity(placeholder, words[idx][0]) < 0.6:
+    if idx is not None:
+        if cut == "lead" and idx + 1 < len(words):
+            c, quiet = au.silence_boundary(seg, words[idx][1] + 0.3, words[idx + 1][1] + 0.05)
+            if quiet >= 0.1:
+                return seg[int(c * au.SR):]
+        if cut == "tail" and idx > 0:
+            c, quiet = au.silence_boundary(seg, words[idx - 1][1] + 0.15, words[idx][1] + 0.05)
+            if quiet >= 0.1:
+                return seg[: int(c * au.SR)]
+    # 2) No pause (Chatterbox, or Dia2 ignored the break): Whisper's timings.
+    ww = au_whisper(seg)
+    widx = max(range(len(ww)), key=lambda i: au.similarity(placeholder, ww[i][0]), default=None)
+    if widx is not None and au.similarity(placeholder, ww[widx][0]) >= 0.6:
+        _, p_start, p_end = ww[widx]
+        if cut == "tail":
+            prev_end = ww[widx - 1][2] if widx > 0 else max(0.0, p_start - 0.1)
+            lo, hi = min(prev_end, p_start), p_start + 0.02
+            c = au.quietest_point(seg, (lo + hi) / 2, max(0.02, (hi - lo) / 2 + 0.02))
+            return seg[: int(c * au.SR)]
+        if widx + 1 >= len(ww):
             return None
+        nxt = ww[widx + 1][1]
+        lo, hi = p_end - 0.02, max(p_end, nxt) + 0.02
+        c = au.quietest_point(seg, (lo + hi) / 2, max(0.02, (hi - lo) / 2))
+        return seg[int(c * au.SR):]
+    # 3) Last resort: the model's own word starts.
+    if idx is None:
+        return None
     if cut == "tail":
-        t = words[idx][1]
-        # Dia2 stamps a word slightly after its onset; search back a little.
-        c = au.quietest_point(seg, max(0.0, t - 0.06), 0.1)
+        c = au.quietest_point(seg, max(0.0, words[idx][1] - 0.06), 0.1)
         return seg[: int(c * au.SR)]
-    # lead: keep everything after the placeholder
     if idx + 1 >= len(words):
         return None
-    t = words[idx + 1][1]
-    c = au.quietest_point(seg, max(0.0, t - 0.06), 0.1)
+    c = au.quietest_point(seg, max(0.0, words[idx + 1][1] - 0.02), 0.08)
     return seg[int(c * au.SR):]
+
+
+def trim_leading_scrap(clip: np.ndarray, ww, expected: str):
+    """Dia2 sometimes lets a breath or a syllable of the conditioning prefix
+    through before the first word ("Well, the puck is down…"). When Whisper's
+    first word isn't the line's first word but its second one is, cut just
+    before that second word."""
+    exp = [w for w in expected.split() if au._norm_word(w)]
+    if len(ww) < 2 or not exp:
+        return clip, ww
+    e0 = au._norm_word(exp[0])
+    if au._norm_word(ww[0][0]) == e0 or au.similarity(exp[0], ww[1][0]) < 0.75:
+        return clip, ww
+    c = au.quietest_point(clip, max(0.0, ww[1][1] - 0.03), 0.06)
+    out = au.trim_silence(clip[int(c * au.SR):])
+    return out, au_whisper(out)
 
 
 # ── engines ──────────────────────────────────────────────────────────────────
@@ -201,6 +270,9 @@ def main() -> None:
     ap.add_argument("--only", default="")
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--no-qa", action="store_true")
+    ap.add_argument("--solo", action="store_true", help="one line per call (slower; cleanest edges)")
+    ap.add_argument("--recheck", type=float, default=0.0,
+                    help="re-render (solo) every clip whose QA word error rate is above this")
     args = ap.parse_args()
 
     from dia2_engine import setup_env
@@ -218,6 +290,12 @@ def main() -> None:
 
     lines = load_lines()
     only = {s.strip() for s in args.only.split(",") if s.strip()}
+    if args.recheck:
+        only |= {k.split(".", 1)[1] for k, v in qa.items() if v.get("wer", 1.0) > args.recheck or v.get("status") == "failed"}
+        args.force, args.solo = True, True
+        print(f"[stems:{args.pair}] recheck: {sorted(only)}", flush=True)
+        if not only:
+            return
     units = [u for u in units_for(lines, CONFIG["stemPlaceholder"])
              if (not only or u["clip"].split(".", 1)[1] in only)
              and (args.force or u["clip"] not in manifest["clips"])]
@@ -231,19 +309,25 @@ def main() -> None:
     gen_audio = 0.0
     for take in range(args.takes):
         rng = random.Random(1000 + take)
-        groups = batches(units, rng) if eng.batched else [[u] for u in units]
+        groups = batches(units, rng) if eng.batched and not args.solo else [[u] for u in units]
         for bi, batch in enumerate(groups):
             seat, style = batch[0]["seat"], batch[0]["style"]
-            text = BREAK.join(u["text"] for u in batch)
+            text = BREAK.join(render_text(u) for u in batch)
             seed = 7919 * (take + 1) + bi
             wav, ts = eng.render(text, seat, style, seed)
             gen_audio += len(wav) / au.SR
+            if len(batch) == 1:
+                # A line rendered on its own is its own clip: no splitting, so
+                # no need for the word stream to line up (Whisper's "99" for
+                # "ninety nine" is fine here).
+                takes[batch[0]["clip"]].append(dict(seg=wav, words=ts, take=take))
+                continue
             spans = unit_spans(wav, ts, batch)
             if spans is None and len(batch) > 1:
                 # Word stream didn't line up: fall back to one line per call.
                 spans = []
                 for u in batch:
-                    w1, t1 = eng.render(u["text"], seat, style, seed)
+                    w1, t1 = eng.render(render_text(u), seat, style, seed)
                     gen_audio += len(w1) / au.SR
                     sp = unit_spans(w1, t1, [u])
                     if sp:
@@ -255,7 +339,7 @@ def main() -> None:
             for u, (s, e, words, ok) in zip(batch, spans):
                 if not ok:
                     # No clean pause to split at: render this line on its own.
-                    w1, t1 = eng.render(u["text"], seat, style, seed + 101)
+                    w1, t1 = eng.render(render_text(u), seat, style, seed + 101)
                     gen_audio += len(w1) / au.SR
                     sp = unit_spans(w1, t1, [u])
                     if sp:
@@ -278,7 +362,9 @@ def main() -> None:
             if not args.no_qa:
                 # QA the clip that will SHIP, against the words it must say (a
                 # scrap of a neighbour or a leftover placeholder scores badly).
-                heard = " ".join(w for (w, s, e) in au_whisper(clip))
+                ww = au_whisper(clip)
+                clip, ww = trim_leading_scrap(clip, ww, u["stem"])
+                heard = " ".join(w for (w, s, e) in ww)
                 score = au.wer(u["stem"], heard)
             cands.append((score, -float(np.sqrt(np.mean(clip ** 2))), c["take"], clip, heard))
         if not cands:

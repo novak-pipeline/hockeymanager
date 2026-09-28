@@ -66,6 +66,14 @@ describe('booth line library', () => {
     }
   })
 
+  it('a lead-slot stem is a whole sentence (Dia2 garbles a verb-first fragment)', () => {
+    for (const l of BOOTH_LINES) {
+      if (nameSlotPosition(l.text) !== 'lead') continue
+      expect(stemText(l), l.id).toMatch(/^[A-Z]/)
+      expect(l.text, l.id).toMatch(/^\{name\}[.!] /)
+    }
+  })
+
   it('name-carrier phrases have exactly one name slot', () => {
     for (const c of Object.values(boothConfig.nameCarriers)) {
       if (c.startsWith('Dia2')) continue // the $comment entry

@@ -96,7 +96,9 @@ function bridge(): BoothBridge | null {
   return h?.booth ?? null
 }
 
-const BASE = './commentary/'
+/** Public-folder base for the browser fallback: the app root in dev (so a
+ *  harness page under /dev/ still finds it), relative in a built bundle. */
+const BASE = `${import.meta.env.BASE_URL ?? './'}commentary/`
 
 /** The Electron bridge when present (packaged file:// can't fetch), else plain
  *  fetch from the dev server's public folder (browser harness). */
@@ -105,7 +107,9 @@ async function readManifest(pair: string): Promise<ClipManifest | null> {
   try {
     if (b) return ((await b.manifest(pair)) as ClipManifest | null) ?? null
     const res = await fetch(`${BASE}${pair}/manifest.json`)
-    return res.ok ? ((await res.json()) as ClipManifest) : null
+    // A dev server answers unknown paths with index.html: only JSON counts.
+    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return null
+    return (await res.json()) as ClipManifest
   } catch { return null }
 }
 
@@ -123,7 +127,7 @@ async function readNameBanks(pair: string): Promise<Array<{ source: string; entr
   try {
     if (b) return (await b.nameBanks(pair)) ?? []
     const res = await fetch(`${BASE}${pair}/names/index.json`)
-    if (!res.ok) return []
+    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return []
     const idx = (await res.json()) as { entries?: Record<string, string> }
     return idx.entries ? [{ source: 'fictional', entries: idx.entries }] : []
   } catch { return [] }
