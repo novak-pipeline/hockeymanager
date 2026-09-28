@@ -15,7 +15,13 @@ const isDev = !app.isPackaged
 // derives userData from the app name, so renaming would silently point the app at
 // a fresh, empty saves folder. Pin userData to the original "hockey-manager" path
 // so every existing autosave/slot stays exactly where the app looks for it.
-app.setPath('userData', join(app.getPath('appData'), 'hockey-manager'))
+//
+// HOCKEY_USER_DATA (unpackaged builds only) points the app at a throwaway
+// folder, so an automated UI check can load a COPY of a save without its
+// autosave ever touching the real careers. (--user-data-dir is overridden by
+// the pin below, so it cannot do this.)
+const isolatedUserData = !app.isPackaged ? process.env.HOCKEY_USER_DATA : undefined
+app.setPath('userData', isolatedUserData ?? join(app.getPath('appData'), 'hockey-manager'))
 
 // GPU: the 3D match view needs hardware acceleration (software rendering made
 // it unwatchably laggy). Some Windows drivers crash Electron's GPU process,

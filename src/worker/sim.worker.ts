@@ -198,6 +198,16 @@ function handle(req: WorkerRequest): WorkerResponse {
       if (!res.ok) throw new Error(res.message ?? 'Could not resolve development camp.')
       return { id: req.id, type: 'devCamp', devCamp: null }
     }
+    case 'setDevCampChoice': {
+      const r = must().setDevCampChoice(req.playerId, req.choice)
+      if (!r.ok) throw new Error(r.message ?? 'That call is not available.')
+      return { id: req.id, type: 'devCamp', devCamp: must().getDevCamp() }
+    }
+    case 'setDevCampFocus': {
+      const r = must().setDevCampFocus(req.playerId, req.focus as Parameters<ReturnType<typeof must>['setDevCampFocus']>[1])
+      if (!r.ok) throw new Error(r.message ?? 'Could not set the programme.')
+      return { id: req.id, type: 'devCamp', devCamp: must().getDevCamp() }
+    }
     case 'skipDevCamp':
       must().autoResolveDevCamp()
       return { id: req.id, type: 'devCamp', devCamp: null }

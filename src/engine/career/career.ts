@@ -146,6 +146,7 @@ import { buildScoutSummary } from '@engine/career/scoutSummary'
 import { buildProspectGrade, type NeedLevel } from '@engine/career/prospectGrade'
 import { buildScoutDraftRead, scoutBoardNote, scoutSignalParts } from '@engine/career/scoutDraftRead'
 import { farmSplit } from '@engine/career/farmReassign'
+import { runDrills, showingOf, gradeOf, citeWeek, readinessOf, choicesFor, staffRead, type DrillResult, type DevGroup, type Readiness, type ChoiceSet } from '@engine/career/devCamp'
 import { detectBattles, rankBattle, battleRead, type CampCandidate, type CampGroup } from '@engine/career/campBattles'
 import { seasonSpans, devCampDateISO, resignDateISO, faDateISO, campDateISO, boardMeetingDateISO, inHolidayFreeze, FREE_AGENCY, ARBITRATION, TRAINING_CAMP } from '@engine/career/seasonSpans'
 import { buildNeeds, leagueBenchmark, type DepthEntry, type NeedsCandidate, type NeedGroup } from '@engine/career/offseasonNeeds'
@@ -836,6 +837,7 @@ import {
   type CampReport,
   type OffseasonNeedsView,
   type CampGameLine,
+  type DevCampChoice,
   type CalendarSpan,
   type MedicalView,
   type MedicalRow,
@@ -983,6 +985,8 @@ export interface WatchedGame {
   homeColors: { primary: number; secondary: number }
   awayColors: { primary: number; secondary: number }
   playerNames: Record<string, string>
+  /** Which way each player shoots (Player.handedness) — the 3D view mirrors right-handed skaters. Additive; older saves lack it. */
+  playerHands?: Record<string, 'L' | 'R'>
   stream: GameStream
 }
 
@@ -1117,6 +1121,12 @@ const PICK_YEARS_AHEAD = 3
  *  (the NHL rule is 10 games / 24 days; we key off the games estimate). */
 const LTIR_MIN_GAMES = 10
 const FA_WINDOW_DAYS = FREE_AGENCY.days
+/** Development camp: up to this many summer programmes. */
+const DEV_FOCUS_SLOTS = 3
+const FOCUS_WORDS: Record<string, string> = {
+  offense: 'his offence', defense: 'his defensive game', skating: 'his skating',
+  physical: 'his strength and physical game', goaltending: 'his goaltending', balanced: 'a balanced programme', recovery: 'recovery',
+}
 /** Offseason 3.0: the market day arbitration hearings are held (July 6).
  *  Real hearings run late July; the summer's compressed calendar keeps the
  *  hearing inside the July window so the award is a decision, not a surprise. */
@@ -10681,7 +10691,12 @@ export class Career {
     const h = this.data.teams.get(home)!
     const a = this.data.teams.get(away)!
     const playerNames: Record<string, string> = {}
-    for (const id of [...h.roster, ...a.roster]) playerNames[id as string] = this.resolve(id).name
+    const playerHands: Record<string, 'L' | 'R'> = {}
+    for (const id of [...h.roster, ...a.roster]) {
+      const p = this.resolve(id)
+      playerNames[id as string] = p.name
+      playerHands[id as string] = p.handedness
+    }
     return {
       homeName: h.name,
       awayName: a.name,
@@ -10692,6 +10707,7 @@ export class Career {
       homeColors: { ...h.colors },
       awayColors: { ...a.colors },
       playerNames,
+      playerHands,
       stream,
     }
   }
@@ -14529,20 +14545,10 @@ export class Career {
   /** The coach's pick for camp standout: the best week (highest read roll),
    *  drafted players edging ties. Deterministic — the same across every call. */
   private devCampStandout(): { player: Player; reason: string } | null {
-    const { invitees, draftedIds } = this.devCampInvitees()
-    if (invitees.length === 0) return null
-    let best: Player | null = null
-    let bestScore = -Infinity
-    for (const p of invitees) {
-      const { z } = this.devCampRead(p)
-      const score = z + (draftedIds.has(p.id as string) ? 0.05 : 0)
-      if (score > bestScore) { bestScore = score; best = p }
-    }
-    if (!best) return null
-    const reason = best.position === 'G'
-      ? 'tracked pucks like a veteran all week and stood tallest in the scrimmage'
-      : 'brought the best pace and compete of the group, and the scrimmage sheet backed it up'
-    return { player: best, reason }
+    const assess = this.devCampAssessments()
+    if (assess.length === 0) return null
+    const best = [...assess].sort((x, y) => y.showing - x.showing || (y.drafted ? 1 : 0) - (x.drafted ? 1 : 0) || ((x.p.id as string) < (y.p.id as string) ? -1 : 1))[0]!
+    return { player: best.p, reason: best.evidence }
   }
 
   /** Deterministic camp read for an invitee — the same roll the report uses,
@@ -14562,32 +14568,23 @@ export class Career {
     if (day > 3) return
     if (day === 2) {
       const { invitees } = this.devCampInvitees()
-      const lines: DevCampState['lines'] = []
-      let white = 0
-      let blue = 0
-      invitees.forEach((p, i) => {
-        const squad: 'white' | 'blue' = i % 2 === 0 ? 'white' : 'blue'
-        const rng = this.rngFor(9503, this.year, Career.pidNum(p.id as string))
-        const talent = (ratedPotential(p) + ratedOverall(p)) / 2
-        const sog = p.position === 'G' ? 0 : Math.max(0, Math.round(rng.float(0, 2) + talent / 30))
-        const g = p.position === 'G' ? 0 : (rng.chance(Math.min(0.6, 0.08 + talent / 200)) ? 1 : 0) + (rng.chance(talent / 400) ? 1 : 0)
-        const a = p.position === 'G' ? 0 : rng.chance(0.35 + talent / 300) ? 1 : 0
-        if (squad === 'white') white += g
-        else blue += g
-        lines.push([p.id as string, { g, a, sog, squad }])
-      })
-      // Filler goals so the scoreline reads like a real scrimmage.
-      const rng = this.rngFor(9504, this.year)
-      white += rng.range(0, 2)
-      blue += rng.range(0, 2)
-      this.devCampState = { day: 2, lines, scoreline: `White ${white}, Blue ${blue}` }
-      const top = [...lines].sort((a, b) => (b[1].g * 2 + b[1].a) - (a[1].g * 2 + a[1].a))[0]
-      const topName = top ? this.data.players.get(asPlayerId(top[0]))?.name : undefined
+      const played = this.playDevCampScrimmages(invitees)
+      this.devCampState = {
+        ...(this.devCampState ?? { lines: [] }),
+        day: 2,
+        lines: played.legacy,
+        games: played.games,
+        results: played.results,
+        ...(played.results[0] ? { scoreline: played.results.join(' · ') } : {}),
+      }
+      const assess = this.devCampAssessments()
+      const top = [...assess].filter((x) => x.lines.length > 0).sort((x, y) => y.showing - x.showing)[0]
       this.pushNews(
         'scouting',
-        `Dev camp scrimmage: ${this.devCampState.scoreline}`,
-        `The kids played a full intra-squad game today.${topName ? ` ${topName} was the best player on the ice.` : ''} ` +
-        `The staff file their final reads tomorrow, and name their camp standout.`,
+        `Dev camp scrimmages: ${played.results.join(' · ') || 'the kids played'}`,
+        `The prospects played ${played.results.length === 1 ? 'a full intra-squad game' : `${played.results.length} intra-squad games`} today, every one of them dressed.` +
+        (top ? ` ${top.p.name} was the best of them: he ${top.evidence}.` : '') +
+        ` The staff file their reads tomorrow — and the calls on who signs, who turns pro and who goes back are yours.`,
         { teamId: this.userTeamId as string }
       )
       return
@@ -14652,6 +14649,9 @@ export class Career {
       'Struggled to keep up; a project for now.',
     ]
     const pickRead = (arr: string[], p: Player): string => arr[Career.pidNum(p.id as string) % arr.length]!
+    const assessList = this.devCampAssessments()
+    const assessOf = new Map(assessList.map((x) => [x.p.id as string, x] as const))
+    const focusPlan = this.devCampFocusPlan(assessList)
     return {
       day,
       ...(this.devCampState?.scoreline ? { scoreline: this.devCampState.scoreline } : {}),
@@ -14683,19 +14683,47 @@ export class Career {
             : bucket === 'behind'
               ? pickRead(BEHIND, p)
               : pickRead(ONTRACK, p)
+        const a = assessOf.get(p.id as string)
+        const shownGrade = a && (day >= 2 || a.drills.length > 0) ? a.grade : grade
+        const games = a?.lines ?? []
         return {
           playerId: p.id as string,
           name: p.name,
           age: p.age,
           position: p.position,
           drafted,
-          grade,
-          read,
+          grade: shownGrade,
+          read: a ? a.read : read,
           ...(lineOf.has(p.id as string) ? { line: lineOf.get(p.id as string)! } : {}),
           ...(p.faceId !== undefined ? { faceId: p.faceId } : {}),
+          ...(a ? {
+            status: a.status,
+            ...(a.club ? { club: a.club } : {}),
+            overall: ratedOverall(p),
+            drills: a.drills,
+            ...(games.length > 0 ? {
+              scrim: {
+                gp: games.length, g: games.reduce((s2, l) => s2 + l.g, 0), a: games.reduce((s2, l) => s2 + l.a, 0),
+                pm: games.reduce((s2, l) => s2 + l.pm, 0), sog: games.reduce((s2, l) => s2 + l.sog, 0),
+                ...(p.position === 'G' ? { sa: games.reduce((s2, l) => s2 + (l.sa ?? 0), 0), ga: games.reduce((s2, l) => s2 + (l.ga ?? 0), 0) } : {}),
+              },
+            } : {}),
+            showing: a.showing,
+            evidence: a.evidence,
+            staffRead: a.read,
+            readiness: a.readiness,
+            options: a.choices.options,
+            ...(a.choices.recommended ? { recommended: a.choices.recommended } : {}),
+            ...(a.choice ? { choice: a.choice } : {}),
+            ...(a.choices.blocked ? { blocked: a.choices.blocked } : {}),
+            focusSuggested: a.focusSuggested,
+            ...(focusPlan.has(p.id as string) ? { focus: focusPlan.get(p.id as string)! } : {}),
+          } : {}),
         }
       }),
       cast,
+      ...(this.devCampState?.results ? { results: [...this.devCampState.results] } : {}),
+      focusSlots: DEV_FOCUS_SLOTS,
       // On wrap day, surface the COACHES' standout pick (read-only) — it's
       // their read, not the GM's call.
       ...(day >= 3
@@ -14711,10 +14739,10 @@ export class Career {
    *  (Arg kept for protocol back-compat; ignored — the coaches decide now.) */
   submitDevCamp(_standoutId?: string): { ok: boolean; message?: string } {
     if (!this.devCampPending) return { ok: false, message: 'Development camp is over.' }
+    this.pushDevCampReport()
     this.devCampPending = false
     this.devCampState = null
     this.devCampRoster = undefined // next summer's camp starts from the auto pool
-    this.pushDevCampReport()
     return { ok: true }
   }
 
@@ -14722,10 +14750,10 @@ export class Career {
    *  as closing it yourself — the coaches always name the standout. */
   autoResolveDevCamp(): void {
     if (!this.devCampPending) return
+    this.pushDevCampReport()
     this.devCampPending = false
     this.devCampState = null
     this.devCampRoster = undefined // next summer's camp starts from the auto pool
-    this.pushDevCampReport()
   }
 
   private pushDevCampReport(): void {
@@ -14748,8 +14776,17 @@ export class Career {
       })
     }
 
+    // The calls land (the GM's, or — delegated — the staff's).
+    const calls = this.applyDevCamp()
+    const assessOf = new Map(this.devCampAssessments().map((x) => [x.p.id as string, x] as const))
     const lines: string[] = []
     for (const p of invitees) {
+      const a = assessOf.get(p.id as string)
+      if (a) {
+        const drafted = draftedIds.has(p.id as string)
+        lines.push(`${p.name}${drafted ? " (this year's pick)" : ''}${(p.id as string) === standoutId ? ' — CAMP STANDOUT' : ''} — ${a.grade}: ${a.read}`)
+        continue
+      }
       // Deterministic camp read; watching him closes a sliver of the fog.
       const { z } = this.devCampRead(p)
       const drafted = draftedIds.has(p.id as string)
@@ -14762,11 +14799,7 @@ export class Career {
       } else {
         lines.push(`${p.name}${tag} — solid, unspectacular week. Exactly where a kid his age should be.`)
       }
-      // Knowledge bump: you watched him for a week (standout a little more).
-      const gain = isStandout ? 9 : 4
-      const entry = this.scouting.knowledge.find(([id]) => id === (p.id as string))
-      if (entry) entry[1] = Math.min(100, entry[1] + gain)
-      else this.scouting.knowledge.push([p.id as string, gain + 4])
+      void isStandout
     }
     this.pushNews(
       'scouting',
@@ -14774,9 +14807,309 @@ export class Career {
       `Development camp wrapped this week: ${invitees.length} of the organisation's young players on the ice, ` +
       `this year's draft class included.` +
       `${standout ? ` The staff named ${standout.player.name} the camp standout — he ${standout.reason}.` : ''}` +
-      `\n\nThe reads:\n\n• ${lines.join('\n• ')}`,
+      (calls.length > 0 ? `\n\nThe calls:\n\n• ${calls.join('\n• ')}` : '') +
+      `\n\nThe reads:\n\n• ${lines.slice(0, 40).join('\n• ')}`,
       { teamId: this.userTeamId as string, ...(standoutId ? { playerId: standoutId } : {}) }
     )
+  }
+
+  /* ─────────────── Development camp 2.0 ─────────────── */
+
+  /** Where a camper stands with the organisation, and his club if outside it. */
+  private devCamper(p: Player, clubs: Map<string, { leagueAbbr: string; club: string }>): { status: 'signed' | 'amateur' | 'tryout'; club?: string; chlJunior: boolean } {
+    const id = p.id as string
+    const affiliate = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
+    const inOrg = this.userTeam.roster.includes(p.id) || (affiliate?.roster.includes(p.id) ?? false)
+    const club = clubs.get(id)
+    const lg = (club?.leagueAbbr ?? '').toUpperCase()
+    const chlJunior = ['OHL', 'WHL', 'QMJHL', 'LHJMQ'].some((k) => lg.includes(k))
+    if (inOrg) return { status: 'signed', chlJunior }
+    if (this.faPool.some((f) => (f as string) === id)) return { status: 'tryout', chlJunior }
+    return { status: 'amateur', ...(club ? { club: `${club.club} (${club.leagueAbbr})` } : {}), chlJunior }
+  }
+
+  /** The level a man must reach to be an NHL regular here — the weakest
+   *  regular, or, when summer expiries have thinned the roster below a full
+   *  group, the weakest man left (never 0). */
+  private orgNhlBarDev(grp: 'F' | 'D' | 'G'): number {
+    const n = grp === 'G' ? 2 : grp === 'D' ? 6 : 12
+    const ovrs = this.userTeam.roster
+      .map((id) => this.data.players.get(id))
+      .filter((q): q is Player => !!q && this.posGroup(q.position) === grp)
+      .map((q) => ratedOverall(q))
+      .sort((a, b) => b - a)
+    return ovrs[Math.min(n, ovrs.length) - 1] ?? 60
+  }
+
+  /** The level a man must reach to be an AHL regular in this organisation. */
+  private orgAhlBar(grp: 'F' | 'D' | 'G'): number {
+    const ahl = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
+    const n = grp === 'G' ? 1 : grp === 'D' ? 6 : 12
+    const ovrs = (ahl?.roster ?? [])
+      .map((id) => this.data.players.get(id))
+      .filter((q): q is Player => !!q && this.posGroup(q.position) === grp)
+      .map((q) => ratedOverall(q))
+      .sort((a, b) => b - a)
+    return ovrs[Math.min(n, ovrs.length) - 1] ?? 50
+  }
+
+  /** Day 1 testing, from real current ratings (deterministic; no potential). */
+  private devCampDrills(invitees: Player[]): Map<string, DrillResult[]> {
+    return runDrills(invitees.map((p) => ({
+      playerId: p.id as string,
+      group: this.posGroup(p.position) as DevGroup,
+      ratings: {
+        skating: p.composites.skating, scoring: p.composites.scoring, playmaking: p.composites.playmaking,
+        puckControl: p.composites.puckControl, hitting: p.composites.hitting, takeaway: p.composites.takeaway,
+        defensiveZone: p.composites.defensiveZone, goaltending: p.composites.goaltending,
+      },
+    })))
+  }
+
+  /** A sim-ready prospect squad: best on the top lines, a goalie in the crease. */
+  private prospectSquad(id: string, name: string, skaters: Player[], goalie: Player | undefined): Team {
+    const byOvr = (a: Player, b: Player): number => ratedOverall(b) - ratedOverall(a) || ((a.id as string) < (b.id as string) ? -1 : 1)
+    const F = skaters.filter((p) => this.posGroup(p.position) === 'F').sort(byOvr).slice(0, 12)
+    const D = skaters.filter((p) => this.posGroup(p.position) === 'D').sort(byOvr).slice(0, 6)
+    const forwards = [0, 1, 2, 3].map((i) => F.slice(i * 3, i * 3 + 3).map((p) => p.id)).filter((l) => l.length > 0) as unknown as Team['lines']['forwards']
+    const defensePairs = [0, 1, 2].map((i) => D.slice(i * 2, i * 2 + 2).map((p) => p.id)).filter((l) => l.length > 0) as unknown as Team['lines']['defensePairs']
+    const E = asPlayerId('')
+    const gid = goalie ? goalie.id : E
+    return {
+      ...this.userTeam,
+      id: asTeamId(id), abbreviation: name.slice(0, 3).toUpperCase(), name,
+      roster: [...F, ...D, ...(goalie ? [goalie] : [])].map((p) => p.id),
+      lines: {
+        forwards, defensePairs, goalies: [gid, gid],
+        powerPlayUnits: [[...F.slice(0, 3), ...D.slice(0, 2)].map((p) => p.id)].filter((u) => u.length >= 4),
+        penaltyKillUnits: [[...F.slice(3, 5), ...D.slice(2, 4)].map((p) => p.id)].filter((u) => u.length >= 3),
+      },
+    }
+  }
+
+  /** Day 2: the prospects' scrimmages, played by the quick sim. White and Blue
+   *  are dealt by ability; when a side has more skaters than a lineup dresses,
+   *  a second (and third) game rotates the rest in, so every kid plays. */
+  private playDevCampScrimmages(invitees: Player[]): { games: Array<[string, CampGameLine[]]>; results: string[]; legacy: DevCampState['lines'] } {
+    const byOvr = (a: Player, b: Player): number => ratedOverall(b) - ratedOverall(a) || ((a.id as string) < (b.id as string) ? -1 : 1)
+    const side = new Map<string, 'white' | 'blue'>()
+    for (const grp of ['F', 'D', 'G'] as const) {
+      invitees.filter((p) => this.posGroup(p.position) === grp).sort(byOvr)
+        .forEach((p, i) => side.set(p.id as string, i % 4 === 0 || i % 4 === 3 ? 'white' : 'blue'))
+    }
+    const of = (s: 'white' | 'blue', grp: 'F' | 'D' | 'G'): Player[] =>
+      invitees.filter((p) => side.get(p.id as string) === s && this.posGroup(p.position) === grp).sort(byOvr)
+    // Goalies: the camp's own, else the farm lends one (his line is not kept).
+    const ahl = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
+    const lenders = (ahl?.roster ?? []).map((id) => this.data.players.get(id)).filter((q): q is Player => !!q && q.position === 'G').sort(byOvr)
+    const gW = of('white', 'G')
+    const gB = of('blue', 'G')
+    if (gW.length === 0 && gB.length > 1) gW.push(gB.pop()!)
+    if (gB.length === 0 && gW.length > 1) gB.push(gW.pop()!)
+    const whiteG = gW.length > 0 ? gW : lenders.slice(0, 1)
+    const blueG = gB.length > 0 ? gB : lenders.slice(gW.length > 0 ? 0 : 1, gW.length > 0 ? 1 : 2)
+    const campers = new Set(invitees.map((p) => p.id as string))
+    // A small camp borrows bodies from the organisation (farm first) so both
+    // sides can dress a real lineup; the borrowed men's lines are not kept.
+    const orgBodies = [...(ahl?.roster ?? []), ...this.userTeam.roster]
+      .map((id) => this.data.players.get(id))
+      .filter((q): q is Player => !!q && q.injuryStatus === null && !campers.has(q.id as string) && q.position !== 'G')
+      .sort(byOvr)
+    const fill = (s: 'white' | 'blue', grp: 'F' | 'D', need: number): Player[] => {
+      const have = of(s, grp)
+      if (have.length >= need) return have
+      const extra = orgBodies.filter((q) => this.posGroup(q.position) === grp && !side.has(q.id as string))
+      for (const q of extra.slice(0, need - have.length)) side.set(q.id as string, s)
+      return of2(s, grp)
+    }
+    const of2 = (s: 'white' | 'blue', grp: 'F' | 'D' | 'G'): Player[] =>
+      [...invitees, ...orgBodies].filter((p, i, arr) => arr.indexOf(p) === i && side.get(p.id as string) === s && this.posGroup(p.position) === grp)
+    fill('white', 'F', 12); fill('blue', 'F', 12); fill('white', 'D', 6); fill('blue', 'D', 6)
+    const maxSkaters = Math.max(of2('white', 'F').length + of2('white', 'D').length, of2('blue', 'F').length + of2('blue', 'D').length)
+    const nGames = Math.max(1, Math.min(3, Math.ceil(maxSkaters / 18)))
+    const rotate = <T,>(arr: T[], k: number, n: number): T[] => arr.length <= n ? arr : Array.from({ length: n }, (_, i) => arr[(k * n + i) % arr.length]!)
+    const lines = new Map<string, CampGameLine[]>()
+    const results: string[] = []
+    const NAMES = ['in the first scrimmage', 'in the second scrimmage', 'in the third scrimmage']
+    for (let k = 0; k < nGames; k++) {
+      const wSk = [...rotate(of2('white', 'F'), k, 12), ...rotate(of2('white', 'D'), k, 6)]
+      const bSk = [...rotate(of2('blue', 'F'), k, 12), ...rotate(of2('blue', 'D'), k, 6)]
+      const white = this.prospectSquad('dev-white', 'White', wSk, whiteG[k % Math.max(1, whiteG.length)])
+      const blue = this.prospectSquad('dev-blue', 'Blue', bSk, blueG[k % Math.max(1, blueG.length)])
+      if (white.lines.goalies[0] === asPlayerId('') || blue.lines.goalies[0] === asPlayerId('') || wSk.length < 8 || bSk.length < 8) break
+      const res = quickSimGame(white, blue, this.resolve, { seed: gameSeed(this.seed ^ 0x0de5ca3b, this.year, `devcamp-${k}`) })
+      results.push(`White ${res.homeGoals}, Blue ${res.awayGoals}${res.decidedBy !== 'regulation' ? ` (${res.decidedBy === 'overtime' ? 'OT' : 'SO'})` : ''}`)
+      for (const [pidRaw, st] of res.playerStats) {
+        const pid = pidRaw as string
+        if (!campers.has(pid) || st.toi <= 0 && st.shotsAgainst <= 0) continue
+        const isG = this.data.players.get(pidRaw)?.position === 'G'
+        const line: CampGameLine = isG
+          ? { game: NAMES[k]!, kind: 'scrimmage', g: 0, a: 0, pm: 0, sog: 0, toiSec: st.toi, sa: st.shotsAgainst, ga: st.goalsAgainst }
+          : { game: NAMES[k]!, kind: 'scrimmage', g: st.goals, a: st.assists, pm: st.plusMinus, sog: st.shots, toiSec: st.toi }
+        lines.set(pid, [...(lines.get(pid) ?? []), line])
+      }
+    }
+    const legacy: DevCampState['lines'] = [...lines].map(([pid, ls]) => [pid, {
+      g: ls.reduce((s, l) => s + l.g, 0), a: ls.reduce((s, l) => s + l.a, 0), sog: ls.reduce((s, l) => s + l.sog, 0), squad: side.get(pid) ?? 'white',
+    }])
+    return { games: [...lines], results, legacy }
+  }
+
+  /** Everything the camp knows about each camper — the view and the close
+   *  both read this, so the screen and the effects can never disagree. */
+  private devCampAssessments(): Array<{
+    p: Player; drafted: boolean; status: 'signed' | 'amateur' | 'tryout'; club?: string
+    drills: DrillResult[]; lines: CampGameLine[]; showing: number; grade: 'A' | 'B' | 'C'
+    evidence: string; readiness: Readiness; read: string; choices: ChoiceSet; choice: DevCampChoice | null
+    focusSuggested: PracticeFocus
+  }> {
+    const { invitees, draftedIds } = this.devCampInvitees()
+    const clubs = this.worldClubInfoByPid()
+    const drills = this.devCampDrills(invitees)
+    const games = new Map(this.devCampState?.games ?? [])
+    const chosen = new Map(this.devCampState?.decisions ?? [])
+    return invitees.map((p) => {
+      const id = p.id as string
+      const grp = this.posGroup(p.position) as DevGroup
+      const camper = this.devCamper(p, clubs)
+      const dr = drills.get(id) ?? []
+      const ls = games.get(id) ?? []
+      const showing = showingOf(dr, ls, grp)
+      const grade = gradeOf(showing)
+      const evidence = citeWeek(dr, ls, grp)
+      const readiness = readinessOf({ ovr: ratedOverall(p), age: p.age, nhlBar: this.orgNhlBarDev(grp), ahlBar: this.orgAhlBar(grp) })
+      const choices = choicesFor({ status: camper.status, readiness, grade, age: p.age, chlJunior: camper.chlJunior })
+      const mine = chosen.get(id)
+      const choice = mine && choices.options.includes(mine) ? mine : choices.recommended
+      return {
+        p, drafted: draftedIds.has(id), status: camper.status, ...(camper.club ? { club: camper.club } : {}),
+        drills: dr, lines: ls, showing, grade, evidence, readiness,
+        read: staffRead({ name: p.name, cite: evidence, grade, readiness, status: camper.status, ...(camper.club ? { club: camper.club.replace(/ \(.*\)$/, '') } : {}) }),
+        choices, choice, focusSuggested: suggestPlayerFocus(p),
+      }
+    })
+  }
+
+  /** The summer programmes: the GM's picks, else the staff's three (the best
+   *  showings with real upside). */
+  private devCampFocusPlan(assess: ReturnType<Career['devCampAssessments']>): Map<string, PracticeFocus> {
+    const mine = this.devCampState?.focus
+    if (mine) return new Map(mine.map(([id, f]) => [id, f as PracticeFocus]))
+    const ranked = [...assess]
+      .filter((a) => a.focusSuggested !== 'balanced' && a.focusSuggested !== 'recovery')
+      .sort((x, y) => (y.showing + (ratedPotential(y.p) - ratedOverall(y.p)) / 5) - (x.showing + (ratedPotential(x.p) - ratedOverall(x.p)) / 5) || ((x.p.id as string) < (y.p.id as string) ? -1 : 1))
+      .slice(0, DEV_FOCUS_SLOTS)
+    return new Map(ranked.map((a) => [a.p.id as string, a.focusSuggested]))
+  }
+
+  /** Make (or undo, with null) a development-camp call on one prospect. */
+  setDevCampChoice(playerId: string, choice: DevCampChoice | null): { ok: boolean; message?: string } {
+    if (!this.devCampPending) return { ok: false, message: 'Development camp is over.' }
+    const a = this.devCampAssessments().find((x) => (x.p.id as string) === playerId)
+    if (!a) return { ok: false, message: 'He is not at camp.' }
+    if (choice !== null && !a.choices.options.includes(choice)) return { ok: false, message: a.choices.blocked ?? 'That call is not available for him.' }
+    const st = this.devCampState ?? { day: 1, lines: [] }
+    const rest = (st.decisions ?? []).filter(([id]) => id !== playerId)
+    this.devCampState = { ...st, decisions: choice === null ? rest : [...rest, [playerId, choice]] }
+    return { ok: true }
+  }
+
+  /** Set (or clear) one prospect's summer development programme. Choosing any
+   *  programme replaces the staff's picks with the GM's own list (max three). */
+  setDevCampFocus(playerId: string, focus: PracticeFocus | null): { ok: boolean; message?: string } {
+    if (!this.devCampPending) return { ok: false, message: 'Development camp is over.' }
+    const assess = this.devCampAssessments()
+    if (!assess.some((x) => (x.p.id as string) === playerId)) return { ok: false, message: 'He is not at camp.' }
+    const plan = this.devCampFocusPlan(assess)
+    const gmList = this.devCampState?.focus !== undefined
+    if (focus === null) plan.delete(playerId)
+    else {
+      // The GM's first pick bumps the staff's weakest pick; after that the
+      // list is his, and a full list must be cleared before it takes another.
+      if (!plan.has(playerId) && plan.size >= DEV_FOCUS_SLOTS && !gmList) plan.delete([...plan.keys()].pop()!)
+      if (!plan.has(playerId) && plan.size >= DEV_FOCUS_SLOTS) return { ok: false, message: `Three summer programmes at most — the development staff is only so big.` }
+      plan.set(playerId, focus)
+    }
+    const st = this.devCampState ?? { day: 1, lines: [] }
+    this.devCampState = { ...st, focus: [...plan] }
+    return { ok: true }
+  }
+
+  /** Close camp: the calls land. Signings and assignments are real roster and
+   *  contract moves; the week's showing and each call move morale; the summer
+   *  programmes become the players' development focus; watching them closes
+   *  some fog. Whoever made the calls — the GM or, delegated, the staff. */
+  private applyDevCamp(): string[] {
+    const assess = this.devCampAssessments()
+    const notes: string[] = []
+    const affiliate = this.userTeam.affiliateId ? this.data.teams.get(this.userTeam.affiliateId) : undefined
+    const elc = (): Player['contract'] => ({ salary: indexed(900_000), yearsRemaining: 3, expiryYear: this.year + 1 + 3, noTradeClause: false, twoWay: true })
+    for (const a of assess) {
+      const p = a.p
+      const pid = p.id as string
+      // The week itself.
+      if (a.grade === 'A') p.morale = Math.min(100, p.morale + 4)
+      else if (a.grade === 'C') p.morale = Math.max(0, p.morale - 2)
+      switch (a.choice) {
+        case 'signAhl': {
+          if (!affiliate) break
+          for (const t of this.data.teams.values()) {
+            if (t.tier === 'world' && t.roster.includes(p.id)) { t.roster = t.roster.filter((x) => x !== p.id); repairLines(t, this.data.players) }
+          }
+          p.contract = elc()
+          affiliate.roster.push(p.id)
+          repairLines(affiliate, this.data.players)
+          this.lockerArrival(affiliate.id, p.id)
+          p.morale = Math.min(100, p.morale + 5)
+          notes.push(`${p.name} signs his entry-level deal and turns pro — assigned to ${affiliate.name}.`)
+          break
+        }
+        case 'signReturn':
+          p.contract = elc()
+          p.morale = Math.min(100, p.morale + 3)
+          notes.push(`${p.name} signs his entry-level deal and goes back to ${a.club ?? 'his club'} for another year — the deal slides.`)
+          break
+        case 'returnUnsigned':
+          if (a.readiness !== 'junior' && p.age >= 19) {
+            p.morale = Math.max(0, p.morale - 4)
+            notes.push(`${p.name} goes back to ${a.club ?? 'his club'} unsigned — he wanted to turn pro, and knows he was ready.`)
+          } else {
+            notes.push(`${p.name} goes back to ${a.club ?? 'his club'}; you keep his rights.`)
+          }
+          break
+        case 'signElc': {
+          if (!affiliate || !this.faPool.some((f) => (f as string) === pid)) break
+          try {
+            signPlayer({ team: affiliate, player: p, salary: indexed(900_000), years: 3, year: this.year, players: this.data.players })
+            p.contract.twoWay = true
+            this.faPool = this.faPool.filter((f) => (f as string) !== pid)
+            this.lockerArrival(affiliate.id, p.id)
+            p.morale = Math.min(100, p.morale + 5)
+            notes.push(`${p.name} earns an entry-level deal out of his camp tryout — he reports to ${affiliate.name}.`)
+          } catch {
+            notes.push(`${p.name} would have signed, but the farm roster is full.`)
+          }
+          break
+        }
+        case 'release':
+          notes.push(`${p.name}'s tryout ends; he goes back to the open market.`)
+          break
+        default:
+          break
+      }
+      // Watching him for a week teaches the staff something.
+      const entry = this.scouting.knowledge.find(([id]) => id === pid)
+      if (entry) entry[1] = Math.min(100, entry[1] + 4)
+      else this.scouting.knowledge.push([pid, 8])
+    }
+    // The summer programmes become real development focus.
+    const plan = this.devCampFocusPlan(assess)
+    for (const [pid, f] of plan) {
+      this.practiceState = setPlayerFocus(this.practiceState, pid, f)
+      const p = this.data.players.get(asPlayerId(pid))
+      if (p) notes.push(`${p.name} leaves with a summer programme: ${FOCUS_WORDS[f] ?? f}.`)
+    }
+    return notes
   }
 
   /** The live training camp (M3): cut day. The coach's verdicts, your calls. */

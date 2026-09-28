@@ -14,6 +14,7 @@ import {
   saveClipFor,
   distToBoards,
   hitPlan,
+  hitPushDir,
   celebrationFor,
   locomotionWeights,
   wantsHockeyStop,
@@ -159,6 +160,44 @@ describe('boards + hits', () => {
     expect(b.target).toBe('hit_stagger')
     expect(b.hardness).toBeLessThanOrEqual(0.4)
   })
+
+  it('the target goes down the way the impulse pushes him (film C3)', () => {
+    // facing +Z (angle 0): hit from the front pushes him back, from behind forward, from his right to his left
+    expect(hitPushDir(0, -1, 0)).toBe('back')
+    expect(hitPushDir(0, 1, 0)).toBe('forward')
+    expect(hitPushDir(1, 0, 0)).toBe('left') // his left is +X at angle 0
+    expect(hitPushDir(-1, 0, 0)).toBe('right')
+    expect(hitPushDir(1, 0, Math.PI / 2)).toBe('forward') // facing +X
+    expect(hitPlan(28, 30, undefined, undefined, 'back').target).toBe('hit_fall')
+    expect(hitPlan(28, 30, undefined, undefined, 'forward').target).toBe('hit_fall_fwd')
+    expect(hitPlan(28, 30, undefined, undefined, 'left').target).toBe('hit_fall_side_L')
+    expect(hitPlan(28, 30, undefined, undefined, 'right').target).toBe('hit_fall_side_R')
+    expect(hitPlan(16, 30, undefined, undefined, 'forward').target).toBe('hit_stumble_fwd')
+  })
+
+  it("the engine's knockdown decides the fall (agent engine)", () => {
+    expect(hitPlan(2, 30, 0.2, 'openIce', 'back', true).target).toBe('hit_fall')
+    expect(hitPlan(30, 30, 1, 'openIce', 'back', false).target).toBe('hit_stumble')
+    // knocked down on the wall: he folds into the boards
+    const w = hitPlan(20, 30, 0.8, 'boards', 'back', true)
+    expect(w.target).toBe('hit_fall_fwd')
+    expect(w.pinned).toBe(true)
+    // a battle with a knockdown still goes down
+    expect(hitPlan(10, 30, 0.5, 'battle', 'left', true).target).toBe('hit_fall_side_L')
+    for (const t of ['hit_fall_fwd', 'hit_fall_side_L', 'hit_fall_side_R', 'hit_stumble_fwd', 'getup_knees']) expect(SKATER_CLIPS).toContain(t)
+  })
+
+  it('reads the knockdown as a hit flag or a separate event (tolerant)', () => {
+    const P = asPlayerId
+    const cues = extractActionCues([
+      { type: 'hit', period: 1, t: 5, by: P('a'), on: P('b'), pos: { x: 0, y: 0 }, force: 0.4, knockdown: true } as unknown as GameStream[number],
+      { type: 'hit', period: 1, t: 9, by: P('c'), on: P('d'), pos: { x: 0, y: 0 }, force: 0.9 },
+      { type: 'knockdown', period: 1, t: 9.3, player: 'd' } as unknown as GameStream[number],
+      { type: 'knockdown', period: 1, t: 30, player: 'e', pos: { x: 0.1, y: 0 } } as unknown as GameStream[number],
+    ]).filter((c) => c.kind === 'hit')
+    expect(cues.map((c) => [c.targetId, c.knockdown])).toEqual([['b', true], ['d', true], ['e', true]])
+    expect(planCues(cues)[2]!.clip).toBeNull() // no hitter to animate
+  })
 })
 
 describe('celebrations', () => {
@@ -236,5 +275,37 @@ describe('cue planning (choreographer)', () => {
     expect(hits[1]!.lead).toBeCloseTo(CLIPS.check!.contact!)
     const fo = plans.find((p) => p.cue.kind === 'faceoff')!
     expect(fo.lead).toBeGreaterThan(0.5)
+  })
+
+  it('paces the faceoff set from the engine (setAt / faceoffSet) and reads tie-ups (tolerant)', () => {
+    const f = extractActionCues([
+      { type: 'faceoff', period: 1, t: 100, zone: 'neutral', winner: P('c1'), pos: { x: 0, y: 0 }, setAt: 97.5, tieUp: true } as unknown as GameStream[number],
+      { type: 'faceoffSet', period: 1, t: 198, pos: { x: 0.5, y: 0.3 } } as unknown as GameStream[number],
+      { type: 'faceoff', period: 1, t: 200, zone: 'offensive', winner: P('c2'), pos: { x: 0.5, y: 0.3 } },
+      { type: 'faceoff', period: 1, t: 300, zone: 'neutral', winner: P('c3'), pos: { x: 0, y: 0 } },
+    ]).filter((c) => c.kind === 'faceoff')
+    expect(f.map((c) => c.setT)).toEqual([97.5, 198, undefined])
+    expect(f[0]!.tieUp).toBe(true)
+    const plan = planCues(f)
+    expect(plan[0]!.lead).toBeCloseTo(2.5)
+    expect(plan[1]!.lead).toBeCloseTo(2)
+    expect(plan[2]!.lead).toBeCloseTo(1.5) // no set time: the crouch starts ~1.5 s before the drop
+  })
+
+  it('pokes on the agent pokeCheck and on takeaways (one poke when both describe it)', () => {
+    const pokes = extractActionCues([
+      // agent engine: the poke, then the takeaway it produced
+      { type: 'pokeCheck', period: 1, t: 20, by: 'd1', on: 'f5', success: true, pos: { x: 0.2, y: 0.1 } } as unknown as GameStream[number],
+      { type: 'takeaway', period: 1, t: 20.1, by: P('d1'), from: P('f5'), pos: { x: 0.2, y: 0.1 } },
+      // a missed poke (no takeaway)
+      { type: 'pokeCheck', period: 1, t: 25, by: 'd2', on: 'f6', success: false, pos: { x: 0.1, y: 0 } } as unknown as GameStream[number],
+      // classic engine: a takeaway alone
+      { type: 'takeaway', period: 1, t: 40, by: P('d3'), from: P('f7'), pos: { x: -0.3, y: 0.2 } },
+    ]).filter((c) => c.kind === 'poke')
+    expect(pokes.map((c) => c.actorId)).toEqual(['d1', 'd2', 'd3'])
+    expect(pokes[1]!.success).toBe(false)
+    const plan = planCues(pokes)
+    expect(plan.every((p) => p.clip === 'poke')).toBe(true)
+    expect(plan[0]!.lead).toBeCloseTo(CLIPS.poke!.contact!)
   })
 })

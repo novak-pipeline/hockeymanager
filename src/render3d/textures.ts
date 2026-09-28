@@ -326,3 +326,21 @@ export function paintJumbotron(
   const per = s.period <= 3 ? `P${s.period}` : s.period === 4 ? 'OT' : `${s.period - 3}OT`
   ctx.fillText(`${per}  ${s.clock}`, W / 2, H * 0.9)
 }
+
+/** An official's sweater in a procedural / Blender atlas slot: white with vertical black stripes, black socks. */
+export function paintOfficialSlot(atlas: HTMLCanvasElement, slot: number, kit: Kit): void {
+  paintJerseySlot(atlas, slot, kit, 0, false)
+  const ctx = atlas.getContext('2d')!
+  const S = atlas.width / ATLAS_GRID
+  const [cu, cv] = atlasOffset(slot)
+  const x0 = cu * atlas.width
+  // atlas V runs bottom-up (UV space); canvas y top-down
+  const band = (v0: number, v1: number) => [atlas.height - (cv + v1 / ATLAS_GRID) * atlas.height, (v1 - v0) * S] as const
+  ctx.fillStyle = '#121212'
+  for (const r of [ATLAS_REGIONS.torso, ATLAS_REGIONS.sleeve] as const) {
+    const [y, h] = band(r[0], r[1])
+    for (let k = 1; k < 16; k += 2) ctx.fillRect(x0 + (k / 16) * S, y, S / 16, h)
+  }
+  const [ys, hs] = band(ATLAS_REGIONS.sock[0], ATLAS_REGIONS.sock[1])
+  ctx.fillRect(x0, ys, S, hs)
+}

@@ -77,11 +77,22 @@ export function legDrop(leg: LegPose, thigh: number = RIG.thigh, shin: number = 
   return sag * Math.cos(leg.abduct)
 }
 
-/** Stride cadence (Hz) for a normalized speed 0..1. Zero when standing still. */
+/** Ground covered per full L+R stride cycle at cruising speed (ft). */
+export const STRIDE_CYCLE_FT = 9.5
+/** Full-speed normalisation of speed01 (ft/s) — rink3dRenderer's pose.speed. */
+export const SPEED01_FT = 22
+
+/**
+ * Stride cadence (full L+R cycles per second, game time) for a normalized
+ * speed 0..1: the legs cycle with the GROUND the body covers (speed / cycle
+ * length), so a slow skater takes slow strides instead of pedalling. Film
+ * study S1: ~3.3 pushes/s (1.6-1.8 cycles/s) cruising at ~16 ft/s; a sprint
+ * tops out near 4 pushes/s. Zero when standing still.
+ */
 export function strideRateHz(speed01: number): number {
   const s = clamp(speed01, 0, 1)
   if (s < 0.05) return 0
-  return 0.9 + 1.1 * s
+  return clamp((s * SPEED01_FT) / STRIDE_CYCLE_FT, 0.35, 2.0)
 }
 
 /**

@@ -127,7 +127,7 @@ import type { TeamDynamicsView } from '@engine/career/views'
 export type { FeedView, FeedAuthor } from '@engine/career/views'
 import type { FeedView } from '@engine/career/views'
 export type { DevCampView, DevCampInvitesView, CampInvitesView, TrainingCampView, TrainingCampState, OffseasonNeedsView } from '@engine/career/views'
-import type { DevCampView, DevCampInvitesView, CampInvitesView, TrainingCampView, OffseasonNeedsView } from '@engine/career/views'
+import type { DevCampView, DevCampInvitesView, CampInvitesView, TrainingCampView, OffseasonNeedsView, DevCampChoice } from '@engine/career/views'
 export type { NegotiationView, NegotiationRoundView, ContractOffer, ClauseLevel } from '@engine/career/views'
 import type { NegotiationView, ContractOffer } from '@engine/career/views'
 // Renderer screens already import these from the protocol barrel, but they were
@@ -310,6 +310,13 @@ export type WorkerRequestBody =
   | { type: 'toggleCampInvite'; playerId: string }
   | { type: 'submitDevCamp'; standoutId?: string }
   | { type: 'skipDevCamp' }
+  /** Dev camp 2.0 (additive): make (or, with null, undo) a call on one
+   *  prospect — sign his ELC, send him back, assign him to the AHL, sign or
+   *  release a tryout. Returns the camp. */
+  | { type: 'setDevCampChoice'; playerId: string; choice: DevCampChoice | null }
+  /** Dev camp 2.0 (additive): set or clear one prospect's summer development
+   *  programme (max three). Returns the camp. */
+  | { type: 'setDevCampFocus'; playerId: string; focus: string | null }
   | { type: 'getTrainingCamp' }
   | { type: 'submitTrainingCamp'; placements: Array<{ playerId: string; place: 'nhl' | 'ahl' }> }
   /** Camp Battles (additive): give up to two battle contenders the look (top
