@@ -874,7 +874,7 @@ export function OffseasonScreen(): JSX.Element {
           {/* Offseason 3.0: the summer opens on what next season's roster is
               MISSING, each hole with real answers — not on a list of names. */}
           {(data.stage === 'resign' || data.stage === 'freeAgency') && (
-            <NeedsBoard compact onBrowse={() => nav.navigate('faMarket')} browseLabel="Browse all free agents" />
+            <NeedsBoard context="all" compact onBrowse={() => nav.navigate('faMarket')} browseLabel="Browse all free agents" />
           )}
 
           {data.stage === 'resign' && data.offerSheets && data.offerSheets.length > 0 && (

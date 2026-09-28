@@ -147,6 +147,7 @@ import { buildProspectGrade, type NeedLevel } from '@engine/career/prospectGrade
 import { buildScoutDraftRead, scoutBoardNote, scoutSignalParts } from '@engine/career/scoutDraftRead'
 import { farmSplit } from '@engine/career/farmReassign'
 import { detectBattles, rankBattle, battleRead, type CampCandidate, type CampGroup } from '@engine/career/campBattles'
+import { seasonSpans, devCampDateISO, resignDateISO, faDateISO, campDateISO, boardMeetingDateISO, inHolidayFreeze, FREE_AGENCY, ARBITRATION, TRAINING_CAMP } from '@engine/career/seasonSpans'
 import { buildNeeds, leagueBenchmark, type DepthEntry, type NeedsCandidate, type NeedGroup } from '@engine/career/offseasonNeeds'
 import { buildOppositionReport } from '@engine/career/oppositionReport'
 import { buildDraftClassArticle } from '@engine/career/draftClassArticle'
@@ -835,6 +836,7 @@ import {
   type CampReport,
   type OffseasonNeedsView,
   type CampGameLine,
+  type CalendarSpan,
   type MedicalView,
   type MedicalRow,
   type LeagueStatTableView,
@@ -1116,11 +1118,11 @@ const PICK_YEARS_AHEAD = 3
 /** #157: minimum games-remaining on an injury to qualify for Long-Term IR
  *  (the NHL rule is 10 games / 24 days; we key off the games estimate). */
 const LTIR_MIN_GAMES = 10
-const FA_WINDOW_DAYS = 8
+const FA_WINDOW_DAYS = FREE_AGENCY.days
 /** Offseason 3.0: the market day arbitration hearings are held (July 6).
  *  Real hearings run late July; the summer's compressed calendar keeps the
  *  hearing inside the July window so the award is a decision, not a surprise. */
-const ARB_HEARING_DAY = 6
+const ARB_HEARING_DAY = ARBITRATION.hearingDay
 /** Inclusive integer range [a..b] — used for jersey-number preference pools. */
 function range(a: number, b: number): number[] {
   const out: number[] = []
@@ -5867,14 +5869,14 @@ export class Career {
     if (this.phase === 'playoffs') return 'playoffs'
     if (this.trainingCamp && !this.trainingCamp.resolved) return 'camp'
     const iso = dayToDateISO(this.year, Math.max(1, day))
-    const [, mm, dd] = iso.split('-').map((x) => parseInt(x, 10)) as [number, number, number]
-    if (mm === 12 && dd >= 19 && dd <= 27) return 'holiday'
+    if (inHolidayFreeze(iso)) return 'holiday'
     if (this.isThanksgivingWeek(iso)) return 'thanksgiving'
     if (this.deadlineDay > 0 && day >= this.deadlineDay - 10 && day <= this.deadlineDay) return 'deadline'
     const gp = this.standings.get(this.userTeamId)?.gamesPlayed ?? 0
     const total = this.userGamesScheduled()
     if (total - gp <= 15) return 'push'
     if (gp >= total / 2 - 3 && gp <= total / 2 + 3) return 'midseason'
+    const mm = parseInt(iso.slice(5, 7), 10)
     if (mm === 10 || mm === 11) return 'early'
     return 'winter'
   }
@@ -9754,6 +9756,45 @@ export class Career {
     if (senior) this.applyIntlBreak(senior)
   }
 
+  /** The upcoming season's schedule, built once and cached. The summer's
+   *  calendar and schedule screens read it, and the rollover installs it, so
+   *  what the GM sees in July is exactly what opens in October. (Before this,
+   *  every summer view read the finished — or on a takeover, never-played —
+   *  season's schedule, dated a year behind the summer clock: the calendar
+   *  a GM landed on after Continue was empty.) */
+  private nextSeasonSchedule: { key: string; games: ScheduledGame[] } | null = null
+  private upcomingSchedule(newYear = this.year + 1): ScheduledGame[] {
+    const key = `${newYear}|${this.data.league.teams.join(',')}`
+    if (this.nextSeasonSchedule?.key === key) return this.nextSeasonSchedule.games
+    // The weighted NHL format when the league has a conference/division
+    // structure (else flat round-robins).
+    const schedTeams = this.data.league.teams
+      .map((id) => this.data.teams.get(id))
+      .filter((t): t is NonNullable<typeof t> => t !== undefined)
+      .map((t) => ({ id: t.id, conferenceId: t.conferenceId, divisionId: t.divisionId }))
+    const structured = new Set(schedTeams.map((t) => t.divisionId)).size >= 2 && schedTeams.length >= 24
+    const games = structured
+      ? buildWeightedSchedule(schedTeams, newYear)
+      : buildSchedule([...this.data.league.teams], ROUND_ROBINS, newYear)
+    // Olympic / Nations Cup winter: the NHL calendar opens a break.
+    if (this.data.league.competitions?.length) {
+      const senior = seniorEventFor(newYear)
+      if (senior && senior !== 'worldJuniors') {
+        const gap = SENIOR_BREAK_DAYS[senior]
+        for (const g of games) if (g.day >= SENIOR_EVENT_DAY) g.day += gap
+      }
+    }
+    this.nextSeasonSchedule = { key, games }
+    return games
+  }
+
+  /** The schedule and season year every schedule-reading VIEW should use:
+   *  in the offseason, the season that is coming; otherwise the live one. */
+  private viewSchedule(): { schedule: ScheduledGame[]; year: number } {
+    if (this.phase === 'offseason') return { schedule: this.upcomingSchedule(), year: this.year + 1 }
+    return { schedule: this.data.league.schedule, year: this.year }
+  }
+
   /** Shift the NHL calendar to open the Olympic / Nations Cup break. Game ids
    *  (and so every game seed) are untouched — only the dates move. */
   private applyIntlBreak(kind: IntlEventKind): void {
@@ -13603,23 +13644,13 @@ export class Career {
     // The economy moves with the ceiling: every ask, the fair-salary curve, the
     // minimum and the entry-level deal are re-indexed to the new cap.
     this.installEconomy()
-    // Rebuild next season's schedule, preserving the weighted NHL format when the
-    // league has a conference/division structure (else flat round-robins).
-    const schedTeams = this.data.league.teams
-      .map((id) => this.data.teams.get(id))
-      .filter((t): t is NonNullable<typeof t> => t !== undefined)
-      .map((t) => ({ id: t.id, conferenceId: t.conferenceId, divisionId: t.divisionId }))
-    const structured = new Set(schedTeams.map((t) => t.divisionId)).size >= 2 && schedTeams.length >= 24
-    this.data.league.schedule = structured
-      ? buildWeightedSchedule(schedTeams, newYear)
-      : buildSchedule([...this.data.league.teams], ROUND_ROBINS, newYear)
+    // Install next season's schedule — the SAME one the summer calendar and
+    // schedule screens have been showing since the season ended (one source:
+    // upcomingSchedule), Olympic/Nations Cup break included.
+    this.data.league.schedule = structuredClone(this.upcomingSchedule(newYear))
+    this.nextSeasonSchedule = null
     this.data.league.season.standings = this.data.league.teams.map(freshStanding)
     this.refreshMatchDays()
-    // Olympic / Nations Cup winter: the NHL calendar opens a break.
-    if (this.data.league.competitions?.length) {
-      const senior = seniorEventFor(newYear)
-      if (senior) this.applyIntlBreak(senior)
-    }
 
     this.standings.clear()
     for (const teamId of this.data.league.teams) this.standings.set(teamId, freshStanding(teamId))
@@ -15357,13 +15388,13 @@ export class Career {
 
   /** The two preseason opponents: division rivals first (the real exhibition
    *  circuit), deterministic per season. */
-  private campOpponents(): Team[] {
+  private campOpponents(year = this.year): Team[] {
     const me = this.userTeam
     const nhl = this.data.league.teams
       .filter((tid) => tid !== this.userTeamId)
       .map((tid) => this.data.teams.get(tid))
       .filter((t): t is Team => !!t && t.roster.length >= 18)
-    const rng = this.rngFor(9610, this.year)
+    const rng = this.rngFor(9610, year)
     const div = nhl.filter((t) => t.divisionId === me.divisionId)
     const others = nhl.filter((t) => t.divisionId !== me.divisionId)
     const first = div.length > 0 ? div : others
@@ -15380,8 +15411,8 @@ export class Career {
   private buildBattleCampWeek(): void {
     const camp = this.trainingCamp
     if (!camp) return
-    camp.startISO = `${this.year}-09-15`
-    camp.endISO = `${this.year}-09-22`
+    camp.startISO = campDateISO(this.year, 1)
+    camp.endISO = campDateISO(this.year, TRAINING_CAMP.days)
     camp.campDay = 1
     const { blue, red } = this.campSquads()
     const ptoSet = new Set(camp.decisions.filter((d) => d.tryout).map((d) => d.playerId))
@@ -21813,17 +21844,13 @@ export class Career {
         // Development camp runs its three beats on three real days (Jun 22–24)
         // before the re-signing window opens — it used to stamp all three on
         // the same date (PHASE 0 calendar pack).
-        if (this.devCampPending) {
-          const campDay = Math.min(3, Math.max(1, this.devCampState?.day ?? 1))
-          return `${summerYear}-06-${String(21 + campDay).padStart(2, '0')}`
-        }
-        const d = 27 + Math.min(RESIGN_WINDOW_DAYS, os.resignDay ?? 0)
-        return d > 30 ? `${summerYear}-07-01` : `${summerYear}-06-${String(d).padStart(2, '0')}`
+        if (this.devCampPending) return devCampDateISO(summerYear, this.devCampState?.day ?? 1)
+        return resignDateISO(summerYear, Math.min(RESIGN_WINDOW_DAYS, os.resignDay ?? 0))
       }
       // Market day 0 is the morning of July 1 (your first look, offers
       // tabled); market day 1 is the same July 1 from noon — the frenzy.
-      case 'freeAgency': return `${summerYear}-07-${String(Math.min(31, Math.max(1, os.faDay))).padStart(2, '0')}`
-      case 'preseason': return `${summerYear}-09-15`
+      case 'freeAgency': return faDateISO(summerYear, os.faDay)
+      case 'preseason': return campDateISO(summerYear, 1)
     }
   }
 
@@ -21837,10 +21864,9 @@ export class Career {
     if (this.phase !== 'regularSeason' || this.currentDay > 0) return null
     const camp = this.trainingCamp
     if (camp && !camp.resolved) {
-      const day = Math.min(8, Math.max(1, camp.campDay ?? 1))
-      return `${this.year}-09-${String(14 + day).padStart(2, '0')}`
+      return campDateISO(this.year, camp.campDay ?? 1)
     }
-    if (this.boardMeetingYear !== null) return `${this.year}-09-23`
+    if (this.boardMeetingYear !== null) return boardMeetingDateISO(this.year)
     return null
   }
 
@@ -26753,7 +26779,7 @@ export class Career {
   }
 
   getSchedule(): ScheduleView {
-    return buildScheduleView(this.ctx())
+    return buildScheduleView({ ...this.ctx(), ...this.viewSchedule() })
   }
 
   /* ── Team-browser getters (task #31: EHM-style team-nav arrows) ── */
@@ -26817,12 +26843,20 @@ export class Career {
     const lastMatchDay = this.matchDays[this.matchDays.length - 1] ?? 0
     // Playoffs begin the day after the regular season ends (same convention as
     // the career phase machine, which flips to 'playoffs' after the last match day).
-    const playoffsStartDay = this.phase !== 'regularSeason' || lastMatchDay > 0
-      ? lastMatchDay + 1
-      : null
+    const playoffsStartDay = this.phase === 'offseason'
+      ? null
+      : this.phase !== 'regularSeason' || lastMatchDay > 0
+        ? lastMatchDay + 1
+        : null
+    const vs = this.viewSchedule()
+    // In the summer the deadline and playoff marks belong to the coming season.
+    const upcoming = this.phase === 'offseason'
+    const upDays = upcoming ? vs.schedule.map((g) => g.day) : []
+    const upLast = upDays.length > 0 ? Math.max(...upDays) : 0
     const ctx: CalendarCtx = {
       ...this.ctx(),
-      deadlineDay: this.deadlineDay,
+      ...vs,
+      deadlineDay: upcoming ? Math.floor(upLast * 0.75) : this.deadlineDay,
       playoffsStartDay,
       interviewDates: this.pendingInterviews.map((i) => ({
         dateISO: dayToDateISO(i.year, i.dueDay),
@@ -26837,17 +26871,14 @@ export class Career {
             extraKeyDates: (() => {
               const y = this.year + 1
               return [
-                { dateISO: `${y}-07-01`, label: 'Free Agency Opens' },
-                // Dev camp runs Jun 22–24 on the summer clock (takeover and
-                // normal path alike) — the marker sits on its first day so the
-                // calendar never re-announces a camp the GM already ran
-                // (playtest #3).
-                { dateISO: `${y}-06-22`, label: 'Development Camp' },
-                { dateISO: `${y}-09-15`, label: 'Training Camp Opens' },
-                // Camp week is Sep 15–22 (day 8 = final cuts); the boardroom
-                // follows the morning after camp breaks (playtest #5).
-                { dateISO: `${y}-09-22`, label: 'Cut Day' },
-                { dateISO: `${y}-09-23`, label: 'Preseason Board Meeting' },
+                // The windows themselves (dev camp, the July market, camp)
+                // are spans; these mark the days that decide something.
+                { dateISO: faDateISO(y, 1), label: 'Free Agency Opens' },
+                { dateISO: resignDateISO(y, RESIGN_WINDOW_DAYS - 1), label: 'QO deadline' },
+                { dateISO: faDateISO(y, ARB_HEARING_DAY), label: 'Arbitration hearings' },
+                { dateISO: campDateISO(y, 1), label: 'Training Camp Opens' },
+                { dateISO: campDateISO(y, TRAINING_CAMP.days), label: 'Cut Day' },
+                { dateISO: boardMeetingDateISO(y), label: 'Preseason Board Meeting' },
               ]
             })(),
           }
@@ -26860,11 +26891,14 @@ export class Career {
               // Pre-opening beats still ahead of (or under) the GM get their marks.
               if (this.currentDay === 0) {
                 if (this.trainingCamp) {
-                  out.push({ dateISO: `${this.year}-09-15`, label: 'Training Camp Opens' })
-                  out.push({ dateISO: `${this.year}-09-22`, label: 'Cut Day' })
+                  out.push({ dateISO: campDateISO(this.year, 1), label: 'Training Camp Opens' })
+                  out.push({ dateISO: campDateISO(this.year, TRAINING_CAMP.days), label: 'Cut Day' })
+                  for (const g of this.trainingCamp.games ?? []) {
+                    if (g.kind === 'preseason') out.push({ dateISO: campDateISO(this.year, g.day), label: `${g.label}: ${g.result}` })
+                  }
                 }
                 if (this.boardMeetingYear !== null) {
-                  out.push({ dateISO: `${this.year}-09-23`, label: 'Preseason Board Meeting' })
+                  out.push({ dateISO: boardMeetingDateISO(this.year), label: 'Preseason Board Meeting' })
                 }
               }
               // Staff meetings are event-triggered now (PHASE 0) — there is no
@@ -26873,7 +26907,34 @@ export class Career {
             })(),
           }),
     }
-    return buildCalendarView(ctx)
+    return buildCalendarView({ ...ctx, spans: this.calendarSpans() })
+  }
+
+  /** The multi-day windows the calendar paints: the season in view (the
+   *  coming one in the summer) and, in season, the summer after it. */
+  private calendarSpans(): CalendarSpan[] {
+    const hasWorld = (this.data.league.competitions?.length ?? 0) > 0
+    const forYear = (y: number, days: number[]): CalendarSpan[] => {
+      const senior = seniorEventFor(y)
+      return seasonSpans({
+        seasonYear: y,
+        matchDays: days,
+        hasWorld,
+        wjcDay: WJC_DAY,
+        seniorEvent: senior && senior !== 'worldJuniors'
+          ? { label: senior === 'olympics' ? 'Olympic' : 'Nations Cup', startDay: SENIOR_EVENT_DAY, days: SENIOR_BREAK_DAYS[senior] }
+          : null,
+        preseasonOpponents: this.campOpponents(y).map((t) => t.abbreviation),
+      })
+    }
+    if (this.phase === 'offseason') {
+      const up = this.upcomingSchedule()
+      return forYear(this.year + 1, [...new Set(up.map((g) => g.day))])
+    }
+    // In season: this season's windows, plus next summer's (no schedule yet,
+    // so no trade freeze for it).
+    const next = forYear(this.year + 1, []).filter((sp) => !sp.id.startsWith('holiday-') && !sp.id.startsWith('wjc-') && !sp.id.startsWith('senior-'))
+    return [...forYear(this.year, this.matchDays), ...next]
   }
 
   getStandings(): StandingsView {

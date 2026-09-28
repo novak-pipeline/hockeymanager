@@ -71,6 +71,14 @@ export class Arena {
   readonly goalLamps: THREE.MeshStandardMaterial[] = []
   private readonly crowdUniforms = { uTime: { value: 0 }, uExcite: { value: 0 } }
   private ribbonTex: THREE.CanvasTexture | null = null
+  private iceMap: THREE.Texture | null = null
+
+  /** Repaint the ice with the home club's logo at centre ice (null = the league roundel). */
+  setCenterLogo(img: (CanvasImageSource & { width: number; height: number }) | null): void {
+    if (!this.iceMap) return
+    this.iceMap.image = buildIceCanvas({ centerLogo: img })
+    this.iceMap.needsUpdate = true
+  }
   private jumboCanvas: HTMLCanvasElement | null = null
   private jumboTex: THREE.CanvasTexture | null = null
   private jumboKey = ''
@@ -172,6 +180,7 @@ export class Arena {
     }
     const aniso = this.renderer.capabilities.getMaxAnisotropy()
     const map = srgb(new THREE.CanvasTexture(buildIceCanvas()))
+    this.iceMap = map
     map.anisotropy = aniso
     const rough = new THREE.CanvasTexture(buildIceRoughnessCanvas())
     rough.anisotropy = aniso

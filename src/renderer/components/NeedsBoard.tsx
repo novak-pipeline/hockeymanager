@@ -10,7 +10,8 @@
  * are still one click away ("Browse all").
  */
 import { useState } from 'react'
-import type { NeedCandidateView, OffseasonNeedView, OffseasonNeedsView } from '../../engine/career/views'
+import type { NeedCandidateView, OffseasonNeedsView } from '../../engine/career/views'
+import { needsFor, type NeedInContext, type NeedsContext } from '../../engine/career/offseasonNeeds'
 import { PlayerLink, useNav } from './NavContext'
 import { PlayerFace } from './PlayerFace'
 import { OverallStars } from './Stars'
@@ -39,9 +40,11 @@ const KIND: Record<NeedCandidateView['kind'], { label: string; cls: string }> = 
   move: { label: 'Your contract', cls: 'chip-warn' },
 }
 
-/** The needs board. `focus` narrows it to one kind of answer (the trade desk
- *  shows trade answers first); `onBrowse` is the "Browse all" escape hatch. */
-export function NeedsBoard(props: { focus?: 'fa' | 'trade'; onBrowse?: () => void; browseLabel?: string; compact?: boolean }): JSX.Element | null {
+/** The needs board, context-aware: the Free Agents desk shows free-agent
+ *  answers (and your own re-sign candidates), the Trade Centre trade answers
+ *  (and, for a cap need, the contracts that clear it), the offseason overview
+ *  both, grouped. `onBrowse` is the "Browse all" escape hatch. */
+export function NeedsBoard(props: { context: NeedsContext; onBrowse?: () => void; browseLabel?: string; compact?: boolean }): JSX.Element | null {
   const client = useClient()
   const { data, refetch } = useScreenData<OffseasonNeedsView>(
     () => client.getOffseasonNeeds(),
@@ -64,8 +67,8 @@ export function NeedsBoard(props: { focus?: 'fa' | 'trade'; onBrowse?: () => voi
       </div>
       {data.needs.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: 'var(--sp-3)' }}>
-          {data.needs.map((n) => (
-            <NeedCard key={n.id} need={n} marketOpen={data.marketOpen} focus={props.focus} compact={props.compact === true} onChanged={refetch} />
+          {needsFor(data.needs, props.context).map((n) => (
+            <NeedCard key={n.id} need={n} marketOpen={data.marketOpen} grouped={props.context === 'all'} compact={props.compact === true} onChanged={refetch} />
           ))}
         </div>
       )}
@@ -78,13 +81,11 @@ export function NeedsBoard(props: { focus?: 'fa' | 'trade'; onBrowse?: () => voi
   )
 }
 
-function NeedCard(props: { need: OffseasonNeedView; marketOpen: boolean; focus?: 'fa' | 'trade' | undefined; compact: boolean; onChanged: () => void }): JSX.Element {
+function NeedCard(props: { need: NeedInContext; marketOpen: boolean; grouped: boolean; compact: boolean; onChanged: () => void }): JSX.Element {
   const { need } = props
+  const nav = useNav()
   const sev = SEVERITY[need.severity]
-  const cands = props.focus
-    ? [...need.candidates].sort((a, b) => (a.kind === props.focus ? 0 : 1) - (b.kind === props.focus ? 0 : 1))
-    : need.candidates
-  const shown = props.compact ? cands.slice(0, 3) : cands
+  const cap = props.compact ? 3 : 5
   return (
     <div style={{ background: 'var(--bg2)', border: '1px solid var(--line)', borderLeft: `3px solid ${sev.color}`, borderRadius: 'var(--radius-sm)', padding: '10px 12px', minWidth: 0 }}>
       <div className="row-between" style={{ alignItems: 'center', gap: 8, marginBottom: 2 }}>
@@ -95,13 +96,26 @@ function NeedCard(props: { need: OffseasonNeedView; marketOpen: boolean; focus?:
         <span className="chip" style={{ fontSize: 10, color: sev.color, borderColor: sev.color }}>{sev.label}</span>
       </div>
       <div className="small muted" style={{ lineHeight: 1.45, marginBottom: 8 }}>{need.why}</div>
-      {shown.length === 0 ? (
-        <div className="small muted" style={{ fontStyle: 'italic' }}>No real answer on the market today — nobody out there is better than who you have. Watch the wire.</div>
-      ) : (
-        <div className="stack" style={{ gap: 8 }}>
-          {shown.map((c) => <CandidateRow key={c.playerId} c={c} marketOpen={props.marketOpen} onChanged={props.onChanged} />)}
-        </div>
-      )}
+      <div className="stack" style={{ gap: 10 }}>
+        {need.groups.filter((g) => g.candidates.length > 0).map((g) => (
+          <div key={g.kind} className="stack" style={{ gap: 8 }}>
+            {props.grouped && (
+              <div style={{ fontSize: 10, letterSpacing: 1.3, textTransform: 'uppercase', color: 'var(--muted)', fontWeight: 700 }}>{g.title}</div>
+            )}
+            {g.candidates.slice(0, cap).map((c) => <CandidateRow key={c.playerId} c={c} marketOpen={props.marketOpen} onChanged={props.onChanged} />)}
+          </div>
+        ))}
+        {need.elsewhere && (
+          <button
+            type="button"
+            className="small"
+            onClick={() => nav.navigate(need.elsewhere!.screen)}
+            style={{ background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', color: 'var(--muted)', fontStyle: 'italic', display: 'inline-flex', gap: 4, alignItems: 'center' }}
+          >
+            {need.elsewhere.text} <Icon size={14} color="var(--accent)"><Icons.ChevronRight /></Icon>
+          </button>
+        )}
+      </div>
     </div>
   )
 }

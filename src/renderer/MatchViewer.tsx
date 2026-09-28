@@ -38,6 +38,7 @@ import {
 } from './lib/commentaryAudio'
 import { fallbackBroadcastContext, ppRemaining } from './lib/broadcastContext'
 import { BroadcastOverlayLayer, Scorebug } from './components/broadcast/BroadcastOverlays'
+import { teamLogoUrl } from './components/Crest'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -556,6 +557,8 @@ export function MatchViewer(props: {
         if (r instanceof Rink3dRenderer) {
           renderer3dRef.current = r
           r.setEventStream(game.stream)
+          // the home club's logo at centre ice (mod logo pack; none = league roundel)
+          void teamLogoUrl(game.homeName).then((url) => { if (!disposed && url) void r.setTeamLogos({ home: url }) })
           r.setCamera(camPreset)
         } else {
           renderer3dRef.current = null
