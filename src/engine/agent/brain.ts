@@ -67,7 +67,7 @@ const r01 = rLevel
  * a carrier who drives into a crowded house risks the whole continuation
  * value on a low-retention carry. That is what brings shots out to range.
  */
-export const VAL = { oz: 0.09, kPos: 0.15, shoot: 0.95, keep: 0.25, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 2, laneRead: 0.75, angleZero: 90, transMaxX: 70, transBack: 0.003, rushNoBackX: 0, regroupMaxX: 20, ozBack: 0.008 }
+export const VAL = { oz: 0.09, kPos: 0.15, shoot: 0.9, keep: 0.25, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 2, laneRead: 0.75, angleZero: 90, behindNet: 0.85, transMaxX: 70, transBack: 0.003, rushNoBackX: 0, regroupMaxX: 20, ozBack: 0.008 }
 /**
  * D safety (gap discipline): how far ahead a defenceman reads an attacker
  * coming at him (s), the base gap (ft) plus gap per ft/s of the attacker's
@@ -82,7 +82,7 @@ export const DRIFT = { rAtk: 12, rDef: 5, omAtk: 1.1, omDef: 0.9 }
  * the seconds he may hold it there before he must act, the per-second cost of
  * holding, and his minimum carry speed there (share of top speed).
  */
-export const INCLOSE = { radius: 30, deadline: 1.0, holdCost: 0.02, minSpeed: 0.8, protectSpeed: 0.55 }
+export const INCLOSE = { radius: 30, deadline: 1.0, holdCost: 0.02, minSpeed: 0.8, protectSpeed: 0.72 }
 /** Defending the house: the on-puck man engages (no containing) inside this radius of our net (ft). */
 export const DZ = { engageFt: 30 }
 /** Seconds after a zone entry that play is still a "rush". */
@@ -106,7 +106,10 @@ export function posValue(x: number, y: number, a: number): number {
   // than shooting from it once the spot is dangerous enough, which is what
   // makes carriers shoot from range instead of skating everyone to the crease.
   if (adv >= BLUE_X) {
-    if (adv > GOAL_X) return VAL.oz
+    // Behind the goal line nothing can be made (no shot, the net in the way):
+    // it is worth less than the same puck in front — you pass through, you
+    // don't set up shop there.
+    if (adv > GOAL_X - 1) return VAL.oz * VAL.behindNet
     return VAL.oz + VAL.kPos * xgAt(x, y, a)
   }
   // Outside their zone: the value of territory rises toward their blue line
@@ -428,8 +431,9 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
             speed: protect ? c.caps.top * INCLOSE.protectSpeed : c.caps.top * clamp(0.55 + urg * 0.4, inClose ? INCLOSE.minSpeed : 0.55, 0.95),
             // Holding up at the line for a mate to tag up: stop short of it.
             arrive: offsideMate && qx * a >= capX - 1,
-            urgency: clamp(urg, 0.3, 1),
-            ...(protect ? { faceX: c.x - Math.cos(ang) * 10, faceY: c.y - Math.sin(ang) * 10 } : {})
+            urgency: inClose ? 1 : clamp(urg, 0.3, 1),
+            // (Protecting = skating away from the pressure with the body between:
+            // he faces where he is going, never backpedals with the puck.)
           }
         }
       })
@@ -884,6 +888,8 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
         // walk in or circle the net for seconds.
         const inHouse = Math.hypot(ownNetX - cx, cy) < DZ.engageFt
         const vulnerable = onWall || csp < 7 || turnedAway || inHouse
+        // A carrier standing still gets no respect: the man on him steps INTO
+        // him (body and stick) instead of waiting a stick-length away.
         const inside = vulnerable ? 3.2 : clamp(10 - pp * 4, 6, 10)
         cmds.set(presser, {
           tx: cx + ux * inside + carrier.vx * 0.25,

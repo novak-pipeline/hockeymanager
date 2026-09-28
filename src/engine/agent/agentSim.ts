@@ -105,9 +105,9 @@ export const AGENT_TUNING = {
   /** Success scale per real attempt (attempts are rarer than thinks). */
   pokeAttemptK: 6.5,
   /** Unforced fumble rate under pressure (giveaways). */
-  fumbleK: 7.5,
+  fumbleK: 9,
   /** Per-think stick-foul chance when beaten (penalties). */
-  stickFoulK: 2.5,
+  stickFoulK: 1.9,
   /** Misc stoppages per second of live play ("other": net off, high stick…). */
   miscStopPerSec: 0.0028
 }
@@ -128,6 +128,8 @@ const FACEOFF_MIN_WAIT = 1.5
 const FACEOFF_MAX_WAIT = 12
 /** Seconds a defender needs between two real stick checks. */
 const POKE_RELOAD_S = 1.4
+/** Seconds a carrier and a checker can lean on each other before one wins it. */
+const TIE_UP_S = 0.7
 /** A skater who fumbles a touch gets another try this much later. */
 const RETRY_S = 0.3
 
@@ -258,6 +260,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   let flightKindAtGain = 'faceoff'
   let gotPos: XY = { x: 0, y: 0 }
   let turnSnap = ""
+  let tieUp = null as { c: Body; o: Body; since: number } | null
   let deke = null as { c: Body; on: Body; goalie: boolean; move: DekeKind; success: boolean; until: number; dir: number } | null
   let windup = null as { c: Body; at: number } | null
   let bite = null as { side: Side; dy: number; until: number } | null
@@ -1540,7 +1543,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const pc = r01(c.player.composites.puckControl)
         const protect = (c.hx * (pk.x - c.x) + c.hy * (pk.y - c.y)) < 0 ? 0.6 : 1 // body between
         const still = stillC ? AGENT_TUNING.pokeStill : 1
-        const pSucc = clamp((0.004 + sc * sc * sc * 0.45 + (sc - pc) * 0.1) * protect * still * AGENT_TUNING.pokeK * AGENT_TUNING.pokeAttemptK, 0.001, 0.6)
+        const pSucc = clamp((0.004 + Math.pow(sc, 4) * 0.8 + (sc - pc) * 0.1) * protect * still * AGENT_TUNING.pokeK * AGENT_TUNING.pokeAttemptK, 0.001, 0.6)
         if (tm) tm.pokeAttempts++
         const won = rng.chance(pSucc)
         ev({ t: T(), period, type: 'pokeCheck', by: pk.player.id, on: c.player.id, success: won, pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y } })
@@ -1573,6 +1576,37 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
             break
           }
         }
+      }
+      // Tie-ups: a carrier and a checker leaning on each other (in contact,
+      // neither moving) don't stay that way. After a moment somebody wins it —
+      // the carrier's strength and hands spin him off the check, or the
+      // checker's body and stick take the puck.
+      if (w.carrier && w.control && !pending) {
+        const c = w.carrier
+        const os = oppOf(w.control)
+        let tier: Body | null = null
+        for (const o of os.skaters) if (o.stun <= 0 && Math.hypot(o.x - c.x, o.y - c.y) < 3.3 && speedOf(o) < 7.3) tier = o
+        if (tier && speedOf(c) < 7.3) {
+          if (!tieUp || tieUp.c !== c || tieUp.o !== tier) tieUp = { c, o: tier, since: now }
+          else if (now - tieUp.since > TIE_UP_S) {
+            const atk = r01(c.player.ratings.physical.strength) * 0.5 + r01(c.player.composites.puckControl) * 0.5
+            const dfn = r01(tier.player.composites.takeaway) * 0.55 + rDef(tier.player.ratings.defensive.checking) * 0.2 + r01(tier.player.ratings.physical.strength) * 0.25
+            tieUp = null
+            if (rng.chance(clamp(0.5 + (atk - dfn) * 1.5, 0.15, 0.85))) {
+              // He spins off it: the checker is left leaning on nothing.
+              tier.stun = Math.max(tier.stun, 0.45)
+              const ang = Math.atan2(c.y - tier.y, c.x - tier.x)
+              c.vx += Math.cos(ang) * 6
+              c.vy += Math.sin(ang) * 6
+            } else {
+              ev({ t: T(), period, type: 'battle', kind: distToBoards(c.x, c.y) < 8 ? 'boards' : 'loosePuck', pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y }, players: [c.player.id, tier.player.id], winner: tier.player.id, durationS: TIE_UP_S })
+              // (A battle won, not a stick steal: no takeaway is scored for it.)
+              const ang = Math.atan2(c.y - tier.y, c.x - tier.x) + rng.float(-1.2, 1.2)
+              loosen(Math.cos(ang) * rng.float(4, 9), Math.sin(ang) * rng.float(4, 9), null)
+              flight!.tried.set(c, now)
+            }
+          }
+        } else tieUp = null
       }
       // Fumbles under pressure (unforced).
       if (w.carrier && w.control && !pending) {

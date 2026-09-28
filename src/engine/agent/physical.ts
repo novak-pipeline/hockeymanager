@@ -34,7 +34,7 @@ export const HIT_TUNING = {
   /** Minimum closing speed for a planned hit to land as a hit. */
   plannedClosing: 4.5,
   /** Penalty scale on dangerous hits. */
-  penaltyK: 2.0,
+  penaltyK: 1.7,
   /** Hit-intent multipliers by where the target is: the hitter's offensive zone / own zone. */
   forecheckK: 5,
   ownZoneK: 0.45
