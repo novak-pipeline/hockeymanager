@@ -278,7 +278,21 @@ export interface DevCampState {
   lines: Array<[string, { g: number; a: number; sog: number; squad: 'white' | 'blue' }]>
   /** "White 4, Blue 3" once the scrimmage has been played. */
   scoreline?: string
+  /* ── Dev camp 2.0 (additive) ── */
+  /** Day 1 testing: [playerId, drill results]. */
+  drills?: Array<[string, Array<{ drill: string; rank: number; of: number }>]>
+  /** Day 2: [playerId, his lines from the sim-played scrimmages]. */
+  games?: Array<[string, CampGameLine[]]>
+  /** The scrimmage scorelines, in order. */
+  results?: string[]
+  /** The GM's calls, [playerId, choice]. Absent = the staff's recommendation. */
+  decisions?: Array<[string, DevCampChoice]>
+  /** The GM's summer programmes, [playerId, focus]. Absent = the staff's picks. */
+  focus?: Array<[string, string]>
 }
+
+/** A development-camp call on one prospect. */
+export type DevCampChoice = 'returnUnsigned' | 'signReturn' | 'signAhl' | 'signElc' | 'release'
 
 /** The July development camp — the org's kids on the rink, live. */
 export interface DevCampView {
@@ -297,8 +311,38 @@ export interface DevCampView {
     read: string
     /** Scrimmage line, present from day 2. */
     line?: { g: number; a: number; sog: number; squad: 'white' | 'blue' }
+    /* ── Dev camp 2.0 (additive) ── */
+    /** Where he is: signed to the org, an amateur whose rights you hold, a tryout. */
+    status?: 'signed' | 'amateur' | 'tryout'
+    /** His club when he is not in the organisation ("London (OHL)"). */
+    club?: string
+    overall?: number
+    /** Day 1 testing sheet. */
+    drills?: Array<{ drill: string; rank: number; of: number }>
+    /** Scrimmage totals (skater) or saves/shots (goalie). */
+    scrim?: { gp: number; g: number; a: number; pm: number; sog: number; sa?: number; ga?: number }
+    /** The week's showing: testing + scrimmage evidence, −5..+5. */
+    showing?: number
+    /** The evidence, in words ("1st of 24 in the skating test; he scored twice…"). */
+    evidence?: string
+    /** The staff's read, argued from the evidence. */
+    staffRead?: string
+    /** Where the staff think he plays next season. */
+    readiness?: 'nhl' | 'ahl' | 'junior'
+    /** The calls available for him, the staff's recommendation, and yours. */
+    options?: DevCampChoice[]
+    recommended?: DevCampChoice
+    choice?: DevCampChoice
+    blocked?: string
+    /** Summer development programme: the staff's suggestion and yours. */
+    focusSuggested?: string
+    focus?: string
   }>
   cast: Array<{ name: string; title: string; faceId?: string }>
+  /** The scrimmage scorelines (dev camp 2.0). */
+  results?: string[]
+  /** Up to three summer programmes may be set. */
+  focusSlots?: number
   /** The COACHES' pick for camp standout (wrap day) — not the GM's. Additive. */
   coachStandout?: { playerId: string; name: string; reason: string }
 }
