@@ -315,3 +315,54 @@ bursts; neutral-zone back passes 0.04 (band ≥ 0.05).
 - **In-close carrier speed.** About 70% of the slow in-close frames are receptions or pickups less than 0.75 s old: receivers standing at their spots. Skate-through chasing did not move it.
 - **Standoffs.** The remaining ones are mostly OZ half-wall holds.
 - **Team shapes** are still 14–27 ft off the templates. The spot targets match the templates; what remains is lag (NZ and rush lanes 12–20 ft behind). A puck-velocity lead and a later breakout hand-off moved them by about 1 ft.
+
+## Pass 4 (2026-09-28): receivers in stride, tips, tie-ups, shape-lag diagnosis
+
+Measured on the imported league, 40 games on each of two seed sets (7000 / 9000), pass 3 → pass 4:
+
+| metric | pass 3 | pass 4 | target |
+|---|---|---|---|
+| in-close receptions at 8+ mph | 43% | 52% | — |
+| in-close carrier speed p50 (mph) | 6.3 / 6.2 | 6.4 / 6.3 | ≥ 9 |
+| standoffs / game | 5.2 / 5.5 | 4.9 / 5.0 | → 0 |
+| shot location TVD | 0.176 / 0.198 | 0.209 / 0.203 | ≤ 0.15 |
+| tips (share of SOG) | 0 (credited to the point man) | ~3.5% | NHL ~3–5% |
+| SOG / goals per team-game | 29.0 / 3.26 | 29.1 / 2.85 | in band |
+| scorecard | 74 / 74 | 76 / 76 | |
+
+**What changed:**
+- **Receivers take passes in stride.** A receiver who is moving keeps skating his line when the pass was led to him. Before, he pulled up on the intercept point and waited.
+- **Tips are the tipper's shots**, recorded from the tip spot, as the NHL scores them. The shooter gets the assist.
+- **Tie-ups:**
+  - Tie-ups are now settled against the nearest checker.
+  - The clock no longer restarts when a second checker steps in.
+  - A carrier who spins off goes along the wall instead of into it.
+  - A won tie-up can be scored as a takeaway.
+  - Carry headings that the boards or the line cut to under 4 ft are dropped.
+- **Pinned players stay in the frames for 1.7 s.** At 1.5 s the gate sat exactly on its own boundary.
+
+**Diagnosis: the team-shape error is lag, not wrong spots.** Per-role telemetry with the D at the point (5v5, settled) compares each player's body with his spot target:
+
+| role | spot target error | body error (x, y), ft |
+|---|---|---|
+| WEAK_LOW | ≤ 1 ft | (-35, +10) |
+| WALL | ≤ 1 ft | (-10, -22) |
+| NET_FRONT | ≤ 1 ft | (-11, +3) |
+| POINT_W | ≤ 1 ft | (-9, +13) |
+
+The spot targets are right. The situation changes faster than drifting (low-urgency) support players relocate.
+
+Tried and reverted:
+- **Hurry-to-shape** (urgency rising with distance from the spot): 1–3 ft better, but accel p50 went to 8.4–8.8 and 20+ mph bursts went over 3 per skater-game.
+- **Spot-velocity feed-forward** (lane running) and a rush urgency floor: under 1 ft.
+- **A puck-velocity lead** on the spots: under 1 ft.
+- **OZ route cuts** (a support forward cutting to the slot every 4 s): no change to reception speed, TVD 0.22.
+
+The next lever is anticipation: support players moving to the spot for the puck's *next* location (the pass target the carrier is about to pick), not its current one.
+
+**Why in-close speed didn't move:** the slow in-close carrier frames are mostly protect carries. A reversal on the spot is a hockey stop. A curl (heading ±2.0–2.3 rad instead of π) raised the median to 8.1 mph, but in-close carry time went from 43 to 117 s per team-game and goals to 4.5, so it was reverted.
+
+**Why TVD didn't move:**
+- 42% of SOG are one-timers, and they are the OZ's shot engine. Cutting the one-timer value drops SOG to 18–21 with no substitute shots.
+- Moving the one-timer spot to the dots (|y| 12–30) also cut SOG.
+- The biggest remaining gaps: too many central 15–40 ft shots and central point shots, too few 30–60° shots from 15–55 ft, and too few 8–15 ft shots.
