@@ -256,9 +256,9 @@ export function buildScoutingBriefing(a: ScoutBriefingArgs): ScoutingBriefingVie
       ? `${countWord(scouts.length)} scout${scouts.length === 1 ? '' : 's'} on the books, and not one player in front of ${scouts.length === 1 ? 'him' : 'them'}.`
       : `${countWord(scouts.length)} scout${scouts.length === 1 ? '' : 's'} carrying ${load.toLocaleString()} players between them.`
   const strain = scouts.length === 0
-    ? 'Hire someone under Recruitment Focus before the draft, or you will be picking off the same board every other club can read.'
+    ? 'Hire a scout (Staff → Job Market) and aim him under Recruitment → Scouts & Coverage before the draft, or you will be picking off the same board every other club can read.'
     : idle >= scouts.length
-      ? `Every brief you have set resolves to nobody — check Recruitment Focus, because an unassigned scout files nothing.`
+      ? `Every brief you have set resolves to nobody — check Recruitment → Scouts & Coverage, because an unassigned scout files nothing.`
       : idle > 0
         ? `${countWord(idle)} of them ${idle === 1 ? 'has' : 'have'} nothing in scope — an unassigned scout files nothing.`
         : per <= SCOUT_CAPACITY

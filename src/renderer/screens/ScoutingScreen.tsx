@@ -364,7 +364,11 @@ function HeaderStrip({ data }: { data: ScoutingView }): JSX.Element {
     <div className="row" style={{ gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
       <HeaderCard label="Scouts on Assignment" value={`${data.activeScouts}/${data.scouts.length}`} sub={`Cap ${data.maxScouts}`} />
       <HeaderCard label="World Knowledge" value={knowledgeWord(data.worldKnowledge)} sub={`${data.worldKnowledge}% average`} />
-      <HeaderCard label="Scouting Range" value="World" sub={`${data.nations.length} nations · ${data.competitions.length} leagues`} />
+      <HeaderCard
+        label="Reports Awaiting a Call"
+        value={`${data.recommendations.filter((f) => !f.shortlisted).length}`}
+        sub={`${data.recommendations.filter((f) => f.shortlisted).length} tracked · ${data.watchList.length}/${data.watchCap} pinned`}
+      />
       <HeaderCard
         label="Nations Covered"
         value={`${data.scoutedNations.length}`}
@@ -381,11 +385,11 @@ function ScoutAssignmentList({ scouts }: { scouts: ScoutCardView[] }): JSX.Eleme
   return (
     <Panel title={`Scout Assignments (${scouts.length})`}>
       <p className="muted small" style={{ marginTop: -4, marginBottom: 10 }}>
-        Each scout's current region/league focus. Re-aim them under Recruitment Focus.
+        Each scout's current brief. Re-aim them under Scouts &amp; Coverage.
       </p>
       <div className="table-wrap">
         <table className="table">
-          <thead><tr><th>Staff Member</th><th>Recruitment Focus</th><th className="num">Ability</th></tr></thead>
+          <thead><tr><th>Staff Member</th><th>Assignment</th><th className="num">Ability</th></tr></thead>
           <tbody>
             {scouts.map((s) => (
               <tr key={s.scoutId}>
@@ -428,7 +432,7 @@ function WatchListPanel({ data, onUnwatch, onNote }: {
   const [draft, setDraft] = useState('')
   const rows = data.watchList
   return (
-    <Panel title={`Watch List${rows.length ? ` (${rows.length}/${data.watchCap})` : ''}`}>
+    <Panel title={`Priority pins${rows.length ? ` (${rows.length}/${data.watchCap})` : ''}`}>
       {rows.length === 0 ? (
         <div className="muted" style={{ padding: '18px 8px', lineHeight: 1.65, maxWidth: 720 }}>
           <div style={{ marginBottom: 6 }}><Icon size={24} color="var(--muted)"><Icons.Milestone /></Icon></div>
@@ -511,15 +515,26 @@ function WatchListPanel({ data, onUnwatch, onNote }: {
   )
 }
 
-function OverviewTab({ data, onUnwatch, onNote }: {
-  data: ScoutingView
-  onUnwatch: (playerId: string) => void
-  onNote: (playerId: string, note: string) => void
-}): JSX.Element {
+/** The Desk: what the department is doing and what moved. The watch list
+ *  lives on Shortlist and the assignments on Scouts & Coverage — each question
+ *  has one home (depth audit §1). */
+function DeskTab({ data }: { data: ScoutingView }): JSX.Element {
+  const nav = useNav()
+  const waiting = data.recommendations.filter((f) => !f.shortlisted)
   return (
     <div className="stack">
       <HeaderStrip data={data} />
-      <WatchListPanel data={data} onUnwatch={onUnwatch} onNote={onNote} />
+      {waiting.length > 0 && (
+        <div className="panel" style={{ display: 'flex', alignItems: 'center', gap: 'var(--sp-3)', padding: '10px 14px' }}>
+          <Icon size={18} color="var(--violet-h)"><Icons.Scouting /></Icon>
+          <div style={{ flex: 1, fontSize: 13 }}>
+            <b>{waiting.length}</b> report{waiting.length === 1 ? '' : 's'} awaiting your call
+            {waiting.some((f) => f.fitsNeed) && <span className="muted"> · {waiting.filter((f) => f.fitsNeed).length} fill a need</span>}
+          </div>
+          <button className="btn btn-primary btn-sm" onClick={() => nav.navigate('scoutingCentre')}>Open reports →</button>
+        </div>
+      )}
+      <DepartmentBriefing b={data.briefing} rosterNeeds={data.rosterNeeds} />
       <ScoutAssignmentList scouts={data.scouts} />
     </div>
   )
@@ -557,48 +572,6 @@ function buildGlobeNations(data: ScoutingView): GlobeNation[] {
 }
 
 /* ── Scouting Centre: surfaced recommendations (fills over time) ────────────── */
-
-function FindCard({ find }: { find: ScoutFindView }): JSX.Element {
-  const color = REC_COLOR[find.grade]
-  return (
-    <div className="panel" style={{ background: 'var(--bg2)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div className="row" style={{ justifyContent: 'space-between', alignItems: 'flex-start' }}>
-        <div>
-          <div style={{ fontWeight: 700, fontSize: 14, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            {find.nationality && <FlagIcon nationality={find.nationality} size={15} />}
-            <PlayerLink playerId={find.playerId} name={find.name} />
-          </div>
-          <div className="muted small">
-            {find.age} · {find.position} · {find.teamAbbr}
-            {find.draftLabel && <> · <span style={{ color: 'var(--accent2, #e0b341)' }}>{find.draftLabel}</span></>}
-          </div>
-        </div>
-        <div style={{ textAlign: 'right' }}>
-          <div style={{ fontWeight: 800, fontSize: 22, color }}>{find.grade}</div>
-          {find.fitsNeed && (
-            <span className="chip" style={{ fontSize: 9, background: 'rgba(52,211,153,0.18)', border: '1px solid var(--success)', color: 'var(--success)' }}>
-              Fills a need
-            </span>
-          )}
-        </div>
-      </div>
-      <div style={{ display: 'flex', gap: 'var(--sp-4)' }}>
-        <div><div className="muted" style={{ fontSize: 10 }}>CURRENT</div><div><StarRating value={find.currentStars} /></div></div>
-        <div><div className="muted" style={{ fontSize: 10 }}>POTENTIAL</div><div><PotentialStars stars={find.potentialStars} /></div></div>
-      </div>
-      <div style={{ fontSize: 12.5, lineHeight: 1.5, color: 'var(--text)' }}>{find.reason}</div>
-      {find.fitNotes && find.fitNotes.length > 0 && (
-        <div className="small" style={{ display: 'flex', gap: 6, lineHeight: 1.45 }}>
-          <span style={{ color: FIT_TONE_COLOR[find.fitNotes[0]!.tone], fontSize: 9, paddingTop: 2 }}>{FIT_TONE_MARK[find.fitNotes[0]!.tone]}</span>
-          <span className="muted">{find.fitNotes[0]!.text}</span>
-        </div>
-      )}
-      <div className="muted small" style={{ borderTop: '1px solid var(--line)', paddingTop: 6, display: 'flex', justifyContent: 'space-between' }}>
-        <span>Flagged by {find.scoutName}</span><span>{find.foundDate}</span>
-      </div>
-    </div>
-  )
-}
 
 type TriageAction = 'shortlist' | 'unshortlist' | 'pass' | 'rescout'
 
@@ -781,7 +754,9 @@ function DepartmentBriefing({ b, rosterNeeds }: { b: ScoutingBriefingView; roste
                     <td>
                       {c.label}
                       <div className="muted" style={{ fontSize: 10 }}>
-                        {c.scoutNames.length ? c.scoutNames.join(', ') : 'passive knowledge only'}
+                        {c.scoutNames.length
+                          ? `${c.scoutNames.slice(0, 3).join(', ')}${c.scoutNames.length > 3 ? ` +${c.scoutNames.length - 3} more` : ''}`
+                          : 'passive knowledge only'}
                       </div>
                     </td>
                     <td className="num" style={{ whiteSpace: 'nowrap' }}>
@@ -859,123 +834,173 @@ function DepartmentBriefing({ b, rosterNeeds }: { b: ScoutingBriefingView; roste
   )
 }
 
-function ScoutingCentreTab({ finds, rosterNeeds, briefing, dismissedCount, onTriage }: {
+const GRADE_ORDER: Record<string, number> = { A: 0, B: 1, C: 2, D: 3, E: 4 }
+
+/** The reports you chose to pursue (Shortlist from Reports), one table. */
+function TrackedReportsPanel({ finds, onUntrack }: { finds: ScoutFindView[]; onUntrack: (playerId: string) => void }): JSX.Element {
+  return (
+    <Panel title={`Shortlisted reports${finds.length ? ` (${finds.length})` : ''}`}>
+      {finds.length === 0 ? (
+        <p className="muted small" style={{ margin: 0 }}>
+          Nobody yet. Hit <b>Shortlist him</b> on a report under Reports and he lands here.
+        </p>
+      ) : (
+        <div className="table-wrap">
+          <table className="table">
+            <thead><tr><th>Gr</th><th>Player</th><th className="num">Age</th><th>Club</th><th>Current</th><th>Potential</th><th className="num">Known</th><th>Scout</th><th></th></tr></thead>
+            <tbody>
+              {[...finds].sort((a, b) => (GRADE_ORDER[a.grade] ?? 9) - (GRADE_ORDER[b.grade] ?? 9)).map((f) => (
+                <tr key={f.playerId}>
+                  <td style={{ fontWeight: 800, color: REC_COLOR[f.grade] }}>{f.grade}</td>
+                  <td>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                      {f.nationality && <FlagIcon nationality={f.nationality} size={14} />}
+                      <PlayerLink playerId={f.playerId} name={f.name} />
+                    </span>
+                    <div className="muted" style={{ fontSize: 10.5 }}>{f.position}{f.draftLabel ? ` · ${f.draftLabel}` : ''}{f.fitsNeed ? ' · fills a need' : ''}</div>
+                  </td>
+                  <td className="num muted">{f.age}</td>
+                  <td className="muted small">{f.teamAbbr}</td>
+                  <td><StarRating value={f.currentStars} /></td>
+                  <td><PotentialStars stars={f.potentialStars} /></td>
+                  <td className="num small">{f.knowledge}%</td>
+                  <td className="muted small">{f.scoutName}</td>
+                  <td className="num"><button className="btn btn-ghost btn-sm" title="Take him off the shortlist" onClick={() => onUntrack(f.playerId)}>✕</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
+  )
+}
+
+/**
+ * Reports: every report awaiting a call in one sortable list, and the selected
+ * one in full beside it. Track, re-scout or pass without losing your place.
+ */
+function ReportsTab({ finds, dismissedCount, onTriage }: {
   finds: ScoutFindView[]
-  rosterNeeds: string[]
-  briefing: ScoutingBriefingView
-  /** All-time count of prospects the GM has passed on (for the end-of-board tally). */
+  /** All-time count of prospects the GM has passed on. */
   dismissedCount: number
   onTriage: (action: TriageAction, playerId: string) => void | Promise<void>
 }): JSX.Element {
   const nav = useNav()
   const [posFilter, setPosFilter] = useState<'ALL' | 'F' | 'D' | 'G'>('ALL')
-  const [idx, setIdx] = useState(0)
+  const [needOnly, setNeedOnly] = useState(false)
+  const [sort, setSort] = useState<'grade' | 'knowledge' | 'age' | 'date'>('grade')
+  const [selected, setSelected] = useState<string | null>(null)
 
   const isPos = (pos: string, f: 'F' | 'D' | 'G'): boolean => {
     const isG = pos === 'G', isD = pos === 'D' || pos === 'LD' || pos === 'RD'
     return f === 'G' ? isG : f === 'D' ? isD : (!isG && !isD)
   }
-  const shortlist = finds.filter((f) => f.shortlisted)
-  const queue = finds
+  const tracked = finds.filter((f) => f.shortlisted).length
+  const list = finds
     .filter((f) => !f.shortlisted)
     .filter((f) => posFilter === 'ALL' || isPos(f.position, posFilter))
-
-  // The stack ENDS (#17): skipping past the last card reaches a close-out state
-  // instead of clamping back onto the final report forever.
-  const current = idx < queue.length ? queue[idx] : undefined
-
+    .filter((f) => !needOnly || f.fitsNeed)
+    .sort((a, b) =>
+      sort === 'grade' ? (GRADE_ORDER[a.grade] ?? 9) - (GRADE_ORDER[b.grade] ?? 9) || b.potentialStars - a.potentialStars
+      : sort === 'knowledge' ? b.knowledge - a.knowledge
+      : sort === 'age' ? a.age - b.age
+      : b.foundDate.localeCompare(a.foundDate))
+  const current = list.find((f) => f.playerId === selected) ?? list[0]
+  const next = (): void => {
+    if (!current) return
+    const i = list.indexOf(current)
+    setSelected(list[i + 1]?.playerId ?? list[i - 1]?.playerId ?? null)
+  }
   const act = (action: TriageAction, pid: string): void => {
+    if (action !== 'rescout') next()
     void onTriage(action, pid)
-    // Track/Pass remove the card from the queue, so the same index shows the next
-    // one; a re-scout keeps him in the queue, so step forward to move on.
-    if (action === 'rescout') setIdx((i) => i + 1)
   }
 
-  const reviewedTally = (
-    <>
-      <b>{shortlist.length}</b> on your shortlist, <b>{dismissedCount}</b> passed on
-    </>
-  )
+  if (finds.length === 0) {
+    return (
+      <Panel title="Reports">
+        <div className="muted" style={{ padding: '24px 8px', textAlign: 'center', lineHeight: 1.6 }}>
+          <div style={{ marginBottom: 6 }}><Icon size={24} color="var(--muted)"><Icons.Scouting /></Icon></div>
+          Your scouts haven't filed on anyone yet. Point them at youth leagues and the draft class
+          under <b>Scouts &amp; Coverage</b>; their reports arrive here, and in a weekly digest in your inbox.
+        </div>
+      </Panel>
+    )
+  }
 
   return (
-    <div className="stack" style={{ gap: 'var(--sp-4)' }}>
-      <DepartmentBriefing b={briefing} rosterNeeds={rosterNeeds} />
-      <Panel title="Scouting Centre">
-        {finds.length === 0 ? (
-          <div className="muted" style={{ padding: '24px 8px', textAlign: 'center', lineHeight: 1.6 }}>
-            <div style={{ marginBottom: 6 }}><Icon size={24} color="var(--muted)"><Icons.Scouting /></Icon></div>
-            Your scouts haven't surfaced anyone yet. Point them at youth leagues and the
-            draft class under <b>Recruitment Focus</b> — their finds arrive here (and in
-            a weekly digest in your inbox).
-          </div>
-        ) : !current ? (
-          <div className="muted" style={{ padding: '24px 8px', textAlign: 'center', lineHeight: 1.6 }}>
-            <div style={{ marginBottom: 6 }}><Icon size={24} color="var(--green)"><Icons.Check /></Icon></div>
-            <div style={{ color: 'var(--text)', fontWeight: 600, marginBottom: 2 }}>
-              That's the board reviewed — {reviewedTally}.
-            </div>
-            {queue.length > 0 ? (
-              <>
-                You skipped <b>{queue.length}</b> report{queue.length === 1 ? '' : 's'} without a call.{' '}
-                <button className="btn btn-ghost btn-sm" onClick={() => setIdx(0)}>Go through them again</button>
-              </>
-            ) : (
-              <>New finds will appear here as your scouts get to know them.</>
-            )}
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(360px, 1fr) minmax(420px, 1.25fr)', gap: 'var(--sp-4)', alignItems: 'start' }}>
+      <Panel title={`Awaiting a call (${list.length})`}>
+        <div className="row" style={{ gap: 4, flexWrap: 'wrap', marginBottom: 8, alignItems: 'center' }}>
+          {(['ALL', 'F', 'D', 'G'] as const).map((p) => (
+            <button key={p} className={`chip${posFilter === p ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none', fontSize: 11 }} onClick={() => setPosFilter(p)}>{p}</button>
+          ))}
+          <button className={`chip${needOnly ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none', fontSize: 11 }} onClick={() => setNeedOnly((v) => !v)}>Fills a need</button>
+          <select className="select select-sm" style={{ marginLeft: 'auto', width: 'auto' }} value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}>
+            <option value="grade">Sort: grade</option>
+            <option value="knowledge">Sort: how well we know him</option>
+            <option value="age">Sort: youngest</option>
+            <option value="date">Sort: newest</option>
+          </select>
+        </div>
+        {list.length === 0 ? (
+          <div className="muted small" style={{ padding: '14px 4px', lineHeight: 1.6 }}>
+            Nothing waiting{posFilter !== 'ALL' || needOnly ? ' under this filter' : ''}. <b>{tracked}</b> tracked,
+            <b> {dismissedCount}</b> passed on. New reports arrive as your scouts get to know players.
           </div>
         ) : (
-          <>
-            {/* Progress + position filter */}
-            <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--sp-2)', marginBottom: 'var(--sp-3)' }}>
-              <span className="muted small">Report <b>{idx + 1}</b> of <b>{queue.length}</b> awaiting your call</span>
-              <div className="row" style={{ gap: 4 }}>
-                {(['ALL', 'F', 'D', 'G'] as const).map((p) => (
-                  <button key={p} className={`chip${posFilter === p ? ' chip-accent' : ''}`} style={{ cursor: 'pointer', border: 'none', fontSize: 11 }} onClick={() => { setPosFilter(p); setIdx(0) }}>{p}</button>
+          <div className="table-wrap" style={{ maxHeight: 560, overflowY: 'auto' }}>
+            <table className="table">
+              <thead><tr><th>Gr</th><th>Player</th><th className="num">Age</th><th>Club</th><th>Scout</th><th className="num">Known</th></tr></thead>
+              <tbody>
+                {list.map((f) => (
+                  <tr
+                    key={f.playerId}
+                    onClick={() => setSelected(f.playerId)}
+                    style={{ cursor: 'pointer', background: current?.playerId === f.playerId ? 'rgba(var(--accent-rgb, 108,92,231), 0.13)' : undefined }}
+                  >
+                    <td style={{ fontWeight: 800, color: REC_COLOR[f.grade] }}>{f.grade}</td>
+                    <td>
+                      <span style={{ fontWeight: 600 }}>{f.name}</span>
+                      <div className="muted" style={{ fontSize: 10.5 }}>
+                        {f.position}{f.draftLabel ? ` · ${f.draftLabel}` : ''}{f.fitsNeed ? ' · fills a need' : ''}
+                      </div>
+                    </td>
+                    <td className="num muted">{f.age}</td>
+                    <td className="muted small">{f.teamAbbr}</td>
+                    <td className="muted small">{f.scoutName}</td>
+                    <td className="num small">{f.knowledge}%</td>
+                  </tr>
                 ))}
-              </div>
-            </div>
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
 
+      <div className="stack" style={{ gap: 'var(--sp-3)' }}>
+        {current ? (
+          <>
             <ReportCard find={current} />
-
-            {/* Triage actions */}
-            <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap', marginTop: 'var(--sp-3)' }}>
+            <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
               <button
                 className="btn btn-primary"
-                title="Puts him on your watch list — his file stops decaying and your scouts prioritise him"
+                title="Adds him to your Shortlist: his file stops decaying and your scouts prioritise him"
                 onClick={() => act('shortlist', current.playerId)}
-              >★ Track him</button>
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              ><Icon size={14}><Icons.Star /></Icon> Shortlist him</button>
               <button className="btn" onClick={() => act('rescout', current.playerId)} title="Send your best-fit scout back for a deeper read" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon size={14}><Icons.Scouting /></Icon> Take another look</button>
-              <button className="btn btn-ghost" onClick={() => setIdx((i) => i + 1)}>Skip →</button>
               <button className="btn btn-ghost" style={{ color: 'var(--danger, #d8584f)' }} onClick={() => act('pass', current.playerId)}>Pass</button>
               <button className="btn btn-ghost" style={{ marginLeft: 'auto' }} onClick={() => nav.navigate('player', { playerId: current.playerId })}>Full profile →</button>
             </div>
           </>
-        )}
-      </Panel>
-
-      {/* Shortlist — the prospects you chose to track */}
-      <Panel title={`Shortlist${shortlist.length ? ` (${shortlist.length})` : ''}`}>
-        {shortlist.length === 0 ? (
-          <p className="muted small" style={{ margin: 0 }}>
-            Nobody tracked yet. Hit <b>★ Track him</b> on a report to pin a prospect here — and onto
-            your watch list, where your scouts will keep going back to him.
-          </p>
         ) : (
-          <div className="grid grid-3" style={{ gap: 'var(--sp-4)' }}>
-            {shortlist.map((f) => (
-              <div key={f.playerId} style={{ position: 'relative' }}>
-                <FindCard find={f} />
-                <button
-                  className="btn btn-ghost btn-sm"
-                  style={{ position: 'absolute', top: 6, right: 6, padding: '0 6px' }}
-                  title="Un-track"
-                  onClick={() => onTriage('unshortlist', f.playerId)}
-                >✕</button>
-              </div>
-            ))}
-          </div>
+          <Panel title="Report">
+            <div className="muted small">Pick a report on the left.</div>
+          </Panel>
         )}
-      </Panel>
+      </div>
     </div>
   )
 }
@@ -1037,10 +1062,8 @@ function NumField({ label, value, onChange, width = 62, placeholder }: {
  * unscouted player shows a dash where his grades would be, and the footer says
  * out loud how much of the result set you are actually able to judge.
  */
-function PlayerSearchTab({ scouts, onToggleWatch, onScoutPlayer }: {
-  scouts: ScoutCardView[]
+function PlayerSearchTab({ onToggleWatch }: {
   onToggleWatch: (playerId: string) => void
-  onScoutPlayer: (scoutId: string, playerId: string) => void
 }): JSX.Element {
   const client = useClient()
   const [text, setText] = useState('')
@@ -1271,9 +1294,7 @@ function PlayerSearchTab({ scouts, onToggleWatch, onScoutPlayer }: {
                       <td><ReadStars value={r.currentStars} /></td>
                       <td><ReadStars value={r.potentialStars} accent /></td>
                       <td className="small" style={{ color: READ_COLOR[r.read] }} title={`${r.knowledge}% knowledge`}>{r.readLabel}</td>
-                      <td className="num">
-                        {scouts.length > 0 && <ScoutPickerCell playerId={r.playerId} scouts={scouts} onPick={onScoutPlayer} />}
-                      </td>
+
                     </tr>
                   ))}
                 </tbody>
@@ -1284,7 +1305,7 @@ function PlayerSearchTab({ scouts, onToggleWatch, onScoutPlayer }: {
               <span className="muted small">Page {page + 1} of {pages}</span>
               <button type="button" className="btn btn-sm" disabled={page + 1 >= pages} onClick={() => setPage((p) => p + 1)}>Next →</button>
               <span className="muted small" style={{ marginLeft: 'auto' }}>
-                The eye pins him to your watch list · <b>Scout ▾</b> sends a named scout at him · right-click for the full menu.
+                The eye pins him to your Shortlist, and your scouts give pinned players the front of their day · right-click for the full menu.
               </span>
             </div>
           </>
@@ -1296,31 +1317,7 @@ function PlayerSearchTab({ scouts, onToggleWatch, onScoutPlayer }: {
 
 /* ── per-player "Scout" picker (assign a scout to one player) ───────────────── */
 
-function ScoutPickerCell({ playerId, scouts, onPick }: {
-  playerId: string
-  scouts: ScoutCardView[]
-  onPick: (scoutId: string, playerId: string) => void
-}): JSX.Element {
-  const [open, setOpen] = useState(false)
-  return (
-    <span style={{ position: 'relative' }}>
-      <button className="btn btn-ghost small" style={{ padding: '2px 8px' }} onClick={() => setOpen((o) => !o)}>Scout ▾</button>
-      {open && (
-        <div style={{ position: 'absolute', right: 0, top: '100%', zIndex: 60, background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 6, minWidth: 170, boxShadow: '0 4px 16px rgba(0,0,0,0.4)' }}>
-          <div className="muted small" style={{ padding: '6px 10px 2px', fontWeight: 700 }}>Assign a scout</div>
-          {scouts.map((s) => (
-            <button key={s.scoutId} className="btn-ghost" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '5px 12px', fontSize: 12 }}
-              onClick={() => { onPick(s.scoutId, playerId); setOpen(false) }}>
-              {s.name} <span className="muted">({s.rating})</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </span>
-  )
-}
-
-/* ── Recruitment Focus: focus-first deployment ─────────────────────────────── */
+/* ── Assignments: focus-first deployment ─────────────────────────────── */
 
 /** A scouting objective. Scouts get assigned TO a focus (not the other way round). */
 interface FocusDef {
@@ -1511,7 +1508,7 @@ function RecruitmentFocusTab({ data, onAssign, onAutoAssign, scoutCardProps }: {
 
   return (
     <div className="stack">
-      <Panel title={`Recruitment Focus — ${data.scouts.length} scout${data.scouts.length === 1 ? '' : 's'} (${data.maxScouts} cap)`}>
+      <Panel title={`Assignments — ${data.scouts.length} scout${data.scouts.length === 1 ? '' : 's'} (${data.maxScouts} cap)`}>
         <div className="row-between" style={{ marginTop: -4, marginBottom: 10, gap: 'var(--sp-3)', alignItems: 'flex-start' }}>
           <p className="muted small" style={{ margin: 0, flex: 1 }}>
             Pick an objective and drop well-fitting scouts on it — no need to micromanage each one.
@@ -1670,17 +1667,17 @@ function CoverageGlobePanel({ data }: { data: ScoutingView }): JSX.Element {
 
 /* ── main screen ───────────────────────────────────────────────────────────── */
 
-export type FmTab = 'overview' | 'centre' | 'players' | 'focus' | 'coverage'
+export type FmTab = 'overview' | 'centre' | 'shortlist' | 'players' | 'focus'
 
 /** Last scouting response, valid for the ui-store `version` it was fetched at. */
 let scoutingViewCache: { version: number; res: WorkerResponse } | null = null
 
 const TAB_TITLE: Record<FmTab, string> = {
-  overview: 'Scouting — Overview',
-  centre: 'Scouting Centre',
-  players: 'Scouting — Players',
-  focus: 'Recruitment Focus',
-  coverage: 'Scouting Coverage',
+  overview: 'Recruitment — Desk',
+  centre: 'Recruitment — Reports',
+  shortlist: 'Recruitment — Shortlist',
+  players: 'Recruitment — Search',
+  focus: 'Recruitment — Scouts & Coverage',
 }
 
 export function ScoutingScreen({ tab }: { tab: FmTab }): JSX.Element {
@@ -1722,11 +1719,6 @@ export function ScoutingScreen({ tab }: { tab: FmTab }): JSX.Element {
     const res = await client.fireScout(scoutId)
     if (res.type === 'error') { toast(res.message, 'error') } else { bumpRefresh(); refetch() }
   }
-  const handleScoutPlayer = async (scoutId: string, playerId: string): Promise<void> => {
-    const scout = data?.scouts.find((s) => s.scoutId === scoutId)
-    const res = await client.assignScout(scoutId, { kind: 'player', playerId }, scout?.focus ?? 'all')
-    if (res.type === 'error') { toast(res.message, 'error') } else { toast('Scout assigned to player', 'success'); bumpRefresh(); refetch() }
-  }
   const handleToggleWatch = async (playerId: string): Promise<void> => {
     const res = await client.toggleWatchPlayer(playerId)
     if (res.type === 'error') { toast(res.message, 'error') } else { bumpRefresh(); refetch() }
@@ -1741,19 +1733,28 @@ export function ScoutingScreen({ tab }: { tab: FmTab }): JSX.Element {
       <ScreenHeader title={TAB_TITLE[tab]} />
       <ScreenStateNotices loading={loading} error={error} empty={!data} emptyText="No scouting data." />
 
-      {data && tab === 'overview' && (
-        <OverviewTab
-          data={data}
-          onUnwatch={(pid) => { void handleToggleWatch(pid) }}
-          onNote={(pid, note) => { void handleWatchNote(pid, note) }}
-        />
+      {data && tab === 'overview' && <DeskTab data={data} />}
+
+      {data && tab === 'shortlist' && (
+        <div className="stack">
+          <TrackedReportsPanel
+            finds={data.recommendations.filter((f) => f.shortlisted)}
+            onUntrack={async (pid) => {
+              const res = await client.unshortlistProspect(pid)
+              if (res.type === 'error') toast(res.message, 'error'); else { bumpRefresh(); refetch() }
+            }}
+          />
+          <WatchListPanel
+            data={data}
+            onUnwatch={(pid) => { void handleToggleWatch(pid) }}
+            onNote={(pid, note) => { void handleWatchNote(pid, note) }}
+          />
+        </div>
       )}
 
       {data && tab === 'centre' && (
-        <ScoutingCentreTab
+        <ReportsTab
           finds={data.recommendations}
-          rosterNeeds={data.rosterNeeds}
-          briefing={data.briefing}
           dismissedCount={data.dismissedCount ?? 0}
           onTriage={async (action, playerId) => {
             const res = await (
@@ -1772,9 +1773,7 @@ export function ScoutingScreen({ tab }: { tab: FmTab }): JSX.Element {
 
       {data && tab === 'players' && (
         <PlayerSearchTab
-          scouts={data.scouts}
           onToggleWatch={(pid) => { void handleToggleWatch(pid) }}
-          onScoutPlayer={(sid, pid) => { void handleScoutPlayer(sid, pid) }}
         />
       )}
 
@@ -1790,13 +1789,16 @@ export function ScoutingScreen({ tab }: { tab: FmTab }): JSX.Element {
         />
       )}
 
-      {data && tab === 'coverage' && (
+      {data && tab === 'focus' && (
         <div className="stack">
           <CoverageGlobePanel data={data} />
-          <div className="grid grid-2" style={{ gap: 'var(--sp-4)' }}>
-            <CoverageTable title="Coverage by Nation" rows={data.nationCoverage} />
-            <CoverageTable title="Coverage by League" rows={data.leagueCoverage} />
-          </div>
+          <details>
+            <summary className="muted small" style={{ cursor: 'pointer', padding: '4px 2px' }}>Coverage tables by nation and league</summary>
+            <div className="grid grid-2" style={{ gap: 'var(--sp-4)', marginTop: 'var(--sp-2)' }}>
+              <CoverageTable title="Coverage by Nation" rows={data.nationCoverage} />
+              <CoverageTable title="Coverage by League" rows={data.leagueCoverage} />
+            </div>
+          </details>
         </div>
       )}
     </section>

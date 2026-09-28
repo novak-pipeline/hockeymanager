@@ -81,15 +81,19 @@ export function buildNav(phase: DashboardView['phase']): NavItem[] {
         { id: 'world', label: 'Leagues' },
         { id: 'worldInternational', label: 'International' },
       ] },
-    { id: 'scouting', label: 'Scouting', icon: 'scouting', section: 'competition', screen: 'scouting',
-      match: ['scouting', 'scoutingCentre', 'scoutingPlayers', 'scoutingFocus', 'scoutingCoverage', 'scoutingDraft'],
+    // Recruitment (depth audit §1): one home per question — the desk, the
+    // reports, the shortlist, search, the scouts and where they are looking,
+    // and the draft board your scouts built. Route ids are unchanged so every
+    // deep link still lands; 'scoutingCoverage' now opens Scouts & Coverage.
+    { id: 'scouting', label: 'Recruitment', icon: 'scouting', section: 'competition', screen: 'scouting',
+      match: ['scouting', 'scoutingCentre', 'scoutingShortlist', 'scoutingPlayers', 'scoutingFocus', 'scoutingCoverage', 'scoutingDraft'],
       subTabs: [
-        { id: 'scouting', label: 'Overview' },
-        { id: 'scoutingCentre', label: 'Scouting Centre' },
-        { id: 'scoutingPlayers', label: 'Players' },
-        { id: 'scoutingFocus', label: 'Recruitment Focus' },
-        { id: 'scoutingCoverage', label: 'Scouting Coverage' },
-        { id: 'scoutingDraft', label: 'Prospect Rankings' },
+        { id: 'scouting', label: 'Desk' },
+        { id: 'scoutingCentre', label: 'Reports' },
+        { id: 'scoutingShortlist', label: 'Shortlist' },
+        { id: 'scoutingPlayers', label: 'Search' },
+        { id: 'scoutingFocus', label: 'Scouts & Coverage' },
+        { id: 'scoutingDraft', label: 'Draft Board' },
       ] },
     { id: 'transfers', label: 'Transfers', icon: 'transfers', section: 'competition', screen: 'trades', match: ['trades', 'waivers'],
       subTabs: [{ id: 'trades', label: 'Trade Block' }, { id: 'waivers', label: 'Waiver Wire' }] },

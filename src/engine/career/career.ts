@@ -820,6 +820,7 @@ import {
   type ScoutBoardRowView,
   type DashboardView,
   type WeekPlanView,
+  type ScoutTrackRecordView,
   type DraftView,
   type DraftAdviceView,
   type ProspectRowView,
@@ -11968,6 +11969,9 @@ export class Career {
         })
         // The draft floor: AI clubs move up and down before the first pick.
         this.draftFloorMarket(os.draft)
+        // The scouts' calls go on file the morning of the draft, to be judged
+        // in two seasons against how the kids actually turned out.
+        this.fileDraftCalls(draftYear)
 
         /* ── scouting combine on the new class ── */
         const cCombine = this.newsCounter
@@ -25833,6 +25837,52 @@ export class Career {
 
   /* ────────────────────── rival-GM relationships ────────────────────── */
 
+  /* ── the scout track record ── */
+
+  /** Each draft's calls on file: the public top 20 and every scout's own top
+   *  20, as they stood on draft morning. Bounded; serialized additively. */
+  private draftCallsLog: Array<{ year: number; publicTop: string[]; scouts: Array<[string, string[]]> }> = []
+
+  private fileDraftCalls(draftYear: number): void {
+    if (this.draftCallsLog.some((e) => e.year === draftYear)) return
+    let ranks: ReturnType<Career['getDraftRankings']>
+    try { ranks = this.getDraftRankings() } catch { return }
+    this.draftCallsLog.push({
+      year: draftYear,
+      publicTop: ranks.rankings.slice(0, 20).map((r) => r.playerId),
+      scouts: ranks.scoutBoards.map((b) => [b.scoutId, b.rows.slice(0, 20).map((r) => r.playerId)] as [string, string[]]),
+    })
+    if (this.draftCallsLog.length > 12) this.draftCallsLog = this.draftCallsLog.slice(-12)
+  }
+
+  /** How a scout's past boards aged: of his top-20 calls in classes drafted two
+   *  or more seasons ago, how many are NHL regulars now — against the public
+   *  board's top 20 of the same classes. The loop EHM players know: keep the
+   *  scout whose calls come good, move on from the one who oversells. */
+  private scoutTrackRecord(scoutId: string): ScoutTrackRecordView {
+    const nhl = new Set<string>()
+    for (const tid of this.data.league.teams) for (const id of this.data.teams.get(tid)?.roster ?? []) nhl.add(id as string)
+    let judged = 0, hits = 0, publicHits = 0, pending = 0
+    let best: { year: number; hits: number; pub: number } | null = null
+    for (const e of this.draftCallsLog) {
+      const mine = e.scouts.find(([sid]) => sid === scoutId)?.[1]
+      if (!mine || mine.length === 0) continue
+      if (e.year > this.year - 2) { pending++; continue }
+      judged++
+      const h = mine.filter((id) => nhl.has(id)).length
+      const pub = e.publicTop.filter((id) => nhl.has(id)).length
+      hits += h; publicHits += pub
+      if (!best || e.year > best.year) best = { year: e.year, hits: h, pub }
+    }
+    const line = judged === 0
+      ? pending > 0
+        ? `Too early to judge: ${pending} class${pending === 1 ? '' : 'es'} on file, judged two seasons after the draft.`
+        : 'No draft boards on file yet.'
+      : `${hits > publicHits ? 'Sharp' : hits < publicHits ? 'Behind the book' : 'Level with the book'}: ${hits} of his top-20 calls are NHL regulars now (public board: ${publicHits})` +
+        (best ? `; latest judged class ${best.year}: ${best.hits} vs ${best.pub}.` : '.')
+    return { line, classesJudged: judged, hits, publicHits, pending }
+  }
+
   /** The user GM's standing with a rival club (0–100, 50 = neutral by default). */
   private relationshipWith(teamId: string): number {
     return this.gmRelationships.get(teamId) ?? 50
@@ -27166,7 +27216,7 @@ export class Career {
       })
     const callToAction = cards.length
       ? ` Their cards are attached — make the calls here, or leave the queue to us.`
-      : ` Nothing awaits your call in the Scouting Centre.`
+      : ` Nothing awaits your call in Recruitment → Reports.`
     const body = `${flagged}${working} ${untriaged} flagged prospect${untriaged === 1 ? '' : 's'} await${untriaged === 1 ? 's' : ''} your call.${callToAction}`
     // A8: a week that produced no new name, and no card the GM has not already
     // been shown, is not a briefing. The standing queue lives on the Scouting
@@ -27481,7 +27531,7 @@ export class Career {
     })
     this.syncScoutRoster()
     this.pushNews('scouting', `Hired ${cand.name} as a scout`,
-      `${cand.name} joins the scouting department${cand.specialtyNation ? ` (specialises in ${cand.specialtyNation})` : ''}. Assign him a region or league from the Scouting screen.`,
+      `${cand.name} joins the scouting department${cand.specialtyNation ? ` (specialises in ${cand.specialtyNation})` : ''}. Assign him a region or league under Recruitment → Scouts & Coverage.`,
       {})
     return { ok: true }
   }
@@ -28305,17 +28355,53 @@ export class Career {
       return m.deptRaw * (m.knowledge / 100)
     })
 
-    // Per-scout boards: each scout's own bias + judgment-scaled noise as the tie-break.
+    // Per-scout boards: EACH SCOUT'S OWN RANKING. A scout ranks only the
+    // prospects he has personally watched (his viewing history — fog-of-war:
+    // no man ranks a kid he never saw), on his own read: the department's value
+    // plus his personal lean (specialty, demeanour and judgment-scaled error,
+    // scoutDraftBias) — as a real shift, not a tie-break, so two scouts who
+    // watched the same kids can genuinely disagree. The staff consensus above
+    // stays the board the war room drafts from.
     const scouts = this.getTeamStaff(this.userTeamId as string).scouts
-    const scoutBoards = scouts.map((s) => ({
-      scoutId: s.id as string,
-      scoutName: s.name,
-      rows: buildBoard((c) => {
+    const history = new Map((this.scouting.scoutHistory ?? []).map(([sid, pids]) => [sid, new Set(pids)] as const))
+    const staffRankOf = new Map(scoutBoard.map((r) => [r.playerId, r.rank]))
+    const scoutBoards = scouts.map((s) => {
+      const seen = history.get(s.id as string) ?? new Set<string>()
+      const mine = cands.filter((c) => seen.has(c.row.playerId))
+      const leanOf = (c: Cand): number => {
         const m = meta.get(c.row.playerId)!
-        const bias = scoutDraftBias(s, c.player, m.composites)
-        return (m.deptRaw + bias) * (m.knowledge / 100)
-      }),
-    }))
+        return scoutDraftBias(s, c.player, m.composites)
+      }
+      const rows: ScoutBoardRowView[] = [...mine]
+        .sort((a, b) => valueOf(b) + leanOf(b) - (valueOf(a) + leanOf(a)) || (a.row.playerId < b.row.playerId ? -1 : 1))
+        .slice(0, 64)
+        .map((c, i) => {
+          const id = c.row.playerId
+          const yourRank = i + 1
+          const consensusRank = consensusRankOf.get(id) ?? yourRank
+          const staffRank = staffRankOf.get(id)
+          const lean = leanOf(c)
+          const movement = consensusRank - yourRank
+          const verdict: ScoutBoardRowView['verdict'] = lean >= 3 ? 'higher' : lean <= -3 ? 'lower' : 'inline'
+          const ourCeiling = ceilingById.get(id) ?? agedPotential(c.player)
+          const note = lean >= 3
+            ? `${s.name} is higher on him than the room${staffRank ? ` (staff board #${staffRank})` : ''}.`
+            : lean <= -3
+              ? `${s.name} is cooler on him than the room${staffRank ? ` (staff board #${staffRank})` : ''}.`
+              : `${s.name} sees him about where the room does.`
+          return {
+            rank: yourRank, ...c.row, potentialStars: overallToStars(ourCeiling), consensusRank, movement, verdict, seen: true, note,
+            ...(staffRank !== undefined ? { staffRank } : {}),
+          }
+        })
+      return {
+        scoutId: s.id as string,
+        scoutName: s.name,
+        seenCount: mine.length,
+        rows,
+        trackRecord: this.scoutTrackRecord(s.id as string),
+      }
+    })
 
     const fullRankById: Record<string, number> = {}
     ordered.forEach((id, i) => { fullRankById[id] = i + 1 })
@@ -30590,6 +30676,7 @@ export class Career {
       ownerRequest: this.ownerRequest ? { ...this.ownerRequest } : undefined,
       gmRelationships: [...this.gmRelationships.entries()],
       gmReputation: structuredClone(this.gmRep),
+      ...(this.draftCallsLog.length ? { draftCallsLog: structuredClone(this.draftCallsLog) } : {}),
       mentorships: [...this.mentorships.entries()],
       clubDirection: this.clubDirection,
       fanInterest: this.fanInterest,
@@ -30782,6 +30869,7 @@ export class Career {
     career.ownerRequest = snapshot.ownerRequest ? { ...snapshot.ownerRequest } : null
     career.gmRelationships = new Map(snapshot.gmRelationships ?? [])
     career.gmRep = snapshot.gmReputation ? structuredClone(snapshot.gmReputation) : createGmReputation()
+    career.draftCallsLog = snapshot.draftCallsLog ? structuredClone(snapshot.draftCallsLog) : []
     career.mentorships = new Map(snapshot.mentorships ?? [])
     career.clubDirection = snapshot.clubDirection ?? 'compete'
     career.fanInterest = snapshot.fanInterest ?? 60

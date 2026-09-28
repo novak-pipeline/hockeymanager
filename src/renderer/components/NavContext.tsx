@@ -60,6 +60,7 @@ export type ScreenId =
   | 'worldInternational'
   | 'scouting'
   | 'scoutingCentre'
+  | 'scoutingShortlist'
   | 'scoutingPlayers'
   | 'scoutingFocus'
   | 'scoutingCoverage'
@@ -129,6 +130,7 @@ export function sectionOf(screen: ScreenId): SectionId {
     case 'worldInternational':
     case 'scouting':
     case 'scoutingCentre':
+    case 'scoutingShortlist':
     case 'scoutingPlayers':
     case 'scoutingFocus':
     case 'scoutingCoverage':

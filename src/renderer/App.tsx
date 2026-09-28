@@ -946,6 +946,7 @@ function ScreenRouter(props: { screen: ScreenId; params: NavParams }): JSX.Eleme
     case 'leagueHistory':
     case 'scouting':
     case 'scoutingCentre':
+    case 'scoutingShortlist':
     case 'scoutingPlayers':
     case 'scoutingFocus':
     case 'scoutingCoverage':

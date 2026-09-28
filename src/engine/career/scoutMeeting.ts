@@ -143,7 +143,7 @@ export function buildScoutMeetingScene(input: ScoutMeetingInput): ScoutMeetingSc
       }],
       options: [
         { id: 'track', label: '★ Track him', detail: `Add ${f.name} to your shortlist`, action: { type: 'track', playerId: f.playerId } },
-        { id: 'leave', label: 'Leave him in the queue', detail: `${f.name} stays in the Scouting Centre queue`, action: { type: 'none' } },
+        { id: 'leave', label: 'Leave him in the queue', detail: `${f.name} stays in the Reports queue`, action: { type: 'none' } },
       ],
       defaultOptionId: 'leave',
     })

@@ -1445,6 +1445,22 @@ export interface ScoutBoardRowView extends DraftRankRowView {
    *  words, and why — so a high potential grade sitting next to a ▼ reads as a
    *  scouting position rather than a contradiction (E2). */
   note: string
+  /** On a scout's own board: where the staff consensus has him. Additive. */
+  staffRank?: number
+}
+
+/** How a scout's past draft boards have aged (the scout track record). */
+export interface ScoutTrackRecordView {
+  /** Plain verdict, e.g. "Sharp: 7 of his top 20 from 2026 are pros (public board: 5)". */
+  line: string
+  /** Classes old enough to judge (drafted two or more seasons ago). */
+  classesJudged: number
+  /** His top-20 calls who are NHL regulars now, across judged classes. */
+  hits: number
+  /** Same count for the public board's top 20 of the same classes. */
+  publicHits: number
+  /** Classes on file still too young to judge. */
+  pending: number
 }
 
 export interface DraftRankingsView {
@@ -1468,7 +1484,9 @@ export interface DraftRankingsView {
   /** YOUR scouts' own board — the staff consensus, re-ranked by what they've seen. */
   scoutBoard: ScoutBoardRowView[]
   /** Per-scout boards — each individual scout's ranking (their own bias/variance). */
-  scoutBoards: { scoutId: string; scoutName: string; rows: ScoutBoardRowView[] }[]
+  /** Each scout's OWN ranking: only prospects he personally watched, on his
+   *  own read. `seenCount` and `trackRecord` are additive. */
+  scoutBoards: { scoutId: string; scoutName: string; rows: ScoutBoardRowView[]; seenCount?: number; trackRecord?: ScoutTrackRecordView }[]
   /** Analyst FULL-ordering rank (1-based) for every eligible prospect — past the
    *  published top board too, so off-board prospects get a concrete "Nth-round"
    *  projection. playerId → rank. */
@@ -2897,6 +2915,8 @@ export interface CareerSnapshot {
   gmPersonas?: Array<[string, GmPersona]>
   /** GM reputation state (anti-cheese). Optional/additive — absent = a fresh name. */
   gmReputation?: import('./gmReputation').GmReputationState
+  /** Scout track record: each draft's calls on file. Optional/additive. */
+  draftCallsLog?: Array<{ year: number; publicTop: string[]; scouts: Array<[string, string[]]> }>
   /** Pending preseason board-meeting year (Season Rhythm M1). Optional/additive. */
   boardMeetingYear?: number | null
   /** M3 dev camp soft gate. Optional/additive. */

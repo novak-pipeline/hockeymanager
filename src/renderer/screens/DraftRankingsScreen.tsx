@@ -90,7 +90,7 @@ export function DraftRankingsScreen(): JSX.Element {
 
   return (
     <div className="stack" style={{ gap: 'var(--sp-4)' }}>
-      <ScreenHeader title="Draft Prospect Rankings">
+      <ScreenHeader title="Recruitment — Draft Board">
         <span className="muted small">The public book on the draft-eligible class. Every club reads it — your edge is what your own scouts see that it doesn&apos;t.</span>
       </ScreenHeader>
       <ScreenStateNotices
@@ -128,17 +128,42 @@ export function DraftRankingsScreen(): JSX.Element {
         return (
           <>
             {data.scoutBoards.length > 0 && (
-              <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
-                <span className="muted small">Board:</span>
-                <select className="select select-sm" value={scoutId} onChange={(e) => setScoutId(e.target.value)}>
-                  <option value="">Staff consensus</option>
+              <Panel title="Whose board?">
+                <div className="muted small" style={{ marginBottom: 8 }}>
+                  The staff consensus is the board the war room drafts from. Each scout also keeps his own:
+                  only the kids <b>he</b> has watched, ranked on his read. When they disagree, that is information.
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))', gap: 'var(--sp-2)' }}>
+                  <button
+                    type="button"
+                    className={`panel${scoutId === '' ? ' panel-active' : ''}`}
+                    style={{ textAlign: 'left', cursor: 'pointer', padding: '8px 10px', border: scoutId === '' ? '1px solid var(--violet-h)' : undefined }}
+                    onClick={() => setScoutId('')}
+                  >
+                    <div style={{ fontWeight: 700 }}>Staff consensus</div>
+                    <div className="muted small">{data.classCoverage.filed} of {data.classCoverage.total} eligibles filed on</div>
+                  </button>
                   {data.scoutBoards.map((b) => (
-                    <option key={b.scoutId} value={b.scoutId}>{b.scoutName}</option>
+                    <button
+                      key={b.scoutId}
+                      type="button"
+                      className="panel"
+                      style={{ textAlign: 'left', cursor: 'pointer', padding: '8px 10px', border: scoutId === b.scoutId ? '1px solid var(--violet-h)' : undefined }}
+                      onClick={() => setScoutId(b.scoutId)}
+                    >
+                      <div style={{ fontWeight: 700 }}>{b.scoutName}</div>
+                      <div className="muted small">{b.seenCount ?? b.rows.length} prospect{(b.seenCount ?? b.rows.length) === 1 ? '' : 's'} seen in person</div>
+                      {b.trackRecord && (
+                        <div className="small" style={{ marginTop: 3, lineHeight: 1.35, color: b.trackRecord.classesJudged === 0 ? 'var(--muted)' : b.trackRecord.hits > b.trackRecord.publicHits ? 'var(--success)' : b.trackRecord.hits < b.trackRecord.publicHits ? 'var(--amber)' : 'var(--text)' }}>
+                          {b.trackRecord.line}
+                        </div>
+                      )}
+                    </button>
                   ))}
-                </select>
-              </div>
+                </div>
+              </Panel>
             )}
-            <ScoutBoardPanel rows={rows} draftYear={data.draftYear} who={who} coverage={data.classCoverage} />
+            <ScoutBoardPanel rows={rows} draftYear={data.draftYear} who={who} coverage={data.classCoverage} personal={!!picked} />
           </>
         )
       })()}
@@ -197,7 +222,7 @@ export function DraftRankingsScreen(): JSX.Element {
             ) : (
               <>Nobody. There are <b>{data.radarUnseen.toLocaleString()}</b> players aged 14–16 in the
               database and your department has not watched one of them closely enough to have an
-              opinion. Point a scout at a junior league or a nation under <b>Recruitment Focus</b> and
+              opinion. Point a scout at a junior league or a nation under <b>Recruitment → Scouts &amp; Coverage</b> and
               the names you find here will be names nobody else has.</>
             )}
           </div>
@@ -257,14 +282,26 @@ function Movement({ value }: { value: number }): JSX.Element {
   )
 }
 
-function ScoutBoardPanel({ rows, draftYear, who, coverage }: {
+function ScoutBoardPanel({ rows, draftYear, who, coverage, personal = false }: {
   rows: ScoutBoardRowView[]; draftYear: number; who: string
   coverage: { filed: number; total: number; pct: number }
+  /** A single scout's own board: only players he watched, with the staff rank beside his. */
+  personal?: boolean
 }): JSX.Element {
   const [seenOnly, setSeenOnly] = useState(false)
   const shown = seenOnly ? rows.filter((r) => r.seen) : rows
   // Sort the filtered set — a header click re-orders what the toggle left visible.
   const { sorted, sortKey, dir, sortBy } = useTableSort(shown, SCOUT_BOARD_COLS, { key: null })
+  if (rows.length === 0 && personal) {
+    return (
+      <Panel title={`${who} — ${draftYear} class`}>
+        <div className="muted small">
+          {who} hasn’t watched anyone from this class yet, so he has no board. Put him on the draft class
+          (or a junior league) under Recruitment → Scouts &amp; Coverage and his own ranking fills as he sees players.
+        </div>
+      </Panel>
+    )
+  }
   if (rows.length === 0) {
     return (
       <Panel title="Your Scouts’ Board">
@@ -277,6 +314,12 @@ function ScoutBoardPanel({ rows, draftYear, who, coverage }: {
   }
   return (
     <Panel title={`${who} — ${draftYear} class`}>
+      {personal ? (
+        <div className="muted small" style={{ marginBottom: 8, lineHeight: 1.6 }}>
+          {who}’s own ranking: only the {rows.length} prospect{rows.length === 1 ? '' : 's'} he has watched in person, on his read.
+          <b> Staff</b> is where the department consensus has the same player; a green row is a kid he likes more than the room, a red one less.
+        </div>
+      ) : (
       <div className="muted small" style={{ marginBottom: 8, lineHeight: 1.6 }}>
         {who === 'Staff consensus' ? 'Your staff’s' : `${who}’s`} own ranking, re-ordered from the consensus by what they’ve
         seen — intangibles, interviews, and the underlying game. <strong style={{ color: 'var(--success, #4caf72)' }}>▲</strong> means
@@ -289,12 +332,13 @@ function ScoutBoardPanel({ rows, draftYear, who, coverage }: {
         </b>{' '}
         eligibles ({coverage.pct}%).
       </div>
-      <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center', marginBottom: 8 }}>
+      )}
+      {!personal && <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center', marginBottom: 8 }}>
         <button type="button" className={`btn btn-sm${seenOnly ? ' btn-primary' : ''}`} onClick={() => setSeenOnly((v) => !v)}>
           {seenOnly ? 'Showing only prospects we have seen' : 'Show only prospects we have seen'}
         </button>
         <span className="muted small">{shown.length} row{shown.length === 1 ? '' : 's'}</span>
-      </div>
+      </div>}
       <table className="data-table" style={{ width: '100%' }}>
         <thead>
           <tr>
@@ -313,6 +357,7 @@ function ScoutBoardPanel({ rows, draftYear, who, coverage }: {
                 <PlayerLink playerId={p.playerId} name={p.name} />
                 {!p.seen && <span className="muted small" title="Not yet scouted"> · unseen</span>}
                 {p.eligibility === 'reentry' && <span className="muted small" title="Re-entry eligible"> · RE</span>}
+                {personal && p.staffRank !== undefined && <span className="muted small" title="Where the staff consensus board has him"> · staff #{p.staffRank}</span>}
                 {/* E2: an arrow on its own reads as a contradiction next to a high
                     potential grade — the staff's position is stated in words. */}
                 {p.verdict !== 'inline' && (
