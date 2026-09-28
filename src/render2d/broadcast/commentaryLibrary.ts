@@ -256,6 +256,19 @@ export function stemText(line: BoothLine): string {
   return line.text
 }
 
+/**
+ * The delivery a line's stem (and bare clip) is recorded at. The colour man is
+ * always conversational; the play-by-play man is excited for the calls that
+ * matter (goals, saves, fights, a close final, banner nights) and even for the
+ * rest. The offline renderer (scripts/booth/) reads this.
+ */
+export function stemStyle(line: BoothLine): 'excited' | 'neutral' {
+  if (line.speaker === 'color') return 'neutral'
+  if (line.intensity >= 3) return 'excited'
+  if (line.intensity === 2 && /^(goal|save|fight|hit)/.test(line.moment)) return 'excited'
+  return 'neutral'
+}
+
 /* ─────────────────────────── clip ids ─────────────────────────── */
 
 /** Clip id of a line's stem (or the whole line when it has no name slot). */

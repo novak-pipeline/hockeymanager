@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { BOOTH_LINES, nameSlotPosition, stemText, type BoothMoment } from './commentaryLibrary'
+import { BOOTH_LINES, nameSlotPosition, stemStyle, stemText, type BoothMoment } from './commentaryLibrary'
 import boothConfig from './booth.config.json'
 import { spokenName, applyLetterRules, respellingToSpeech } from './pronunciation'
-import { nameClipKey } from './clipManifest'
 
 describe('booth line library', () => {
   it('ids are unique', () => {
@@ -49,11 +48,29 @@ describe('booth line library', () => {
     expect(BOOTH_LINES.length).toBeLessThanOrEqual(70)
   })
 
-  it('the booth has two FIXED, distinct voices from the quality-gated cast', () => {
-    const { pbp, color } = boothConfig.speakers
-    expect(pbp.voiceId).toBe('bm_george')
-    expect(color.voiceId).toBe('am_michael')
-    expect(pbp.voiceId).not.toBe(color.voiceId)
+  it('every booth pair has two FIXED, distinct seats with a committed reference voice', () => {
+    expect(boothConfig.defaultPair).toBe('dia2')
+    for (const pair of Object.values(boothConfig.pairs)) {
+      const { pbp, color } = pair.speakers
+      expect(pbp.voiceId).not.toBe(color.voiceId)
+      expect(pbp.referenceSample).toMatch(/^scripts\/booth\/voices\/.+\.wav$/)
+      expect(color.referenceSample).toMatch(/^scripts\/booth\/voices\/.+\.wav$/)
+    }
+  })
+
+  it('stems: the play-by-play man is excited on goals and saves, the colour man never is', () => {
+    for (const l of BOOTH_LINES) {
+      const s = stemStyle(l)
+      if (l.speaker === 'color') expect(s).toBe('neutral')
+      if (l.speaker === 'pbp' && /^(goal|save)/.test(l.moment)) expect(s).toBe('excited')
+    }
+  })
+
+  it('name-carrier phrases have exactly one name slot', () => {
+    for (const c of Object.values(boothConfig.nameCarriers)) {
+      if (c.startsWith('Dia2')) continue // the $comment entry
+      expect(c.split('{name}').length).toBe(2)
+    }
   })
 })
 
@@ -90,11 +107,11 @@ describe('pronunciation', () => {
     expect(respellingToSpeech('NEH-chahs')).toBe('neh-chahs')
   })
 
-  it('name clip key changes with pronunciation', () => {
+  it('a respelling changes the spoken text (and so the name-bank key)', () => {
     const a = spokenName({ id: '1', name: 'Martin Nečas', nationality: 'Czech Republic' })
     const b = spokenName({ id: '1', name: 'Martin Nečas', nationality: 'Czech Republic', pronunciation: 'NETCH-us' })
-    const k = (h: string): string => nameClipKey({ playerId: '1', voiceId: 'bm_george', form: 'surname', style: 'excited', pronunciationHash: h })
-    expect(k(a.hash)).not.toBe(k(b.hash))
+    expect(a.surname).not.toBe(b.surname)
+    expect(a.hash).not.toBe(b.hash)
   })
 })
 

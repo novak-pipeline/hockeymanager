@@ -14,9 +14,10 @@
  *    is talking. Lower priorities wait in a one-deep queue (highest wins) and are
  *    DROPPED if they can't start within their `maxLatencyMs` — a stale line is
  *    worse than silence.
- *  - Stitching: a named line plays [name][stem] or [stem][name]. When tonight's
- *    name clip isn't rendered, the line's BARE clip (the same call without the
- *    name) plays instead — the cue never waits for a name.
+ *  - Stitching: a named line plays [name][stem] or [stem][name] with a
+ *    {@link STITCH_GAP_MS} breath at the seam. When the player's name isn't in
+ *    any name bank (or hasn't decoded yet), the line's BARE clip (the same call
+ *    without the name) plays instead — the cue never waits for a name.
  *  - Missing audio is SILENCE, never a fallback voice: no stem/bare clip → the
  *    cue is skipped (the ticker still shows the text).
  *  - The crowd/SFX bed is ducked while the booth talks.
@@ -61,6 +62,11 @@ interface Pending {
 
 /** Gap left between two lines so they don't run into each other. */
 const LINE_GAP_MS = 140
+
+/** Silence between a name clip and its stem. The stems are cut at the name
+ *  slot of a real read ("Big save, | Jackson!"), so a short breath is all the
+ *  seam needs; the sink inserts it and the scheduler counts it. */
+export const STITCH_GAP_MS = 30
 
 /** Resolve a cue to the clips it plays, or null when it has no audio. */
 export function resolveParts(cue: CommentaryCue, lookup: ClipLookup): { parts: ClipRef[]; named: boolean } | null {
@@ -153,7 +159,7 @@ export class CommentaryScheduler {
       this.stats.droppedMissing++
       return
     }
-    const dur = r.parts.reduce((s, p) => s + p.durationMs, 0)
+    const dur = r.parts.reduce((s, p) => s + p.durationMs, 0) + STITCH_GAP_MS * (r.parts.length - 1)
     this.sink.duck(true)
     this.sink.play(r.parts, cue.speaker)
     this.current = { cue, endsAt: this.now() + dur + LINE_GAP_MS }

@@ -42,6 +42,16 @@ const api = {
     scene: (name: string): Promise<string | null> => ipcRenderer.invoke('mods:scene', name),
     logo: (logoId: string): Promise<string | null> => ipcRenderer.invoke('mods:logo', logoId),
   },
+  /** The commentary booth's pre-recorded audio (read-only; see src/main/booth.ts). */
+  booth: {
+    manifest: (pair: string): Promise<unknown> => ipcRenderer.invoke('booth:manifest', pair),
+    stem: (pair: string, file: string): Promise<Uint8Array | null> => ipcRenderer.invoke('booth:stem', pair, file),
+    nameBanks: (pair: string): Promise<Array<{ source: string; entries: Record<string, string> }>> =>
+      ipcRenderer.invoke('booth:nameBanks', pair),
+    nameClip: (pair: string, source: string, file: string): Promise<Uint8Array | null> =>
+      ipcRenderer.invoke('booth:nameClip', pair, source, file),
+    pronunciations: (): Promise<unknown> => ipcRenderer.invoke('booth:pronunciations'),
+  },
   press: {
     setKey: (key: string): Promise<{ ok: boolean }> =>
       ipcRenderer.invoke('press:setKey', key),

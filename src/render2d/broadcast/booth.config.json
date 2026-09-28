@@ -1,29 +1,52 @@
 {
-  "$comment": "THE BOOTH — one place for the commentary voice identity. The offline stem build (scripts/dev/render-commentary.mjs) and the runtime name-clip renderer (src/renderer/lib/commentaryAudio.ts) both read this file, so a name is always spoken by the same engine + voice + style as the stems around it. Swapping engines = change `engine` and the per-speaker `voiceId`/`referenceSample`, then rebuild the stems. See docs/BROADCAST-PACKAGE.md.",
-  "version": 1,
-  "engine": "kokoro",
-  "model": "onnx-community/Kokoro-82M-v1.0-ONNX",
-  "dtype": "fp32",
-  "sampleRate": 24000,
-  "speakers": {
-    "pbp": {
-      "displayName": "Graham Whitlock",
-      "role": "Play-by-play",
-      "voiceId": "bm_george",
-      "rate": 1.1,
-      "referenceSample": null
+  "$comment": "THE BOOTH: the commentary voice identity, in one place. Two fixed seats (play-by-play + colour), rendered OFFLINE by scripts/booth/ into pre-recorded clips; nothing is synthesised while the game runs. A 'pair' is one complete booth (both seats, same engine). The stems for a pair live in src/renderer/public/commentary/<pair>/ and its name bank in mods/<mod>/commentary/<pair>/ (real names are mod data). The fictional name pools' bank ships at src/renderer/public/commentary/<pair>/names/. Changing a seat's voice means re-rendering that pair's stems AND name banks. See docs/COMMENTARY-BOOTH.md.",
+  "version": 2,
+  "defaultPair": "dia2",
+  "pairs": {
+    "dia2": {
+      "label": "Dia2 booth",
+      "engine": "dia2",
+      "model": "nari-labs/Dia2-2B",
+      "speakers": {
+        "pbp": {
+          "displayName": "Graham Whitlock",
+          "role": "Play-by-play",
+          "voiceId": "dia2-pbp-v1",
+          "referenceSample": "scripts/booth/voices/dia2_pbp_prefix.wav"
+        },
+        "color": {
+          "displayName": "Dale Brennan",
+          "role": "Colour analyst",
+          "voiceId": "dia2-color-v1",
+          "referenceSample": "scripts/booth/voices/dia2_color_prefix.wav"
+        }
+      }
     },
-    "color": {
-      "displayName": "Dale Brennan",
-      "role": "Colour analyst",
-      "voiceId": "am_michael",
-      "rate": 1.04,
-      "referenceSample": null
+    "chatterbox": {
+      "label": "Chatterbox booth",
+      "engine": "chatterbox",
+      "model": "ResembleAI/chatterbox",
+      "speakers": {
+        "pbp": {
+          "displayName": "Graham Whitlock",
+          "role": "Play-by-play",
+          "voiceId": "chatterbox-pbp-v1",
+          "referenceSample": "scripts/booth/voices/chatterbox_pbp_ref.wav"
+        },
+        "color": {
+          "displayName": "Dale Brennan",
+          "role": "Colour analyst",
+          "voiceId": "chatterbox-color-v1",
+          "referenceSample": "scripts/booth/voices/chatterbox_color_ref.wav"
+        }
+      }
     }
   },
-  "styles": {
-    "neutral": { "rateDelta": 0, "terminator": "." },
-    "excited": { "rateDelta": 0.08, "terminator": "!" },
-    "rising": { "rateDelta": 0.02, "terminator": "?" }
-  }
+  "nameCarriers": {
+    "$comment": "Dia2 cannot say a lone word, so every name clip is cut out of a carrier phrase. The carrier sets the inflection.",
+    "excited": "It's {name}!",
+    "neutral": "That's {name}.",
+    "rising": "Is it {name}?"
+  },
+  "stemPlaceholder": "Jackson"
 }
