@@ -27,7 +27,7 @@ const SCREEN_TARGETS: Array<{ label: string; screen: ScreenId; keywords: string 
   { label: 'Roster', screen: 'squad', keywords: 'squad players lineup' },
   { label: 'Tactics', screen: 'tactics', keywords: 'lines systems strategy' },
   { label: 'Trades', screen: 'trades', keywords: 'trade block offers' },
-  { label: 'Scouting', screen: 'scoutingCentre' as ScreenId, keywords: 'scouts prospects draft' },
+  { label: 'Recruitment', screen: 'scouting' as ScreenId, keywords: 'scouting scouts prospects draft reports shortlist' },
   { label: 'Standings', screen: 'standings' as ScreenId, keywords: 'table league rank' },
   { label: 'Schedule', screen: 'schedule' as ScreenId, keywords: 'calendar fixtures games' },
   { label: 'Finances', screen: 'finances', keywords: 'cap salary money budget' },
