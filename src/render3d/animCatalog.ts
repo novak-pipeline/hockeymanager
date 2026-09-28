@@ -82,6 +82,9 @@ export const CLIPS: Record<string, ClipMeta> = {
   faceoff_draw: { mask: 'full', hands: 'stick', contact: f(4), fadeIn: 0.1, fadeOut: 0.2 },
   faceoff_tieup: { mask: 'full', hands: 'stick', contact: f(4), fadeIn: 0.1, fadeOut: 0.2 },
   faceoff_wing: { mask: 'full', hands: 'stick', loop: true, fadeIn: 0.35, fadeOut: 0.2 },
+  // the linesman (a stick-less skater rig): arms at rest over the skating legs, and the drop
+  official_arms: { mask: 'upper', hands: 'clip', loop: true, fadeIn: 0.3, fadeOut: 0.3 },
+  official_drop: { mask: 'full', hands: 'clip', contact: f(8), fadeIn: 0.15, fadeOut: 0.3 },
   // ── hitting ──
   check: { mask: 'full', hands: 'stick', contact: f(8), fadeIn: 0.1, fadeOut: 0.2 },
   check_boards: { mask: 'full', hands: 'clip', contact: f(8), fadeIn: 0.1, fadeOut: 0.3 },

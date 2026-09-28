@@ -427,6 +427,23 @@ def skater_clips(arm):
         (30, P(stick=carry(0.0))),
     ])
 
+    # ── the linesman (a skater rig in stripes, no stick: rink3dRenderer hides it) ──
+    # arms relaxed at his sides while he skates / waits; the drop: square up over
+    # the dot, bend, the puck held out low in the right hand, release, straighten
+    no_stick = dict(stick=dict(hand='R', dir=(0.0, 1.0, 0.0), grip=0.2))
+    arms = lambda f, sw: (f, P(lean=0.35, look=(-0.1, 0.0), handL=(0.95 + sw, hipY + 0.55, 0.35), handR=(-0.95 + sw, hipY + 0.55, 0.35), **no_stick))  # noqa: E731
+    A('official_arms', [arms(0, 0.0), arms(15, 0.04), arms(30, 0.0)])
+    A('official_drop', [
+        (0, P(lean=0.4, handL=(0.95, hipY + 0.55, 0.35), handR=(-0.95, hipY + 0.55, 0.35), **no_stick)),
+        (6, P(lean=0.95, look=(-0.6, 0.0), L=leg(0.9, 0.3, 1.3), R=leg(0.9, 0.3, 1.3),
+              handL=(0.7, hipY - 0.1, 0.9), handR=(-0.15, hipY - 0.3, 1.9), **no_stick)),
+        (8, P(lean=1.0, look=(-0.65, 0.0), L=leg(0.95, 0.3, 1.35), R=leg(0.95, 0.3, 1.35),
+              handL=(0.7, hipY - 0.1, 0.9), handR=(-0.1, hipY - 0.55, 2.0), **no_stick)),
+        (14, P(lean=0.7, look=(-0.3, 0.0), L=leg(0.7, 0.3, 1.0), R=leg(0.7, 0.3, 1.0),
+               handL=(0.9, hipY + 0.4, 0.4), handR=(-0.9, hipY + 0.3, 0.8), **no_stick)),
+        (22, P(lean=0.35, handL=(0.95, hipY + 0.55, 0.35), handR=(-0.95, hipY + 0.55, 0.35), **no_stick)),
+    ])
+
     # ── celebrations ──
     fist_stick = dict(hand='L', dir=(-0.3, 0.6, -0.74), grip=3.2)
     fist = lambda f, y, z, lift: (f, P(lean=0.4, look=(-0.2, 0.0), handR=(-0.75, hipY + y, z), handL=(0.9, hipY + 0.45, 1.3),

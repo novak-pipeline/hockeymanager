@@ -68,9 +68,9 @@ interface OwnerRoleTex {
   gearN: THREE.Texture
 }
 import { ActionLayer } from './animLayer'
-import { Choreographer, extractActionCues, type LocoMode } from './choreo'
+import { Choreographer, extractActionCues, FACEOFF_LEAD_S, type LocoMode } from './choreo'
 import { kitFor, type Kit } from './palette'
-import { ATLAS_GRID, buildAtlasCanvas, paintJerseySlot } from './textures'
+import { ATLAS_GRID, buildAtlasCanvas, paintJerseySlot, paintOfficialSlot } from './textures'
 import { RINK_HALF_W } from './iceCanvas'
 import { assignRigs, capStep, type RigMode } from './lineChange'
 import { layoutLabels, type LabelRequest, type PlacedLabel } from '@render2d/labelLayout'
@@ -183,6 +183,11 @@ function goalPhaseAt(t: number): GoalPhase {
 // — same-team neighbours, so mip bleed between cells rarely mixes teams.
 const HOME_G_SLOT = 12
 const AWAY_G_SLOT = 25
+// the linesman: a spare atlas cell, white / black stripes, black breezers + socks
+const OFFICIAL_SLOT = 26
+const OFFICIAL_KIT: Kit = { jersey: 0xf2f2ee, trim: 0x121212, trim2: 0x121212, number: 0x121212, numberOutline: 0xf2f2ee, pants: 0x121212, helmet: 0x121212, gloves: 0x121212, socks: 0x121212 }
+/** He waits along the far boards (the benches are on +Z). */
+const LINESMAN_BOARDS_Z = 38
 
 interface PlayerPose {
   worldX: Spring1D
@@ -305,6 +310,11 @@ export class Rink3dRenderer implements MatchRenderer {
    * scoring bench → the crowd → cut back to the game. Every change is a CUT.
    */
   private deadTimes: Array<{ from: number; to: number; x: number; z: number }> = []
+  /** Every faceoff (drop time, set time, dot) — the linesman's schedule. */
+  private faceoffs: Array<{ t: number; set: number; x: number; z: number }> = []
+  /** The linesman: a stick-less skater rig in stripes who drops the puck (null without authored athletes). */
+  private linesman: PlayerPose | null = null
+  private linesmanDropped = -1
   /** The faceoff that ends the stoppage in progress at time t (null in live play). */
   private deadAt(t: number): { x: number; z: number } | null {
     const d = this.deadTimes
@@ -857,6 +867,15 @@ export class Rink3dRenderer implements MatchRenderer {
     this.homeGoaliePose = mk('home', true, HOME_G_SLOT, -NET_X + 4, 0)
     this.awayGoaliePose = mk('away', true, AWAY_G_SLOT, NET_X - 4, 0)
     for (const p of this.allPoses()) this.paintSlot(p)
+    if (this.assets) {
+      // the linesman: a skater rig variant (spare atlas cell, stripes, no stick)
+      const l = mk('home', false, OFFICIAL_SLOT, 0, -LINESMAN_BOARDS_Z)
+      l.mode = 'play'
+      l.rig.bones.stick.scale.setScalar(1e-4)
+      l.rig.bones.stick_blade.scale.setScalar(1e-4)
+      this.linesman = l
+      this.paintOfficial()
+    }
 
     if (this.assets) {
       const all = () => this.allPoses()
@@ -871,6 +890,7 @@ export class Rink3dRenderer implements MatchRenderer {
         !!own
       )
       for (const p of all()) p.overlay = this.choreo.overlayFor(p)
+      if (this.linesman) this.linesman.overlay = this.choreo.overlayFor(this.linesman)
     }
 
     this.batch = new AthleteBatch(rigs, material)
@@ -898,6 +918,70 @@ export class Rink3dRenderer implements MatchRenderer {
       ...(this.homeGoaliePose ? [this.homeGoaliePose] : []),
       ...(this.awayGoaliePose ? [this.awayGoaliePose] : []),
     ]
+  }
+
+  /** The linesman's stripes (his own atlas cell; repainted with the kits). */
+  private paintOfficial(): void {
+    const l = this.linesman
+    if (!l) return
+    if (this.ownerPainter && this.ownerAtlas && this.owner) {
+      this.ownerPainter.paintOfficial(this.ownerAtlas, l.rig.slot, OFFICIAL_KIT)
+      this.ownerAtlasUp?.mark(slotRect(this.ownerAtlas, l.rig.slot))
+      this.ownerAtlasDirty = true
+      return
+    }
+    l.rig.kit = OFFICIAL_KIT
+    l.rig.recolor()
+    paintOfficialSlot(this.atlasCanvas, l.rig.slot, OFFICIAL_KIT)
+    this.atlasUp?.mark(slotRect(this.atlasCanvas, l.rig.slot))
+    this.atlasDirty = true
+  }
+
+  /**
+   * The linesman works the faceoffs (film T1): he skates in to the dot as the
+   * set begins, squares up beside it, bends and drops the puck on the drop,
+   * backs out ~6 ft, then drifts to the far boards and follows the play along
+   * them until the next faceoff. Skated through updatePose (springs, stride,
+   * skate heading) so he moves like everyone else.
+   */
+  private updateLinesman(absT: number, dt: number, simDt: number, puckWx: number, puckWz: number): void {
+    const l = this.linesman
+    if (!l) return
+    // a seek / load (dt 0): drop whatever he was doing (a paused drop would resume at the new time)
+    if (dt === 0 && l.layer) {
+      l.layer.clear()
+      this.linesmanDropped = -1
+    }
+    // (arms at rest whenever nothing else is playing — never on top of the drop)
+    if (l.layer && l.layer.playing.length === 0) l.layer.play('official_arms')
+    // the faceoff he is working: the next drop within its set window, or the one just dropped
+    let f: (typeof this.faceoffs)[number] | null = null
+    for (const x of this.faceoffs) {
+      if (x.t + 1.6 < absT) continue
+      if (x.set - 2.2 <= absT) f = x
+      break
+    }
+    let tx: number
+    let tz: number
+    let face: number | undefined
+    if (f) {
+      const s = f.z >= 0 ? 1 : -1 // stand on the dot's boards side
+      const off = absT <= f.t ? 3.4 : 9
+      tx = f.x
+      tz = f.z + s * off
+      face = Math.atan2(f.x - l.worldX.pos, f.z - l.worldZ.pos)
+      const dropAt = f.t - 8 / 30
+      if (l.layer && absT >= dropAt && absT < f.t + 0.2 && this.linesmanDropped !== f.t) {
+        l.layer.play('official_drop', { at: Math.max(0, absT - dropAt) })
+        this.linesmanDropped = f.t
+      }
+    } else {
+      tx = Math.max(-80, Math.min(80, puckWx * 0.8))
+      tz = -LINESMAN_BOARDS_Z
+      face = Math.atan2(puckWx - l.worldX.pos, puckWz - l.worldZ.pos)
+    }
+    this.updatePose(l, tx, tz, dt, simDt, puckWx, puckWz, 24, face)
+    this.skateHeading(l, dt, simDt)
   }
 
   private paintSlot(p: PlayerPose): void {
@@ -1151,7 +1235,12 @@ export class Rink3dRenderer implements MatchRenderer {
         pending = null
       }
     }
-    this.choreo?.setCues(extractActionCues(stream))
+    const cues = extractActionCues(stream)
+    this.faceoffs = cues
+      .filter((c) => c.kind === 'faceoff')
+      .map((c) => ({ t: c.absT, set: c.setT ?? c.absT - FACEOFF_LEAD_S, x: normXtoWorld(c.nx), z: normYtoWorld(c.ny) }))
+    this.linesmanDropped = -1
+    this.choreo?.setCues(cues)
   }
 
   /**
@@ -1479,6 +1568,8 @@ export class Rink3dRenderer implements MatchRenderer {
       this.updateGoaliePose(this.awayGoaliePose, snap.awayGoalie.x, snap.awayGoalie.y, snap.puck, dt, simDt)
     }
 
+    this.updateLinesman(absT, dt, simDt, puckWx, puckWz)
+
     // Sticks on the ice: skating poses float the blade (up to ~0.6 ft on the
     // owner clips), which puts a carried puck visibly off the blade
     for (const p of this.homePoses) this.groundStick(p, dt)
@@ -1720,7 +1811,7 @@ export class Rink3dRenderer implements MatchRenderer {
 
   private syncBlobs(): void {
     const m = new THREE.Matrix4()
-    const poses = this.allPoses()
+    const poses = this.linesman ? [...this.allPoses(), this.linesman] : this.allPoses()
     poses.forEach((p, i) => {
       if (!p.rig.visible) {
         m.makeScale(0, 0, 0)
@@ -1943,6 +2034,9 @@ export class Rink3dRenderer implements MatchRenderer {
       // (velocities are already game ft/s: game-time dt, no playback correction)
       this.choreo?.locomotionEvents(pose, simDt, 1)
     }
+    // handedness: a rig handed to a player who shoots the other way eases into the mirror
+    const mw = pose.rig.rightHanded ? 1 : 0
+    pose.rig.mirrorW = dt === 0 ? mw : pose.rig.mirrorW + (mw - pose.rig.mirrorW) * (1 - Math.exp(-dt / 0.08))
     pose.rig.apply(pose.worldX.pos, pose.worldZ.pos, pose.angle, body, stick, pose.overlay)
 
     pose.labelY = body.hipHeight + 3.4

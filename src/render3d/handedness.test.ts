@@ -12,6 +12,7 @@ describe('handedness', () => {
   const posed = (right: boolean) => {
     const rig = new AthleteRig(false, 0, new THREE.MeshStandardMaterial())
     rig.rightHanded = right
+    rig.mirrorW = right ? 1 : 0
     rig.apply(0, 0, 0, pose, { mode: 'carry' })
     rig.root.updateMatrixWorld(true)
     const at: Record<string, THREE.Vector3> = {}
