@@ -327,7 +327,7 @@ export interface Contact {
 /** Share of a contact impulse applied per substep (1 = instantaneous). */
 export const CONTACT_SOFT = { k: 0.2 }
 /** Friction circle: total edge force as a multiple of the lateral grip. */
-export const PHYS = { circle: 1.0, backThrust: 0.7, backGrip: 0.8, brakeBase: 10, gripBase: 13, tau0: 1.6, tauU: 1.25, glideDeadband: 4, easyAccel: 4.5 }
+export const PHYS = { circle: 1.0, backThrust: 0.7, backGrip: 0.8, brakeBase: 10, gripBase: 13, tau0: 1.6, tauU: 1.25, glideDeadband: 4.5, easyAccel: 4 }
 
 export function resolveBodies(bodies: readonly Body[], out: Contact[]): void {
   const n = bodies.length

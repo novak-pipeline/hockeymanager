@@ -67,7 +67,7 @@ const r01 = rLevel
  * a carrier who drives into a crowded house risks the whole continuation
  * value on a low-retention carry. That is what brings shots out to range.
  */
-export const VAL = { keepRoute: 3, minCarry: 4, oneTimerV: 1.3, otMinX: 50, otMinY: 6, otMaxY: 28, nzBack: 0.0015, carryKeep: 0.004, oz: 0.11, kPos: 0.15, shoot: 0.76, keep: 0.18, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 0.8, laneRead: 0.95, angleZero: 90, behindNet: 0.85, transMaxX: 70, transBack: 0.003, rushNoBackX: 0, regroupMaxX: 20, ozBack: 0.008 }
+export const VAL = { keepRoute: 3, minCarry: 4, oneTimerV: 1.8, otMinX: 50, otMinY: 14, otMaxY: 32, nzBack: 0.0015, carryKeep: 0.004, oz: 0.11, kPos: 0.15, shoot: 0.66, keep: 0.18, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 1.2, laneRead: 0.95, angleZero: 90, behindNet: 0.85, transMaxX: 70, transBack: 0.003, rushNoBackX: 0, regroupMaxX: 20, ozBack: 0.008 }
 /**
  * D safety (gap discipline): how far ahead a defenceman reads an attacker
  * coming at him (s), the base gap (ft) plus gap per ft/s of the attacker's
@@ -78,7 +78,7 @@ export const D_SAFETY = { look: 2, gap: 12, gapPerV: 0.5, stepUpMargin: 1.3, pin
 /** Support-skater motion loops around a spot: radius (ft) and angular speed (rad/s). */
 /** Shape tuning: where the breakout hands over to the neutral-zone lanes (x in the attack frame), and the target-smoothing time constant (s). */
 export const SHAPE_TUNING = { breakoutX: -25, smooth: 0.45 }
-export const DRIFT = { rAtk: 12, rDef: 5, omAtk: 0.5, omDef: 0.45 }
+export const DRIFT = { rAtk: 12, rDef: 5, omAtk: 0.42, omDef: 0.38 }
 /**
  * In close: the radius (ft) around their net where a carrier may not dawdle,
  * the seconds he may hold it there before he must act, the per-second cost of

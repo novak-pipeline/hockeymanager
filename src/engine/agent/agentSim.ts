@@ -97,7 +97,7 @@ const DOWN_S = { knockdown: 1.8, pinned: 1.7 }
 // ---------------------------------------------------------------------------
 export const AGENT_TUNING = {
   /** Reconciles the empirical xG with this engine's shot mix → goals/game. */
-  finishK: 0.7,
+  finishK: 0.9,
   /** A checker this close (ft) to a stopped carrier, himself stopped, is tied up with him. */
   tieUpR: 5,
   /** Share of tipped shots credited to the tipper (the NHL scores a tip as the deflector's shot). */
@@ -123,7 +123,7 @@ export const AGENT_TUNING = {
   /** Success scale per real attempt (attempts are rarer than thinks). */
   pokeAttemptK: 6.5,
   /** Unforced fumble rate under pressure (giveaways). */
-  fumbleK: 13,
+  fumbleK: 14.5,
   /** Per-think stick-foul chance when beaten (penalties). */
   stickFoulK: 1.9,
   /** Misc stoppages per second of live play ("other": net off, high stick…). */
