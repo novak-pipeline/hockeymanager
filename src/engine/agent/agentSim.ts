@@ -1537,8 +1537,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         // you get beaten).
         const stillC = speedOf(c) < AGENT_TUNING.pokeStillV
         // A player with a good stick picks more moments to go for it.
-        const sc = 0.3 * rDef(pk.player.ratings.defensive.stickChecking) + 0.7 * r01(pk.player.composites.takeaway)
-        if (!rng.chance((stillC ? AGENT_TUNING.pokeTryStill : AGENT_TUNING.pokeTry) * (0.3 + 1.4 * sc * sc))) continue
+        const sc = 0.1 * rDef(pk.player.ratings.defensive.stickChecking) + 0.9 * r01(pk.player.composites.takeaway)
+        if (!rng.chance((stillC ? AGENT_TUNING.pokeTryStill : AGENT_TUNING.pokeTry) * (0.1 + 2 * sc * sc * sc))) continue
         pokeReady.set(pk, now + POKE_RELOAD_S * rng.float(0.8, 1.3))
         const pc = r01(c.player.composites.puckControl)
         const protect = (c.hx * (pk.x - c.x) + c.hy * (pk.y - c.y)) < 0 ? 0.6 : 1 // body between
