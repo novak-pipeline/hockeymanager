@@ -568,9 +568,12 @@ export function MatchViewer(props: {
         })
         // Build player labels: last name + jersey number (number not in WatchedGame yet, omit)
         const playerLabels: PlayerLabels = {}
+        // handedness: additive on the watched game (absent on older saves)
+        const hands = game.playerHands
         for (const [id, fullName] of Object.entries(game.playerNames)) {
           const parts = fullName.trim().split(/\s+/)
-          playerLabels[id] = { lastName: parts[parts.length - 1] ?? fullName }
+          const hand = hands?.[id]
+          playerLabels[id] = { lastName: parts[parts.length - 1] ?? fullName, ...(hand ? { handedness: hand } : {}) }
         }
         // Start paused at speed=2; will play when user picks a mode
         r.load(timeline, r instanceof Rink3dRenderer ? colors3d : colors, playerLabels)

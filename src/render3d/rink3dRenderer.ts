@@ -920,6 +920,8 @@ export class Rink3dRenderer implements MatchRenderer {
     pose.playerId = id
     if (id) this.paintSlot(pose)
     const info = id ? this.labels[id] : undefined
+    // a right-handed shooter's pose is mirrored (athlete.ts mirrorPose); goalies keep theirs
+    pose.rig.rightHanded = !pose.rig.goalie && info?.handedness === 'R'
     if (!id || !info) {
       pose.labelText = null
       return
@@ -1484,7 +1486,7 @@ export class Rink3dRenderer implements MatchRenderer {
       this.carrierWx = carrierPose.worldX.pos
       this.carrierWz = carrierPose.worldZ.pos
     } else if (carrierPose !== null) {
-      const offset = puckCarriedOffset(carrierPose.angle)
+      const offset = puckCarriedOffset(carrierPose.angle, carrierPose.rig.bladeSide)
       pTargetX = carrierPose.worldX.pos + offset.dx
       pTargetZ = carrierPose.worldZ.pos + offset.dz
       this.carrierWx = carrierPose.worldX.pos
@@ -1566,7 +1568,7 @@ export class Rink3dRenderer implements MatchRenderer {
     this.groundW.set(pose, gw)
     if (gw < 0.01 || lift < 0.02) return
     const weight = gw
-    const hand = rig.bones.hand_R
+    const hand = rig.topHand
     hand.updateWorldMatrix(true, false)
     this.gPivot.setFromMatrixPosition(hand.matrixWorld)
     const v = this.gV.copy(w).sub(this.gPivot)

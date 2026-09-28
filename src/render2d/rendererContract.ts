@@ -31,6 +31,8 @@ export interface PlayerLabel {
   lastName: string
   /** Jersey number — omitted when unavailable (e.g. quick-sim, tests). */
   number?: number
+  /** Which way he shoots (Player.handedness) — 3D mirrors right-handed skaters. Omitted = left. */
+  handedness?: 'L' | 'R'
 }
 
 /** Map from PlayerId → label data. Passed as an optional parameter to load(). */

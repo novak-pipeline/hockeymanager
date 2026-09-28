@@ -418,11 +418,12 @@ export function legSwingAngle(time: number, speed: number): number {
  *
  * Returns {dx, dz} in world feet; caller rotates by the carrier's Y angle.
  */
-export function puckCarriedOffset(angle: number): { dx: number; dz: number } {
+export function puckCarriedOffset(angle: number, side: 1 | -1 = 1): { dx: number; dz: number } {
   // Stick is on the player's right side (positive local X) and slightly ahead.
   // Local-space offset: right = +1 ft, forward = +3 ft along facing direction.
   // (athlete.ts CARRY_BLADE: the blade sits ~4 ft out front at a ~45° lie)
-  const localX = 1.0
+  // side −1: a right-handed shooter carries it on his right (athlete.ts mirrorPose)
+  const localX = 1.0 * side
   const localZ = 4.1
   const sin = Math.sin(angle)
   const cos = Math.cos(angle)

@@ -25,8 +25,10 @@ const sim = q.get('engine') === 'agent' ? agentSimGame : fullSimGame
 const out = sim(home, away, resolve, { seed: seed * 7 })
 const homeIds = new Set<PlayerId>(home.roster)
 const tl = new MatchTimeline(out.stream, (id) => homeIds.has(id))
-const labels: Record<string, { lastName: string }> = {}
-for (const [id, p] of data.players) labels[id] = { lastName: p.name.split(' ').pop() ?? p.name }
+// ?hand=R|L forces every skater's handedness (mirroring checks); default = the player's own
+const forceHand = q.get('hand') as 'L' | 'R' | null
+const labels: Record<string, { lastName: string; handedness: 'L' | 'R' }> = {}
+for (const [id, p] of data.players) labels[id] = { lastName: p.name.split(' ').pop() ?? p.name, handedness: forceHand ?? p.handedness }
 
 const colors = { home: Number(q.get('home') ?? 0x1f4fbf), away: Number(q.get('away') ?? 0xc8102e) }
 // ?old=1 mounts the pre-upgrade renderer (scripts/dev/render3d-harness/old-*.ts,

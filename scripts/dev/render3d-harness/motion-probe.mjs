@@ -155,7 +155,9 @@ const r = await page.evaluate(async (secs) => {
         if (!goalie && p.layer) {
           // (older builds without gripWeights: any stick clip playing counts as both hands gripping)
           const stickClip = [...(p.layer.playing ?? [])].some((n) => /^(shot_|pass|deke_|stickhandle|faceoff_|check$|poke)/.test(n))
-          const gw = p.layer.gripWeights ? p.layer.gripWeights() : { L: stickClip ? 1 : 0, R: stickClip ? 1 : 0 }
+          const gw0 = p.layer.gripWeights ? p.layer.gripWeights() : { L: stickClip ? 1 : 0, R: stickClip ? 1 : 0 }
+          // clips are authored left-handed; a right-handed rig is the mirror (its top hand is hand_L)
+          const gw = p.rig.rightHanded ? { L: gw0.R, R: gw0.L } : gw0
           B.stick.updateWorldMatrix(true, false)
           const e = B.stick.matrixWorld.elements
           const heel = { x: e[12], y: e[13], z: e[14] }
