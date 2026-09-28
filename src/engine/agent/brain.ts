@@ -67,7 +67,7 @@ const r01 = rLevel
  * a carrier who drives into a crowded house risks the whole continuation
  * value on a low-retention carry. That is what brings shots out to range.
  */
-export const VAL = { keepRoute: 3, minCarry: 4, oneTimerV: 1.3, otMinX: 50, otMinY: 6, otMaxY: 28, nzBack: 0.0015, carryKeep: 0.004, oz: 0.11, kPos: 0.15, shoot: 0.76, keep: 0.18, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 0.8, laneRead: 0.95, angleZero: 90, behindNet: 0.85, transMaxX: 70, transBack: 0.003, rushNoBackX: 0, regroupMaxX: 20, ozBack: 0.008 }
+export const VAL = { keepRoute: 3, minCarry: 4, oneTimerV: 1.8, otMinX: 50, otMinY: 14, otMaxY: 32, nzBack: 0.0015, carryKeep: 0.004, oz: 0.11, kPos: 0.15, shoot: 0.66, keep: 0.18, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 1.2, laneRead: 0.95, angleZero: 90, behindNet: 0.85, transMaxX: 70, transBack: 0.003, rushNoBackX: 0, regroupMaxX: 20, ozBack: 0.008 }
 /**
  * D safety (gap discipline): how far ahead a defenceman reads an attacker
  * coming at him (s), the base gap (ft) plus gap per ft/s of the attacker's
@@ -78,7 +78,7 @@ export const D_SAFETY = { look: 2, gap: 12, gapPerV: 0.5, stepUpMargin: 1.3, pin
 /** Support-skater motion loops around a spot: radius (ft) and angular speed (rad/s). */
 /** Shape tuning: where the breakout hands over to the neutral-zone lanes (x in the attack frame), and the target-smoothing time constant (s). */
 export const SHAPE_TUNING = { breakoutX: -25, smooth: 0.45 }
-export const DRIFT = { rAtk: 12, rDef: 5, omAtk: 0.5, omDef: 0.45 }
+export const DRIFT = { rAtk: 12, rDef: 5, omAtk: 0.42, omDef: 0.38 }
 /**
  * In close: the radius (ft) around their net where a carrier may not dawdle,
  * the seconds he may hold it there before he must act, the per-second cost of
@@ -685,6 +685,9 @@ function supportTable(w: World, me: Side, withPuck: boolean): RoleSpot[] {
   return DZ_ZONE
 }
 
+/** Role assignment: hysteresis on a man's current role (ft of skating it is worth keeping), and whether to solve the whole shape at once. */
+export const ROLE_ASSIGN = { keep: 12, optimal: 1 }
+
 /** Assign roles greedily in priority order, with hysteresis on current roles. */
 function assignRoles(me: Side, pool: Body[], table: RoleSpot[], targets: Map<string, XY>): Map<Body, RoleSpot> {
   const out = new Map<Body, RoleSpot>()
@@ -710,17 +713,51 @@ function assignRoles(me: Side, pool: Body[], table: RoleSpot[], targets: Map<str
       return false
     })
   }
+  const costOf = (b: Body, spot: RoleSpot): number => {
+    const tgt = targets.get(spot.role)!
+    const isD = b.player.position === 'D'
+    let cost = Math.hypot(b.x - tgt.x, b.y - tgt.y)
+    if (spot.pos === 'F' && isD) cost += 30
+    if (spot.pos === 'D' && !isD) cost += 30
+    if (me.roles.get(b) === spot.role) cost -= ROLE_ASSIGN.keep
+    return cost
+  }
+  // The shape as a whole: the assignment with the least total skating (all
+  // permutations — five men at most), so nobody crosses the ice to take a
+  // spot a teammate is standing next to, and the roles don't churn.
+  const men = [...free]
+  if (ROLE_ASSIGN.optimal && men.length <= 5 && used.length <= 6 && men.length > 0 && men.length <= used.length) {
+    const k = Math.min(men.length, used.length)
+    let bestCost = Infinity
+    let bestPick: number[] = []
+    const pick: number[] = []
+    const usedSpot = new Array(used.length).fill(false)
+    const rec = (i: number, acc: number): void => {
+      if (acc >= bestCost) return
+      if (i === k) {
+        bestCost = acc
+        bestPick = pick.slice()
+        return
+      }
+      for (let j = 0; j < used.length; j++) {
+        if (usedSpot[j]) continue
+        usedSpot[j] = true
+        pick.push(j)
+        rec(i + 1, acc + costOf(men[i], used[j]) + ROLE_ASSIGN.keep)
+        pick.pop()
+        usedSpot[j] = false
+      }
+    }
+    rec(0, 0)
+    for (let i = 0; i < k; i++) out.set(men[i], used[bestPick[i]])
+    return out
+  }
   for (const spot of used) {
     if (free.size === 0) break
-    const tgt = targets.get(spot.role)!
     let best: Body | null = null
     let bc = Infinity
     for (const b of free) {
-      const isD = b.player.position === 'D'
-      let cost = Math.hypot(b.x - tgt.x, b.y - tgt.y)
-      if (spot.pos === 'F' && isD) cost += 30
-      if (spot.pos === 'D' && !isD) cost += 30
-      if (me.roles.get(b) === spot.role) cost -= 12
+      const cost = costOf(b, spot)
       if (cost < bc) {
         bc = cost
         best = b

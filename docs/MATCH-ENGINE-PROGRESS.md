@@ -366,3 +366,39 @@ The next lever is anticipation: support players moving to the spot for the puck'
 - 42% of SOG are one-timers, and they are the OZ's shot engine. Cutting the one-timer value drops SOG to 18–21 with no substitute shots.
 - Moving the one-timer spot to the dots (|y| 12–30) also cut SOG.
 - The biggest remaining gaps: too many central 15–40 ft shots and central point shots, too few 30–60° shots from 15–55 ft, and too few 8–15 ft shots.
+
+## Pass 5 (2026-09-28): shot map in band, carrier-aware shapes
+
+Pass-4 engine vs pass 5, imported league, 40 games × two seed sets (7000 / 9000), same analyzer for both:
+
+| metric | pass 4 | pass 5 | target |
+|---|---|---|---|
+| shot location TVD | 0.209 / 0.203 | **0.146 / 0.141** | ≤ 0.15 ✓ |
+| mean shot distance (ft) | 31.0 / 32.4 | 35.6 / 34.5 | |
+| SOG / goals per team-game | 29.0 / 2.91 · 29.1 / 2.78 | 30.4 / 3.01 · 30.4 / 3.29 | in band |
+| accel p50 / p99 (ft/s²) | 7.99 / 22.2 | 7.67 / 21.9 | ≤ 8 / ≤ 25 ✓ |
+| miles / 60, 22+ mph bursts | 8.20, 0.035 | 8.00, 0.028 | ✓ |
+| standoffs / game | 4.92 / 4.97 | 4.28 / 4.63 | → 0 |
+| NZ back-pass share | 0.067 | 0.086 / 0.079 | ≥ 0.05 ✓ |
+| in-close carrier speed p50 (mph) | 6.4 / 6.3 | 6.3 / 6.2 | ≥ 9 ✗ |
+| scorecard passes | 76 / 76 | 78 / 79 | |
+
+- **Shot map.**
+  - The one-timer feed now goes to the circles (|y| 14–32 ft) and is valued ×1.8, so it stays the offensive-zone shot engine while shooting from where the NHL takes one-timers.
+  - Point shots again count for their retrieval value (pointKeep 1.2).
+  - Recalibrated: shoot 0.66, finishK 0.90, fumbles ×1.12, glide deadband 4.5 / easy accel 4, support loops 0.42 / 0.38 rad/s.
+- **Carrier-aware shape matching** (analyzer). Each template now declares the puck holder's position group. 60% of the frames scored as "point possession" had a *forward* holding the puck on the half-wall, with support still coming in after the entry. That is a different play from a D walking the line, so it is no longer matched.
+  - Point-possession error, same pass-4 engine: 27.5 → 22.3 ft.
+  - Regroup error, same pass-4 engine: 24.7 → 20.3 ft.
+- **Role assignment** now solves the whole shape at once. OZ role churn was about 10% of support decisions. The effect on template error is within noise.
+- **Tried, no gain, reverted:**
+  - Anticipation (spot targets read at the carrier's best-pass point, k = 0.3–1.0): shapes flat or worse, TVD worse at k = 0.3.
+  - Hustle (no urgency damping on lanes).
+  - Screen-role urgency, and no get-open slide for net-front roles: under 1 ft.
+  - Carving protect (no hockey stop): in-close p50 went down to 6.0 and carry time up 25%.
+  - A smaller protect retention bonus in close: no change.
+- **Remaining shape error is systematic:**
+  - The net-front forward sits 15–18 ft high of the crease on average: body x ≈ 64 against a target of 80, moving at 10 ft/s.
+  - The rush lanes trail the carrier by 15–25 ft (the carrier often enters alone).
+  - Both need the player to *be* there before the situation arises. That is not reachable by tuning urgency, anticipation or assignment.
+- **In-close speed.** In-close carries are boxed in by geometry: every carry heading ends at the end boards or the net within about 15 ft, and the boards look-ahead brakes the carrier.
