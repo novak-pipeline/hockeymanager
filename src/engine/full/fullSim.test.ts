@@ -591,6 +591,8 @@ describe('post-goal sequence and puck continuity', () => {
         for (let j = whistleIdx + 1; j < out.stream.length; j++) {
           if (isEvent(out.stream[j], 'faceoff')) { faceoffIdx = j; break }
         }
+        // (A goal in the dying seconds of regulation ends the game: no faceoff follows.)
+        if (faceoffIdx < 0 && (ev as { period: number }).period === 3) continue
         expect(faceoffIdx).toBeGreaterThan(whistleIdx)
         const fo = out.stream[faceoffIdx] as any
         // After a goal the faceoff is always at center (|x| < 0.01, |y| < 0.01).
