@@ -40,6 +40,13 @@ export const HIT_TUNING = {
   ownZoneK: 0.45
 }
 
+/**
+ * Hit physics: how much of the ideal momentum transfer a check delivers
+ * (bodies are not rigid), the bounce, and the velocity change (ft/s) that
+ * takes an average-balance man off his feet.
+ */
+export const HIT_PHYS = { transfer: 0.75, restitution: 0.1, downDv: 11, pinHard: 0.25 }
+
 export interface HitIntent {
   target: Body
   until: number
@@ -57,6 +64,10 @@ export interface HitResult {
   kind: HitKind
   /** The victim had the puck, or had just moved it. */
   hadPuck: boolean
+  /** The victim went off his feet (the impulse beat his balance). */
+  knockdown: boolean
+  /** The victim is pinned against the boards for a beat (a board battle). */
+  pinned: boolean
 }
 
 function roleBoost(b: Body): number {
@@ -203,7 +214,44 @@ export function resolveHit(w: World, ct: Contact, intents: Map<Body, HitIntent>,
   }
   const bal = (r01(victim.player.ratings.physical.balance) + r01(victim.player.ratings.physical.strength)) / 2
   const hard = clamp((force - 6) / 20, 0, 1)
-  victim.stun = Math.max(victim.stun, clamp(0.25 + hard * 1.1 - bal * 0.35 + (boards ? 0.25 : 0), 0.15, 1.6))
+
+  // MOMENTUM EXCHANGE. The contact solver absorbs bumps softly over a few
+  // substeps; a real check is a hit: along the line of impact the victim takes
+  // the hitter's momentum (masses, closing speed, a little bounce), plus the
+  // drive of the hitter's legs through the man, and the hitter gives up what
+  // he hands over. It moves the bodies — visible in the frames.
+  const dx = victim.x - hitter.x
+  const dy = victim.y - hitter.y
+  const dl = Math.max(Math.hypot(dx, dy), 0.1)
+  const nx = dx / dl
+  const ny = dy / dl
+  const mh = hitter.mass
+  const mv = victim.mass
+  const drive = planned ? 1 + r01(hitter.player.ratings.physical.strength) * 0.35 : 1
+  const jImp = ((1 + HIT_PHYS.restitution) * ct.closing * (mh * mv) / (mh + mv)) * drive * HIT_PHYS.transfer
+  const dvV = jImp / mv
+  victim.vx += nx * dvV
+  victim.vy += ny * dvV
+  hitter.vx -= nx * (jImp / mh) * 0.8
+  hitter.vy -= ny * (jImp / mh) * 0.8
+  // Off his feet when the shove beats what his balance and strength can take.
+  const knockdown = dvV > HIT_PHYS.downDv * (0.6 + bal * 0.8)
+  // Into the boards: pinned there for a beat — a board battle, not a bounce.
+  const pinned = boards && !knockdown && planned && hard > HIT_PHYS.pinHard
+  if (pinned) {
+    const vn = victim.vx * nx + victim.vy * ny
+    if (vn > 0) {
+      victim.vx -= nx * vn
+      victim.vy -= ny * vn
+    }
+    victim.vx *= 0.3
+    victim.vy *= 0.3
+  }
+  victim.stun = Math.max(
+    victim.stun,
+    knockdown ? 1 + hard * 0.5 : pinned ? 1 + hard * 0.8 : clamp(0.25 + hard * 1.1 - bal * 0.35, 0.15, 1.2)
+  )
+  if (pinned) hitter.stun = Math.max(hitter.stun, 0.6)
   victim.energy = Math.max(0, victim.energy - 0.02 - hard * 0.03)
   hitter.energy = Math.max(0, hitter.energy - 0.015)
   const loosePuck = w.carrier === victim && rng.chance(clamp(0.2 + hard * 0.55 - bal * 0.25 + (boards ? 0.1 : 0), 0.08, 0.85))
@@ -222,7 +270,7 @@ export function resolveHit(w: World, ct: Contact, intents: Map<Body, HitIntent>,
   else if (hard > 0.5 && rng.chance(0.015 * k)) penalty = 'elbowing'
   void hs
   const kind: HitKind = !planned ? 'battle' : boards ? 'boards' : w.carrier === victim ? 'openIce' : 'finish'
-  return { hitter, victim, force, boards, loosePuck, penalty, planned, kind, hadPuck }
+  return { hitter, victim, force, boards, loosePuck: loosePuck || (knockdown && w.carrier === victim), penalty, planned, kind, hadPuck, knockdown, pinned }
 }
 
 function sideOfBody(w: World, b: Body): Side | null {

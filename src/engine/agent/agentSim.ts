@@ -72,7 +72,7 @@ import {
   type Puck
 } from './physics'
 import { BLUE_X, DOT_EZ_X, DOT_NZ_X, DOT_Y, GOAL_X, HALF_X, HALF_Y, NET_HALF_W, boardsClamp, distToBoards } from './rink'
-import { DEKE, REACH, blockChance, decideCarrier, dekeSkill, pressureOn, realPressure, thinkSide, xgAt, type ThinkOut } from './brain'
+import { DEKE, DEKE_LEVEL, REACH, blockChance, decideCarrier, dekeDefRead, dekeGoalieRead, dekeSkill, pressureOn, realPressure, thinkSide, xgAt, type ThinkOut } from './brain'
 import { decideHit, resolveHit, type HitIntent } from './physical'
 import { emptyAgentTelemetry, type AgentTelemetry } from './telemetry'
 import { LEVEL, levelDefOffset, levelOffset, rDef, rLevel, type CarrierAction, type Side, type World } from './world'
@@ -90,11 +90,11 @@ const DT = FRAME_DT / SUBSTEPS
 // ---------------------------------------------------------------------------
 export const AGENT_TUNING = {
   /** Reconciles the empirical xG with this engine's shot mix → goals/game. */
-  finishK: 0.64,
+  finishK: 0.7,
   /** Base share of unblocked attempts that miss the net. */
   missBase: 0.3,
   /** Poke-check success scale (takeaways). */
-  pokeK: 0.055,
+  pokeK: 0.04,
   /** Stick-check success multiplier on a carrier who is standing still. */
   pokeStill: 2.2,
   /** Chance per ready think that a defender stabs at a MOVING carrier in reach. */
@@ -126,6 +126,8 @@ const BENCH_GATE = { x: 22, y: -41 }
 const GOAL_CELEBRATION_S = 4
 const FACEOFF_MIN_WAIT = 1.5
 const FACEOFF_MAX_WAIT = 12
+/** Seconds between everyone being set and the drop (the linesman squares the centres up). */
+const FACEOFF_HOLD: [number, number] = [0.6, 1.2]
 /** Seconds a defender needs between two real stick checks. */
 const POKE_RELOAD_S = 1.4
 /** Chance a carrier holds up at the line when a mate is still offside. */
@@ -184,6 +186,12 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const dressed = [home, away].flatMap((t) => [...t.team.lines.forwards.flat(), ...t.team.lines.defensePairs.flat()].map((id) => t.resolve(id)))
     LEVEL.offset = levelOffset(dressed)
     LEVEL.def = levelDefOffset(dressed)
+    const bodies0 = dressed.map((p) => makeBody(p, 0, 0, 1))
+    const goalies0 = [home, away].map((t) => makeBody(t.resolve(t.team.lines.goalies[0]), 0, 0, 1))
+    const mean = (xs: number[]): number => xs.reduce((q, v) => q + v, 0) / Math.max(1, xs.length)
+    DEKE_LEVEL.atk = mean(bodies0.filter((b) => b.player.position !== 'D').map(dekeSkill))
+    DEKE_LEVEL.def = mean(bodies0.map(dekeDefRead))
+    DEKE_LEVEL.goalie = mean(goalies0.map(dekeGoalieRead))
   }
 
   const bodies = new Map<PlayerId, Body>()
@@ -242,6 +250,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   let now = 0
   let ended = false
   let deadAt: XY | null = null
+  let foSetAt = null as number | null
+  let foHold = 0
   let pending: { dot: XY; zone: 'offensive' | 'defensive' | 'neutral'; since: number; zoneFor: Side | null } | null = null
   let celebration: { scorer: Body; side: Side; until: number } | null = null
   let delayed: DelayedPenalty | null = null
@@ -639,7 +649,19 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         }
       }
     }
-    if (!set && waited < FACEOFF_MAX_WAIT) return false
+    if (!set && waited < FACEOFF_MAX_WAIT) {
+      foSetAt = null
+      return false
+    }
+    // Everyone is set: the linesman steps in, the centres square up and
+    // lower their sticks — a short hold before the drop.
+    if (foSetAt === null) {
+      foSetAt = now
+      foHold = rng.float(FACEOFF_HOLD[0], FACEOFF_HOLD[1])
+    }
+    if (now - foSetAt < foHold) return false
+    const setAt = foSetAt
+    foSetAt = null
     if (!hC || !aC) return false
     const hw = hC.player.composites.faceoffWin
     const aw = aC.player.composites.faceoffWin
@@ -659,6 +681,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const dx = p.dot.x * win.a
     const play = (dx > 30 ? win.tactics.offensiveFaceoff : dx < -30 ? win.tactics.defensiveFaceoff : undefined) ?? 'standard'
     const clean = rng.chance(0.72 + (Math.abs((homeWins ? hw : aw) - (homeWins ? aw : hw)) / 100) * 0.4)
+    const tieUpDraw = !clean || play === 'tie-up'
     let target: Body | null = null
     let at: XY
     const spots = faceoffSpots(win, p.dot)
@@ -694,7 +717,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       zone: p.zone === 'neutral' ? 'neutral' : zoneOf(p.dot, win),
       winner: winner.player.id,
       pos: { x: p.dot.x / HALF_X, y: p.dot.y / HALF_Y },
-      loser: (homeWins ? aC : hC).player.id
+      loser: (homeWins ? aC : hC).player.id,
+      setAt: Math.round(setAt * 100) / 100,
+      ...(tieUpDraw ? { tieUp: true } : {})
     })
     return true
   }
@@ -1548,7 +1573,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const pc = r01(c.player.composites.puckControl)
         const protect = (c.hx * (pk.x - c.x) + c.hy * (pk.y - c.y)) < 0 ? 0.6 : 1 // body between
         const still = stillC ? AGENT_TUNING.pokeStill : 1
-        const pSucc = clamp((0.004 + Math.pow(sc, 4) * 0.8 + (sc - pc) * 0.1) * protect * still * AGENT_TUNING.pokeK * AGENT_TUNING.pokeAttemptK, 0.001, 0.6)
+        const pSucc = clamp((0.004 + Math.pow(sc, 5) * 1.25 + (sc - pc) * 0.1) * protect * still * AGENT_TUNING.pokeK * AGENT_TUNING.pokeAttemptK, 0.001, 0.6)
         if (tm) tm.pokeAttempts++
         const won = rng.chance(pSucc)
         ev({ t: T(), period, type: 'pokeCheck', by: pk.player.id, on: c.player.id, success: won, pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y } })
@@ -1739,7 +1764,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           pos: { x: r.victim.x / HALF_X, y: r.victim.y / HALF_Y },
           force: Math.round(clamp((r.force - 4) / 26, 0, 1) * 100) / 100,
           kind: r.kind,
-          targetHadPuck: r.hadPuck
+          targetHadPuck: r.hadPuck,
+          ...(r.knockdown ? { knockdown: true } : {}),
+          ...(r.pinned ? { pinned: true } : {})
         })
         if (tm) tm.noteHit(r)
         if (r.loosePuck && w.carrier === r.victim) {
