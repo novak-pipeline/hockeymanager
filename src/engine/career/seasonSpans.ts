@@ -71,6 +71,13 @@ export function inHolidayFreeze(dateISO: string): boolean {
   return m === HOLIDAY_FREEZE.month && d >= HOLIDAY_FREEZE.firstDay && d <= HOLIDAY_FREEZE.lastDay
 }
 
+/** The All-Star break: ~55% of the way through the regular season (early
+ *  February on a real schedule). The calendar marks it and the season's act
+ *  structure holds its midseason report there — one day, one source. */
+export function allStarBreakDay(firstMatchDay: number, lastMatchDay: number): number {
+  return firstMatchDay + Math.round((lastMatchDay - firstMatchDay) * 0.55)
+}
+
 /* ───────────────────────── the windows ───────────────────────── */
 
 export interface SeasonSpanArgs {

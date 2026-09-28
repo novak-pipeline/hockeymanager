@@ -10,6 +10,7 @@ import {
   CLUB_SCENES,
   DRAFT_CALL_EVENTS,
   FARM_TRIP_EVENTS,
+  RACE_EVENTS,
 } from './clubScenes'
 import type { DecisionOption } from './decisionEvents'
 
@@ -31,8 +32,9 @@ describe('club scenes — library integrity', () => {
     expect(DRAFT_CALL_EVENTS.length).toBeGreaterThan(0)
     expect(ARRIVAL_EVENTS.length).toBeGreaterThan(0)
     expect(FARM_TRIP_EVENTS.length).toBeGreaterThan(0)
+    expect(RACE_EVENTS.length).toBeGreaterThan(0)
     expect(CLUB_SCENES).toHaveLength(
-      DRAFT_CALL_EVENTS.length + ARRIVAL_EVENTS.length + FARM_TRIP_EVENTS.length
+      DRAFT_CALL_EVENTS.length + ARRIVAL_EVENTS.length + FARM_TRIP_EVENTS.length + RACE_EVENTS.length
     )
   })
 
@@ -96,6 +98,8 @@ describe('club scenes — library integrity', () => {
       'ev.draft.slid-to-us-call',
       'ev.arrival.role-and-wants',
       'ev.farm.playoff-trip',
+      'ev.race.clinched',
+      'ev.race.eliminated',
     ]) {
       expect(CLUB_SCENES.some((e) => e.id === id), id).toBe(true)
     }

@@ -43,7 +43,9 @@ function armFiring(career: Career, internals: Internals): void {
 
 describe('E3: being fired is honoured', () => {
   it('holds Continue until the GM takes a real vacancy, then moves him and hires his successor', () => {
-    const { career, internals } = toSeasonEnd(71)
+    // Seed 70: the club misses the Cup (a cupOrBust mandate is only failed
+    // without one). The seed is incidental; the season's outcome is what matters.
+    const { career, internals } = toSeasonEnd(70)
     const oldTeamId = career.userTeamId as string
     const year = career.year
     armFiring(career, internals)

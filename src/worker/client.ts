@@ -497,6 +497,10 @@ export class SimClient {
   setStaffMeetingMode(mode: 'weekly' | 'onDemand' | 'delegate'): Promise<WorkerResponse> {
     return this.send({ type: 'setStaffMeetingMode', mode })
   }
+  /** THE WEEK: this week's practice load; null hands it back to the staff. */
+  setWeekLoad(load: 'push' | 'standard' | 'light' | null): Promise<WorkerResponse> {
+    return this.send({ type: 'setWeekLoad', load })
+  }
 
   getScoutMeeting(): Promise<WorkerResponse> {
     return this.send({ type: 'getScoutMeeting' })

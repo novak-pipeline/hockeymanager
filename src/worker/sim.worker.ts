@@ -348,6 +348,11 @@ function handle(req: WorkerRequest): WorkerResponse {
     case 'setStaffMeetingMode':
       must().setStaffMeetingMode(req.mode)
       return { id: req.id, type: 'dashboard', dashboard: must().getDashboard() }
+    case 'setWeekLoad': {
+      const r = must().setWeekLoad(req.load)
+      if (!r.ok) throw new Error(r.message ?? 'The week is already planned.')
+      return { id: req.id, type: 'dashboard', dashboard: must().getDashboard() }
+    }
     case 'getScoutMeeting':
       return { id: req.id, type: 'scoutMeeting', scoutMeeting: must().getScoutMeeting() }
     case 'submitScoutMeeting': {
