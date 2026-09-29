@@ -77,9 +77,13 @@ the render logs.
   - The carriers are "Great shot, {name}!" (excited), "Nice work, {name}."
     (neutral) and "Wait, {name}?" (rising), set in
     `booth.config.json → nameCarriers`.
-  - Each carrier ends in a stop consonant plus a comma, which leaves a gap in
-    front of the name. "It's {name}" left the hiss of its "s" on the clip
-    (Whisper heard "It's McDavid" in a stitched call).
+  - The renderer adds a forced `<break/>` in front of the name, so the name is
+    the last stretch of sound in its unit.
+  - `keep_last_segment` keeps only what follows the last real pause.
+  - Carriers tried and rejected:
+    - "It's {name}!" left the hiss of its "s" on the clip.
+    - Name-first carriers ("{name}! Great shot!") made Whisper stop
+      transcribing after the first line.
 - **Every stem is read whole, never cut.**
   - **Lead slot.** Dia2 garbles the first word of a verb-first fragment:
     "shoots, and scores!" came out "Fruits and scores" or "Foot and scores" in
@@ -90,24 +94,29 @@ the render logs.
     kept dropping the weak word right before the name ("…absolutely robbed by"
     lost its "by"). A tail stem ("Oh, what a save by") is now read on its own.
   - A tail stem is judged **stitched** to a reference name clip from the bank
-    ("Murphy"), exactly as the game plays it. Heard on its own, Whisper drops a
+    (the first names.ts surname Whisper hears cleanly), exactly as the game
+    plays it. Heard on its own, Whisper drops a
     stem's trailing "for"/"by"/"on" nearly every time, so an isolated score says
     nothing.
-- **Cuts are aligned with Whisper, not with Dia2's word stamps.**
+- **Name cuts: Whisper finds the unit, the audio finds the edge.**
   - Dia2's per-word stamps drift against the audio by a variable amount, worst
-    around `<break/>`s.
-  - Cuts placed on them clipped name onsets ("Crosby" came out "Crossbeast"),
-    kept carrier scraps ("Work Matthews") and dropped a stem's last word ("…a
-    milestone night for" lost its "for").
-  - Now Whisper-large-v3 transcribes the render, with word timings:
-    - the carrier words are the anchors;
-    - the name is what is heard between one carrier and the next;
-    - every edge snaps to the longest pause in the gap around it.
-  - Dia2's stamps are still used to split a multi-line stem batch at its 0.9 s
-    breaks. Every clip is QA'd afterwards, so a bad split is caught.
-  - A last pass (`clean_edges`) drops a short burst that a ≥ 0.15 s pause cuts
-    off from the rest of a name clip, such as the "t" of "shot" in front of
-    "Doyle". A name has no pause that long inside it.
+    around `<break/>`s. Cuts placed on them clipped name onsets ("Crosby" came
+    out "Crossbeast") and dropped stems' last words.
+  - Whisper-large-v3 transcribes each batch. The carrier's last word
+    ("shot,"/"work,") anchors each unit; its word order is reliable, its word
+    edges are not.
+  - The actual cut comes from the audio: the pause before the next carrier ends
+    the clip, and `keep_last_segment` / `clean_edges` drop any carrier left in
+    front of the name.
+- **Two QA gates per name clip:**
+  1. What Whisper hears between the anchors must resemble the name (phonetic
+     similarity ≥ 0.45).
+  2. The clip, **stitched after a plain line of the same seat** ("And it is
+     in!" + name), must not be heard with a carrier word in it. That is exactly
+     how a player would hear a bad cut.
+
+  A clip that fails is retried with a new seed, up to 3 times, then marked
+  failed. A failed name is simply not said: the line plays bare.
 - **Every shipped clip is QA'd by Whisper-large-v3 against its exact text.**
   - A scrap of the conditioning prefix before the first word ("Well, the puck
     is down…") is trimmed.
@@ -244,8 +253,57 @@ bundling the audio they generate is allowed. The obligations are:
 
 None of the engines ships in the game. Only their output does.
 
-## 6. Numbers
+## 6. Numbers (RTX 5090, Windows, busy desktop; 2026-09-28)
 
-Measured on the RTX 5090 under Windows (WDDM, busy desktop):
+| | |
+|---|---|
+| Stems (Dia2) | 96 clips (62 stems + 34 bare), **270 s of audio, 1.4 MB** Ogg/Opus, committed. First full pass: 28 min for 2 takes of every clip. The targeted re-renders that followed added about 1.5 h in total. |
+| Stem QA | After the re-renders, every stem is word-perfect for Whisper or within its spelling noise ("Milestone Watch"). Tail stems were scored stitched to a reference name. |
+| Name throughput | **About 3–4 s of GPU per accepted clip**: batches of 10, plus Whisper QA and retries. The fixed cost of about 10 s per Dia2 call is the floor. |
+| Name clip size | About 6 KB per clip (about 1 s Opus). |
+| Vanilla bank (committed) | The 50 `names.ts` surnames × 3 variants (pbp excited/neutral, colour neutral). |
+| Demo mod bank (not committed) | 20 NHL stars × 3 variants in `mods/nhl-ehm/commentary/dia2/`. |
 
-(filled in by the render runs; see the booth branch report)
+**Estimates for the full banks.** Each is a GPU job over 30 min, so it needs
+owner approval before it runs. All are resumable and pausable.
+
+| Bank | Clips | GPU time | Size |
+|---|---:|---:|---:|
+| Fictional pools, all 3,251 surnames × 3 variants | 9.75k | about 9–11 h | about 60 MB (at the repo's ~60 MB line: commit pbp-only, or git-ignore it and treat it as a build step) |
+| Fictional pools, pbp excited + neutral only | 6.5k | about 6–7 h | about 40 MB |
+| nhl-ehm, NHL rosters (660 surnames + 699 full names) × 3 | 4.1k | about 4 h | about 25 MB (mod folder) |
+| nhl-ehm, whole DB (8,555 surnames + 699 full) × 3 | 27.8k | about 25–30 h | about 170 MB (mod folder) |
+
+## 7. Known issues and what's left
+
+- **The owner must listen.** Every automatic check here goes through Whisper,
+  which spells unknown names however it likes and sometimes drops a name glued
+  to a sentence. Samples are listed in the booth branch report. The
+  `state.json → check` list in each bank names the clips to spot-check.
+- **Name-cut yield.** On hard names (the NHL demo), only about 70–75 % of clips
+  pass both gates within 3 attempts. The rest play bare.
+  - The cleaner fix is a real forced aligner, torchaudio's MMS_FA, which needs a
+    one-time ~1.2 GB model download (owner approval).
+  - Or fine-tune Dia2 on the two seat voices, which would let it say a lone word.
+- **Dia2 call overhead.** CUDA graphs are re-captured on every call. Keeping the
+  graph and buffers across calls (a deeper patch of `run_generation_loop`)
+  would roughly halve the name-bank time.
+- **Chatterbox pair.** The worker and the render path are in place
+  (`render_stems.py --pair chatterbox`, and `render_names.py` accepts it), but
+  its stems were not rendered in this pass. Settings shows it as
+  "not installed".
+- **No runtime fallback voice for unbanked names.** A pregame Chatterbox child
+  process was deliberately not added:
+  - its voice would not match the Dia2 booth;
+  - it would ship a 7 GB Python stack.
+
+  Unbanked names play the bare line. Modders re-run `render_names.py` (it only
+  renders what's missing) after a roster refresh or a draft.
+- **Library wording.** Lead-slot lines were rewritten as "{name}! He …" (whole
+  sentences). The bare line of `goal.tie.2` is now "All tied up!", because Dia2
+  said "Tie game" as "Time game" in every take.
+- **Pronunciation defaults** were written for Kokoro. They are now rendered as
+  one plain word ("Kahpreezoff"). A few (Tkachuk → "Kuhchuck") may be better
+  left as spelled. That is for the owner's ear.
+- **Credits.** Add the Mimi CC-BY-4.0 attribution to the game's credits /
+  third-party notices before shipping.

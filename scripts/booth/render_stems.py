@@ -44,6 +44,7 @@ NODE = os.environ.get("NODE", "C:/Program Files/nodejs/node.exe")
 CONFIG = json.load(open(os.path.join(ROOT, "src/render2d/broadcast/booth.config.json"), encoding="utf-8"))
 BREAK = ' <break time="0.9s"/> '
 SLOT_BREAK = '<break time="0.25s"/>'
+TAIL_CUT_TOO = False  # set by --tail-cut
 _BREAK_RE = re.compile(r"<break[^>]*/>")
 
 
@@ -88,6 +89,15 @@ def units_for(lines: list, placeholder: str) -> List[dict]:
                 units.append(dict(clip=f"stem.{l['id']}", seat=l["speaker"], style=style, text=l["stem"],
                                   cut=None, qa_tail=True, stem=l["stem"],
                                   nstyle=l.get("nameStyle") or "neutral"))
+                if TAIL_CUT_TOO:
+                    # The alternative: read with a placeholder name after a
+                    # forced pause and cut in front of it. Both kinds of take
+                    # compete on the same stitched score.
+                    head = l["text"].rsplit("{name}", 1)[0].rstrip()
+                    units.append(dict(clip=f"stem.{l['id']}", seat=l["speaker"], style=style,
+                                      text=l["text"].replace("{name}", placeholder),
+                                      render=f"{head} {SLOT_BREAK} {placeholder}!", cut="tail", qa_tail=True,
+                                      stem=l["stem"], nstyle=l.get("nameStyle") or "neutral"))
             units.append(dict(clip=f"bare.{l['id']}", seat=l["speaker"], style=style, text=l["bare"], cut=None,
                               stem=l["bare"]))
         else:
@@ -151,40 +161,55 @@ def unit_spans(wav: np.ndarray, ts: List[Tuple[str, float]], batch: List[dict]):
 
 
 def cut_placeholder(seg: np.ndarray, words: List[Tuple[str, float]], cut: str, placeholder: str) -> Optional[np.ndarray]:
-    """Cut the placeholder name off the end of a tail-slot line ("Big save,
-    <break/> Jackson!" -> "Big save,"). Lead-slot stems are rendered whole and
-    never come here.
-
-    Aligned with Whisper, not Dia2's word stamps: those drift against the audio
-    around a <break/> and cut the last word off ("...a milestone night for"
-    lost its "for"). The cut snaps to the longest pause between the end of the
-    word before the placeholder and the placeholder's start."""
+    """Cut the placeholder name off a tail-slot read ("Big save, <break/>
+    Jackson!" -> "Big save,"): in the longest pause just before the
+    placeholder's stamp (the forced break), else at the quietest frame there.
+    Only a candidate: it competes with whole reads on the stitched score."""
     if cut != "tail":
         return None
-    ww = au_whisper(seg)
-    widx = max(range(len(ww)), key=lambda i: au.similarity(placeholder, ww[i][0]), default=None)
-    if widx is None or widx == 0 or au.similarity(placeholder, ww[widx][0]) < 0.6:
+    idx = next((i for i, (w, _) in enumerate(words) if placeholder.lower() in w.lower().strip(",.!?")), None)
+    if idx is None or idx == 0:
         return None
-    prev_end, p_start = ww[widx - 1][2], ww[widx][1]
-    c, _ = au.silence_boundary(seg, prev_end - 0.03, max(prev_end, p_start) + 0.05)
+    t_prev, t_ph = words[idx - 1][1], words[idx][1]
+    c, quiet = au.silence_boundary(seg, t_prev + 0.15, t_ph + 0.1)
+    if quiet < 0.08:
+        c = au.quietest_point(seg, max(0.0, t_ph - 0.06), 0.1)
     return seg[: int(c * au.SR)]
 
 
-REF_NAME = "Murphy"  # a names.ts surname Whisper knows: the fictional bank has it
+REF_CANDIDATES = ["Murphy", "Anderson", "Doyle", "Ellis", "Reilly", "Whitaker", "Garrity", "Tennant", "Olsen", "Wallin"]
 _ref_cache: Dict[tuple, Optional[np.ndarray]] = {}
 
 
-def _ref_name(pair: str, seat: str, style: str) -> Optional[np.ndarray]:
+def _ref_name(pair: str, seat: str, style: str):
+    """(name, clip) for stitched QA: the first names.ts surname in the bank
+    that Whisper hears EXACTLY when stitched after a plain line, so the
+    reference itself adds no error. None when the bank has none."""
     k = (pair, seat, style)
-    if k not in _ref_cache:
-        import soundfile as sf
-        d = os.path.join(ROOT, "src", "renderer", "public", "commentary", pair, "names")
-        try:
-            idx = json.load(open(os.path.join(d, "index.json"), encoding="utf-8"))["entries"]
-            f = idx.get(f"{seat}|{style}|{REF_NAME}")
-            _ref_cache[k] = sf.read(os.path.join(d, f), dtype="float32")[0] if f else None
-        except Exception:
-            _ref_cache[k] = None
+    if k in _ref_cache:
+        return _ref_cache[k]
+    import soundfile as sf
+    d = os.path.join(ROOT, "src", "renderer", "public", "commentary", pair)
+    _ref_cache[k] = None
+    try:
+        idx = json.load(open(os.path.join(d, "names", "index.json"), encoding="utf-8"))["entries"]
+        man = json.load(open(os.path.join(d, "manifest.json"), encoding="utf-8"))["clips"]
+    except Exception:
+        return None
+    lead_id = {"pbp": "bare.goal.4", "color": "stem.goal.color.1"}[seat]
+    lead_txt = man[lead_id]["text"]
+    lead = sf.read(os.path.join(d, man[lead_id]["file"]), dtype="float32")[0]
+    gap = np.zeros(int(au.SR * 0.03), dtype=np.float32)
+    for name in REF_CANDIDATES:
+        f = idx.get(f"{seat}|{style}|{name}")
+        if not f:
+            continue
+        clip = sf.read(os.path.join(d, "names", f), dtype="float32")[0]
+        heard = " ".join(w for (w, _s, _e) in au_whisper(np.concatenate([lead, gap, clip])))
+        if au.wer(f"{lead_txt} {name}", heard) == 0:
+            _ref_cache[k] = (name, clip)
+            print(f"[stems] stitched-QA reference for {seat}/{style}: {name}", flush=True)
+            break
     return _ref_cache[k]
 
 
@@ -198,10 +223,11 @@ def qa_score(u: dict, clip: np.ndarray, pair: str, ww=None) -> Tuple[str, float]
     if u.get("qa_tail"):
         ref = _ref_name(pair, u["seat"], u.get("nstyle", "neutral"))
         if ref is not None:
+            name, rclip = ref
             gap = np.zeros(int(au.SR * 0.03), dtype=np.float32)
-            words = au_whisper(np.concatenate([clip, gap, ref]))
+            words = au_whisper(np.concatenate([clip, gap, rclip]))
             heard = " ".join(w for (w, _s, _e) in words)
-            return heard, au.wer(f"{u['stem']} {REF_NAME}", heard)
+            return heard, au.wer(f"{u['stem']} {name}", heard)
     words = ww if ww is not None else au_whisper(clip)
     heard = " ".join(w for (w, _s, _e) in words)
     return heard, au.wer(u["stem"], heard)
@@ -302,12 +328,16 @@ def main() -> None:
     ap.add_argument("--solo", action="store_true", help="one line per call (slower; cleanest edges)")
     ap.add_argument("--requalify", action="store_true", help="re-score the rendered clips (no rendering)")
     ap.add_argument("--kind", choices=["all", "stem", "bare"], default="all", help="render only stem.* or bare.* clips")
+    ap.add_argument("--tail-cut", action="store_true",
+                    help="also try cut-from-placeholder takes for tail stems (best stitched score wins)")
     ap.add_argument("--recheck", type=float, default=0.0,
                     help="re-render (solo) every clip whose QA word error rate is above this")
     args = ap.parse_args()
 
     from dia2_engine import setup_env
     setup_env()
+    global TAIL_CUT_TOO
+    TAIL_CUT_TOO = args.tail_cut
     pair = CONFIG["pairs"][args.pair]
     out_dir = os.path.join(ROOT, "src", "renderer", "public", "commentary", args.pair)
     man_path = os.path.join(out_dir, "manifest.json")
@@ -355,7 +385,7 @@ def main() -> None:
                 # A line rendered on its own is its own clip: no splitting, so
                 # no need for the word stream to line up (Whisper's "99" for
                 # "ninety nine" is fine here).
-                takes[batch[0]["clip"]].append(dict(seg=wav, words=ts, take=take))
+                takes[batch[0]["clip"]].append(dict(seg=wav, words=ts, take=take, cut=batch[0]["cut"]))
                 continue
             spans = unit_spans(wav, ts, batch)
             if spans is None and len(batch) > 1:
@@ -366,7 +396,7 @@ def main() -> None:
                     gen_audio += len(w1) / au.SR
                     sp = unit_spans(w1, t1, [u])
                     if sp:
-                        takes[u["clip"]].append(dict(seg=w1, words=sp[0][2], take=take))
+                        takes[u["clip"]].append(dict(seg=w1, words=sp[0][2], take=take, cut=u["cut"]))
                 continue
             if spans is None:
                 print(f"  ! {batch[0]['clip']}: word stream mismatch, skipped this take", flush=True)
@@ -378,18 +408,18 @@ def main() -> None:
                     gen_audio += len(w1) / au.SR
                     sp = unit_spans(w1, t1, [u])
                     if sp:
-                        takes[u["clip"]].append(dict(seg=w1, words=sp[0][2], take=take))
+                        takes[u["clip"]].append(dict(seg=w1, words=sp[0][2], take=take, cut=u["cut"]))
                     continue
-                takes[u["clip"]].append(dict(seg=au.cut(wav, s, e), words=words, take=take))
+                takes[u["clip"]].append(dict(seg=au.cut(wav, s, e), words=words, take=take, cut=u["cut"]))
             print(f"  take {take + 1} batch {bi + 1}/{len(groups)} ({seat}/{style}, {len(batch)} lines) "
                   f"{time.time() - t0:.0f}s elapsed", flush=True)
 
     # Pick the best take per clip, cut the placeholder, finish + encode.
-    for u in units:
+    for u in {x["clip"]: x for x in reversed(units)}.values():
         cands = []
         for c in takes[u["clip"]]:
             seg = c["seg"]
-            clip = seg if not u["cut"] else cut_placeholder(seg, c["words"], u["cut"], CONFIG["stemPlaceholder"])
+            clip = seg if not c.get("cut") else cut_placeholder(seg, c["words"], c["cut"], CONFIG["stemPlaceholder"])
             if clip is None or len(clip) < au.SR * 0.3:
                 continue
             clip = au.trim_silence(clip)

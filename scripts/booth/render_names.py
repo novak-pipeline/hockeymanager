@@ -32,7 +32,7 @@ import json
 import os
 import sys
 import time
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -47,7 +47,7 @@ DEFAULT_VARIANTS = "pbp:excited,pbp:neutral,color:neutral"
 MIN_SIM = 0.45
 # Words of the carrier phrases: hearing one inside a name clip means the cut
 # kept a scrap of "It's" / "That's".
-CARRIER_WORDS = {"great", "shot", "nice", "work", "its", "it's", "thats", "that's", "is", "it"}  # phonetic similarity of Whisper's hearing vs the text
+CARRIER_WORDS = {"great", "shot", "nice", "work", "wait"}  # phonetic similarity of Whisper's hearing vs the text
 
 
 def job_key(seat: str, style: str, text: str) -> str:
@@ -59,13 +59,14 @@ def carrier(style: str, text: str) -> str:
     return CONFIG["nameCarriers"][style].replace("{name}", text)
 
 
-NAME_BREAK = '<break time="0.25s"/>'
+NAME_BREAK = '<break time="0.3s"/>'
 
 
 def carrier_render(style: str, text: str) -> str:
-    """The carrier as sent to the engine: a forced pause in front of the name.
-    An excited read runs "shot" straight into the name, and the cut kept the
-    word ("Shot Murphy"). Alignment is by Whisper, so the pause costs nothing."""
+    """The carrier as sent to the engine: a forced pause in front of the name,
+    so the name is the last sound of its unit, set apart by silence on both
+    sides. (Name-first carriers were tried: Whisper then often transcribed
+    nothing past the first line, so the batch could not be aligned.)"""
     return CONFIG["nameCarriers"][style].replace("{name}", f"{NAME_BREAK} {text}")
 
 
@@ -90,44 +91,106 @@ def _match(word: str, target: str) -> bool:
     return au._norm_word(word) == au._norm_word(target) or au.similarity(target, word) >= 0.9
 
 
+class StitchCheck:
+    """Second opinion on a name clip, the way the player hears it: stitched
+    after a plain line of the same seat ("And it is in!" + name). Whatever
+    Whisper hears after that line's words is the name; a scrap of the carrier
+    shows up there as an extra word."""
+    LEAD = {"pbp": "bare.goal.4", "color": "stem.hit.big.1"}
+
+    def __init__(self, pair: str):
+        import soundfile as sf
+        d = os.path.join(ROOT, "src", "renderer", "public", "commentary", pair)
+        man = json.load(open(os.path.join(d, "manifest.json"), encoding="utf-8"))["clips"]
+        self.lead = {}
+        for seat, cid in self.LEAD.items():
+            e = man.get(cid)
+            if e:
+                self.lead[seat] = (sf.read(os.path.join(d, e["file"]), dtype="float32")[0], e["text"])
+        # A longer gap than the game's 30 ms: Whisper tends to swallow a
+        # name glued to the end of a sentence.
+        self.gap = np.zeros(int(au.SR * 0.15), dtype=np.float32)
+
+    def heard(self, clip: np.ndarray, seat: str) -> Optional[str]:
+        if seat not in self.lead:
+            return None
+        from dia2_engine import whisper_words
+        a, text = self.lead[seat]
+        words = [w for (w, _s, _e) in whisper_words(np.concatenate([a, self.gap, clip]), au.SR)]
+        lead = [au._norm_word(w) for w in text.split()]
+        i = 0
+        # Drop the lead line's words (Whisper may merge or drop one of them).
+        for lw in lead:
+            if i < len(words) and (au._norm_word(words[i]) == lw or au.similarity(lw, words[i]) >= 0.8):
+                i += 1
+        return " ".join(words[i:])
+
+
+def _align_anchors(ww, batch: List[dict], lead_words: List[str]) -> List[Optional[int]]:
+    """When Whisper dropped or doubled a carrier word, line the transcript up
+    with the script (difflib over sound skeletons) and take each unit's anchor
+    from the alignment. A unit whose anchor wasn't heard gets None and fails on
+    its own instead of sinking the whole batch."""
+    import difflib
+    exp, owner = [], []  # expected tokens, and (unit, is_anchor) per token
+    for k, j in enumerate(batch):
+        for i, w in enumerate(lead_words):
+            exp.append(au.phonetic_key(w))
+            owner.append((k, i == len(lead_words) - 1))
+        for w in j["text"].split():
+            exp.append(au.phonetic_key(w))
+            owner.append((k, False))
+    heard = [au.phonetic_key(w) for (w, _s, _e) in ww]
+    anchors: List[Optional[int]] = [None] * len(batch)
+    sm = difflib.SequenceMatcher(None, exp, heard, autojunk=False)
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag not in ("equal", "replace") or (i2 - i1) != (j2 - j1):
+            continue
+        for d in range(i2 - i1):
+            k, is_anchor = owner[i1 + d]
+            if is_anchor and _match(ww[j1 + d][0], lead_words[-1]):
+                anchors[k] = j1 + d
+    return anchors
+
+
 def split_batch(wav: np.ndarray, ww: List[Tuple[str, float, float]], batch: List[dict]):
-    """Cut each name out of 'Great shot, A! <break/> Great shot, B! ...'.
+    """Cut each name out of 'Great shot, <pause> A! <break/> Great shot, <pause> B! ...'.
 
-    Dia2's own word stamps drift by a variable amount against the audio (worst
-    around <break/>s): cuts placed on them clipped name onsets ("Crosby" came
-    out "Crossbeast") and kept carrier scraps ("Work Matthews"). So the batch is
-    aligned with Whisper instead: the carrier words are reliable anchors, the
-    name is whatever Whisper hears between one carrier and the next, and each
-    edge snaps to the longest pause in the gap around it.
-
-    Returns per job (start, end, heard) or None for that job."""
+    Aligned with Whisper, not Dia2's word stamps (those drift against the audio
+    around <break/>s). Whisper's word ORDER is reliable and its word EDGES are
+    loose, so it only says roughly where each unit is: the carrier's last word
+    ("shot,"/"work,") is the anchor, and the name is what it hears between one
+    anchor and the next carrier. The cut then comes from the audio itself: the
+    unit's LAST stretch of sound (keep_last_segment), because the render puts
+    a forced pause in front of every name.
+    Returns per job (start, end, heard), or None for a job it can't place."""
     dur = len(wav) / au.SR
-    lead_words = [w for w in CONFIG["nameCarriers"][batch[0]["style"]].split("{name}")[0].split() if w]
-    # Anchor on the carrier's LAST word before the name ("shot," / "work,"):
-    # Whisper sometimes doubles or drops the first ("Nice, nice work").
+    lead_words = [w for w in CONFIG["nameCarriers"][batch[0]["style"]].split("{name}")[0].split() if au._norm_word(w)]
     key, before = lead_words[-1], lead_words[:-1]
     anchors = [i for i, (w, _s, _e) in enumerate(ww) if _match(w, key)]
     if len(anchors) != len(batch):
-        return [None] * len(batch)
+        anchors = _align_anchors(ww, batch, lead_words)
     out = []
     for k, a in enumerate(anchors):
+        if a is None:
+            out.append(None)
+            continue
         first = a + 1
-        last = (anchors[k + 1] if k + 1 < len(anchors) else len(ww)) - 1
+        nxt_a = next((x for x in anchors[k + 1:] if x is not None), None)
+        last = (nxt_a if nxt_a is not None else len(ww)) - 1
         # The next carrier's opening words ("Great") belong to the next unit.
-        while k + 1 < len(anchors) and last >= first and any(_match(ww[last][0], b) for b in before):
+        while nxt_a is not None and last >= first and any(_match(ww[last][0], b) for b in before):
             last -= 1
         if last < first:
             out.append(None)
             continue
         name_words = ww[first:last + 1]
         heard = " ".join(w for (w, _s, _e) in name_words)
-        # Whisper's word EDGES are loose (±0.1 s), its word ORDER is not: search
-        # wide windows for the real pauses. In front of the name that is the
-        # comma pause after "shot," (window from inside the carrier word);
-        # behind it, the 0.6 s <break/> before the next carrier.
-        s0, _ = au.silence_boundary(wav, ww[a][1] + 0.1, name_words[0][1] + 0.05)
+        # A generous span: from inside the anchor word to the pause before the
+        # next carrier. keep_last_segment() then drops the carrier.
+        s0 = ww[a][1] + 0.05
         if last + 1 < len(ww):
-            e0, _ = au.silence_boundary(wav, name_words[0][1] + 0.25, ww[last + 1][1] + 0.02)
+            e0, _ = au.silence_boundary(wav, name_words[0][1] + 0.25, max(name_words[0][1] + 0.3, ww[last + 1][1] + 0.02))
         else:
             e0 = dur
         out.append((s0, max(e0, s0 + 0.1), heard))
@@ -190,6 +253,7 @@ def main() -> None:
         # Whisper anyway, so the same carrier batches work for it.
         from render_stems import ChatterboxRenderer
         generate = ChatterboxRenderer().render
+    check = StitchCheck(args.pair)
     t_start = time.time()
     done_this_run = 0
     retry: List[dict] = []
@@ -213,7 +277,8 @@ def main() -> None:
         t0 = time.time()
         wav, ts = generate(text, head["seat"], head["style"], seed)
         from dia2_engine import whisper_words
-        spans = split_batch(wav, whisper_words(wav, au.SR), batch)
+        ww = whisper_words(wav, au.SR)
+        spans = split_batch(wav, ww, batch)
         ok = 0
         for k, j in enumerate(batch):
             state["attempts"][j["key"]] = state["attempts"].get(j["key"], 0) + 1
@@ -223,7 +288,7 @@ def main() -> None:
                 reason = "could not align the batch"
             else:
                 s, e, heard_txt = spans[k]
-                seg = au.clean_edges(au.trim_silence(au.cut(wav, s, e)))
+                seg = au.keep_last_segment(au.clean_edges(au.trim_silence(au.cut(wav, s, e))))
                 d = len(seg) / au.SR
                 max_d = 3.2 if j["form"] == "full" else 2.2
                 sim = au.similarity(j["text"], heard_txt)
@@ -231,12 +296,22 @@ def main() -> None:
                     reason = f"duration {d:.2f}s"
                 elif any(au._norm_word(w) in CARRIER_WORDS for w in heard_txt.split()):
                     reason = f"carrier bleed: heard '{heard_txt}'"
+
                 elif sim < MIN_SIM:
                     reason = f"heard '{heard_txt}' ({sim:.2f})"
                 else:
-                    clip = au.finish(seg, j["style"])
-                    if sim < 0.65:
-                        state["check"][j["key"]] = heard_txt
+                    cand = au.finish(seg, j["style"])
+                    stitched = check.heard(cand, j["seat"])
+                    bleed = [w for w in (stitched or "").split()
+                             if au._norm_word(w) in CARRIER_WORDS and au.similarity(j["text"], w) < 0.6]
+                    if bleed:
+                        reason = f"carrier bleed (stitched): heard '{stitched}'"
+                    else:
+                        clip = cand
+                        if sim < 0.65 or (stitched is not None and au.similarity(j["text"], stitched) < MIN_SIM):
+                            # Report-only: listen to these. Whisper often drops
+                            # a name glued to the end of a sentence.
+                            state["check"][j["key"]] = f"batch: {heard_txt} | stitched: {stitched}"
             if clip is not None:
                 fn = f"{au.slug(j['text'])}.{j['seat']}.{j['style']}.ogg"
                 au.write_ogg(os.path.join(args.out, fn), clip)

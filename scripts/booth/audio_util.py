@@ -227,3 +227,28 @@ def clean_edges(a: np.ndarray, min_gap: float = 0.15, max_scrap: float = 0.22, r
     if lo == 0 and hi == n or hi - lo < int(0.2 * SR / FRAME):
         return a
     return trim_silence(a[lo * FRAME: hi * FRAME])
+
+
+
+def keep_last_segment(a: np.ndarray, min_gap: float = 0.12, min_keep: float = 0.25, rel_db: float = -32.0) -> np.ndarray:
+    """Keep only what follows the LAST pause of at least `min_gap` s, provided at
+    least `min_keep` s of sound remains after it. A name clip is cut from
+    "…shot, <pause> NAME": whatever precedes the last real pause is carrier.
+    A name has no internal pause that long (stop closures run ~50-100 ms)."""
+    r = frame_rms(a)
+    if r.size < 5:
+        return a
+    quiet = r < r.max() * (10 ** (rel_db / 20.0))
+    need = max(1, int(min_gap * SR / FRAME))
+    keep = int(min_keep * SR / FRAME)
+    cut_at, run = None, 0
+    for i, q in enumerate(quiet):
+        if q:
+            run += 1
+        else:
+            if run >= need and len(r) - i >= keep and i - run > 0:
+                cut_at = i - run // 2
+            run = 0
+    if cut_at is None:
+        return a
+    return trim_silence(a[cut_at * FRAME:])
