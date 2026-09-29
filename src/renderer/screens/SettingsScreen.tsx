@@ -33,6 +33,11 @@ import {
   isVoiceEnabled, setVoiceEnabled,
   isAutoplayEnabled, setAutoplayEnabled,
 } from '../lib/speak'
+import {
+  BOOTH_PAIRS, BoothAudio, boothPairInstalled, isCommentaryEnabled, setCommentaryEnabled,
+  readBoothPair, writeBoothPair, readCommentaryVolume, writeCommentaryVolume, type BoothPair,
+} from '../lib/commentaryAudio'
+import boothConfig from '../../render2d/broadcast/booth.config.json'
 
 type KeyStatus = 'unknown' | 'present' | 'absent' | 'saving' | 'testing'
 
@@ -263,8 +268,71 @@ export function SettingsScreen(): JSX.Element {
       </Panel>
 
       <FeedModelPanel />
+      <CommentaryPanel />
       <VoicePanel />
     </section>
+  )
+}
+
+/** Commentary: the two-man booth for watched games — pre-recorded, never
+ *  synthesised live. Off by default until the owner signs off on the sound. */
+function CommentaryPanel(): JSX.Element {
+  const [on, setOn] = useState<boolean>(isCommentaryEnabled())
+  const [volume, setVolume] = useState<number>(readCommentaryVolume())
+  const [pair, setPair] = useState<BoothPair>(readBoothPair())
+  const [installed, setInstalled] = useState<Partial<Record<BoothPair, boolean>>>({})
+  const [msg, setMsg] = useState('')
+  const sampleRef = useRef<BoothAudio | null>(null)
+
+  useEffect(() => {
+    let live = true
+    for (const p of BOOTH_PAIRS) void boothPairInstalled(p).then((ok) => { if (live) setInstalled((m) => ({ ...m, [p]: ok })) })
+    return () => { live = false; sampleRef.current?.dispose() }
+  }, [])
+
+  async function hear(): Promise<void> {
+    sampleRef.current?.dispose()
+    const b = new BoothAudio(pair)
+    sampleRef.current = b
+    b.setVolume(volume)
+    const ok = await b.playSample()
+    setMsg(ok ? '' : 'No commentary audio is installed for this booth yet.')
+  }
+
+  return (
+    <Panel title="Commentary">
+      <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
+        A two-man booth for the games you watch: play-by-play and colour. Every line is recorded
+        ahead of time, so it never lags the game. Names come from the name bank; a player who isn't
+        in it gets the call without his name.
+      </div>
+      <ToggleRow label="Commentary" note="Experimental. Off by default." value={on}
+        onChange={(v) => { setCommentaryEnabled(v); setOn(v) }} />
+      <label className="row" style={{ gap: 8, alignItems: 'center', margin: '10px 0', fontSize: 12.5, opacity: on ? 1 : 0.5 }}>
+        <span style={{ minWidth: 60 }}>Volume</span>
+        <input type="range" min={0} max={100} step={5} value={Math.round(volume * 100)} disabled={!on}
+          onChange={(e) => { const v = Number(e.target.value) / 100; writeCommentaryVolume(v); setVolume(v) }} />
+        <span className="muted" style={{ fontVariantNumeric: 'tabular-nums', minWidth: 34 }}>{Math.round(volume * 100)}%</span>
+      </label>
+      <div style={{ fontSize: 12.5, marginBottom: 6, opacity: on ? 1 : 0.5 }}>Booth voices</div>
+      {BOOTH_PAIRS.map((p) => (
+        <label key={p} className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 6, cursor: 'pointer', fontSize: 12.5, opacity: on ? 1 : 0.5 }}>
+          <input type="radio" name="booth-pair" checked={pair === p} disabled={!on}
+            onChange={() => { writeBoothPair(p); setPair(p) }} />
+          <span>
+            <span style={{ fontWeight: 600 }}>{boothConfig.pairs[p].label}</span>
+            {p === boothConfig.defaultPair && <span className="muted"> (default)</span>}
+            <span className="muted"> · {installed[p] === undefined ? 'checking…' : installed[p] ? 'installed' : 'not installed'}</span>
+          </span>
+        </label>
+      ))}
+      <div className="row" style={{ gap: 8, alignItems: 'center', marginTop: 8 }}>
+        <button className="btn" disabled={!on} onClick={() => void hear()}>
+          <Icon size={14}><Icons.Volume /></Icon> Hear the booth
+        </button>
+        {msg && <span className="muted small">{msg}</span>}
+      </div>
+    </Panel>
   )
 }
 
@@ -328,7 +396,7 @@ function VoicePanel(): JSX.Element {
           checked={voiceOn}
           onChange={(e) => { const on = e.target.checked; setVoiceEnabled(on); setVoiceOn(on) }}
         />
-        <span>Voices on <span className="muted">(master switch — commentary, meetings, calls)</span></span>
+        <span>Voices on <span className="muted">(master switch — meetings and calls; match commentary has its own setting)</span></span>
       </label>
       <label className="row" style={{ gap: 8, alignItems: 'center', marginBottom: 8, cursor: 'pointer', fontSize: 12.5, opacity: voiceOn ? 1 : 0.5 }}>
         <input

@@ -128,20 +128,20 @@ export const BOOTH_LINES: readonly BoothLine[] = [
     text: 'And we are away.' },
 
   { id: 'goal.1', speaker: 'pbp', moment: 'goal', intensity: 2,
-    text: '{name} shoots, and scores!', bare: 'He shoots, and scores!', nameStyle: 'excited' },
+    text: '{name}! He shoots, and scores!', bare: 'He shoots, and scores!', nameStyle: 'excited' },
   { id: 'goal.2', speaker: 'pbp', moment: 'goal', intensity: 2,
     text: 'In the back of the net! Goal, {name}!', bare: 'In the back of the net! Goal!', nameStyle: 'excited' },
   { id: 'goal.3', speaker: 'pbp', moment: 'goal', intensity: 2,
     text: 'He buries it! {name}!', bare: 'He buries it!', nameStyle: 'excited' },
   { id: 'goal.4', speaker: 'pbp', moment: 'goal', intensity: 2,
-    text: '{name}, and it is in!', bare: 'And it is in!', nameStyle: 'excited' },
+    text: '{name}! And it is in!', bare: 'And it is in!', nameStyle: 'excited' },
 
   { id: 'goal.tie.1', speaker: 'pbp', moment: 'goal.tie', intensity: 2,
     text: 'And we are all square! {name}!', bare: 'And we are all square!', nameStyle: 'excited' },
   { id: 'goal.tie.2', speaker: 'pbp', moment: 'goal.tie', intensity: 2,
-    text: '{name} ties it up!', bare: 'Tie game!', nameStyle: 'excited' },
+    text: '{name}! He ties it up!', bare: 'All tied up!', nameStyle: 'excited' },
   { id: 'goal.goAhead.1', speaker: 'pbp', moment: 'goal.goAhead', intensity: 2,
-    text: '{name} puts them in front!', bare: 'And they are in front!', nameStyle: 'excited' },
+    text: '{name}! He puts them in front!', bare: 'And they are in front!', nameStyle: 'excited' },
   { id: 'goal.goAhead.2', speaker: 'pbp', moment: 'goal.goAhead', intensity: 2,
     text: 'He scores, and the lead belongs to them! {name}!', bare: 'He scores, and the lead belongs to them!', nameStyle: 'excited' },
 
@@ -161,7 +161,7 @@ export const BOOTH_LINES: readonly BoothLine[] = [
   { id: 'goal.powerPlay.1', speaker: 'pbp', moment: 'goal.powerPlay', intensity: 2,
     text: 'The power play cashes in! {name}!', bare: 'The power play cashes in!', nameStyle: 'excited' },
   { id: 'goal.powerPlay.2', speaker: 'pbp', moment: 'goal.powerPlay', intensity: 2,
-    text: '{name} on the power play, and it is in!', bare: 'On the power play, and it is in!', nameStyle: 'excited' },
+    text: '{name}! On the power play, and it is in!', bare: 'On the power play, and it is in!', nameStyle: 'excited' },
 
   { id: 'goal.shortHanded.1', speaker: 'pbp', moment: 'goal.shortHanded', intensity: 3,
     text: 'Shorthanded, and he scores! {name}!', bare: 'Shorthanded, and he scores!', nameStyle: 'excited' },
@@ -192,7 +192,7 @@ export const BOOTH_LINES: readonly BoothLine[] = [
   { id: 'save.big.1', speaker: 'pbp', moment: 'save.big', intensity: 2,
     text: 'Big save, {name}!', bare: 'Big save!', nameStyle: 'excited' },
   { id: 'save.big.2', speaker: 'pbp', moment: 'save.big', intensity: 2,
-    text: '{name} says no!', bare: 'And the goalie says no!', nameStyle: 'excited' },
+    text: '{name}! And he says no!', bare: 'And the goalie says no!', nameStyle: 'excited' },
   { id: 'save.robbery.1', speaker: 'pbp', moment: 'save.robbery', intensity: 3,
     text: 'Oh, what a save by {name}!', bare: 'Oh, what a save!', nameStyle: 'excited' },
   { id: 'save.robbery.2', speaker: 'pbp', moment: 'save.robbery', intensity: 3,
@@ -203,7 +203,7 @@ export const BOOTH_LINES: readonly BoothLine[] = [
     text: 'That is a goal ninety nine times out of a hundred.' },
 
   { id: 'penalty.1', speaker: 'pbp', moment: 'penalty', intensity: 1,
-    text: '{name} heads to the box.', bare: 'And he heads to the box.', nameStyle: 'neutral' },
+    text: '{name}. He heads to the box.', bare: 'And he heads to the box.', nameStyle: 'neutral' },
   { id: 'penalty.2', speaker: 'pbp', moment: 'penalty', intensity: 1,
     text: 'The arm goes up, and that is a penalty on {name}.', bare: 'The arm goes up, and that is a penalty.', nameStyle: 'neutral' },
 
@@ -251,9 +251,22 @@ export function nameSlotPosition(text: string): 'lead' | 'tail' | null {
  */
 export function stemText(line: BoothLine): string {
   const pos = nameSlotPosition(line.text)
-  if (pos === 'lead') return line.text.replace(/^\{name\}[,]?\s*/, '').trim()
+  if (pos === 'lead') return line.text.replace(/^\{name\}[,.!?]?\s*/, '').trim()
   if (pos === 'tail') return line.text.replace(/\s*\{name\}[.!?]*$/, '').trim()
   return line.text
+}
+
+/**
+ * The delivery a line's stem (and bare clip) is recorded at. The colour man is
+ * always conversational; the play-by-play man is excited for the calls that
+ * matter (goals, saves, fights, a close final, banner nights) and even for the
+ * rest. The offline renderer (scripts/booth/) reads this.
+ */
+export function stemStyle(line: BoothLine): 'excited' | 'neutral' {
+  if (line.speaker === 'color') return 'neutral'
+  if (line.intensity >= 3) return 'excited'
+  if (line.intensity === 2 && /^(goal|save|fight|hit)/.test(line.moment)) return 'excited'
+  return 'neutral'
 }
 
 /* ─────────────────────────── clip ids ─────────────────────────── */

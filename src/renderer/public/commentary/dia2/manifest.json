@@ -1,0 +1,588 @@
+{
+ "clips": {
+  "bare.goal.1": {
+   "durationMs": 2380,
+   "file": "clips/bare.goal.1.ogg",
+   "speaker": "pbp",
+   "text": "He shoots, and scores!"
+  },
+  "bare.goal.2": {
+   "durationMs": 2360,
+   "file": "clips/bare.goal.2.ogg",
+   "speaker": "pbp",
+   "text": "In the back of the net! Goal!"
+  },
+  "bare.goal.3": {
+   "durationMs": 845,
+   "file": "clips/bare.goal.3.ogg",
+   "speaker": "pbp",
+   "text": "He buries it!"
+  },
+  "bare.goal.4": {
+   "durationMs": 1610,
+   "file": "clips/bare.goal.4.ogg",
+   "speaker": "pbp",
+   "text": "And it is in!"
+  },
+  "bare.goal.emptyNet.1": {
+   "durationMs": 2800,
+   "file": "clips/bare.goal.emptyNet.1.ogg",
+   "speaker": "pbp",
+   "text": "Into the empty net, and that should seal it."
+  },
+  "bare.goal.emptyNet.2": {
+   "durationMs": 2665,
+   "file": "clips/bare.goal.emptyNet.2.ogg",
+   "speaker": "pbp",
+   "text": "That is the empty netter."
+  },
+  "bare.goal.first.1": {
+   "durationMs": 2730,
+   "file": "clips/bare.goal.first.1.ogg",
+   "speaker": "pbp",
+   "text": "His first in the National Hockey League!"
+  },
+  "bare.goal.goAhead.1": {
+   "durationMs": 2410,
+   "file": "clips/bare.goal.goAhead.1.ogg",
+   "speaker": "pbp",
+   "text": "And they are in front!"
+  },
+  "bare.goal.goAhead.2": {
+   "durationMs": 2970,
+   "file": "clips/bare.goal.goAhead.2.ogg",
+   "speaker": "pbp",
+   "text": "He scores, and the lead belongs to them!"
+  },
+  "bare.goal.hatTrick.1": {
+   "durationMs": 2330,
+   "file": "clips/bare.goal.hatTrick.1.ogg",
+   "speaker": "pbp",
+   "text": "Here come the hats! A hat trick!"
+  },
+  "bare.goal.lateTie.1": {
+   "durationMs": 1420,
+   "file": "clips/bare.goal.lateTie.1.ogg",
+   "speaker": "pbp",
+   "text": "Scores! Scores! Tied up late!"
+  },
+  "bare.goal.lateTie.2": {
+   "durationMs": 3470,
+   "file": "clips/bare.goal.lateTie.2.ogg",
+   "speaker": "pbp",
+   "text": "With time running out, they have tied it!"
+  },
+  "bare.goal.milestone.1": {
+   "durationMs": 3200,
+   "file": "clips/bare.goal.milestone.1.ogg",
+   "speaker": "pbp",
+   "text": "There it is! A milestone night!"
+  },
+  "bare.goal.overtime.1": {
+   "durationMs": 2700,
+   "file": "clips/bare.goal.overtime.1.ogg",
+   "speaker": "pbp",
+   "text": "Overtime winner! It is over!"
+  },
+  "bare.goal.overtime.2": {
+   "durationMs": 2830,
+   "file": "clips/bare.goal.overtime.2.ogg",
+   "speaker": "pbp",
+   "text": "He scores, and they win it!"
+  },
+  "bare.goal.powerPlay.1": {
+   "durationMs": 2245,
+   "file": "clips/bare.goal.powerPlay.1.ogg",
+   "speaker": "pbp",
+   "text": "The power play cashes in!"
+  },
+  "bare.goal.powerPlay.2": {
+   "durationMs": 3600,
+   "file": "clips/bare.goal.powerPlay.2.ogg",
+   "speaker": "pbp",
+   "text": "On the power play, and it is in!"
+  },
+  "bare.goal.revenge.1": {
+   "durationMs": 3370,
+   "file": "clips/bare.goal.revenge.1.ogg",
+   "speaker": "pbp",
+   "text": "Against his old team! Of course it is him!"
+  },
+  "bare.goal.shortHanded.1": {
+   "durationMs": 1570,
+   "file": "clips/bare.goal.shortHanded.1.ogg",
+   "speaker": "pbp",
+   "text": "Shorthanded, and he scores!"
+  },
+  "bare.goal.tie.1": {
+   "durationMs": 2020,
+   "file": "clips/bare.goal.tie.1.ogg",
+   "speaker": "pbp",
+   "text": "And we are all square!"
+  },
+  "bare.goal.tie.2": {
+   "durationMs": 1490,
+   "file": "clips/bare.goal.tie.2.ogg",
+   "speaker": "pbp",
+   "text": "All tied up!"
+  },
+  "bare.moment.rookieLap.1": {
+   "durationMs": 4170,
+   "file": "clips/bare.moment.rookieLap.1.ogg",
+   "speaker": "pbp",
+   "text": "The veterans hang back, and out he goes alone. The rookie lap."
+  },
+  "bare.moment.rookieLap.2": {
+   "durationMs": 4130,
+   "file": "clips/bare.moment.rookieLap.2.ogg",
+   "speaker": "pbp",
+   "text": "An empty sheet, one lap, and a whole career ahead."
+  },
+  "bare.moment.tribute.1": {
+   "durationMs": 4110,
+   "file": "clips/bare.moment.tribute.1.ogg",
+   "speaker": "pbp",
+   "text": "Up on the video board, a tribute for an old friend."
+  },
+  "bare.open.debut.1": {
+   "durationMs": 3910,
+   "file": "clips/bare.open.debut.1.ogg",
+   "speaker": "color",
+   "text": "A night he will never forget. A first game in the National Hockey League."
+  },
+  "bare.open.debut.2": {
+   "durationMs": 3670,
+   "file": "clips/bare.open.debut.2.ogg",
+   "speaker": "color",
+   "text": "You only get one debut, and a young man gets his tonight."
+  },
+  "bare.open.homecoming.1": {
+   "durationMs": 3045,
+   "file": "clips/bare.open.homecoming.1.ogg",
+   "speaker": "color",
+   "text": "This building knows him well. A homecoming tonight."
+  },
+  "bare.open.homecoming.2": {
+   "durationMs": 2720,
+   "file": "clips/bare.open.homecoming.2.ogg",
+   "speaker": "color",
+   "text": "Plenty of history in this rink for one man in particular."
+  },
+  "bare.open.milestone.1": {
+   "durationMs": 3460,
+   "file": "clips/bare.open.milestone.1.ogg",
+   "speaker": "color",
+   "text": "Keep an eye on the milestone watch tonight. It is right there."
+  },
+  "bare.open.milestone.2": {
+   "durationMs": 3450,
+   "file": "clips/bare.open.milestone.2.ogg",
+   "speaker": "color",
+   "text": "The whole building knows what could happen tonight."
+  },
+  "bare.penalty.1": {
+   "durationMs": 1660,
+   "file": "clips/bare.penalty.1.ogg",
+   "speaker": "pbp",
+   "text": "And he heads to the box."
+  },
+  "bare.penalty.2": {
+   "durationMs": 2390,
+   "file": "clips/bare.penalty.2.ogg",
+   "speaker": "pbp",
+   "text": "The arm goes up, and that is a penalty."
+  },
+  "bare.save.big.1": {
+   "durationMs": 1150,
+   "file": "clips/bare.save.big.1.ogg",
+   "speaker": "pbp",
+   "text": "Big save!"
+  },
+  "bare.save.big.2": {
+   "durationMs": 2170,
+   "file": "clips/bare.save.big.2.ogg",
+   "speaker": "pbp",
+   "text": "And the goalie says no!"
+  },
+  "bare.save.robbery.1": {
+   "durationMs": 2520,
+   "file": "clips/bare.save.robbery.1.ogg",
+   "speaker": "pbp",
+   "text": "Oh, what a save!"
+  },
+  "bare.save.robbery.2": {
+   "durationMs": 2010,
+   "file": "clips/bare.save.robbery.2.ogg",
+   "speaker": "pbp",
+   "text": "Robbed! Absolutely robbed!"
+  },
+  "stem.fight.1": {
+   "durationMs": 1620,
+   "file": "clips/stem.fight.1.ogg",
+   "speaker": "pbp",
+   "text": "And the gloves are off!"
+  },
+  "stem.fight.2": {
+   "durationMs": 3240,
+   "file": "clips/stem.fight.2.ogg",
+   "speaker": "pbp",
+   "text": "They drop them, and here we go!"
+  },
+  "stem.gameEnd.1": {
+   "durationMs": 2070,
+   "file": "clips/stem.gameEnd.1.ogg",
+   "speaker": "pbp",
+   "text": "And that is the final horn."
+  },
+  "stem.gameEnd.2": {
+   "durationMs": 2800,
+   "file": "clips/stem.gameEnd.2.ogg",
+   "speaker": "pbp",
+   "text": "It is over. Handshakes at the benches."
+  },
+  "stem.gameEnd.close.1": {
+   "durationMs": 3820,
+   "file": "clips/stem.gameEnd.close.1.ogg",
+   "speaker": "pbp",
+   "text": "They hang on! That is the final horn!"
+  },
+  "stem.goal.1": {
+   "durationMs": 2700,
+   "file": "clips/stem.goal.1.ogg",
+   "speaker": "pbp",
+   "text": "He shoots, and scores!"
+  },
+  "stem.goal.2": {
+   "durationMs": 2290,
+   "file": "clips/stem.goal.2.ogg",
+   "speaker": "pbp",
+   "text": "In the back of the net! Goal,"
+  },
+  "stem.goal.3": {
+   "durationMs": 1760,
+   "file": "clips/stem.goal.3.ogg",
+   "speaker": "pbp",
+   "text": "He buries it!"
+  },
+  "stem.goal.4": {
+   "durationMs": 1310,
+   "file": "clips/stem.goal.4.ogg",
+   "speaker": "pbp",
+   "text": "And it is in!"
+  },
+  "stem.goal.color.1": {
+   "durationMs": 3350,
+   "file": "clips/stem.goal.color.1.ogg",
+   "speaker": "color",
+   "text": "What a finish. The goalie had no chance on that one."
+  },
+  "stem.goal.color.2": {
+   "durationMs": 3430,
+   "file": "clips/stem.goal.color.2.ogg",
+   "speaker": "color",
+   "text": "Watch the pass that sets it up. That is the whole play."
+  },
+  "stem.goal.color.3": {
+   "durationMs": 3190,
+   "file": "clips/stem.goal.color.3.ogg",
+   "speaker": "color",
+   "text": "They have been knocking on the door, and it finally opens."
+  },
+  "stem.goal.color.4": {
+   "durationMs": 5680,
+   "file": "clips/stem.goal.color.4.ogg",
+   "speaker": "color",
+   "text": "You leave a man that open in the slot, and this is what happens."
+  },
+  "stem.goal.emptyNet.1": {
+   "durationMs": 3120,
+   "file": "clips/stem.goal.emptyNet.1.ogg",
+   "speaker": "pbp",
+   "text": "Into the empty net, and that one goes to"
+  },
+  "stem.goal.emptyNet.2": {
+   "durationMs": 3040,
+   "file": "clips/stem.goal.emptyNet.2.ogg",
+   "speaker": "pbp",
+   "text": "That is the empty netter, from"
+  },
+  "stem.goal.first.1": {
+   "durationMs": 1910,
+   "file": "clips/stem.goal.first.1.ogg",
+   "speaker": "pbp",
+   "text": "His first in the National Hockey League!"
+  },
+  "stem.goal.goAhead.1": {
+   "durationMs": 1850,
+   "file": "clips/stem.goal.goAhead.1.ogg",
+   "speaker": "pbp",
+   "text": "He puts them in front!"
+  },
+  "stem.goal.goAhead.2": {
+   "durationMs": 4000,
+   "file": "clips/stem.goal.goAhead.2.ogg",
+   "speaker": "pbp",
+   "text": "He scores, and the lead belongs to them!"
+  },
+  "stem.goal.hatTrick.1": {
+   "durationMs": 3600,
+   "file": "clips/stem.goal.hatTrick.1.ogg",
+   "speaker": "pbp",
+   "text": "Here come the hats! A hat trick for"
+  },
+  "stem.goal.lateTie.1": {
+   "durationMs": 2320,
+   "file": "clips/stem.goal.lateTie.1.ogg",
+   "speaker": "pbp",
+   "text": "Scores! Scores! Tied up late, by"
+  },
+  "stem.goal.lateTie.2": {
+   "durationMs": 1810,
+   "file": "clips/stem.goal.lateTie.2.ogg",
+   "speaker": "pbp",
+   "text": "With time running out!"
+  },
+  "stem.goal.milestone.1": {
+   "durationMs": 4080,
+   "file": "clips/stem.goal.milestone.1.ogg",
+   "speaker": "pbp",
+   "text": "There it is! A milestone night for"
+  },
+  "stem.goal.overtime.1": {
+   "durationMs": 3300,
+   "file": "clips/stem.goal.overtime.1.ogg",
+   "speaker": "pbp",
+   "text": "Overtime winner! It is over, and it is"
+  },
+  "stem.goal.overtime.2": {
+   "durationMs": 2590,
+   "file": "clips/stem.goal.overtime.2.ogg",
+   "speaker": "pbp",
+   "text": "He scores, and they win it!"
+  },
+  "stem.goal.powerPlay.1": {
+   "durationMs": 2355,
+   "file": "clips/stem.goal.powerPlay.1.ogg",
+   "speaker": "pbp",
+   "text": "The power play cashes in!"
+  },
+  "stem.goal.powerPlay.2": {
+   "durationMs": 2770,
+   "file": "clips/stem.goal.powerPlay.2.ogg",
+   "speaker": "pbp",
+   "text": "On the power play, and it is in!"
+  },
+  "stem.goal.revenge.1": {
+   "durationMs": 1870,
+   "file": "clips/stem.goal.revenge.1.ogg",
+   "speaker": "pbp",
+   "text": "Against his old team!"
+  },
+  "stem.goal.shortHanded.1": {
+   "durationMs": 1430,
+   "file": "clips/stem.goal.shortHanded.1.ogg",
+   "speaker": "pbp",
+   "text": "Shorthanded, and he scores!"
+  },
+  "stem.goal.tie.1": {
+   "durationMs": 2540,
+   "file": "clips/stem.goal.tie.1.ogg",
+   "speaker": "pbp",
+   "text": "And we are all square!"
+  },
+  "stem.goal.tie.2": {
+   "durationMs": 1970,
+   "file": "clips/stem.goal.tie.2.ogg",
+   "speaker": "pbp",
+   "text": "He ties it up!"
+  },
+  "stem.hit.big.1": {
+   "durationMs": 1200,
+   "file": "clips/stem.hit.big.1.ogg",
+   "speaker": "color",
+   "text": "Oh, he felt that one."
+  },
+  "stem.hit.big.2": {
+   "durationMs": 1700,
+   "file": "clips/stem.hit.big.2.ogg",
+   "speaker": "pbp",
+   "text": "Big hit along the wall!"
+  },
+  "stem.moment.banner.1": {
+   "durationMs": 4320,
+   "file": "clips/stem.moment.banner.1.ogg",
+   "speaker": "pbp",
+   "text": "And up it goes. Champions, forever, in the rafters."
+  },
+  "stem.moment.ovation.1": {
+   "durationMs": 3040,
+   "file": "clips/stem.moment.ovation.1.ogg",
+   "speaker": "color",
+   "text": "Listen to this building. They are on their feet."
+  },
+  "stem.moment.ovation.2": {
+   "durationMs": 4520,
+   "file": "clips/stem.moment.ovation.2.ogg",
+   "speaker": "color",
+   "text": "That is a standing ovation, and he has earned every second of it."
+  },
+  "stem.moment.rookieLap.1": {
+   "durationMs": 5280,
+   "file": "clips/stem.moment.rookieLap.1.ogg",
+   "speaker": "pbp",
+   "text": "The veterans hang back, and out he goes alone. The rookie lap for"
+  },
+  "stem.moment.rookieLap.2": {
+   "durationMs": 5900,
+   "file": "clips/stem.moment.rookieLap.2.ogg",
+   "speaker": "pbp",
+   "text": "An empty sheet, one lap, and a whole career ahead. Enjoy it,"
+  },
+  "stem.moment.tribute.1": {
+   "durationMs": 3090,
+   "file": "clips/stem.moment.tribute.1.ogg",
+   "speaker": "pbp",
+   "text": "Up on the video board, a tribute for"
+  },
+  "stem.open.banner.1": {
+   "durationMs": 3380,
+   "file": "clips/stem.open.banner.1.ogg",
+   "speaker": "pbp",
+   "text": "The champions are home, and tonight the banner goes up."
+  },
+  "stem.open.debut.1": {
+   "durationMs": 4250,
+   "file": "clips/stem.open.debut.1.ogg",
+   "speaker": "color",
+   "text": "A night he will never forget. First game in the National Hockey League for"
+  },
+  "stem.open.debut.2": {
+   "durationMs": 2660,
+   "file": "clips/stem.open.debut.2.ogg",
+   "speaker": "color",
+   "text": "You only get one debut. Tonight it belongs to"
+  },
+  "stem.open.homecoming.1": {
+   "durationMs": 3010,
+   "file": "clips/stem.open.homecoming.1.ogg",
+   "speaker": "color",
+   "text": "This building knows him well. Welcome back,"
+  },
+  "stem.open.homecoming.2": {
+   "durationMs": 1570,
+   "file": "clips/stem.open.homecoming.2.ogg",
+   "speaker": "color",
+   "text": "Plenty of history in this rink for"
+  },
+  "stem.open.milestone.1": {
+   "durationMs": 3140,
+   "file": "clips/stem.open.milestone.1.ogg",
+   "speaker": "color",
+   "text": "Keep an eye on the milestone watch tonight. It is right there for"
+  },
+  "stem.open.milestone.2": {
+   "durationMs": 4010,
+   "file": "clips/stem.open.milestone.2.ogg",
+   "speaker": "color",
+   "text": "The whole building knows what could happen tonight for"
+  },
+  "stem.open.welcome.1": {
+   "durationMs": 5970,
+   "file": "clips/stem.open.welcome.1.ogg",
+   "speaker": "pbp",
+   "text": "Good evening, and welcome in. The building is full, and we are just about ready for hockey."
+  },
+  "stem.open.welcome.2": {
+   "durationMs": 5600,
+   "file": "clips/stem.open.welcome.2.ogg",
+   "speaker": "pbp",
+   "text": "Hello again, everyone. A big crowd in tonight, and a big one on the ice."
+  },
+  "stem.open.welcome.3": {
+   "durationMs": 5470,
+   "file": "clips/stem.open.welcome.3.ogg",
+   "speaker": "pbp",
+   "text": "Welcome along. The anthem is done, the lines are set, and here we go."
+  },
+  "stem.penalty.1": {
+   "durationMs": 1700,
+   "file": "clips/stem.penalty.1.ogg",
+   "speaker": "pbp",
+   "text": "He heads to the box."
+  },
+  "stem.penalty.2": {
+   "durationMs": 3490,
+   "file": "clips/stem.penalty.2.ogg",
+   "speaker": "pbp",
+   "text": "The arm goes up, and that is a penalty on"
+  },
+  "stem.periodEnd.1": {
+   "durationMs": 2440,
+   "file": "clips/stem.periodEnd.1.ogg",
+   "speaker": "pbp",
+   "text": "And there is the horn to end the period."
+  },
+  "stem.periodEnd.2": {
+   "durationMs": 1960,
+   "file": "clips/stem.periodEnd.2.ogg",
+   "speaker": "pbp",
+   "text": "That will do it for the period."
+  },
+  "stem.puckDrop.1": {
+   "durationMs": 3430,
+   "file": "clips/stem.puckDrop.1.ogg",
+   "speaker": "pbp",
+   "text": "The puck is down, and we are underway."
+  },
+  "stem.puckDrop.2": {
+   "durationMs": 990,
+   "file": "clips/stem.puckDrop.2.ogg",
+   "speaker": "pbp",
+   "text": "And we are away."
+  },
+  "stem.save.big.1": {
+   "durationMs": 1405,
+   "file": "clips/stem.save.big.1.ogg",
+   "speaker": "pbp",
+   "text": "Big save,"
+  },
+  "stem.save.big.2": {
+   "durationMs": 1280,
+   "file": "clips/stem.save.big.2.ogg",
+   "speaker": "pbp",
+   "text": "And he says no!"
+  },
+  "stem.save.color.1": {
+   "durationMs": 2080,
+   "file": "clips/stem.save.color.1.ogg",
+   "speaker": "color",
+   "text": "He had no business getting across for that one."
+  },
+  "stem.save.color.2": {
+   "durationMs": 3200,
+   "file": "clips/stem.save.color.2.ogg",
+   "speaker": "color",
+   "text": "That is a goal ninety nine times out of a hundred."
+  },
+  "stem.save.robbery.1": {
+   "durationMs": 1690,
+   "file": "clips/stem.save.robbery.1.ogg",
+   "speaker": "pbp",
+   "text": "Oh, what a save by"
+  },
+  "stem.save.robbery.2": {
+   "durationMs": 2180,
+   "file": "clips/stem.save.robbery.2.ogg",
+   "speaker": "pbp",
+   "text": "Robbed! Absolutely robbed by"
+  }
+ },
+ "engine": "dia2",
+ "format": "ogg",
+ "sampleRate": 24000,
+ "version": 1,
+ "voices": {
+  "color": "dia2-color-v1",
+  "pbp": "dia2-pbp-v1"
+ }
+}

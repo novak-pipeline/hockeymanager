@@ -194,11 +194,18 @@ function hashStr(s: string): string {
   return (h >>> 0).toString(36)
 }
 
-/** Respelling → engine text. Stress caps are lowered (an all-caps syllable is
- *  read letter by letter by the phonemiser); syllable hyphens are kept, which
- *  the phonemiser treats as one compound word: "NEH-chahs" → "neh-chahs". */
+/** Respelling → engine text, for the booth's voice engine (Dia2, which reads
+ *  words, not phonemes). Each respelled word becomes ONE plain word: syllable
+ *  hyphens are joined and the stress caps dropped, first letter capitalised —
+ *  "NEH-chahs" → "Nehchahs", "EK-mun LAR-son" → "Ekmun Larson". Measured in
+ *  the booth renders: hyphenated respellings made Dia2 spell them out
+ *  ("pahs-ter-nyahk" came out "Pops. Turn it."), and ALL-CAPS syllables are
+ *  read letter by letter by every engine. */
 export function respellingToSpeech(respelling: string): string {
-  return respelling.trim().split(/\s+/).map((w) => w.toLowerCase()).join(' ')
+  return respelling.trim().split(/\s+/).map((w) => {
+    const joined = w.replace(/-/g, '').toLowerCase()
+    return joined.charAt(0).toUpperCase() + joined.slice(1)
+  }).join(' ')
 }
 
 function wordSpoken(word: string, nationality: string | undefined, file: PronunciationFile | null): string {

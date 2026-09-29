@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { BOOTH_LINES, nameSlotPosition, stemText, type BoothMoment } from './commentaryLibrary'
+import { BOOTH_LINES, nameSlotPosition, stemStyle, stemText, type BoothMoment } from './commentaryLibrary'
 import boothConfig from './booth.config.json'
 import { spokenName, applyLetterRules, respellingToSpeech } from './pronunciation'
-import { nameClipKey } from './clipManifest'
 
 describe('booth line library', () => {
   it('ids are unique', () => {
@@ -49,31 +48,57 @@ describe('booth line library', () => {
     expect(BOOTH_LINES.length).toBeLessThanOrEqual(70)
   })
 
-  it('the booth has two FIXED, distinct voices from the quality-gated cast', () => {
-    const { pbp, color } = boothConfig.speakers
-    expect(pbp.voiceId).toBe('bm_george')
-    expect(color.voiceId).toBe('am_michael')
-    expect(pbp.voiceId).not.toBe(color.voiceId)
+  it('every booth pair has two FIXED, distinct seats with a committed reference voice', () => {
+    expect(boothConfig.defaultPair).toBe('dia2')
+    for (const pair of Object.values(boothConfig.pairs)) {
+      const { pbp, color } = pair.speakers
+      expect(pbp.voiceId).not.toBe(color.voiceId)
+      expect(pbp.referenceSample).toMatch(/^scripts\/booth\/voices\/.+\.wav$/)
+      expect(color.referenceSample).toMatch(/^scripts\/booth\/voices\/.+\.wav$/)
+    }
+  })
+
+  it('stems: the play-by-play man is excited on goals and saves, the colour man never is', () => {
+    for (const l of BOOTH_LINES) {
+      const s = stemStyle(l)
+      if (l.speaker === 'color') expect(s).toBe('neutral')
+      if (l.speaker === 'pbp' && /^(goal|save)/.test(l.moment)) expect(s).toBe('excited')
+    }
+  })
+
+  it('a lead-slot stem is a whole sentence (Dia2 garbles a verb-first fragment)', () => {
+    for (const l of BOOTH_LINES) {
+      if (nameSlotPosition(l.text) !== 'lead') continue
+      expect(stemText(l), l.id).toMatch(/^[A-Z]/)
+      expect(l.text, l.id).toMatch(/^\{name\}[.!] /)
+    }
+  })
+
+  it('name-carrier phrases have exactly one name slot', () => {
+    for (const c of Object.values(boothConfig.nameCarriers)) {
+      if (c.startsWith('Dia2')) continue // the $comment entry
+      expect(c.split('{name}').length).toBe(2)
+    }
   })
 })
 
 describe('pronunciation', () => {
   it('explicit respelling wins', () => {
     const s = spokenName({ id: '1', name: 'Martin Nečas', nationality: 'Czech Republic', pronunciation: 'MAR-tin NEH-chahs' })
-    expect(s.full).toBe('mar-tin neh-chahs')
-    expect(s.surname).toBe('neh-chahs')
+    expect(s.full).toBe('Martin Nehchahs')
+    expect(s.surname).toBe('Nehchahs')
   })
 
   it('community file by external id and by surname', () => {
     const file = { version: 1 as const, byExternalId: { 'nhl-1': 'KEE-rill kah-PREE-zoff' }, byName: { 'Hughes': 'HYOOZ' } }
-    expect(spokenName({ id: '1', name: 'Kirill Kaprizov', externalId: 'nhl-1' }, file).surname).toBe('kah-pree-zoff')
-    expect(spokenName({ id: '2', name: 'Jack Hughes' }, file).surname).toBe('hyooz')
+    expect(spokenName({ id: '1', name: 'Kirill Kaprizov', externalId: 'nhl-1' }, file).surname).toBe('Kahpreezoff')
+    expect(spokenName({ id: '2', name: 'Jack Hughes' }, file).surname).toBe('Hyooz')
   })
 
   it('shipped defaults cover the hard ones', () => {
-    expect(spokenName({ id: '1', name: 'Samuel Söderblom', nationality: 'Sweden' }).surname).toBe('suh-der-bloom')
-    expect(spokenName({ id: '2', name: 'Oliver Ekman-Larsson', nationality: 'Sweden' }).surname).toBe('ek-mun lar-son')
-    expect(spokenName({ id: '3', name: 'Rasmus Dahlin', nationality: 'Sweden' }).surname).toBe('dah-leen')
+    expect(spokenName({ id: '1', name: 'Samuel Söderblom', nationality: 'Sweden' }).surname).toBe('Suhderbloom')
+    expect(spokenName({ id: '2', name: 'Oliver Ekman-Larsson', nationality: 'Sweden' }).surname).toBe('Ekmun Larson')
+    expect(spokenName({ id: '3', name: 'Rasmus Dahlin', nationality: 'Sweden' }).surname).toBe('Dahleen')
   })
 
   it('nationality letter rules handle diacritics and clusters', () => {
@@ -86,24 +111,25 @@ describe('pronunciation', () => {
     expect(applyLetterRules('Côté')).toBe('Cote')
   })
 
-  it('respelling lowercases stress caps (caps are read as letters)', () => {
-    expect(respellingToSpeech('NEH-chahs')).toBe('neh-chahs')
+  it('respelling becomes one plain word per name (no hyphens, no stress caps)', () => {
+    expect(respellingToSpeech('NEH-chahs')).toBe('Nehchahs')
+    expect(respellingToSpeech('EK-mun LAR-son')).toBe('Ekmun Larson')
   })
 
-  it('name clip key changes with pronunciation', () => {
+  it('a respelling changes the spoken text (and so the name-bank key)', () => {
     const a = spokenName({ id: '1', name: 'Martin Nečas', nationality: 'Czech Republic' })
     const b = spokenName({ id: '1', name: 'Martin Nečas', nationality: 'Czech Republic', pronunciation: 'NETCH-us' })
-    const k = (h: string): string => nameClipKey({ playerId: '1', voiceId: 'bm_george', form: 'surname', style: 'excited', pronunciationHash: h })
-    expect(k(a.hash)).not.toBe(k(b.hash))
+    expect(a.surname).not.toBe(b.surname)
+    expect(a.hash).not.toBe(b.hash)
   })
 })
 
 describe('pronunciation — names as the imported DB spells them', () => {
   it('diacritic-free spellings and a two-word surname still resolve', () => {
-    expect(spokenName({ id: '1', name: 'Martin Necas', nationality: 'Czech Republic' }).surname).toBe('neh-chahs')
-    expect(spokenName({ id: '2', name: 'Andrei Vasilevsky', nationality: 'Russia' }).surname).toBe('vas-ih-lef-skee')
+    expect(spokenName({ id: '1', name: 'Martin Necas', nationality: 'Czech Republic' }).surname).toBe('Nehchahs')
+    expect(spokenName({ id: '2', name: 'Andrei Vasilevsky', nationality: 'Russia' }).surname).toBe('Vasihlefskee')
     const oel = spokenName({ id: '3', name: 'Oliver Ekman Larsson', nationality: 'Sweden' })
-    expect(oel.surname).toBe('ek-mun lar-son')
-    expect(oel.full).toBe('ol-ih-ver ek-mun lar-son')
+    expect(oel.surname).toBe('Ekmun Larson')
+    expect(oel.full).toBe('Olihver Ekmun Larson')
   })
 })

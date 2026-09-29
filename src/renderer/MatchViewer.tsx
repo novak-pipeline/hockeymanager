@@ -34,7 +34,7 @@ import type {
 import { CommentaryScheduler } from '../render2d/broadcast/audioScheduler'
 import {
   BoothAudio, isCommentaryEnabled, setCommentaryEnabled, readPresentation, writePresentation,
-  type PresentationSetting,
+  readModPronunciations, type BoothLoadResult, type PresentationSetting,
 } from './lib/commentaryAudio'
 import { fallbackBroadcastContext, ppRemaining } from './lib/broadcastContext'
 import { BroadcastOverlayLayer, Scorebug } from './components/broadcast/BroadcastOverlays'
@@ -325,6 +325,8 @@ export function MatchViewer(props: {
   const [bctx, setBctx] = useState<BroadcastContext>(() => props.broadcast ?? fallbackBroadcastContext(game))
   const [liveOverlays, setLiveOverlays] = useState<OverlayCue[]>([])
   const [namesPending, setNamesPending] = useState<number>(0)
+  /** The booth's load outcome ('unavailable' = no commentary audio installed). */
+  const [boothState, setBoothState] = useState<BoothLoadResult | null>(null)
   const [hostSize, setHostSize] = useState<{ w: number; h: number }>({ w: 900, h: 383 })
   const plan: BroadcastPlan = useMemo(
     () => directBroadcast(game.stream, bctx, { presentation }),
@@ -407,10 +409,13 @@ export function MatchViewer(props: {
     const sched = new CommentaryScheduler(booth, booth, () => performance.now())
     boothRef.current = booth
     schedulerRef.current = sched
-    void booth.loadStems()
+    setBoothState(null)
+    // Pre-recorded stems + name banks only; never a TTS model (see commentaryAudio.ts).
+    void readModPronunciations().then((pf) => booth.setPronunciations(pf))
+    void booth.load().then((r) => { if (boothRef.current === booth) setBoothState(r) })
     const id = window.setInterval(() => {
       sched.tick()
-      setNamesPending(booth.tonightPending)
+      setNamesPending(booth.namesPending)
     }, 60)
     return () => {
       clearInterval(id)
@@ -422,29 +427,18 @@ export function MatchViewer(props: {
     }
   }, [commentaryOn, game])
 
-  // Tonight's two rosters get their name clips first (background, before puck
-  // drop); the rest of the league trickles in afterwards in idle time.
+  // Tonight's two dressed rosters: look their names up in the name banks and
+  // decode those clips before puck drop (file reads + decode only, no TTS).
   useEffect(() => {
     const booth = boothRef.current
     if (!booth || !commentaryOn) return
-    const starters = new Set([...bctx.home.starters, ...bctx.away.starters])
-    booth.queueNames(Object.values(bctx.players).map((p) => ({
-      id: p.id, name: p.name, starter: starters.has(p.id),
+    const players = Object.values(bctx.players).map((p) => ({
+      id: p.id, name: p.name,
       ...(p.nationality !== undefined ? { nationality: p.nationality } : {}),
       ...(p.pronunciation !== undefined ? { pronunciation: p.pronunciation } : {}),
-    })))
-    if (!client) return
-    const t = setTimeout(() => {
-      client.searchPlayers({ leagueIds: ['nhl'], sort: 'points', limit: 500 }).then((res) => {
-        if (res.type !== 'playerSearch' || boothRef.current !== booth) return
-        booth.queueNames(res.playerSearch.rows.map((r) => ({
-          id: r.playerId, name: r.name, starter: false,
-          ...(r.nationality !== undefined ? { nationality: r.nationality } : {}),
-        })), { league: true })
-      }).catch(() => undefined)
-    }, 20_000)
-    return () => clearTimeout(t)
-  }, [bctx, commentaryOn, client])
+    }))
+    void booth.load().then(() => { if (boothRef.current === booth) booth.prepareNames(players) })
+  }, [bctx, commentaryOn])
 
   // Host size, for clamping world-anchored tags inside the frame.
   useEffect(() => {
@@ -1473,8 +1467,13 @@ export function MatchViewer(props: {
                 {p === 'auto' ? 'Auto' : p === 'on' ? 'On' : 'Off'}
               </button>
             ))}
-            {commentaryOn && namesPending > 0 && (
-              <span style={{ color: MUTED, fontSize: 11 }}>Booth: preparing {namesPending} name clips…</span>
+            {commentaryOn && boothState?.status === 'unavailable' && (
+              <span style={{ color: MUTED, fontSize: 11 }} title="The booth's recorded lines aren't installed (docs/COMMENTARY-BOOTH.md). The ticker still carries the call.">
+                Booth: commentary audio not installed
+              </span>
+            )}
+            {commentaryOn && boothState?.status === 'ready' && namesPending > 0 && (
+              <span style={{ color: MUTED, fontSize: 11 }}>Booth: loading {namesPending} name clips…</span>
             )}
           </div>
         </div>

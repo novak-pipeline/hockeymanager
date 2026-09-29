@@ -5,6 +5,7 @@ import electronUpdater from 'electron-updater'
 import { registerSaveIpc } from './saves'
 import { registerPressIpc } from './press'
 import { registerModIpc } from './mods'
+import { registerBoothIpc } from './booth'
 import { registerFeedModelIpc } from './feedModel'
 
 const { autoUpdater } = electronUpdater
@@ -108,6 +109,7 @@ app.whenReady().then(() => {
   registerSaveIpc(ipcMain)
   registerPressIpc(ipcMain)
   registerModIpc(ipcMain)
+  registerBoothIpc(ipcMain)
   registerFeedModelIpc(ipcMain)
   createWindow()
 

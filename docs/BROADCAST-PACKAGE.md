@@ -165,16 +165,12 @@ To reproduce:
 ## 4. The booth: commentary
 
 ### Identity
-There are two fixed voices. They are set in **one config file**,
-`src/render2d/broadcast/booth.config.json`:
-
-| Seat | Name | Engine / voice | Rate |
-|---|---|---|---|
-| Play-by-play | Graham Whitlock | Kokoro `bm_george` (grade C, British booth) | 1.10 |
-| Colour | Dale Brennan | Kokoro `am_michael` (grade C+) | 1.04 |
-
-Both come from `voiceCast.ts`'s quality-gated pools, and they are the same two
-every night.
+There are two fixed voices, set in **one config file**,
+`src/render2d/broadcast/booth.config.json`: Graham Whitlock (play-by-play) and
+Dale Brennan (colour). A *pair* is a complete booth rendered by one engine:
+**Dia2-2B** (default, the owner's pick from the blind listening test) or
+**Chatterbox** (the alternative). The voices, the offline renderer, the name
+banks and the licences are documented in **`docs/COMMENTARY-BOOTH.md`**.
 
 ### Line library
 **File:** `src/render2d/broadcast/commentaryLibrary.ts`. It holds 60 lines over
@@ -207,53 +203,31 @@ The old `render2d/commentary.ts` still generates the **text ticker**, and its
 tests are unchanged. It no longer drives speech: the match no longer calls the
 live-TTS announcer at all.
 
-### Audio architecture: stitched pre-rendered clips, never live synthesis
-Live neural TTS measured about 0.6× realtime in the renderer, so live calls would
-lag. The booth plays only pre-rendered audio.
-
-- **Stems** are built offline by `node scripts/dev/render-commentary.mjs`.
-  - It renders every stem (`stem.<lineId>`) and every bare fallback
-    (`bare.<lineId>`) with the booth voices.
-  - It trims silence, writes 16-bit mono WAV to
-    `src/renderer/public/commentary/clips/`, and writes `manifest.json`
-    (clip id → file, duration, speaker, text).
-  - **The audio is gitignored.** Only the manifest and the script are committed.
-  - Format is WAV because no pure-JS Opus/MP3 encoder is in the dependency tree,
-    and none was added.
-  - The starter set is 96 clips, about 10 MB WAV. As Opus it would be about 1 MB.
+### Audio architecture: pre-recorded clips only, never live synthesis
+See `docs/COMMENTARY-BOOTH.md` for the full pipeline. In short:
+- **Stems** are rendered offline (`scripts/booth/render_stems.py`) as Ogg/Opus
+  into `src/renderer/public/commentary/<pair>/` and committed.
+- **Names** come from offline **name banks** (`scripts/booth/render_names.py`):
+  the fictional name pools' bank ships with the stems; a real-roster mod carries
+  its own bank in `mods/<mod>/commentary/<pair>/`. Nothing renders at runtime;
+  a name not in any bank plays the line's bare clip.
 - **Scheduler** (`audioScheduler.ts`, pure, tested with a fake clock and sink):
   - A cue that can start starts **in the same call**, with zero added latency.
   - Priority 3 barges in over lower priorities.
   - Other cues wait in a one-deep queue and are **dropped** once older than their
     `maxLatencyMs`.
+  - Name and stem are joined with a 30 ms breath (`STITCH_GAP_MS`); the sink
+    stops anything still sounding before it starts a line, so two lines never
+    overlap.
   - The crowd and SFX bed is ducked from 0.7 to 0.3 while the booth talks.
   - A missing name clip plays the bare clip instead. A missing stem or bare clip
     is **silence**.
-- **Never the system voice.** `commentaryAudio.ts` has no fallback engine. If
-  Kokoro can't load, every line is played bare from the stems. If the stems are
-  missing, the booth is silent. This is an owner rule: no "Microsoft Sam".
-- **Setting:** Commentary has **its own toggle** (match screen, `hockey.broadcast.commentary`).
-  It is independent of the general voice toggle, which stays off.
-  **Commentary defaults to OFF until the owner approves the sound.**
-
-### Player names are first-class
-- **Background rendering** (`nameQueue.ts`, `BoothAudio.queueNames`), in priority order:
-  - priority 0: tonight's starters (surname, excited and neutral)
-  - priority 1: the rest of both dressed rosters, plus the full-name forms
-  - priority 2: the rising variants
-  - then the rest of the league (top 500 by points) trickles in 20 s into the
-    game, in idle time
-- Names are rendered by the **same engine and voice as the stems** (Kokoro on the
-  existing `voice.worker.ts`, via the new `renderClipPcm`). It is never on the
-  main thread: `renderClipPcm` refuses the in-process transport.
-- Clips are cached in IndexedDB (`hockey-booth/names`), keyed by
-  `nameClipKey(playerId, voiceId, form, style, pronunciationHash)`.
-- If a name is not ready at call time, the line plays without it. **A cue never
-  waits for a name.**
-- **Intonation variants:** `neutral` ("Kaprizov."), `excited` ("Kaprizov!", rate
-  +0.08) and `rising` ("Kaprizov?"). Kokoro has no style control, so style is
-  terminator punctuation plus rate. A cloning engine with real style control
-  would use it directly.
+- **Never the system voice, never a TTS model.** `commentaryAudio.ts` imports no
+  engine (a test guards it). If the chosen pair isn't installed the other pair
+  is used; if none is, the match screen says "commentary audio not installed".
+- **Settings:** Settings → Commentary (on/off, volume, booth voices, "Hear the
+  booth"), plus the match-screen toggle. **Commentary defaults to OFF until the
+  owner approves the sound.**
 
 ### Pronunciation (`pronunciation.ts`)
 Pronunciation is resolved in this order (first hit wins):
@@ -281,55 +255,9 @@ Pronunciation is resolved in this order (first hit wins):
    - German w/ei/ie/umlauts
    - anything else: only the safe diacritic subset
 
-### Engine-agnostic TTS
-`clipManifest.ts` defines the engine interface:
-```ts
-interface TtsEngine { id: string; render({ text, voiceId, rate, style }): Promise<{ pcm, sampleRate }> }
-```
-- Kokoro is the baseline implementation: `KokoroWorkerTts` at runtime, and the
-  same call in the Node build script.
-- Because stems and names go through the same engine, voice and style, a name
-  always sounds like the booth that says it.
-- The manifest records the voices it was rendered with. The runtime warns when
-  `booth.config.json` no longer matches, meaning the stems are stale.
-
-**Plugging in a local cloning engine** (Chatterbox- or Orpheus-class). Nothing is
-installed; this awaits the owner's listening test. It would need:
-- **A reference sample per seat.** Set `speakers.<seat>.referenceSample` in the
-  config: 10–30 s of clean, dry read at broadcast energy, one per style if the
-  engine clones prosody from the reference.
-- **Style control.** Map `neutral`, `excited` and `rising` to the engine's
-  emotion/exaggeration parameter (Chatterbox) or tags (Orpheus), in place of the
-  punctuation trick.
-- **Render speed.** Stems are offline, so any speed is acceptable there. Name
-  clips render during the pregame for about 40 players × up to 7 variants.
-  - At ≥ 1× realtime that is about 1–2 minutes of background work, and the
-    starters (priority 0) are done in about 20 s.
-  - Anything slower just means more lines play bare early in the first game;
-    later games hit the disk cache.
-  - It must run in a worker or child process, never on the renderer thread.
-- **The same `TtsEngine.render` signature**, returning mono PCM. Re-run
-  `render-commentary.mjs` after switching, so the stems and names match.
-
-### Rendered proof of concept
-`render-commentary.mjs` on this machine (Node, onnxruntime-node CPU, fp32):
-- The model loaded in about 60–75 s on first run. It is cached in `.cache/kokoro`,
-  which is gitignored.
-- Synthesis ran at **2.45× realtime** on a quiet machine, and 0.95× on a second run with other work competing for the CPU. That is fast enough to render
-  tonight's names in the background well before puck drop. The in-browser worker
-  is slower (the measured 0.6×), which is why names are queued by priority and
-  cached to disk.
-
-Output locations:
-- **Stems:** `src/renderer/public/commentary/clips/*.wav`, 96 clips.
-- **Name samples**, with real names from `mods/nhl-ehm/database.json` (read-only,
-  not copied): `src/renderer/public/commentary/samples/`
-  - `<name>.surname.neutral.wav` and `<name>.surname.excited.wav`: both intonations
-  - `<name>.full.neutral.wav`: the introduction form
-  - `samples/index.json`: which player each file is (gitignored, since it contains real names)
-  - `<name>.demo.goal.wav` ("Kaprizov! … shoots, and scores!") and
-    `<name>.demo.save.wav` ("Big save, … Kaprizov!"): stitched exactly as the
-    scheduler plays them
+### Engines
+The voice engines run only in the offline scripts (`scripts/booth/`), never in
+the app. See `docs/COMMENTARY-BOOTH.md`.
 
 ## 5. 3D hand-off (how `src/render3d` consumes this)
 The 3D renderer lives on another branch. It has the calm broadcast camera, the
@@ -388,13 +316,8 @@ interface BroadcastProjector {
   are web 202 and node 167, both at the gate.
 
 ## 7. What's left
-- **Owner listening test** for the booth voices before commentary defaults to on.
-  Then consider a cloning engine (see §4).
-- **Encode stems to Opus** once an encoder is approved, bringing about 10 MB of
-  WAV down to about 1 MB. Or bundle the WAVs through the packager's
-  `extraResources`, since they are not in git.
-- **Load `pronunciations.json` from the mod folder** through the mods bridge. The
-  format and resolver are done.
+- **Owner sign-off on the Dia2 booth sound** before commentary defaults to on
+  (see `docs/COMMENTARY-BOOTH.md` for what's left there).
 - **3D:**
   - implement `requestShot` / `playMoment` / `projectPlayer` on
     `Rink3dRenderer`, using the framing and choreography tables
