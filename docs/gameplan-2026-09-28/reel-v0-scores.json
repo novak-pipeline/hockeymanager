@@ -1,0 +1,79 @@
+{
+  "reel": "v0",
+  "exportedAt": "2026-10-04T08:13:54.902Z",
+  "scores": {
+    "agent-breakaway": {
+      "c3": false,
+      "score": 1,
+      "note": "glitchy playback, shots are too fast and happen instatnly. there's a penalty and i dont know what its for. the lines switch while people are still on the ice"
+    },
+    "agent-twoOnOne": {
+      "note": "defenseman skating into boards on other side of play for no reason, two people defending one guy. other than that it looked fine. shot / play looked better",
+      "score": 3
+    },
+    "agent-ozCycleShot": {
+      "note": "this is so glitchy i cant even tell what is happening ",
+      "score": 1
+    },
+    "agent-ppSetPlay": {
+      "note": "glitchy cant tell ",
+      "score": 1
+    },
+    "agent-goalReplay": {
+      "score": 3,
+      "note": "the shot and play looked good, but the replay didnt actually show the goal. and still some jank. board tie up into pass and shot looked really good. bench doesnt celebrate "
+    },
+    "agent-lineChangeOnFly": {
+      "score": 1,
+      "note": "no this is still really bad. three people come off the bench and ignore the guy with the puck right in front of them "
+    },
+    "agent-faceoffWinPlay": {
+      "note": "the puck wasnt even dropped in the faceoff circle",
+      "score": 1
+    },
+    "agent-bigHit": {
+      "note": "he wasnt even hit by anyone when he falls over. but the fall over is cool",
+      "score": 2
+    },
+    "agent-saveRebound": {
+      "score": 2,
+      "note": "positiooning of all the players just looks bad"
+    },
+    "agent-emptyNetLate": {
+      "score": 4,
+      "note": "fine"
+    },
+    "classic-ozCycleShot": {
+      "note": "too much standing still in dangerous areas. and the way they hold thestick it looks like the wrists are messed up ",
+      "score": 1
+    },
+    "classic-ppSetPlay": {
+      "score": 1,
+      "note": "really bad. he stands in the crease with the puck for so long doign nothing "
+    },
+    "classic-goalReplay": {
+      "score": 1,
+      "note": "goal replay isnt shown. he gets hit and still slides forward and gets back up its weird"
+    },
+    "classic-lineChangeOnFly": {
+      "score": 3,
+      "note": "line change looked better other than them phasing through the boards. can we make a jump over the boards animation and or the door opening for them to enter"
+    },
+    "classic-faceoffWinPlay": {
+      "score": 1,
+      "note": "no one set and cant even tell there's a faceoff"
+    },
+    "classic-bigHit": {
+      "score": 1,
+      "note": "i didnt even see a hit "
+    },
+    "classic-saveRebound": {
+      "score": 1,
+      "note": "cant tell whats happening puck is zipping around too fast "
+    },
+    "classic-emptyNetLate": {
+      "note": "looked offside. line change horrible so many people on ice. looked like he skated past the net then cuts to instant goal ",
+      "score": 1
+    }
+  }
+}
