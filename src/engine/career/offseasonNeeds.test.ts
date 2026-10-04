@@ -42,11 +42,39 @@ describe('needs builder', () => {
     const g = r.needs.find((n) => n.label === 'a backup G')!
     expect(g).toBeDefined()
     expect(g.candidates.map((c) => c.playerId).sort()).toEqual(['backup-fa', 'backup-trade'])
-    expect(g.candidates.every((c) => c.fit.includes('over g1'))).toBe(true)
+    expect(g.candidates.every((c) => / on g1$/.test(c.fit))).toBe(true)
     const dNeed = r.needs.find((n) => /2nd-pair LHD/.test(n.label))!
     expect(dNeed).toBeDefined()
     expect(dNeed.candidates[0]!.playerId).toBe('lhd-fa') // the hand the pair lacks
     expect(r.headline).toContain('a backup G')
+  })
+
+  it('never prints a hidden rating: no "(67)", no "+17 over", no "74 against 72" (owner rule)', () => {
+    const depth = parDepth()
+      .map((x) => (x.playerId === 'g0' ? { ...x, ovr: 63 } : x))
+      .map((x) => (x.playerId === 'g1' ? { ...x, ovr: 60 } : x))
+      .map((x) => (x.playerId === 'd2' ? { ...x, hand: 'R' as const } : x))
+      .map((x) => (x.playerId === 'f4' ? { ...x, ovr: 61 } : x))
+    const pool = [
+      cand('starter', 'G', 80), cand('backup-trade', 'G', 72, { kind: 'trade', teamAbbr: 'SJS' }),
+      cand('lhd-fa', 'D', 74, { hand: 'L' }), cand('top6', 'F', 77),
+    ]
+    const r = buildNeeds({ depth, benchmark: bench, capCeiling: 90e6, committed: 70e6, pool, moveable: [] })
+    expect(r.needs.length).toBeGreaterThan(1)
+    const ratings = new Set([...depth.map((x) => x.ovr), ...pool.map((c) => c.overall), ...Object.values(bench).flat()].map((n) => Math.round(n)))
+    for (const n of r.needs) {
+      for (const text of [n.why, n.label, ...n.candidates.map((c) => c.fit)]) {
+        expect(text, text).not.toMatch(/[+−-]\d|\(\d+\)|\bOVR\b/)
+        for (const run of text.match(/\d+/g) ?? []) {
+          // Ordinals ("1st goalie") and pair numbers ("2nd-pair") are fine; a
+          // bare number that equals a rating is a leak.
+          if (/\d+(st|nd|rd|th)/.test(text) && text.includes(`${run}st`)) continue
+          expect(ratings.has(Number(run)) && !new RegExp(`${run}(st|nd|rd|th)`).test(text), `${run} in "${text}"`).toBe(false)
+        }
+      }
+    }
+    const starter = r.needs.find((n) => n.label === 'a starting goalie')!
+    expect(starter.why).toMatch(/reads as a .*\. Most clubs have a No\. 1 starter there\./)
   })
 
   it('a cap need appears when filling the holes would break the ceiling, with the contracts that clear it', () => {

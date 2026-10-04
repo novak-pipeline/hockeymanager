@@ -73,7 +73,7 @@ export function aOrAn(next: string): string {
   if (/^\d/.test(t)) return 'a'
   if (/^[AEFHILMNORSX](\+|-|\b|$)(?![a-z])/.test(t)) return 'an' // letter grades / initialisms said as letters
   if (/^(hour|honest|heir)/i.test(t)) return 'an'
-  if (/^(uni|use|usu|euro|one|once)/i.test(t)) return 'a'
+  if (/^(uni|use|usu|euro|one\b|once)/i.test(t)) return 'a'
   return /^[aeiou]/i.test(t) ? 'an' : 'a'
 }
 

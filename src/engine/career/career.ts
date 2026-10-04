@@ -7249,7 +7249,7 @@ export class Career {
       const num = (id: string): number => parseInt(id.split('-').pop() ?? '0', 10)
       const since = this.mediaLast('faTx')
       const signings = this.transactionLedger.items.filter(
-        (t) => t.kind === 'signing' && num(t.id) > since && /sign/i.test(t.summary) && !/fire|dismiss/i.test(t.summary),
+        (t) => t.kind === 'signing' && num(t.id) > since && /\bsign/i.test(t.summary) && !/fire|dismiss/i.test(t.summary),
       )
       this.setMediaLast('faTx', Math.max(since, ...this.transactionLedger.items.map((t) => num(t.id))))
       const ours = signings.filter((t) => t.teamIds.includes(this.userTeamId as string))
@@ -17247,7 +17247,7 @@ export class Career {
     const lines = open.map((id) => {
       const p = this.resolve(id)
       const ask = askTerms(p, this.year)
-      return `• ${p.name} (${p.position}, ${p.age}, ${ratedOverall(p)} OVR): qualify at $${(qualifyingOffer(p) / 1e6).toFixed(2)}M — his ask is $${(ask.salary / 1e6).toFixed(2)}M × ${ask.years}`
+      return `• ${p.name} (${p.position}, ${p.age}): qualify at $${(qualifyingOffer(p) / 1e6).toFixed(2)}M — his ask is $${(ask.salary / 1e6).toFixed(2)}M × ${ask.years}`
     })
     this.pushNews('contract', `QO deadline tonight: ${open.length} RFA${open.length === 1 ? '' : 's'} still undecided`,
       `Tender or walk. A qualifying offer keeps his rights — he can take it, file for arbitration, or draw an offer sheet you can match. ` +
@@ -18429,6 +18429,7 @@ export class Career {
       .reduce((s, p) => s + p.contract.salary, 0) + this.userDeadCap
     const capCeiling = this.userTeam.finances.salaryCap
     const tierOf = (v: number): string => assetValueTier(v).label
+    const needFog = this.fogCtx()
     const pool: NeedsCandidate[] = []
 
     // Free agents, with the REAL bids against you.
@@ -18448,7 +18449,8 @@ export class Career {
       pool.push({
         ...(pending && standing ? { yourOffer: { salary: pending.salary, years: pending.years, standing: standing.standing, note: standing.note } } : {}),
         kind: 'fa', group: grpOf(p), playerId: id as string, name: p.name, position: p.position, age: p.age,
-        overall: ratedOverall(p), ...(p.faceId !== undefined ? { faceId: p.faceId } : {}), hand: p.handedness,
+        // Another club's man (or nobody's): your scouts' read, never the truth.
+        overall: badge(p, needFog).overall, ...(p.faceId !== undefined ? { faceId: p.faceId } : {}), hand: p.handedness,
         capHit: ask, years: raw.years,
         cost: offers.length > 0
           ? `${offers.length} offer${offers.length === 1 ? '' : 's'} on the table — ${leadAbbr} leads (${Career.approxMoney(lead!.bid.salary)} × ${lead!.bid.years}, ${lead!.reason})`
@@ -18505,10 +18507,10 @@ export class Career {
               : backupG && posture === 'contend' ? `${t.abbreviation} would move their backup — at a price` : `${t.abbreviation} are retooling`
           pool.push({
             kind: 'trade', group: g, playerId: p.id as string, name: p.name, position: p.position, age: p.age,
-            overall: ratedOverall(p), ...(p.faceId !== undefined ? { faceId: p.faceId } : {}), hand: p.handedness,
+            overall: badge(p, needFog).overall, ...(p.faceId !== undefined ? { faceId: p.faceId } : {}), hand: p.handedness,
             teamId: tid as string, teamAbbr: t.abbreviation,
             capHit: p.contract.salary, years: p.contract.yearsRemaining,
-            cost: `${stance}. The price: ${tierOf(v).toLowerCase()} value (${Math.round(v)})`,
+            cost: `${stance}. The price: ${tierOf(v).toLowerCase()} value`,
             assetValue: Math.round(v), assetTier: tierOf(v),
           })
         })
@@ -18526,7 +18528,7 @@ export class Career {
           capHit: p.contract.salary, years: p.contract.yearsRemaining,
           cost: p.contract.noTradeClause
             ? 'No-trade clause — a buyout is the way out'
-            : `Trade him (${tierOf(v).toLowerCase()} value, ${Math.round(v)}) or buy him out`,
+            : `Trade him (${tierOf(v).toLowerCase()} value) or buy him out`,
           assetValue: Math.round(v), assetTier: tierOf(v),
         }
       })
@@ -24182,7 +24184,7 @@ export class Career {
     const list = this.legends.get(teamId) ?? []
     if (list.some((l) => l.playerId === (p.id as unknown as string))) return
     const tier = ovr >= 88 ? 'franchise icon' : ovr >= 82 ? 'star' : seasonsPlayed >= 12 ? 'long-serving veteran' : 'fan favourite'
-    const blurb = `A ${tier} — ${seasonsPlayed} season${seasonsPlayed === 1 ? '' : 's'}, peak rating ${ovr}.`
+    const blurb = `${tier[0]!.toUpperCase()}${tier.slice(1)}. ${seasonsPlayed} season${seasonsPlayed === 1 ? '' : 's'} in the league.`
     const legend: ClubLegend = {
       playerId: p.id as unknown as string,
       name: p.name,
