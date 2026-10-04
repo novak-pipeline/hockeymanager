@@ -147,7 +147,12 @@ const PENALTY_SECONDS = 120
  * periods: the home bench is on the home team's first-period defending half,
  * so the second period is the LONG change for both teams.
  */
-const BENCH_GATE = { x: 22, y: -41 }
+const BENCH_GATE = { x: 22, y: 41 }
+/** Into the ice from the bench boards (+1 / −1 in y). The benches are on the
+ *  FAR side from the broadcast camera (+y = world +z), where the 3D arena
+ *  builds them — they were on the near side here, so every change the sim
+ *  made happened at boards the picture had no bench on (W2). */
+const INTO_ICE = -Math.sign(BENCH_GATE.y)
 const GOAL_CELEBRATION_S = 4
 const FACEOFF_MIN_WAIT = 1.5
 const FACEOFF_MAX_WAIT = 12
@@ -361,22 +366,21 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   const bindSide = (s: Side, departing: Body[] = []): void => {
     const unit = s.sim.unit
     const free = departing.filter((b) => !unit.skaters.some((r) => r.player.id === b.player.id))
+    let newAtGate = 0
     s.skaters = unit.skaters.map((r) => {
       const had = bodies.get(r.player.id)
       if (had) return had
       const isD = r.player.position === 'D'
       const src = free.find((b) => (b.player.position === 'D') === isD) ?? free[0]
       if (src) free.splice(free.indexOf(src), 1)
-      // Nobody leaving to take the place of (the extra attacker, a man back
-      // from the box): he comes over the boards at the bench door.
-      const gate = { x: gateOf(s).x, y: BENCH_GATE.y + 1.5 }
-      const b = makeBody(r.player, src ? src.x : gate.x, src ? src.y : gate.y, s.a)
-      if (src) {
-        b.vx = src.vx
-        b.vy = src.vy
-        b.hx = src.hx
-        b.hy = src.hy
-      }
+      // Every new man comes over the boards at HIS bench door (W2: he used
+      // to appear in the departing man's skates, mid-ice — "the lines switch
+      // while people are still on the ice"). Several at once spread along it.
+      void src
+      const k = newAtGate++
+      const gate = { x: gateOf(s).x + (k % 3 - 1) * 3, y: BENCH_GATE.y + INTO_ICE * (1.5 + Math.floor(k / 3) * 2) }
+      const b = makeBody(r.player, gate.x, gate.y, s.a)
+      b.vy = 6 * INTO_ICE
       const rest = benchEnergy.get(r.player.id)
       if (rest) b.energy = clamp(rest.e + (now - rest.at) * BENCH_RECOVER_PER_S, 0, 1)
       bodies.set(r.player.id, b)
@@ -449,8 +453,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           continue
         }
         const p = s.sim.resolve(sw.inId)
-        const nb = makeBody(p, gate.x, gate.y + 2, s.a)
-        nb.vy = 8
+        const nb = makeBody(p, gate.x, gate.y + INTO_ICE * 2, s.a)
+        nb.vy = 8 * INTO_ICE
         const rest = benchEnergy.get(p.id)
         if (rest) nb.energy = clamp(rest.e + (now - rest.at) * BENCH_RECOVER_PER_S, 0, 1)
         benchEnergy.set(b.player.id, { e: b.energy, at: now })

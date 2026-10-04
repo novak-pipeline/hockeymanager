@@ -73,7 +73,7 @@ import { Choreographer, extractActionCues, FACEOFF_LEAD_S, type LocoMode } from 
 import { kitFor, type Kit } from './palette'
 import { ATLAS_GRID, buildAtlasCanvas, paintJerseySlot, paintOfficialSlot } from './textures'
 import { RINK_HALF_W } from './iceCanvas'
-import { assignRigs, capStep, type RigMode } from './lineChange'
+import { approach, assignRigs, capStep, type RigMode } from './lineChange'
 import { layoutLabels, type LabelRequest, type PlacedLabel } from '@render2d/labelLayout'
 import { MOMENT_CHOREOGRAPHY, type MomentCue, type ShotCue } from '@render2d/broadcast/types'
 
@@ -85,9 +85,16 @@ const LABEL_GOALIE_NEAR_FT = 28
 const LABEL_MAX = 5
 
 /** Bench gates on the far boards (home bench at x = -26, away at +26, matching arena.ts). */
-const BENCH_GATE = { home: { x: -26, z: RINK_HALF_W - 1.5 }, away: { x: 26, z: RINK_HALF_W - 1.5 } } as const
+/** Bench doors — the agent engine's own (agentSim BENCH_GATE: x ∓22 on the far boards). */
+const BENCH_GATE = { home: { x: -22, z: RINK_HALF_W - 1.5 }, away: { x: 22, z: RINK_HALF_W - 1.5 } } as const
+/** The bench floor behind the boards, where a changing man hops to / from. */
+const BENCH_Z = RINK_HALF_W + 3
+/** A change within this far of the door is drawn through it; farther, the sim moved him (seek, stoppage). */
+const DOOR_NEAR_FT = 12
+/** Skating through the hop over the boards (ft/s) and how high the root rises. */
+const HOP_SPEED = 16
+const HOP_RISE_FT = 2.2
 /** Standing spots along each bench (arena.ts: 30 ft benches centred on the gates). */
-const BENCH_SLOTS = 9
 
 /**
  * Athlete source: 'owner' = the owner-supplied rigged athletes imported by
@@ -159,7 +166,6 @@ const smoothstep01 = (e0: number, e1: number, x: number) => {
 // Nothing on the ice moves faster than an elite skater: a residual teleport in
 // the stream (faceoff resets, a stoppage) becomes a skate, never a snap.
 const MAX_RENDER_SPEED = 40   // ft/s
-const ARRIVE_SPEED = 30       // skating out from the bench gate
 const DEPART_SPEED = 30       // heading off to the bench
 const DEPART_TIMEOUT_S = 2.2  // a departing player is off the ice by this (a change is quick)
 // Rigs per team: up to 6 skaters on the ice + 6 skating off during a full change.
@@ -1500,7 +1506,7 @@ export class Rink3dRenderer implements MatchRenderer {
     const pm = this.puckMesh.position
     const pp = project(pm.x, pm.y, pm.z)
     sink({
-      wall: performance.now() / 1000, dt, clock: this.clockPos, speed: this.speed, playing: this.playing, w, h,
+      wall: performance.now() / 1000, dt, clock: this.clockPos, speed: this.speed, playing: this.playing, dead: this.deadAt(this.clockPos) !== null, w, h,
       cam: { x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z, fov: this.camera.fov, preset: this.camPreset },
       puck: { x: pm.x, y: pm.y, z: pm.z, sx: pp.sx, sy: pp.sy, onScreen: pp.onScreen, simX: snap ? normXtoWorld(snap.puck.x) : NaN, simZ: snap ? normYtoWorld(snap.puck.y) : NaN },
       carrier: (snap?.carrier as string | null | undefined) ?? null,
@@ -1916,10 +1922,16 @@ export class Rink3dRenderer implements MatchRenderer {
   private departSeq = 0
 
   /**
-   * Bind one team's on-ice skaters to rigs and move every rig: players in play
-   * follow the sim, a player who just came on skates out from the bench gate, a
-   * player who just went off coasts to the gate and steps off. On a seek (dt 0)
-   * everything snaps and nobody is mid-change.
+   * Bind one team's on-ice skaters to rigs and move every rig — from the
+   * ENGINE's facts (W2). The agent engine changes through the bench door: a
+   * man coming on appears at his door, a man going off has skated to it. So
+   * the renderer only draws the step through the door (a hop over the boards),
+   * and invents nothing on the ice:
+   *  - no idle bench rigs standing at the boards (the owner's "too many men");
+   *  - a man the sim took off FAR from his door (a stoppage change) walks to it
+   *    only while the play is dead, and is gone the instant play is live;
+   *  - never more drawn on the ice than the sim has there.
+   * On a seek (dt 0) everything snaps and nobody is mid-change.
    */
   private syncSide(
     team: 'home' | 'away',
@@ -1930,6 +1942,7 @@ export class Rink3dRenderer implements MatchRenderer {
     facing?: ReadonlyArray<number | undefined>,
   ): void {
     const gate = BENCH_GATE[team]
+    const dead = this.deadAt(this.clockPos) !== null
     const idList = (ids ?? []).map((id) => (id as string | undefined))
     const slots = poses.map((p) => ({ id: p.playerId as string | null, mode: p.mode }))
     const { follow, entered, left } = assignRigs(slots, idList, poses.map((p) => p.departSeq))
@@ -1938,78 +1951,110 @@ export class Rink3dRenderer implements MatchRenderer {
       poses[r]!.departSeq = ++this.departSeq
       poses[r]!.labelOn = false
     }
-    let benchSlot = 0
     poses.forEach((pose, r) => {
       const slot = slots[r]!
       pose.mode = slot.mode
       if (slot.id !== (pose.playerId as string | null)) this.updatePoseLabelForPlayer(pose, slot.id as PlayerId | null)
       const k = follow[r]!
       if (pose.mode === 'idle' || (pose.mode === 'departing' && dt === 0)) {
-        // idle, or a seek landed mid-change: nobody is skating off — he's on
-        // the bench, standing at the boards and watching the play
+        // on the bench: not drawn (the arena's bench is the bench)
         pose.mode = 'idle'
         pose.playerId = null
         pose.labelOn = false
-        const slot = benchSlot++
-        const b = BENCH_GATE[team]
-        pose.rig.visible = slot < BENCH_SLOTS
-        if (pose.rig.visible) this.updatePose(pose, b.x - 12 + slot * 3 + (slot % 2) * 0.4, RINK_HALF_W + 4.9, dt, simDt, puckWx, puckWz, 10)
+        pose.rig.visible = false
         return
       }
-      pose.rig.visible = true
       if (pose.mode === 'departing') {
         pose.departT += dt
-        // spread along the bench front (5 men don't all hop the boards at one spot)
-        const exitX = gate.x + ((pose.departSeq % 5) - 2) * 2.6
-        this.updatePose(pose, exitX, gate.z, dt, simDt, puckWx, puckWz, DEPART_SPEED)
-        const home = Math.hypot(pose.worldX.pos - exitX, pose.worldZ.pos - gate.z)
-        // he hops the boards once he is close to the bench (not skating up to a point)
-        if (home < 7 || pose.departT > DEPART_TIMEOUT_S) {
-          // through the gate: from next frame he stands on the bench (idle)
+        const door = Math.hypot(pose.worldX.pos - gate.x, pose.worldZ.pos - gate.z)
+        // far from his door in live play: the sim has him off — so is the picture
+        if (door > DOOR_NEAR_FT && !dead) {
           pose.mode = 'idle'
           pose.playerId = null
+          pose.rig.visible = false
+          return
+        }
+        pose.rig.visible = true
+        const exitX = gate.x + ((pose.departSeq % 3) - 1) * 3
+        if (door > 2.5 && pose.worldZ.pos < gate.z) {
+          this.updatePose(pose, exitX, gate.z, dt, simDt, puckWx, puckWz, DEPART_SPEED)
+        } else {
+          // over the boards and down onto the bench
+          this.moveDirect(pose, exitX, BENCH_Z, dt, simDt, puckWx, puckWz)
+          this.hopOver(pose)
+          if (pose.worldZ.pos >= BENCH_Z - 0.5 || pose.departT > DEPART_TIMEOUT_S) {
+            pose.mode = 'idle'
+            pose.playerId = null
+            pose.rig.visible = false
+          }
         }
         return
       }
+      pose.rig.visible = true
       const p = pos[k]
       const tx = normXtoWorld(p?.x ?? 0)
       const tz = normYtoWorld(p?.y ?? 0)
       if (entered.includes(r)) {
-        if (dt === 0) pose.mode = 'play'
-        else {
-          // over the boards from where he stood on the bench (else the gate),
-          // not from wherever this rig last was — and not all from one spot
-          const onBench = pose.rig.visible && Math.abs(pose.worldZ.pos - (RINK_HALF_W + 4.9)) < 1.5 && Math.abs(pose.worldX.pos - gate.x) < 16
-          const ex = onBench ? pose.worldX.pos : gate.x
-          pose.worldX = snapSpring(ex)
-          pose.worldZ = snapSpring(gate.z)
-          pose.prevWx = ex
-          pose.prevWz = gate.z
+        const nearDoor = Math.hypot(tx - gate.x, tz - gate.z) < DOOR_NEAR_FT
+        if (dt === 0 || !nearDoor) {
+          // a seek, or a man the sim put straight onto the ice: draw him where he is
+          pose.mode = 'play'
+          pose.worldX = snapSpring(tx)
+          pose.worldZ = snapSpring(tz)
+          pose.prevWx = tx
+          pose.prevWz = tz
           pose.velSmX = 0
           pose.velSmZ = 0
-          pose.angle = Math.atan2(tx - ex, tz - gate.z)
+        } else {
+          // over the boards from the bench, right behind his door
+          pose.worldX = snapSpring(tx)
+          pose.worldZ = snapSpring(BENCH_Z)
+          pose.prevWx = tx
+          pose.prevWz = BENCH_Z
+          pose.velSmX = 0
+          pose.velSmZ = 0
+          pose.angle = Math.PI
         }
       }
       if (pose.mode === 'arriving') {
-        this.updatePose(pose, tx, tz, dt, simDt, puckWx, puckWz, ARRIVE_SPEED)
+        this.moveDirect(pose, tx, tz, dt, simDt, puckWx, puckWz)
+        this.hopOver(pose)
         if (Math.hypot(pose.worldX.pos - tx, pose.worldZ.pos - tz) < 1.5) pose.mode = 'play'
         return
       }
       this.updatePose(pose, tx, tz, dt, simDt, puckWx, puckWz, MAX_RENDER_SPEED, facing?.[k])
     })
-    // Never too many men: at most one departing skater may still be on the
-    // ice alongside the full unit (the real change rule is within ~5 ft of the
-    // bench). Extras hop off — the ones nearest the bench first.
+    // Never too many men: in live play at most one departing skater (inside
+    // ~10 ft of his door) may still be drawn alongside the sim's full unit.
+    if (dead) return
     const onIce = poses.filter((p) => p.rig.visible && (p.mode === 'play' || p.mode === 'arriving')).length
     const leaving = poses
       .filter((p) => p.rig.visible && p.mode === 'departing')
       .sort((a, b) => Math.hypot(a.worldX.pos - gate.x, a.worldZ.pos - gate.z) - Math.hypot(b.worldX.pos - gate.x, b.worldZ.pos - gate.z))
     const allowed = Math.max(0, Math.min(1, 6 - onIce))
-    for (const p of leaving.slice(0, Math.max(0, leaving.length - allowed))) {
+    for (const p of leaving.slice(allowed)) {
       p.mode = 'idle'
       p.playerId = null
       p.labelOn = false
+      p.rig.visible = false
     }
+  }
+
+  /** Move a rig at the hop's own pace (no position spring lag): a change is a
+   *  few feet through the door, not a chase across the ice. */
+  private moveDirect(pose: PlayerPose, tx: number, tz: number, dt: number, simDt: number, puckWx: number, puckWz: number): void {
+    const step = approach(pose.worldX.pos, pose.worldZ.pos, tx, tz, simDt, HOP_SPEED, 0.2)
+    pose.worldX = snapSpring(step.x)
+    pose.worldZ = snapSpring(step.z)
+    this.updatePose(pose, step.x, step.z, dt, simDt, puckWx, puckWz, HOP_SPEED)
+  }
+
+  /** The hop over the bench boards: the root rises over the boards line (W2;
+   *  code-only until W5's animation data). */
+  private hopOver(pose: PlayerPose): void {
+    const u = (pose.worldZ.pos - (RINK_HALF_W - 1.2)) / (BENCH_Z - (RINK_HALF_W - 1.2))
+    if (u <= 0 || u >= 1) return
+    pose.rig.root.position.y = Math.sin(Math.PI * u) * HOP_RISE_FT
   }
 
   private updatePose(pose: PlayerPose, wx: number, wz: number, dt: number, simDt: number, puckWx: number, puckWz: number, maxSpeed = MAX_RENDER_SPEED, simFacing?: number): void {

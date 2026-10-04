@@ -57,6 +57,8 @@ export interface ProbeFrame {
   clock: number
   speed: number
   playing: boolean
+  /** The play is dead (whistle → drop) at this clock. */
+  dead: boolean
   w: number
   h: number
   cam: { x: number; y: number; z: number; fov: number; preset: string }

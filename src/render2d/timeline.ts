@@ -464,10 +464,13 @@ function snapshotOf(frame: FrameEvent): PosSnapshot {
 
 /** Facing per slot: shortest-arc blend when the same player holds it, else the later frame's. */
 function blendFacing(a: SkaterSnapshot[], b: SkaterSnapshot[], f: number): (number | undefined)[] {
-  return b.map((bs, i) => {
-    const as = a[i]
-    if (bs.facing === undefined) return undefined
-    if (!as || as.player !== bs.player || as.facing === undefined) return bs.facing
+  // dominant-frame order, matched by player id (as blend())
+  const dom = f < 0.5 ? a : b
+  return dom.map((ds) => {
+    const as = a.find((x) => x.player === ds.player)
+    const bs = b.find((x) => x.player === ds.player) ?? ds
+    if (bs.facing === undefined) return as?.facing
+    if (!as || as.facing === undefined) return bs.facing
     const d = Math.atan2(Math.sin(bs.facing - as.facing), Math.cos(bs.facing - as.facing))
     return as.facing + d * f
   })
@@ -482,15 +485,23 @@ type Slot = { player: PlayerId; pos: XY }
  * the slot across all four, the path is splined instead of straight-lined (see
  * splineXY), which is what keeps fast playback readable.
  */
+/**
+ * Skater positions in the DOMINANT frame's slot order (the ids the snapshot
+ * reports), each blended by PLAYER ID across the bracketing frames. Matching by
+ * slot index paired one player's id with another's position whenever a change
+ * reshuffled the slots between two frames (W2, VT2: a man drawn mid-ice while
+ * the sim had him at the bench door).
+ */
 function blend(a: Slot[], b: Slot[], f: number, p?: Slot[], n?: Slot[]): XY[] {
-  return b.map((bs, i) => {
-    const as = a[i]
-    if (!as || as.player !== bs.player) return { ...bs.pos }
-    const ps = p?.[i]
-    const ns = n?.[i]
-    if (ps && ns && ps.player === as.player && ns.player === bs.player) {
-      return splineXY(ps.pos, as.pos, bs.pos, ns.pos, f)
-    }
+  const dom = f < 0.5 ? a : b
+  const find = (xs: Slot[] | undefined, id: Slot['player']): Slot | undefined => xs?.find((x) => x.player === id)
+  return dom.map((ds) => {
+    const as = find(a, ds.player)
+    const bs = find(b, ds.player)
+    if (!as || !bs) return { ...ds.pos }
+    const ps = find(p, ds.player)
+    const ns = find(n, ds.player)
+    if (ps && ns) return splineXY(ps.pos, as.pos, bs.pos, ns.pos, f)
     return lerpXY(as.pos, bs.pos, f)
   })
 }

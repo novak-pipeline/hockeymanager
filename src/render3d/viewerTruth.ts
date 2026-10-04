@@ -111,7 +111,8 @@ export function vt1Bodies(inp: VTInput): VTResult {
   let benchShare = 0
   const ev: string[] = []
   for (const f of inp.frames) {
-    if (!isLive(f)) continue
+    // in a stoppage a change is legal with both units out (real hockey)
+    if (!isLive(f) || f.dead) continue
     n++
     for (const team of ['home', 'away'] as const) {
       const mine = skaters(f).filter((r) => r.team === team)
@@ -131,7 +132,7 @@ export function vt1Bodies(inp: VTInput): VTResult {
   return {
     id: 'VT1', name: 'Bodies on the ice per team (as rendered)',
     status: n === 0 ? 'n/a' : share <= 0.001 ? 'green' : 'red',
-    rule: `visible + on screen + within ${NEAR_RINK_FT} ft of the sheet ≤ 6 per team (7 with an extra attacker) on 99.9% of live frames`,
+    rule: `visible + on screen + within ${NEAR_RINK_FT} ft of the sheet ≤ 6 per team (7 with an extra attacker) on 99.9% of live-play frames (stoppages excluded: changes)`,
     value: `${(share * 100).toFixed(1)}% of team-frames over; worst ${worst}; avg idle bench rigs in an over-count ${bad ? f1(benchShare / bad) : '0'}`,
     evidence: ev,
   }
@@ -154,7 +155,8 @@ export function vt2Divergence(inp: VTInput): VTResult {
         if (r.onScreen) inventedRigSec += f.dt
         continue
       }
-      if (declared) continue
+      // declared: goal sequence / replay, and the few-feet hop through the bench door
+      if (declared || r.mode === 'arriving' || r.mode === 'departing') continue
       const d = Math.hypot(r.x - r.simX, r.z - r.simZ)
       ds.push(d)
       if (d > 3 * DIVERGE_FT && ev.length < 5) ev.push(`${clk(f.clock)} ${r.team} ${r.id}: drawn ${f1(d)} ft from the sim (mode ${r.mode})`)
