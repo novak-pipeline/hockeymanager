@@ -452,7 +452,7 @@ const QUOTE_POOL: Record<CoachSituation, DemeanorPool> = {
       "Structurally we were a step slow. I've already identified the areas to address before the next game.",
       "Strip out the empty-netter and the story is still the same: they generated from the middle, we generated from the perimeter. That gap IS the score.",
       "Our forecheck retrieval rate fell off a cliff in the second period, and every goal against traces back to it. One fixable number.",
-      "I'm less worried than the scoreline suggests. The expected-goals gap was narrow — but 'close on paper' doesn't pay the bills, so we correct it anyway.",
+      "I'm less worried than the scoreline suggests. The expected-goals gap was narrow. Narrow still loses, so we fix it anyway.",
     ],
     motivator: [
       "I believe in this group. Tonight wasn't us at our best, but I've seen what this team is capable of.",

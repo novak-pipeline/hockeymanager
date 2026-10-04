@@ -10,7 +10,7 @@
  * phrases them.
  */
 
-import { plural, renderStable } from '@engine/story/prose'
+import { plural, renderStable, stableSeed } from '@engine/story/prose'
 import type { ContentVariant } from '@engine/story/contentEngine'
 import type { MatchKeyView, ThreeStarView, TurningPointView } from './views'
 
@@ -57,6 +57,11 @@ const sv = (f: number): string => {
 export function buildMatchKeys(args: MatchKeysArgs): MatchKeyView[] {
   const { user, opp } = args
   const cands: Array<{ score: number; key: MatchKeyView }> = []
+  // The coach's closing line per key. One fixed tail per branch printed 45-73
+  // times a season (writing audit 2026-10); a stable pick per matchup and
+  // game count varies it without flickering on re-render.
+  const gameKey = `${user.abbr}|${opp.abbr}|${user.gamesPlayed}`
+  const say = (slot: string, opts: string[]): string => opts[stableSeed(`${gameKey}|${slot}`) % opts.length]!
 
   // Special-teams collision: their PP vs our PK (and the reverse) — cite both
   // percentages. Needs a real sample on both sides of the matchup.
@@ -68,7 +73,9 @@ export function buildMatchKeys(args: MatchKeysArgs): MatchKeyView[] {
         title: `Their power play vs your kill`,
         detail:
           `${opp.abbr} convert ${pct(opp.ppPct)} of their chances; your penalty kill holds ${pct(user.pkPct)}. ` +
-          (opp.ppPct >= 0.22 ? `Stay out of the box — this is where they hurt you.` : `Discipline keeps this a non-factor.`),
+          (opp.ppPct >= 0.22
+            ? say('ppHot', [`Stay out of the box. This is where they hurt you.`, `Every penalty tonight is a chance for them. Keep the sticks down.`, `Don't give that unit a look.`])
+            : say('ppCold', [`Discipline keeps this a non-factor.`, `Their power play isn't the worry tonight.`, `Take a penalty if you must; that unit hasn't punished many.`, `The kill can handle this one.`])),
       },
     })
   }
@@ -79,7 +86,9 @@ export function buildMatchKeys(args: MatchKeysArgs): MatchKeyView[] {
         title: `Your power play vs their kill`,
         detail:
           `Your unit runs at ${pct(user.ppPct)}; ${opp.abbr}'s kill survives ${pct(opp.pkPct)}. ` +
-          (opp.pkPct < 0.78 ? `Draw penalties — their kill leaks.` : `Five-on-five may decide it; their kill is stingy.`),
+          (opp.pkPct < 0.78
+            ? say('pkLeaks', [`Draw penalties. Their kill leaks.`, `Get to the net and make them take penalties.`, `Their kill gives up goals. Make them defend shorthanded.`])
+            : say('pkStingy', [`Five-on-five may decide it; their kill is stingy.`, `Don't count on the power play to bail you out.`, `Their kill is good. Win it at even strength.`, `Power-play goals will be hard to come by.`])),
       },
     })
   }
@@ -93,7 +102,9 @@ export function buildMatchKeys(args: MatchKeysArgs): MatchKeyView[] {
         title: `Contain ${hs.name}`,
         detail:
           `${hs.name} has ${plural(hs.goals, 'goal')} and ${plural(hs.assists, 'assist')} this season` +
-          (hs.form >= 2 ? ` — and he's running hot right now. Hard-match him.` : `. He drives their offense.`),
+          (hs.form >= 2
+            ? say('hsHot', [`, and he's running hot right now. Hard-match him.`, `. He's on a heater; put your best checkers on him.`, `, and he's been better lately. Don't give him the middle.`])
+            : say('hsCold', [`. He drives their offense.`, `. Take him away and they have to find goals elsewhere.`, `. Most of what they do goes through him.`, `. Know where he is every shift.`])),
       },
     })
   }
@@ -110,7 +121,8 @@ export function buildMatchKeys(args: MatchKeysArgs): MatchKeyView[] {
           title: hot ? `${g.name} is standing tall` : `Your crease is shaky`,
           detail:
             `${g.name} carries a ${sv(g.svPct)} save percentage, rating ${g.last5Avg.toFixed(1)} over his last starts. ` +
-            (hot ? `He's been the backbone — lean on him.` : `He needs goal support tonight.`),
+            (hot ? say('ugHot', [`He's been the backbone. Lean on him.`, `Keep the shots to the outside and he'll keep stopping them.`, `He's playing well. Don't hang him out to dry.`])
+                : say('ugCold', [`He needs goal support tonight.`, `Help him: clear the rebounds and block shots.`, `Score early and take the pressure off him.`])),
         },
       })
     }
@@ -124,7 +136,8 @@ export function buildMatchKeys(args: MatchKeysArgs): MatchKeyView[] {
         title: hot ? `Beating ${og.name} won't be easy` : `Test ${og.name} early`,
         detail:
           `${og.name} sits at ${sv(og.svPct)} on the season, rating ${og.last5Avg.toFixed(1)} over his last starts. ` +
-          (hot ? `Traffic and second chances — clean looks die in his glove.` : `He's been beatable — shoot from everywhere.`),
+          (hot ? say('ogHot', [`Traffic and second chances. Clean looks die in his glove.`, `Get bodies in front. He's not giving up the first shot.`, `He's seeing everything. Take his eyes away.`])
+              : say('ogCold', [`He's been beatable. Shoot from everywhere.`, `Get pucks on net early and often.`, `Test him from distance in the first period.`])),
       },
     })
   }
@@ -137,7 +150,7 @@ export function buildMatchKeys(args: MatchKeysArgs): MatchKeyView[] {
       key: {
         title: w ? `${opp.abbr} arrive on a heater` : `${opp.abbr} are wounded`,
         detail: w
-          ? `They've won ${opp.streak} straight. Weather the first ten minutes — confidence like that feeds on early goals.`
+          ? `They've won ${opp.streak} straight. Weather the first ten minutes; a team like that feeds on an early goal.`
           : `They've lost ${Math.abs(opp.streak)} in a row. Bury them early before belief creeps back in.`,
       },
     })
@@ -149,7 +162,7 @@ export function buildMatchKeys(args: MatchKeysArgs): MatchKeyView[] {
       key: {
         title: w ? `Protect the run` : `Stop the slide`,
         detail: w
-          ? `Your club has won ${user.streak} straight — keep the recipe identical: start on time, defend the middle.`
+          ? `Your club has won ${user.streak} straight. Keep it simple: start on time, defend the middle.`
           : `${Math.abs(user.streak)} losses in a row. The first goal tonight is worth double to this room.`,
       },
     })
@@ -164,7 +177,7 @@ export function buildMatchKeys(args: MatchKeysArgs): MatchKeyView[] {
       key: {
         title: `The margins`,
         detail: `You score ${uGf.toFixed(1)} a game; ${opp.abbr} concede ${oGa.toFixed(2)}. ${
-          uGf > oGa ? `The chances will be there — finish them.` : `Expect a tight-checking night; special teams may decide it.`
+          uGf > oGa ? `The chances will be there. Finish them.` : `Expect a tight-checking night; special teams may decide it.`
         }`,
       },
     })

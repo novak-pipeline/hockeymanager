@@ -438,7 +438,7 @@ export function outcomeLine(kind: InteractionKind, tone: ResponseTone, delta: nu
     if (tone === 'supportive') {
       return band === 'good' || band === 'ok'
         ? `${last} said that was all he wanted: somebody above the coaches to know.`
-        : `${last} wanted it handled quietly. He did not want it taken to the whole room.`
+        : `${last} wanted it kept between the two of them. He did not want it taken to the whole room.`
     }
     if (tone === 'firm') {
       return band === 'good' || band === 'ok'

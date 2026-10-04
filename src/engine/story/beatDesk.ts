@@ -506,7 +506,13 @@ export function buildGameday(c: DeskCtx, f: GamedayFacts): BeatArticle | null {
   const headline = say(c, GD_HEAD, ctx, slots, 'h')
   const lede = say(c, GD_LEDE, ctx, slots, 'l')
   const body = [lede]
-  if (f.starter) body.push(`Expected in goal: ${f.starter.name} (${f.starter.line}).${f.backup ? ` ${f.backup} is the other option.` : ''}`)
+  if (f.starter) {
+    // The backup line ran 76 times a season as one sentence; vary it stably.
+    const bk = f.backup
+      ? [` ${f.backup} is the other option.`, ` ${f.backup} backs up.`, ` ${f.backup} is on the bench if needed.`, ` ${f.backup} would be next.`][stableSeed(`${c.key}|bk`) % 4]
+      : ''
+    body.push(`Expected in goal: ${f.starter.name} (${f.starter.line}).${bk}`)
+  }
   const watchLines = f.watch.slice(0, 3).map((w, i) =>
     sayStable(
       WATCH,

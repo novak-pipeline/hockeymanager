@@ -194,7 +194,7 @@ const SHAPE_POOL: ContentVariant[] = [
     text: `Not once behind. The {us} took the lead early, made the {them} play the game they wanted, and won it {ourGoals}-{theirGoals}.` },
   /* ── generic fallbacks ── */
   { id: 'mr.win.a', conditions: { won: true },
-    text: `Two points, honestly earned. The {us} beat the {them} {ourGoals}-{theirGoals} in a game that stayed in doubt longer than the shot clock suggested.` },
+    text: `Two points. The {us} beat the {them} {ourGoals}-{theirGoals} in a game that stayed in doubt longer than the shot count suggested.` },
   { id: 'mr.win.b', conditions: { won: true },
     text: `The {us} take it {ourGoals}-{theirGoals}. Not a night anyone will frame, but the standings do not ask how.` },
   { id: 'mr.loss.a', conditions: { won: false },
@@ -211,7 +211,7 @@ const DECIDER_POOL: ContentVariant[] = [
   { id: 'mr.dec.ot', conditions: { period: 4 },
     text: `{scorer} ended it in overtime.` },
   { id: 'mr.dec.d', conditions: { pos: 'D' },
-    text: `{scorer} — a defenceman — scored the one that decided it, at {clock} of the {ordinal}.` },
+    text: `The winner came from the blue line: {scorer}, at {clock} of the {ordinal}.` },
   { id: 'mr.dec.pp', conditions: { strength: 'pp' },
     text: `The winner came on the power play, {scorer} at {clock} of the {ordinal}.` },
   { id: 'mr.dec.third', conditions: { period: 3 },

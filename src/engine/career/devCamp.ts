@@ -18,6 +18,7 @@
  */
 import type { CampGameLine, DevCampChoice } from './views'
 import { citeCamp, evidenceFor } from './campBattles'
+import { stableSeed } from '@engine/story/prose'
 
 export type DevGroup = 'F' | 'D' | 'G'
 
@@ -91,13 +92,19 @@ export function gradeOf(showing: number): 'A' | 'B' | 'C' {
 const ORD = (n: number): string => `${n}${n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th'}`
 
 /** "fastest in the skating test (1st of 24)" — the drills worth quoting. */
+/** The drill as an object of "in the …": "the shooting test", not "the shot". */
+function drillPhrase(drill: string): string {
+  const d = drill.toLowerCase()
+  return /test|drill$/.test(d) ? `the ${d}` : `the ${d} test`
+}
+
 export function citeDrills(results: DrillResult[]): string | null {
   const best = [...results].sort((a, b) => a.rank / a.of - b.rank / b.of)[0]
   const worst = [...results].sort((a, b) => b.rank / b.of - a.rank / a.of)[0]
   if (!best) return null
-  if (best.rank <= Math.max(1, Math.ceil(best.of * 0.15))) return `${ORD(best.rank)} of ${best.of} in the ${best.drill.toLowerCase()}`
-  if (worst && worst.rank >= Math.floor(worst.of * 0.85) && worst.of >= 4) return `${ORD(worst.rank)} of ${worst.of} in the ${worst.drill.toLowerCase()}`
-  return `mid-pack in testing (best: ${ORD(best.rank)} of ${best.of}, ${best.drill.toLowerCase()})`
+  if (best.rank <= Math.max(1, Math.ceil(best.of * 0.15))) return `${ORD(best.rank)} of ${best.of} in ${drillPhrase(best.drill)}`
+  if (worst && worst.rank >= Math.floor(worst.of * 0.85) && worst.of >= 4) return `${ORD(worst.rank)} of ${worst.of} in ${drillPhrase(worst.drill)}`
+  return `mid-pack in testing (his best: ${ORD(best.rank)} of ${best.of} in ${drillPhrase(best.drill)})`
 }
 
 /** The whole week's evidence as one clause. */
@@ -168,11 +175,26 @@ export const CHOICE_LABEL: Record<DevCampChoice, string> = {
 /** The staff's read on a camper, in one or two sentences, from the evidence. */
 export function staffRead(args: { name: string; cite: string; grade: 'A' | 'B' | 'C'; readiness: Readiness; status: CamperStatus; club?: string }): string {
   const { cite, grade, readiness, status } = args
-  const lead = grade === 'A' ? 'Turned heads' : grade === 'C' ? 'A hard week' : 'A steady week'
+  // The lead must agree with the evidence it introduces: "A steady week: 27th
+  // of 31" was the B-grade default whatever the rank (audit F11). The first
+  // "Nth of M" in the cite decides between solid, steady and mixed.
+  const m = cite.match(/(\d+)(?:st|nd|rd|th) of (\d+)/)
+  const pct = m ? (Number(m[1]) - 1) / Math.max(1, Number(m[2]) - 1) : 0.5
+  const lead = grade === 'A'
+    ? 'Turned heads'
+    : grade === 'C'
+      ? 'A hard week'
+      : pct <= 0.2 ? 'A solid week' : pct >= 0.75 ? 'A mixed week' : 'A steady week'
+  // One camp reports on dozens of kids; a single "where" sentence per level
+  // read 42 times in one inbox item. A stable pick per player.
+  const pickFor = (opts: string[]): string => opts[stableSeed(`camp|${args.name}`) % opts.length]!
+  const junior = args.club ? `with ${args.club}` : 'in junior'
   const where = readiness === 'nhl'
-    ? 'He is pushing for an NHL look at main camp.'
+    ? pickFor(['He is pushing for an NHL look at main camp.', 'Bring him to main camp and see.', 'He belongs at main camp with the pros.'])
     : readiness === 'ahl'
-      ? status === 'signed' ? 'The AHL is the right level for him next season.' : 'He is ready for pro hockey — the AHL would push him.'
-      : `Another year${args.club ? ` with ${args.club}` : ' in junior'} is what he needs.`
+      ? status === 'signed'
+        ? pickFor(['The AHL is the right level for him next season.', 'He goes to the AHL and plays big minutes.', 'Pro hockey in the AHL is the next step.'])
+        : pickFor(['He is ready for pro hockey, and the AHL would push him.', 'Sign him and send him to the AHL.', 'He has outgrown his level. The AHL is next.', 'Pro-ready. The AHL would test him.'])
+      : pickFor([`Another year ${junior} is what he needs.`, `Send him back ${junior} and let him play.`, `One more season ${junior}, then we look again.`, `He needs more time ${junior}.`])
   return `${lead}: ${cite}. ${where}`
 }

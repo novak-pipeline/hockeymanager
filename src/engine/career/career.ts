@@ -9812,7 +9812,7 @@ export class Career {
         domestic
           ? `${p.name} signs on with the ${s.competitionName}`
           : `${p.name} heads overseas to the ${s.competitionName}`,
-        `${p.name} (${p.age}) — unsigned in the NHL — has joined ${this.data.teams.get(s.teamId)?.name ?? 'a club'} in the ${s.competitionName} on a ${s.years}-year deal.`,
+        `${p.name}, ${p.age}, couldn't find an NHL contract and has joined ${this.data.teams.get(s.teamId)?.name ?? 'a club'} in the ${s.competitionName} on a ${s.years}-year deal.`,
         { playerId: s.playerId as string, teamId: s.teamId as string }
       )
     }

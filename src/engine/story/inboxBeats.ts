@@ -364,7 +364,7 @@ export const SCOUT_REPORT_POOL: ContentVariant[] = [
   { id: 'sr.f', text: `The scouts have seen enough of {name}` },
   { id: 'sr.g', text: `{name} projects as {role}, says the report` },
   { id: 'sr.h', text: `Report filed: {name}, {club}` },
-  { id: 'sr.y.a', conditions: { young: true }, text: `{name}, {age}: {role} if it comes together` },
+  { id: 'sr.y.a', conditions: { young: true }, text: `{name}, {age}: the ceiling is {role}` },
   { id: 'sr.y.b', conditions: { young: true }, text: `Scouting {name}, {age}, of {club}` },
   { id: 'sr.y.c', conditions: { young: true }, text: `Young {pos} {name} gets the full report` },
   { id: 'sr.g.a', conditions: { group: 'G' }, text: `Goalie report: {name}, {club}` },

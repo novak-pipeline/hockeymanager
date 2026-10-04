@@ -407,7 +407,7 @@ const HOT_STREAK_POOL: ContentVariant[] = [
     text2: `{n} games in a row. Nobody in this league does that by accident.` },
   { id: 'arc.hot.unlikely', conditions: { star: false, minN: 8 },
     text: `Nobody had {name} on {n} straight`,
-    text2: `This is not the man anyone circled in October. {name} has a point in {n} consecutive games and is quietly rewriting what the {team} thought they had.` },
+    text2: `This is not the man anyone circled in October. {name} has a point in {n} consecutive games, and the {team} are finding him more ice time.` },
   { id: 'arc.hot.unlikely.b', conditions: { star: false, minN: 8 },
     text: `{name} is not supposed to do this`,
     text2: `Depth players get hot; they do not usually stay hot for {n} games. The {team} are not asking questions about it yet.` },

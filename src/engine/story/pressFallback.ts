@@ -143,8 +143,8 @@ function expectationBlurb(sheet: PressFactSheet): string | null {
   const diff = Math.abs(t.rank - t.expectedRank)
   if (gp < VERDICT_SAMPLE) {
     if (diff === 0) return `They sit exactly where the preseason numbers put them, ${ordinal(t.expectedRank)}, on a book this thin.`
-    if (overPerforming(sheet)) return `They're ahead of a preseason projection of ${ordinal(t.expectedRank)}, on ${gp} games.`
-    return `They're behind a preseason projection of ${ordinal(t.expectedRank)}, though ${gp} games is a small sample.`
+    if (overPerforming(sheet)) return `They're ahead of a preseason projection of ${ordinal(t.expectedRank)}, on ${gp} ${gp === 1 ? 'game' : 'games'}.`
+    return `They're behind a preseason projection of ${ordinal(t.expectedRank)}, though ${gp} ${gp === 1 ? 'game is' : 'games is'} a small sample.`
   }
   if (overPerforming(sheet)) {
     if (diff >= 5) return `They were projected ${ordinal(t.expectedRank)} before the season. They're ${diff} places better than that.`
@@ -1134,7 +1134,7 @@ function rankingsSection(s: ScheduledReportFactSheet, max = 5): string {
     const delta = r.delta !== undefined && r.delta !== 0
       ? r.delta > 0 ? ` (↑${r.delta})` : ` (↓${Math.abs(r.delta)})`
       : ''
-    return `${r.rank}. ${r.teamName} — ${r.wins}–${r.losses}–${r.otLosses} (${r.points} pts)${delta}`
+    return `${r.rank}. ${r.teamName} (${r.wins}–${r.losses}–${r.otLosses}, ${r.points} pts)${delta}`
   })
   return lines.join('\n')
 }
