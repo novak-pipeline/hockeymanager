@@ -135,11 +135,15 @@ const PP_SHOT_BOOST = 1.12
  * Seconds from committing to a shot to the puck leaving the blade — a REAL sim
  * state (W2, owner: "shots happen instantly"): the shooter sets, slows and
  * loads with the puck on his blade, and defenders can close or get a stick in
- * during it. A slapper from distance winds up longer. (Was one 0.25 s frame for
- * every shot, and skipped entirely for a man who had carried the puck a while.)
+ * during it; a slapper from distance winds up longer. It used to be SKIPPED for
+ * a man who had carried the puck a while (most shots). Calibration note: a
+ * 0.5 / 0.75 s wind-up cut goals 2.94 -> 2.28 per team-game (defenders close in
+ * the extra beat), so the wrist wind-up is one think (0.25 s) and the slapper
+ * 0.5 s: goals 3.00, no scalar changed. The renderer's swing (choreo) spans at
+ * least 0.4 s and is timed so contact lands on this release.
  * One-timers and tips are catch-and-release and don't wind up here.
  */
-export const VAL_WINDUP = { near: 0.5, far: 0.75 }
+export const VAL_WINDUP = { near: 0.25, far: 0.5 }
 const SHIFT_TARGET = 22
 const PENALTY_SECONDS = 120
 /**
@@ -673,6 +677,14 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     for (const s of sides) {
       const spots = faceoffSpots(s, p.dot)
       s.skaters.forEach((b) => {
+        if (foSetAt !== null) {
+          // SET (W2, owner: "no one set and can't even tell there's a
+          // faceoff"): from the linesman stepping in to the drop, nobody moves.
+          b.vx *= 0.2
+          b.vy *= 0.2
+          cmds.set(b, { tx: b.x, ty: b.y, speed: 0.5, arrive: true, urgency: 0.2, faceX: p.dot.x, faceY: p.dot.y })
+          return
+        }
         const spot = spots.get(b) ?? { x: b.x, y: b.y }
         const tx = spot.x
         const ty = spot.y

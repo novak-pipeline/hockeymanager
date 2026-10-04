@@ -1739,7 +1739,7 @@ function probeEventsOf(stream: WatchedGame['stream']): VTEvent[] {
       case 'goal': e.actor = ev.scorer; e.scorer = ev.scorer; break
       case 'save': e.actor = ev.goalie; e.rebound = ev.rebound; break
       case 'faceoff': e.actor = ev.winner; e.x = ev.pos.x * 100; e.z = ev.pos.y * 42.5; break
-      case 'hit': e.actor = ev.by; break
+      case 'hit': e.actor = ev.by; e.target = ev.on; if (ev.knockdown !== undefined) e.knockdown = ev.knockdown; break
       case 'deke': e.actor = ev.by; break
       case 'penalty': e.actor = ev.player; break
     }

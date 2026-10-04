@@ -62,7 +62,7 @@ describe('viewer-truth detectors', () => {
 
   it('runs all ten and reports n/a with nothing to judge', () => {
     const res = runViewerTruth(input([]))
-    expect(res.map((r) => r.id)).toEqual(['VT1', 'VT2', 'VT3', 'VT4', 'VT5', 'VT6', 'VT7', 'VT8', 'VT9', 'VT10'])
+    expect(res.map((r) => r.id)).toEqual(['VT1', 'VT2', 'VT3', 'VT4', 'VT5', 'VT6', 'VT7', 'VT8', 'VT9', 'VT10', 'VT11'])
     expect(res.every((r) => r.status === 'n/a')).toBe(true)
   })
 })

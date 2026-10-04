@@ -169,6 +169,8 @@ export function extractActionCues(stream: GameStream): ActionCue[] {
 
 /** Slowest a shot clip is stretched to cover a long wind-up (beyond this the swing reads as slow motion). */
 const SHOT_SWING_MIN_RATE = 0.55
+/** A shot the sim wound up (windupS present) is drawn swinging for at least this long, so the set reads at 1×. */
+const SHOT_SWING_MIN_S = 0.4
 
 /** Seconds the faceoff set (crouch, wingers down) starts before the drop, when the engine doesn't say. */
 export const FACEOFF_LEAD_S = 1.5
@@ -220,8 +222,9 @@ export function planCues(cues: ActionCue[], contactOf: (clip: string) => number 
     if (clip && cue.kind !== 'faceoff') lead = contact(clip)
     // A shot's swing spans the sim's real wind-up (W2): the clip plays slower
     // so its contact frame lands on the release, never faster than authored.
-    if (clip && cue.kind === 'shot' && cue.windupS !== undefined && cue.windupS > lead && lead > 0) {
-      const speed = Math.max(SHOT_SWING_MIN_RATE, lead / cue.windupS)
+    const swing = cue.windupS !== undefined ? Math.max(cue.windupS, SHOT_SWING_MIN_S) : 0
+    if (clip && cue.kind === 'shot' && swing > lead && lead > 0) {
+      const speed = Math.max(SHOT_SWING_MIN_RATE, lead / swing)
       out.push({ cue, clip, lead: lead / speed, speed })
       continue
     }
