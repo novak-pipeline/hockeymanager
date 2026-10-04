@@ -1071,8 +1071,8 @@ export function MatchViewer(props: {
       shownScore: sv ? `${sv.homeScore}-${sv.awayScore}` : '',
     }
   }
-  const probeCtlRef = useRef({ handleDropPuck, skipPregame, handleSeek, endReplay: _endReplay })
-  probeCtlRef.current = { handleDropPuck, skipPregame, handleSeek, endReplay: _endReplay }
+  const probeCtlRef = useRef({ handleDropPuck, skipPregame, handleSeek, endReplay: _endReplay, continueFromIntermission })
+  probeCtlRef.current = { handleDropPuck, skipPregame, handleSeek, endReplay: _endReplay, continueFromIntermission }
   useEffect(() => {
     const probe = probeRef.current
     if (!probe) return
@@ -1086,7 +1086,9 @@ export function MatchViewer(props: {
         ...probeViewerRef.current(), clock: lastAbsTRef.current, duration: gameDurationRef.current,
         home: game.homeAbbr, away: game.awayAbbr, frames: probe.frames.length, goalsSeen: probe.goals.length,
         playing: viewRef.current?.playing ?? false,
+        ready: rendererRef.current !== null && gameDurationRef.current > 0,
       }),
+      continueIntermission: (): void => probeCtlRef.current.continueFromIntermission(),
       dropPuck: (mode: PlaybackMode = 'full'): void => probeCtlRef.current.handleDropPuck(mode),
       skipPregame: (): void => probeCtlRef.current.skipPregame(),
       /** Cut to an absolute game second (as a scrub), keeping the score graphics honest. */

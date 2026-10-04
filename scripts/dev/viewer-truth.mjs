@@ -144,12 +144,25 @@ try {
       const opened = await win.evaluate((s) => window.__reel.watch(s.homeId, s.awayId, s.seed, s.engine), sc)
       const evCount = Number(String(opened).split('·')[1]?.trim().split(' ')[0])
       const fpOk = String(sc.fingerprint).startsWith(`${evCount}·`)
-      await win.waitForFunction(() => window.__viewerProbe && window.__viewerProbe.state().duration > 0, null, { timeout: 120000 })
+      // wait for THIS game's viewer with its renderer built (the previous clip's
+      // viewer may still be unmounting), then drop the puck, skip the open, cut in
+      await win.waitForFunction((h) => {
+        const p = window.__viewerProbe
+        if (!p) return false
+        const st = p.state()
+        return st.ready && st.phase === 'hero' && st.away === h
+      }, sc.awayAbbr, { timeout: 120000 })
       await win.evaluate(() => { window.__viewerProbe.dropPuck('full') })
-      await win.waitForTimeout(300)
-      await win.evaluate(() => { window.__viewerProbe.skipPregame() })
-      await win.waitForTimeout(300)
-      await win.evaluate((t) => { window.__viewerProbe.jumpTo(t); window.__viewerProbe.reset() }, sc.clipFrom)
+      await win.waitForFunction(() => ['pregame', 'playing'].includes(window.__viewerProbe.state().phase), null, { timeout: 15000 })
+      await win.evaluate(() => { if (window.__viewerProbe.state().phase === 'pregame') window.__viewerProbe.skipPregame() })
+      await win.waitForFunction(() => window.__viewerProbe.state().phase === 'playing', null, { timeout: 15000 })
+      for (let k = 0; k < 3; k++) {
+        await win.evaluate((t) => { window.__viewerProbe.jumpTo(t) }, sc.clipFrom)
+        await win.waitForTimeout(250)
+        const st0 = await win.evaluate(() => window.__viewerProbe.state())
+        if (st0.phase === 'intermission') await win.evaluate(() => window.__viewerProbe.continueIntermission())
+        else if (st0.playing && Math.abs(st0.clock - sc.clipFrom) < 5) break
+      }
       // the camera springs settle for a beat before the clip counts
       await win.waitForTimeout(400)
       await win.evaluate(() => window.__viewerProbe.reset())
@@ -192,6 +205,8 @@ try {
           mkdirSync(join(OUT, 'stills'), { recursive: true })
           await win.screenshot({ path: join(OUT, 'stills', `${label}.png`) }).catch(() => {})
         }
+        // a period break inside the clip window: on with the clip (the owner would press Continue)
+        if (st.phase === 'intermission' && st.clock < sc.clipTo) { await win.evaluate(() => window.__viewerProbe.continueIntermission()); continue }
         if (st.phase === 'intermission' || st.phase === 'postgame') break
         const pastClip = st.clock >= sc.clipTo && !st.replay && !st.replayPending
         if (pastClip && (!isGoal || replaySeen || st.goalsSeen === 0 || Date.now() - t0 > 25_000)) break
