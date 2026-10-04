@@ -9,6 +9,8 @@ A single-player hockey management simulation in the spirit of **Football Manager
 
 ---
 
+**Writing game text:** any player-facing prose (inbox, news, scenes, reports, commentary, UI copy, variant pools) follows the `game-writing` skill (`.claude/skills/game-writing/SKILL.md`). In short: true to the sim facts, specific, in a hockey voice, no AI tells. Measure with the prose-audit harness, never assert.
+
 ## CORE ARCHITECTURE PRINCIPLES (do not violate)
 
 1. **Sim engine is fully decoupled from visuals.** The engine emits a positional **event stream**; 2D and 3D are just renderers reading the same stream. (This is how FM works — visuals "sit on top of what the players already do.") The event-stream contract is the keystone — get it right, never rewrite it.
