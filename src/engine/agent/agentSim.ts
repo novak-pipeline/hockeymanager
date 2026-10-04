@@ -131,8 +131,15 @@ export const AGENT_TUNING = {
 }
 
 const PP_SHOT_BOOST = 1.12
-/** Seconds from committing to a shot to the puck leaving the blade (a slapper from the point winds up longer). */
-export const VAL_WINDUP = { near: FRAME_DT, far: FRAME_DT }
+/**
+ * Seconds from committing to a shot to the puck leaving the blade — a REAL sim
+ * state (W2, owner: "shots happen instantly"): the shooter sets, slows and
+ * loads with the puck on his blade, and defenders can close or get a stick in
+ * during it. A slapper from distance winds up longer. (Was one 0.25 s frame for
+ * every shot, and skipped entirely for a man who had carried the puck a while.)
+ * One-timers and tips are catch-and-release and don't wind up here.
+ */
+export const VAL_WINDUP = { near: 0.5, far: 0.75 }
 const SHIFT_TARGET = 22
 const PENALTY_SECONDS = 120
 /**
@@ -300,7 +307,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   let turnSnap = ""
   let tieUp = null as { c: Body; o: Body; since: number } | null
   let deke = null as { c: Body; on: Body; goalie: boolean; move: DekeKind; success: boolean; until: number; dir: number } | null
-  let windup = null as { c: Body; at: number } | null
+  let windup = null as { c: Body; at: number; from: number } | null
   let bite = null as { side: Side; dy: number; until: number } | null
   let prevPoss: { side: Side; since: number; adv: number } | null = null
 
@@ -974,7 +981,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     return { x: gx + (dx / d) * depth, y: (dy / d) * depth }
   }
 
-  const shoot = (c: Body, s: Side, oneTimer: boolean, beatGoalie = false): void => {
+  const shoot = (c: Body, s: Side, oneTimer: boolean, beatGoalie = false, windupS?: number): void => {
     const opp = oppOf(s)
     const a = s.a
     const from = { x: puck.x, y: puck.y }
@@ -1111,7 +1118,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           target: { x: a, y: clamp(wide / HALF_Y, -1, 1) },
           result: r < 0.08 ? 'post' : r < 0.38 ? 'high' : 'wide',
           shotType: tipped ? 'tip' : shotType(),
-          speedMph: Math.round(speed * 0.6818)
+          speedMph: Math.round(speed * 0.6818),
+          ...(windupS !== undefined && !tipped ? { windupS: Math.round(windupS * 100) / 100 } : {})
         })
       } else {
         // On target: the goalie's read decides it.
@@ -1160,7 +1168,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           shotType: tipped ? 'tip' : shotType(),
           speedMph: Math.round(speed * 0.6818),
           origin: shotOrigin(),
-          oddMan: oddManNow()
+          oddMan: oddManNow(),
+          ...(windupS !== undefined && !tipped ? { windupS: Math.round(windupS * 100) / 100 } : {})
         })
         const st = stat(ctx, shooterB.player.id)
         st.shots++
@@ -1569,8 +1578,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           // The release: the puck leaves the blade at the shot event (the
           // renderer swings in the lead-up, with the puck still on his stick).
           if (now >= windup.at - 1e-6) {
+            const ws = now - windup.from
             windup = null
-            shoot(c, s, false)
+            shoot(c, s, false, false, ws)
           } else cmds.set(c, { tx: c.x + c.vx * 0.6, ty: c.y + c.vy * 0.6, speed: speedOf(c) * 0.9, arrive: false, urgency: 0.5 })
         } else {
         const act = decideCarrier(w, s, c)
@@ -1585,16 +1595,13 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         } else if (act.kind === 'dump') {
           release(c, s, act.at, act.speed, act.lift, 'dump')
         } else {
-          // The puck must have been on his blade for the swing (the renderer
-          // starts the shot clip that long before the release): a man who has
-          // carried it a while releases now; one who just got it winds up first.
+          // Every shot winds up from the moment he commits (the puck on his
+          // blade, the stick loading): the viewer sees the set, and the
+          // defence gets the same beat to close or block.
           const far = Math.hypot(s.a * GOAL_X - c.x, c.y) > 45
           const need = far ? VAL_WINDUP.far : VAL_WINDUP.near
-          if (now - gotAt >= need - 1e-6) shoot(c, s, false)
-          else {
-            windup = { c, at: gotAt + need }
-            cmds.set(c, { tx: c.x + c.vx * 0.6, ty: c.y + c.vy * 0.6, speed: speedOf(c) * 0.9, arrive: false, urgency: 0.5 })
-          }
+          windup = { c, at: now + need, from: now }
+          cmds.set(c, { tx: c.x + c.vx * 0.6, ty: c.y + c.vy * 0.6, speed: speedOf(c) * 0.75, arrive: false, urgency: 0.5 })
         }
         }
         if (w.carrier === c && !cmds.has(c)) cmds.set(c, { tx: c.x + c.vx, ty: c.y + c.vy, speed: speedOf(c), arrive: false, urgency: 0.4 })

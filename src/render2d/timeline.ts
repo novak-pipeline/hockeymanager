@@ -159,6 +159,8 @@ export class MatchTimeline {
    * faceoff dot.
    */
   private readonly stoppages: StoppageMark[] = []
+  /** Shot / pass releases (absT, who) — the carrier lets go AT the event, not at the next 4 Hz frame. */
+  private readonly releases: Array<{ absT: number; by: PlayerId }> = []
   /**
    * Absolute clock offset at the start of each period (1-indexed).
    * Regulation periods are each 1200 s; OT periods (4+) derive their length
@@ -205,6 +207,7 @@ export class MatchTimeline {
     }
 
     // Second pass: index frames + goals + stoppages with their true absolute times.
+    let lastShotEnd = -Infinity
     for (const ev of stream) {
       if (isEvent(ev, 'frame')) {
         const pBase = this.periodBase.get(ev.period) ?? (ev.period - 1) * REGULATION_PERIOD_SECONDS
@@ -216,7 +219,19 @@ export class MatchTimeline {
         // Index stoppages so sampleAt() can snap the puck at stoppage boundaries
         // instead of lerping it across the ice to the new faceoff position.
         const pBase = this.periodBase.get(ev.period) ?? (ev.period - 1) * REGULATION_PERIOD_SECONDS
-        this.stoppages.push({ absT: pBase + ev.t })
+        const at = pBase + ev.t
+        // …except the whistle that ENDS a shot (a frozen save, a goal): the puck
+        // is still flying into the goalie / the net there, and snapping made
+        // every such shot vanish off the blade and appear at the net (W2, VT3).
+        if (isEvent(ev, 'faceoff') || at - lastShotEnd > 0.3) this.stoppages.push({ absT: at })
+      }
+      if (isEvent(ev, 'shot') || isEvent(ev, 'missedShot')) {
+        this.releases.push({ absT: (this.periodBase.get(ev.period) ?? (ev.period - 1) * REGULATION_PERIOD_SECONDS) + ev.t, by: ev.shooter })
+      } else if (isEvent(ev, 'pass')) {
+        this.releases.push({ absT: (this.periodBase.get(ev.period) ?? (ev.period - 1) * REGULATION_PERIOD_SECONDS) + ev.t, by: ev.from })
+      }
+      if (isEvent(ev, 'save') || isEvent(ev, 'goal')) {
+        lastShotEnd = (this.periodBase.get(ev.period) ?? (ev.period - 1) * REGULATION_PERIOD_SECONDS) + ev.t
       }
     }
     // stoppages are already in stream order (ascending absT)
@@ -271,6 +286,23 @@ export class MatchTimeline {
   }
 
   /** Interpolated positions at an absolute time. */
+  /** Did `carrier` release the puck (shot / pass) in [fromT, absT]? (W2: the puck
+   *  leaves the blade at the release, so a 4 Hz frame can't keep it stuck there
+   *  for up to 0.25 s and then teleport it — "shots happen instantly".) */
+  private releasedBy(carrier: PlayerId | null, fromT: number, absT: number): boolean {
+    if (carrier === null) return false
+    const r = this.releases
+    let lo = 0
+    let hi = r.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (r[mid]!.absT < fromT - 1e-6) lo = mid + 1
+      else hi = mid
+    }
+    for (let k = lo; k < r.length && r[k]!.absT <= absT + 1e-6; k++) if (r[k]!.by === carrier) return true
+    return false
+  }
+
   sampleAt(absT: number): PosSnapshot | null {
     const i = this.frameIndexAt(absT)
     if (i < 0) return null
@@ -317,7 +349,7 @@ export class MatchTimeline {
       homeGoalie: blendOne(a.homeGoalie, b.homeGoalie, f, smooth ? prev!.homeGoalie : undefined, smooth ? after!.homeGoalie : undefined),
       awayGoalie: blendOne(a.awayGoalie, b.awayGoalie, f, smooth ? prev!.awayGoalie : undefined, smooth ? after!.awayGoalie : undefined),
       puck,
-      carrier: dom.puckCarrier,
+      carrier: this.releasedBy(dom.puckCarrier, frameAT, absT) ? null : dom.puckCarrier,
       homeIds: dom.home.map((s) => s.player),
       awayIds: dom.away.map((s) => s.player),
       homeGoalieId: dom.homeGoalie.player,

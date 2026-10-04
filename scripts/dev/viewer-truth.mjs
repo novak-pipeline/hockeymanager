@@ -229,6 +229,10 @@ try {
         writeFileSync(join(OUT, clipFile), Buffer.from(b64, 'base64'))
       }
       const vt = await win.evaluate(() => window.__viewerProbe.report())
+      if (process.env.VT_DUMP && String(process.env.VT_DUMP).split(',').includes(sc.kind)) {
+        const dump = await win.evaluate(() => ({ events: window.__viewerProbe.events(), frames: window.__viewerProbe.drain() }))
+        writeFileSync(join(OUT, `dump-${label}.json`), JSON.stringify(dump))
+      }
       const fps = await win.evaluate(() => {
         const st = window.__viewerProbe.state()
         return st.frames

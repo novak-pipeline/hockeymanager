@@ -68,6 +68,8 @@ export interface ActionCue {
   loserId?: string
   /** shot (agent engine): the release type */
   shotType?: string
+  /** shot (agent engine, W2): seconds the sim's shooter wound up — the swing is timed to it */
+  windupS?: number
   /** deke (agent engine): which move */
   dekeKind?: string
   /** poke: did it knock the puck free (agent pokeCheck.success; takeaways always did) */
@@ -94,7 +96,10 @@ export function extractActionCues(stream: GameStream): ActionCue[] {
   for (const ev of stream) {
     if (isEvent(ev, 'shot')) {
       lastShot = { x: ev.from.x, y: ev.from.y, tx: ev.target.x, ty: ev.target.y }
-      out.push({ kind: 'shot', absT: absTime(ev.period, ev.t), nx: ev.from.x, ny: ev.from.y, actorId: ev.shooter, ...(ev.shotType ? { shotType: ev.shotType } : {}) })
+      out.push({ kind: 'shot', absT: absTime(ev.period, ev.t), nx: ev.from.x, ny: ev.from.y, actorId: ev.shooter, ...(ev.shotType ? { shotType: ev.shotType } : {}), ...(ev.windupS !== undefined ? { windupS: ev.windupS } : {}) })
+    } else if (isEvent(ev, 'missedShot')) {
+      // a miss is still a shot: the shooter swings (it used to just leave his stick)
+      out.push({ kind: 'shot', absT: absTime(ev.period, ev.t), nx: ev.from.x, ny: ev.from.y, actorId: ev.shooter, ...(ev.shotType ? { shotType: ev.shotType } : {}), ...(ev.windupS !== undefined ? { windupS: ev.windupS } : {}) })
     } else if (isEvent(ev, 'save')) {
       out.push({
         kind: 'save', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.goalie, rebound: ev.rebound,
@@ -162,6 +167,9 @@ export function extractActionCues(stream: GameStream): ActionCue[] {
   })
 }
 
+/** Slowest a shot clip is stretched to cover a long wind-up (beyond this the swing reads as slow motion). */
+const SHOT_SWING_MIN_RATE = 0.55
+
 /** Seconds the faceoff set (crouch, wingers down) starts before the drop, when the engine doesn't say. */
 export const FACEOFF_LEAD_S = 1.5
 
@@ -171,6 +179,8 @@ export interface PlannedCue {
   clip: string | null
   /** Seconds before absT the clip starts. */
   lead: number
+  /** Clip playback rate (a shot's swing stretched over the sim's wind-up; 1 otherwise). */
+  speed?: number
 }
 
 /**
@@ -208,6 +218,13 @@ export function planCues(cues: ActionCue[], contactOf: (clip: string) => number 
       lead = contact('g_glove_save')
     }
     if (clip && cue.kind !== 'faceoff') lead = contact(clip)
+    // A shot's swing spans the sim's real wind-up (W2): the clip plays slower
+    // so its contact frame lands on the release, never faster than authored.
+    if (clip && cue.kind === 'shot' && cue.windupS !== undefined && cue.windupS > lead && lead > 0) {
+      const speed = Math.max(SHOT_SWING_MIN_RATE, lead / cue.windupS)
+      out.push({ cue, clip, lead: lead / speed, speed })
+      continue
+    }
     out.push({ cue, clip, lead })
   }
   return out
@@ -428,7 +445,8 @@ export class Choreographer {
     }
     const a = this.find(c.actorId)
     if (!a?.layer || !p.clip) return
-    a.layer.play(p.clip, { at: late })
+    const rate = p.speed ?? 1
+    a.layer.play(p.clip, { at: late * rate, speed: rate })
     if (c.kind === 'hit' && c.targetId) {
       // the hitter squares up to his man so the clip's turned-in shoulder meets him (through the facing spring)
       const t = this.find(c.targetId)

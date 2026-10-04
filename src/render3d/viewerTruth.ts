@@ -20,6 +20,8 @@ export interface VTEvent {
   z?: number
   shotType?: string
   rebound?: boolean
+  /** shots: world x of the net it was aimed at (±89). */
+  netX?: number
 }
 
 /** A spoken / captioned booth line as fired (channel 'commentary'). */
@@ -182,19 +184,33 @@ export function vt3Shots(inp: VTInput): VTResult {
     // only shots the recording actually played through live (continuous, not a replay)
     const near = frames.filter((f) => f.clock >= s.absT - 3 && f.clock <= s.absT + 1.5 && isLive(f) && !inReplay(f))
     if (near.length < 10 || near[0]!.clock > s.absT - 1 || near[near.length - 1]!.clock < s.absT + 0.3) continue
-    const arrival = inp.events.find((e) => e.absT >= s.absT && e.absT <= s.absT + 1.5 && (e.type === 'save' || e.type === 'goal' || e.type === 'blockedShot'))
-    const arriveT = arrival ? arrival.absT : s.absT + 0.4
+    // set-up: the wind-up the renderer drew — or a deke by the shooter right
+    // before (a deke-and-tuck's set-up IS the deke)
+    const deke = inp.events.find((e) => e.type === 'deke' && e.actor === s.actor && e.absT >= s.absT - 1.5 && e.absT < s.absT)
     let setup = 0
-    for (const f of near) if (f.clock <= s.absT && f.windup === s.actor) setup += f.dt
-    const flightFrames = near.filter((f) => f.clock >= s.absT && f.clock < arriveT)
-    const flightWall = flightFrames.reduce((a, f) => a + f.dt, 0)
+    for (const f of near) if (f.clock <= s.absT && (f.windup === s.actor || (deke && f.clock >= deke.absT))) setup += f.dt
+    // flight: rendered frames after the release on which the drawn puck is
+    // travelling toward the net (closing, still > 3 ft out), within 1 game-s
+    const netX = s.netX ?? 89
+    const after = frames.filter((f) => f.clock >= s.absT && f.clock <= s.absT + 1 && isLive(f) && !inReplay(f))
+    let flightWall = 0
+    let prevD = Infinity
+    let started = false
+    for (const f of after) {
+      const d = Math.hypot(f.puck.x - netX, f.puck.z)
+      if (d <= 3) break
+      if (d < prevD - 0.05) { started = true; flightWall += f.dt }
+      else if (started) break
+      prevD = d
+    }
     // frames on a 60 Hz display (the off-screen probe window may render faster)
     const flight60 = flightWall * 60
     const need = s.shotType === 'slap' ? 0.6 : 0.3
+    const catchRelease = s.shotType === 'oneTimer' || s.shotType === 'tip'
     judged++
     setups.push(setup)
     flights.push(flight60)
-    const ok = setup >= need && flight60 >= 3
+    const ok = (catchRelease || setup >= need) && flight60 >= 3
     if (!ok) {
       failed++
       if (ev.length < 6) ev.push(`${clk(s.absT)} ${s.shotType ?? 'shot'} by ${s.actor}: set-up ${f2(setup)} s wall (need ${need}), flight ${f2(flightWall)} s wall (${f1(flight60)} frames @60 Hz) at ${f2(near[0]!.speed)}×`)
@@ -203,7 +219,7 @@ export function vt3Shots(inp: VTInput): VTResult {
   return {
     id: 'VT3', name: 'Shot readability (wall time)',
     status: judged === 0 ? 'n/a' : failed / judged <= 0.1 ? 'green' : 'red',
-    rule: 'set-up ≥ 0.3 s wall (slap ≥ 0.6 s) and puck in flight ≥ 3 frames at 60 Hz (0.05 s wall), for ≥ 90% of shots',
+    rule: 'set-up ≥ 0.3 s wall (slap ≥ 0.6 s; one-timers/tips exempt; a deke counts as set-up) and the drawn puck travelling to the net on ≥ 3 frames at 60 Hz, for ≥ 90% of shots',
     value: `${judged - failed}/${judged} shots readable; median set-up ${f2(pct(setups, 0.5))} s wall, median flight ${f1(pct(flights, 0.5))} frames @60 Hz`,
     evidence: ev,
   }
@@ -295,7 +311,7 @@ export function vt6Clocks(inp: VTInput): VTResult {
     // the goal sequence must advance with the game clock (t = clock − goal), not wall time
     const live = inp.frames.filter((f) => f.wall >= g.wall && f.wall <= g.wall + 30 && !inReplay(f))
     let drift = 0
-    for (const f of live) if (f.goalSeqT !== null && f.clock >= g.goalAbsT) drift = Math.max(drift, Math.abs(f.goalSeqT - (f.clock - g.goalAbsT)))
+    for (const f of live) if (f.goalSeqT !== null && f.clock >= g.goalAbsT && f.clock <= g.goalAbsT + GOAL_SEQ_S) drift = Math.max(drift, Math.abs(f.goalSeqT - (f.clock - g.goalAbsT)))
     if (drift > 0.25) problems.push(`goal sequence drifts ${f2(drift)} s from the game clock`)
     // the replay must not cut the goal sequence short
     const firstRep = inp.frames.findIndex((f) => f.wall > g.wall && inReplay(f))
