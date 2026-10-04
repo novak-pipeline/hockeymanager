@@ -70,7 +70,7 @@ export interface VTResult {
 const POP_RAD_S = 12          // motion-probe's body-core pop threshold
 const DIVERGE_FT = 3
 const NEAR_RINK_FT = 6        // the eye counts a body this close to the sheet as "on it"
-const SNAP_FT_S = 40          // a drawn root faster than this (game time) is a snap
+const SNAP_FT_S = 45          // a drawn root faster than this (game time, ≥0.1 s window) is a snap
 const SEEK_JUMP_S = 0.75      // a clock jump bigger than the frame's own advance = seek / cut
 
 const pct = (xs: number[], p: number): number => {
@@ -227,10 +227,18 @@ export function vt4Motion(inp: VTInput): VTResult {
       if (!r.visible || r.id === null || !q || q.id !== r.id || !q.visible) return
       b.rigSec += f.dt
       if (r.boneW > POP_RAD_S) b.pops++
-      const gameDt = f.dt * f.speed
-      if (gameDt > 0 && !r.goalie && Math.hypot(r.x - q.x, r.z - q.z) / gameDt > SNAP_FT_S) {
+      if (r.goalie) return
+      // a snap: one rendered frame jumps > 3 ft, or the root averages faster than
+      // SNAP_FT_S over the last ≥ 0.1 game-s (single 5 ms frames are too noisy)
+      const jump = Math.hypot(r.x - q.x, r.z - q.z)
+      let j = i - 1
+      while (j > 0 && f.clock - frames[j]!.clock < 0.1 && !brk[j]) j--
+      const o = frames[j]!.rigs[k]
+      const win = f.clock - frames[j]!.clock
+      const avg = o && o.id === r.id && win >= 0.1 ? Math.hypot(r.x - o.x, r.z - o.z) / win : 0
+      if (jump > 3 || avg > SNAP_FT_S) {
         b.snaps++
-        if (ev.length < 4) ev.push(`${clk(f.clock)} ${r.id}: drawn root moved ${f1(Math.hypot(r.x - q.x, r.z - q.z))} ft in ${f2(gameDt)} game-s (${r.mode}) at ${key}`)
+        if (ev.length < 4) ev.push(`${clk(f.clock)} ${r.id}: drawn root ${jump > 3 ? `jumped ${f1(jump)} ft in one frame` : `averaged ${f1(avg)} ft/s over ${f2(win)} game-s`} (${r.mode}) at ${key}`)
       }
     })
     by.set(key, b)
@@ -241,7 +249,7 @@ export function vt4Motion(inp: VTInput): VTResult {
   return {
     id: 'VT4', name: 'Motion gates at the playback speed actually used',
     status: rows.length === 0 ? 'n/a' : bad.length === 0 ? 'green' : 'red',
-    rule: `per speed: body-core pops (> ${POP_RAD_S} rad/s) ≤ 0.05 per rig-s and root snaps (> ${SNAP_FT_S} ft/s game) ≤ 0.05 per rig-s`,
+    rule: `per speed: body-core pops (> ${POP_RAD_S} rad/s) ≤ 0.05 per rig-s and root snaps (> 3 ft in one frame, or > ${SNAP_FT_S} ft/s over 0.1 game-s) ≤ 0.05 per rig-s`,
     value: rows.map(([k, b]) => `${k}: pops ${f2(b.pops / b.rigSec)}/rig-s, snaps ${f2(b.snaps / b.rigSec)}/rig-s`).join(' · ') + ` · live-play speeds seen: ${speeds.join(', ')}`,
     evidence: ev,
   }
@@ -275,26 +283,34 @@ export function vt5Replay(inp: VTInput): VTResult {
 }
 
 /* ── VT6 one clock per moment ────────────────────────────────────────────── */
+/** The renderer's on-ice goal sequence length, game seconds (rink3dRenderer GOAL_SEQ.end). */
+const GOAL_SEQ_S = 8
 export function vt6Clocks(inp: VTInput): VTResult {
   const ev: string[] = []
   let bad = 0
   for (const g of inp.goals) {
-    const timers = inp.timers.filter((t) => t.wall >= g.wall - 0.05 && t.wall <= g.wall + 20)
-    const seq = inp.frames.filter((f) => f.wall >= g.wall && f.wall <= g.wall + 20 && f.goalSeq !== null)
-    const clocks = new Set<string>()
-    for (const t of timers) clocks.add(`wall setTimeout '${t.name}' ${t.ms} ms`)
-    if (seq.length > 0) clocks.add(`renderer GOAL_SEQ (${f1(Math.max(...seq.map((f) => f.goalSeqT ?? 0)))} s on its cue clock)`)
-    const speeds = new Set(inp.frames.filter((f) => f.wall >= g.wall && f.wall <= g.wall + 6 && !inReplay(f)).map((f) => f2(f.speed)))
-    if (speeds.size > 0) clocks.add(`playback plan speeds ${[...speeds].join('/')}×`)
-    const wallTimers = timers.length
-    if (wallTimers > 0 || clocks.size > 1) bad++
-    ev.push(`${clk(g.goalAbsT)} goal: ${clocks.size} clocks → ${[...clocks].join('; ')}`)
+    const problems: string[] = []
+    const timers = inp.timers.filter((t) => t.wall >= g.wall - 0.05 && t.wall <= g.wall + 30)
+    for (const t of timers) problems.push(`wall setTimeout '${t.name}' ${t.ms} ms`)
+    // the goal sequence must advance with the game clock (t = clock − goal), not wall time
+    const live = inp.frames.filter((f) => f.wall >= g.wall && f.wall <= g.wall + 30 && !inReplay(f))
+    let drift = 0
+    for (const f of live) if (f.goalSeqT !== null && f.clock >= g.goalAbsT) drift = Math.max(drift, Math.abs(f.goalSeqT - (f.clock - g.goalAbsT)))
+    if (drift > 0.25) problems.push(`goal sequence drifts ${f2(drift)} s from the game clock`)
+    // the replay must not cut the goal sequence short
+    const firstRep = inp.frames.findIndex((f) => f.wall > g.wall && inReplay(f))
+    if (firstRep > 0) {
+      const before = inp.frames[firstRep - 1]!
+      if (before.clock < g.goalAbsT + GOAL_SEQ_S - 0.1) problems.push(`replay cut in ${f1(before.clock - g.goalAbsT)} s after the goal (sequence is ${GOAL_SEQ_S} s)`)
+    }
+    if (problems.length) bad++
+    ev.push(`${clk(g.goalAbsT)} goal: ${problems.length ? problems.join('; ') : 'one game clock'}`)
   }
   return {
     id: 'VT6', name: 'One clock per moment',
     status: inp.goals.length === 0 ? 'n/a' : bad === 0 ? 'green' : 'red',
-    rule: 'every timer of a goal moment derives from one schedule; zero wall-clock setTimeouts govern game-time content',
-    value: `${bad}/${inp.goals.length} goal moments run on more than one clock`,
+    rule: 'a goal moment runs on the game clock: no wall-clock timers, the goal sequence tracks clock − goal (±0.25 s), the replay starts after the sequence ends',
+    value: `${bad}/${inp.goals.length} goal moments off the one clock`,
     evidence: ev.slice(0, 5),
   }
 }

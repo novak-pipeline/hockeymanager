@@ -8,6 +8,7 @@ import {
 import type { MatchRenderer, RinkColors, PlayerLabels } from '@render2d'
 import { RinkRenderer } from '@render2d'
 import { Rink3dRenderer, type CameraPreset } from '@render3d'
+import { GOAL_SEQ } from '@render3d/rink3dRenderer'
 import { viewerProbeEnabled, type ProbeFrame, type ProbeGeometry, type ProbeViewerState } from '@render3d/viewerProbe'
 import { runViewerTruth, type VTCue, type VTEvent, type VTGoal, type VTTimer } from '@render3d/viewerTruth'
 import { periodBases } from '@render2d/timeline'
@@ -69,6 +70,15 @@ function readReplayPref(): ReplayPref {
 function writeReplayPref(v: ReplayPref): void {
   try { localStorage.setItem(LS_REPLAYS, v) } catch { /* ignore */ }
 }
+/** The replay cuts in once the on-ice goal sequence is over (GOAL_SEQ.end = 8 s, game time). */
+const REPLAY_AFTER_S = GOAL_SEQ.end + 0.2
+/** The replay re-plays this much build-up … */
+const REPLAY_LEAD_S = 5
+/** … through the puck crossing the line, and this much after it. */
+const REPLAY_TAIL_S = 1.2
+/** Slow-motion replay speed (a replay is presentation, not live play). */
+const REPLAY_SPEED = 0.6
+
 function replaysOn(pref: ReplayPref, mode: PlaybackMode): boolean {
   return pref === 'on' || (pref === 'auto' && mode !== 'key')
 }
@@ -221,10 +231,6 @@ export function MatchViewer(props: {
   // Null unless the main process enabled it — never in a packaged build.
   const probeRef = useRef<ProbeStore | null>(null)
   if (probeRef.current === null && viewerProbeEnabled()) probeRef.current = newProbeStore()
-  const probeTimer = (name: string, ms: number): void => {
-    const p = probeRef.current
-    if (p) p.timers.push({ wall: performance.now() / 1000, clock: lastAbsTRef.current, name, ms })
-  }
 
   // Renderer refs
   const rendererRef   = useRef<MatchRenderer | null>(null)
@@ -262,6 +268,11 @@ export function MatchViewer(props: {
   const heldViewRef        = useRef<MatchView | null>(null)
   // Bumped per replay so a stale timer never ends (or starts) a later one.
   const replaySeqRef       = useRef<number>(0)
+  // The replay is scheduled on the GAME clock (W2): starts when the live clock
+  // reaches startAt, ends when the replay clock reaches replayEndAt.
+  const pendingReplayRef   = useRef<{ goalAbsT: number; startAt: number } | null>(null)
+  const replayEndAtRef     = useRef<number>(Infinity)
+  const bannerUntilRef     = useRef<number>(Infinity)
 
   // Where the NEXT renderer build picks the game up. A 2D↔3D switch or the Sim
   // view's "Watch on the ice" keeps the same moment of the same game — the view
@@ -598,9 +609,9 @@ export function MatchViewer(props: {
           const hand = hands?.[id]
           playerLabels[id] = { lastName: parts[parts.length - 1] ?? fullName, ...(hand ? { handedness: hand } : {}) }
         }
-        // Start paused at speed=2; will play when user picks a mode
+        // Start paused at live speed (1×); will play when user picks a mode
         r.load(timeline, r instanceof Rink3dRenderer ? colors3d : colors, playerLabels)
-        r.setSpeed(2)
+        r.setSpeed(1)
 
         // Resume where the previous view left off (renderer switch / Sim view).
         const resume = resumeRef.current
@@ -666,6 +677,21 @@ export function MatchViewer(props: {
     if (dur <= 0 || !v.playing) return
 
     const currentAbsT = v.progress * dur
+
+    // ── Goal → replay schedule, on the game clock ───────────────────────────────
+    if (replayActiveRef.current && currentAbsT >= replayEndAtRef.current) {
+      _endReplay()
+      return
+    }
+    const pending = pendingReplayRef.current
+    if (pending && replaySkipRef.current && !replayActiveRef.current && currentAbsT >= pending.startAt) {
+      _startReplay(pending.goalAbsT)
+      return
+    }
+    if (currentAbsT >= bannerUntilRef.current) {
+      bannerUntilRef.current = Infinity
+      setGoalBanner(null)
+    }
 
     // ── Commentary ticker ─────────────────────────────────────────────────────
     // Silent during an instant replay — we don't re-narrate the goal's lead-up
@@ -752,40 +778,18 @@ export function MatchViewer(props: {
         probeRef.current?.goals.push({ wall: performance.now() / 1000, goalAbsT: currentAbsT })
         if (goalBannerTimerRef.current) clearTimeout(goalBannerTimerRef.current)
         const wantReplay = !replaySkipRef.current && replaysOn(replayPrefRef.current, pendingModeRef.current)
-        if (!wantReplay && !replaySkipRef.current) {
-          goalBannerTimerRef.current = setTimeout(() => setGoalBanner(null), 4500)
-          probeTimer('goal banner', 4500)
-        }
-
-        // Watch the on-ice celebration FIRST, then cut to the instant replay.
-        // We don't flag replayActive until the replay actually starts, so the
-        // celebration plays at normal speed and the REPLAY watermark / skip
-        // button only appear once we've cut to the replay.
+        // ONE CLOCK (W2, VT5/VT6): everything after a goal is scheduled on the
+        // GAME clock — the on-ice goal sequence (rink3dRenderer GOAL_SEQ:
+        // celebration → bench → crowd) plays out at 1×, then the replay cuts
+        // in, re-plays the build-up THROUGH the puck crossing the line, and
+        // hands back. No wall-clock timers (they cut the bench shot and ended
+        // the replay ~3 s before the goal).
         if (wantReplay) {
           replaySkipRef.current = true
-          const seq = ++replaySeqRef.current
-          const replayStart = Math.max(0, (currentAbsT - 8) / dur)
-          const CELEBRATION_WALL_MS = 4500
-          probeTimer('celebration → replay cut', CELEBRATION_WALL_MS)
-          setTimeout(() => {
-            if (!replaySkipRef.current || seq !== replaySeqRef.current) return // superseded / left
-            heldViewRef.current = viewRef.current
-            renderer3dRef.current?.setBoardHold(true)
-            setReplayActive(true)
-            replayActiveRef.current = true
-            // The booth keeps talking over the replay (the analyst's line is
-            // cued for it); only NEW cues are held while the replay re-crosses.
-            const r = rendererRef.current
-            if (!r) return
-            r.seekFraction(replayStart)
-            r.setSpeed(0.6)
-            r.play()
-            // End the replay after ~8s wall time.
-            probeTimer('replay length', 8000)
-            setTimeout(() => {
-              if (replaySkipRef.current && seq === replaySeqRef.current) _endReplay()
-            }, 8000)
-          }, CELEBRATION_WALL_MS)
+          ++replaySeqRef.current
+          pendingReplayRef.current = { goalAbsT: currentAbsT, startAt: currentAbsT + REPLAY_AFTER_S }
+        } else if (!replaySkipRef.current) {
+          bannerUntilRef.current = currentAbsT + REPLAY_AFTER_S
         }
       }
       prevScoreRef.current = { home: v.homeScore, away: v.awayScore }
@@ -825,7 +829,11 @@ export function MatchViewer(props: {
       // In extended/key modes, when we reach dead air between highlights we
       // DON'T play it — we fast-forward the clock and cut into the next one.
       const jump = nextActiveJump(planRef.current, currentAbsT)
-      if (jump) {
+      if (jump && pendingModeRef.current === 'full') {
+        // Full mode: a stoppage is a CUT (the broadcast cuts to the dot), not
+        // a fast-forward — live hockey is never shown above 1× (W2).
+        _cutTo(jump.jumpToAbsT)
+      } else if (jump) {
         _startFastForward(jump.jumpToAbsT)
       } else {
         const planSpd = currentSpeed(planRef.current, currentAbsT)
@@ -921,6 +929,18 @@ export function MatchViewer(props: {
     ffRafRef.current = requestAnimationFrame(step)
   }
 
+  /** An instant cut forward (full mode's dead time): no spin, no overlay. */
+  function _cutTo(toAbsT: number): void {
+    const r = rendererRef.current
+    const dur = gameDurationRef.current
+    if (!r || dur <= 0) return
+    r.seekFraction(toAbsT / dur)
+    r.setSpeed(currentSpeed(planRef.current, toAbsT) * nudgeRef.current)
+    lastCommentaryAbsT.current = toAbsT
+    lastAbsTRef.current = toAbsT
+    cursorRef.current?.seek(toAbsT)
+  }
+
   /** Stop at the end of a period: pause, and put the intermission up. */
   function _enterIntermission(period: number, resumeJumpTo: number | null): void {
     shownBreaksRef.current.add(period)
@@ -953,9 +973,27 @@ export function MatchViewer(props: {
     rendererRef.current?.play()
   }
 
+  /** Cut to the instant replay: hold the live score, rewind to the build-up. */
+  function _startReplay(goalAbsT: number): void {
+    const r = rendererRef.current
+    const dur = gameDurationRef.current
+    pendingReplayRef.current = null
+    if (!r || dur <= 0) { _endReplay(); return }
+    heldViewRef.current = viewRef.current
+    renderer3dRef.current?.setBoardHold(true)
+    setReplayActive(true)
+    replayActiveRef.current = true
+    replayEndAtRef.current = goalAbsT + REPLAY_TAIL_S
+    r.seekFraction(Math.max(0, goalAbsT - REPLAY_LEAD_S) / dur)
+    r.setSpeed(REPLAY_SPEED)
+    r.play()
+  }
+
   function _endReplay(): void {
     replaySeqRef.current++
     replaySkipRef.current = false
+    pendingReplayRef.current = null
+    replayEndAtRef.current = Infinity
     // Back to the LIVE moment the replay cut away from. (It used to resume
     // wherever the replay had got to — a few seconds before the goal — so the
     // goal played a third time, under a score that had dropped back a goal.)
@@ -1039,7 +1077,7 @@ export function MatchViewer(props: {
         for (const c of planRefB.current.game) if (c.at < startAbsT) firedCuesRef.current.add(c.id)
       }
     }
-    const initSpd = dur > 0 ? currentSpeed(planRef.current, startAbsT) : 2
+    const initSpd = dur > 0 ? currentSpeed(planRef.current, startAbsT) : 1
     rendererRef.current?.setSpeed(initSpd)
     rendererRef.current?.play()
   }

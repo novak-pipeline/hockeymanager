@@ -174,7 +174,7 @@ const TURN_TAU = 0.25         // bank-into-turn smoothing (s)
 const SHOT_SWING_S = 0.32     // stick swing duration on a shot cue
 const GOAL_CUE_S = 4.2        // lifetime of the goal cue (celebration cam)
 /** Post-goal sequence timing (s of game time from the goal). */
-const GOAL_SEQ = { celly: 1.1, bench: 4.6, crowd: 6.4, back: 8.0, end: 8.0 } as const
+export const GOAL_SEQ = { celly: 1.1, bench: 4.6, crowd: 6.4, back: 8.0, end: 8.0 } as const
 type GoalPhase = 'hold' | 'celly' | 'bench' | 'crowd' | 'done'
 function goalPhaseAt(t: number): GoalPhase {
   return t < GOAL_SEQ.celly ? 'hold' : t < GOAL_SEQ.bench ? 'celly' : t < GOAL_SEQ.crowd ? 'bench' : t < GOAL_SEQ.back ? 'crowd' : 'done'
@@ -329,7 +329,8 @@ export class Rink3dRenderer implements MatchRenderer {
     const w = d[lo - 1]
     return w && t < w.to ? w : null
   }
-  private goalSeq: { t: number; scorer: string; side: 'home' | 'away'; phase: GoalPhase } | null = null
+  /** The goal sequence runs on the GAME clock: t = clock − at (W2 one clock; VT6). */
+  private goalSeq: { t: number; at: number; scorer: string; side: 'home' | 'away'; phase: GoalPhase } | null = null
 
   // ── Play-focus smoother ────────────────────────────────────────────────────
   // Two-layer approach: raw puck → play-focus EMA (long tau, deadzone) → camera spring.
@@ -2191,14 +2192,15 @@ export class Rink3dRenderer implements MatchRenderer {
     }
     this.lastEvaluatedClock = absT
 
-    const cueDt = this.playing ? dt : 0
+    // cue lifetimes are GAME seconds (a replay at 0.6× plays them slower, like the picture)
+    const cueDt = this.playing ? dt * this.speed : 0
     this.activeCues = this.activeCues.filter((ac) => {
       ac.elapsed += cueDt
       return ac.elapsed < this.cueLifetime(ac.cue.kind)
     })
     if (this.goalSeq) {
-      this.goalSeq.t += cueDt
-      if (this.goalSeq.t >= GOAL_SEQ.end) this.goalSeq = null
+      this.goalSeq.t = absT - this.goalSeq.at
+      if (this.goalSeq.t >= GOAL_SEQ.end || this.goalSeq.t < 0) this.goalSeq = null
     }
     if (this.celebration) {
       this.celebration.elapsed += cueDt
@@ -2246,7 +2248,7 @@ export class Rink3dRenderer implements MatchRenderer {
       const netX = Math.sign(gx || 1) * NET_X
       this.celebration = { elapsed: 0, x: gx + (netX - gx) * 0.35, z: gz * 0.6 }
       const scorer = this.allPoses().find((p) => p.playerId === cue.actorId)
-      if (scorer) this.goalSeq = { t: 0, scorer: cue.actorId, side: this.homePoses.includes(scorer) ? 'home' : 'away', phase: 'hold' }
+      if (scorer) this.goalSeq = { t: 0, at: cue.absT, scorer: cue.actorId, side: this.homePoses.includes(scorer) ? 'home' : 'away', phase: 'hold' }
     } else if (this.choreo) {
       // authored clips (shots, saves, hits) are started by the choreographer
     } else if (cue.kind === 'save') {
