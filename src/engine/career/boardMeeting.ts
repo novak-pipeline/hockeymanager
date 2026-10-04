@@ -255,7 +255,7 @@ export function buildBoardMeeting(facts: BoardMeetingFacts, rng: Rng): BoardMeet
     objectiveOptions.push({
       id: 'askPatience',
       label: 'Ask for patience — at a price',
-      detail: `Argue the roster read (${facts.postureReason}). If the board accepts the softer bar — "${softer.text}" — they'll want a receipt: ${facts.topProspects[0] ?? 'your top prospects'} and the young core get real NHL minutes this season.`,
+      detail: `Argue the roster read (${facts.postureReason}). If the board accepts the softer bar ("${softer.text}"), they'll want a receipt: ${facts.topProspects[0] ?? 'your top prospects'} and the young core get real NHL minutes this season.`,
     })
   }
   const item1: MeetingAgendaItem = {
@@ -329,7 +329,7 @@ function buildWildcard(facts: BoardMeetingFacts, rng: Rng): MeetingAgendaItem | 
       ],
       options: [
         { id: 'shed', label: 'Promise to fix it by the deadline', detail: `Commit to a cap-compliant payroll by season's end. Fail, and the board's trust takes a real hit.` },
-        { id: 'defend', label: 'Defend the spend', detail: `Argue the roster justifies it. The owner backs down — this time — but patience burns now.` },
+        { id: 'defend', label: 'Defend the spend', detail: `Argue the roster justifies it. The owner backs down this time, but his patience is shorter now.` },
       ],
     }
   }

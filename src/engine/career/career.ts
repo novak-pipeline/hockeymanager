@@ -14032,7 +14032,7 @@ export class Career {
     this.pushNews(
       'league',
       `${this.data.league.name} ${newYear}–${newYear + 1} season begins`,
-      `A clean sheet of ice. ${this.matchDays.length} match days to the playoffs.`
+      `A fresh sheet of ice. ${this.matchDays.length} game days until the playoffs.`
     )
     this.pushSeeds(odds.newsSeeds)
   }

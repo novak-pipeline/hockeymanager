@@ -52,7 +52,8 @@ const BANNED_TELLS: Array<[string, RegExp]> = [
   ['persona tic', /I'?ll tell you what|make of that what you will|here'?s what we know|on paper, fine|let me tell you something/i],
   ['hedge', /\bif it comes together\b|might be for real|not yet a trend|\barguably\b|\bperhaps\b/i],
   ['negative parallelism', /\b(?:isn'?t|is not) (?:about|just) [^.]{1,50}\. It'?s\b|\bnot just\b[^.]{1,60}\bbut\b/i],
-  ['football voice', /\bthe table\b(?! for)|surprise package|\bfixture\b|clean sheet|\bthe manager\b/i],
+  // "on the table" is ordinary English; "climbing the table" is football press.
+  ['football voice', /\b(?:climb\w*|top of|bottom of|middle of)\s+the table\b|surprise package|\bfixture\b|clean sheet|\bthe manager\b|match days/i],
   ['quietly', /\bquietly\b/i],
 ]
 
@@ -263,5 +264,11 @@ describe.skipIf(!process.env.PA_RUN)('prose audit', () => {
     console.log('\n' + L.slice(0, 90).join('\n'))
 
     expect(beats.length).toBeGreaterThan(0)
+    // PA_STRICT=1 turns the writing gates into a pass/fail: no mechanical bug,
+    // no banned tell, and em-dash density under the skill's 0.3 per 100 words.
+    if (process.env.PA_STRICT) {
+      for (const [g, n] of gates) expect(n, g).toBe(0)
+      expect(dashDensity).toBeLessThan(0.3)
+    }
   }, 3_600_000)
 })

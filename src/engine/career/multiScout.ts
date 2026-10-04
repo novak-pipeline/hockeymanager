@@ -188,7 +188,7 @@ const TAKES: Record<PosGroup, Record<ProjectionTier, string[]>> = {
       'Elite — a game-breaker every time he\'s on the ice.',
       'A franchise forward; you build the top six around him.',
       'The best forward on most sheets he skates on.',
-      'Drives play and finishes — a true number-one forward.',
+      'Drives play and finishes. A number-one forward.',
       'A dynamic, dangerous scorer at the top of any lineup.',
       'Elite skill — he tilts the ice every shift.',
     ],
@@ -220,7 +220,7 @@ const TAKES: Record<PosGroup, Record<ProjectionTier, string[]>> = {
   },
   D: {
     Star: [
-      'Elite — a true number-one defenceman.',
+      'Elite. A number-one defenceman.',
       'A franchise blueliner who logs every situation.',
       'A game-changing defenceman you build around.',
       'Drives play from the back end — a special talent.',

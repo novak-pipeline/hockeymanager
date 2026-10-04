@@ -58,8 +58,8 @@ export interface NewsSeed {
 
 const CHAMPION_BLURBS: ReadonlyArray<string> = [
   'The analytics back it up: this is the team to beat.',
-  'On paper, the best roster in the league heading into the season.',
-  'Depth up and down the lineup — every forecaster agrees they are the favourite.',
+  'The best roster in the league heading into the season, by the numbers.',
+  'Depth up and down the lineup. Every forecaster has them as the favourite.',
   'When strength ratings say this clearly, you listen.',
   'Consensus No. 1 and it is hard to argue otherwise.',
 ]
