@@ -460,8 +460,8 @@ import {
   type PendingLedgerReaction,
   type ResidueFlag,
 } from './livingLedger'
-import { markUsed, renderTemplate, type ContentCtx, type ContentUse, type ContentVariant } from '@engine/story/contentEngine'
-import { oneSentence, possessive, prosaicList, renderStable, stableSeed } from '@engine/story/prose'
+import { markUsed, renderTemplate, tidyProse, type ContentCtx, type ContentUse, type ContentVariant } from '@engine/story/contentEngine'
+import { feedPostHeadline, aOrAn, oneSentence, possessive, prosaicList, renderStable, stableSeed } from '@engine/story/prose'
 import { writeBeat } from '@engine/story/beatWriter'
 import {
   ANNIVERSARY_POOL,
@@ -506,7 +506,7 @@ import {
   walkThread,
   type TradeThread,
 } from './tradeThread'
-import { DECISION_EVENTS, decisionSlots, pickDecisionEvent, type DecisionAct, type DecisionEffects } from '@engine/story/decisionEvents'
+import { DECISION_EVENTS, decisionSlots, pickDecisionEvent, sceneHeadline, type DecisionAct, type DecisionEffects } from '@engine/story/decisionEvents'
 import {
   ARRIVAL_EVENTS,
   CLUB_SCENES,
@@ -2365,8 +2365,10 @@ export class Career {
       year: this.year,
       ...(beatISO !== null ? { dateISO: beatISO } : {}),
       category,
-      headline,
-      body,
+      // The mechanical net (a/an before numbers, "1 points") under every
+      // template that reaches the desk, authored or composed.
+      headline: tidyProse(headline),
+      body: tidyProse(body),
       read: false,
       ...(refs.teamId !== undefined ? { teamId: refs.teamId } : {}),
       ...(refs.playerId !== undefined ? { playerId: refs.playerId } : {}),
@@ -3879,7 +3881,7 @@ export class Career {
       this.decisionEventFor.set(`i${this.interactionCounter - 1}`, ev.id)
       markUsed(this.contentLedger, ev.id, this.year, day)
       this.lastDecisionDay = day
-      this.pushNews('contract', `${p.name} is waiting in your office`,
+      this.pushNews('contract', renderTemplate(sceneHeadline(ev), slots),
         renderTemplate(ev.scene, slots), { playerId: p.id as string, teamId: this.userTeamId as string })
       return // one dilemma at a time
     }
@@ -3980,7 +3982,13 @@ export class Career {
     }
     // A refused act rewrites the receipt: the authored outcome describes the
     // thing as done, and it was not.
-    const receipt = refused ? acted.message : acted?.message ? `${chosen.outcome} ${acted.message}` : chosen.outcome
+    // Outcomes are templates too ("{last} nodded and left"): fill them from the
+    // same slots the scene was rendered with, or the receipt prints "{last}".
+    const outcome = renderTemplate(
+      chosen.outcome,
+      decisionSlots(player, player.stats.reduce((n, s) => n + s.gamesPlayed, 0), this.userTeam.name)
+    )
+    const receipt = refused ? acted.message : acted?.message ? `${outcome} ${acted.message}` : outcome
     if (e.leakChance && new Rng(deriveSeed(this.seed, Career.DECISION_NS, this.year, day, 7)).chance(e.leakChance)) {
       this.pushNews('contract', `Word gets out about ${player.name}'s meeting`,
         `What was said behind your office door did not stay there. ${receipt}`,
@@ -4555,7 +4563,7 @@ export class Career {
     for (const post of published) {
       if (!shouldReachInbox(post, this.followedFeedAuthors)) continue
       const author = this.feedAuthorFor(post.authorId)
-      this.pushNews('league', `@${author?.handle ?? post.authorId}`, post.text, {
+      this.pushNews('league', feedPostHeadline(author?.name ?? `@${author?.handle ?? post.authorId}`, post.text), post.text, {
         ...(post.teamId !== undefined ? { teamId: post.teamId } : {}),
         ...(post.playerId !== undefined ? { playerId: post.playerId } : {}),
         channel: post.channel,
@@ -5302,7 +5310,7 @@ export class Career {
         ? this.data.teams.get(asTeamId(tid))?.name
         : undefined
     const beat = arc.beats[arc.beats.length - 1]?.summary ?? ''
-    return who ? `${who} — ${beat}` : beat
+    return who ? `${who}: ${beat}` : beat
   }
 
   /* ────────────────────────── press corps (Wave 2) ────────────────────────── */
@@ -5356,11 +5364,18 @@ export class Career {
       }
     }
 
-    const rumors = this.tentpoles.rumors.map((r) => ({
-      playerName: nameOf(r.playerId),
-      teamAbbr: this.data.teams.get(asTeamId(r.teamId))?.abbreviation ?? r.teamId,
-      heat: r.heat,
-    }))
+    // Only a rumour a columnist would actually write about: a player on a
+    // league club (not a farm depth body), hottest first (audit F10: the GM's
+    // own AHL depth man was 'at a fever pitch' 14 times a season).
+    const leagueClubs = new Set(this.data.league.teams.map((t) => t as string))
+    const rumors = this.tentpoles.rumors
+      .filter((r) => leagueClubs.has(r.teamId) && r.heat >= 50)
+      .sort((a, b) => b.heat - a.heat)
+      .map((r) => ({
+        playerName: nameOf(r.playerId),
+        teamAbbr: this.data.teams.get(asTeamId(r.teamId))?.abbreviation ?? r.teamId,
+        heat: r.heat,
+      }))
 
     const recordsWatch: string[] = []
     const pts = this.recordsState.singleSeason.points[0]
@@ -5382,7 +5397,10 @@ export class Career {
       if (g.homeTeamId !== this.userTeamId && g.awayTeamId !== this.userTeamId) continue
       const home = g.homeTeamId === this.userTeamId
       const opp = this.data.teams.get(home ? g.awayTeamId : g.homeTeamId)!
-      upcoming.push(`${home ? 'vs' : '@'} ${opp.abbreviation} (day ${g.day})`)
+      // A date a reader can use ("Nov 3"), never the sim's internal day index.
+      const d = new Date(`${dayToDateISO(this.year, g.day)}T12:00:00Z`)
+      const when = `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()]} ${d.getUTCDate()}`
+      upcoming.push(`${home ? 'home to' : 'at'} ${opp.name} (${when})`)
       if (upcoming.length >= 3) break
     }
 
@@ -5704,7 +5722,7 @@ export class Career {
             'feud',
             [a.id as string, b.id as string],
             [this.userTeamId as string],
-            `Tempers simmer between ${a.name} and ${b.name} after the manager's fiery press conference.`,
+            `Tempers simmer between ${a.name} and ${b.name} after the GM's fiery press conference.`,
             this.currentDay,
             this.year
           )
@@ -5840,8 +5858,8 @@ export class Career {
   private static teaserTail(a: BeatArticle): string {
     switch (a.kind) {
       case 'gameday': return 'Projected lines and what to watch.'
-      case 'grades': return 'Grades for everyone who dressed.'
-      case 'mailbag': return `${a.qa?.length ?? 0} of your questions, answered.`
+      case 'grades': return a.dek || 'Grades for everyone who dressed.'
+      case 'mailbag': return a.dek || `${a.qa?.length ?? 0} of your questions, answered.`
       case 'notebook': return a.dek
       case 'moves': return 'The day\u2019s transactions.'
       default: return a.dek
@@ -6756,7 +6774,7 @@ export class Career {
     if (leader && inSeason) {
       items.push({
         topic: 'standout', verdict: '', label: 'the team MVP', playerId: leader.p.id as string,
-        slots: { name: leader.p.name, line: `${leader.line.g} goals and ${leader.line.pts} points in ${leader.line.gp} games`, nick: clubNickname(this.castTeam(team.id)!) },
+        slots: { name: leader.p.name, line: `${leader.line.g} ${leader.line.g === 1 ? 'goal' : 'goals'} and ${leader.line.pts} ${leader.line.pts === 1 ? 'point' : 'points'} in ${leader.line.gp} games`, nick: clubNickname(this.castTeam(team.id)!) },
         weight: 2,
       })
     }
@@ -7234,7 +7252,7 @@ export class Career {
           feature: 'draft',
           ctx: {},
           slots: { name: firstP.name, n: String(lines.length) },
-          paragraphs: [`${firstP.name} is the headline, a ${firstP.age}-year-old ${firstP.position === 'D' ? 'defenceman' : firstP.position === 'G' ? 'goaltender' : firstP.position === 'C' ? 'centre' : 'winger'}. The rest of the class is a longer bet, as the rest of every class is.`],
+          paragraphs: [`${firstP.name} is the headline, ${aOrAn(String(firstP.age))} ${firstP.age}-year-old ${firstP.position === 'D' ? 'defenceman' : firstP.position === 'G' ? 'goaltender' : firstP.position === 'C' ? 'centre' : 'winger'}. The rest of the class is a longer bet, as the rest of every class is.`],
           sections: [{ title: `The ${nick} class`, lines }],
           dek: `${lines.length} picks, led by ${firstP.name}.`,
           playerIds: [firstP.id as string],
@@ -7247,7 +7265,7 @@ export class Career {
       const num = (id: string): number => parseInt(id.split('-').pop() ?? '0', 10)
       const since = this.mediaLast('faTx')
       const signings = this.transactionLedger.items.filter(
-        (t) => t.kind === 'signing' && num(t.id) > since && /sign/i.test(t.summary) && !/fire|dismiss/i.test(t.summary),
+        (t) => t.kind === 'signing' && num(t.id) > since && /\bsign/i.test(t.summary) && !/fire|dismiss/i.test(t.summary),
       )
       this.setMediaLast('faTx', Math.max(since, ...this.transactionLedger.items.map((t) => num(t.id))))
       const ours = signings.filter((t) => t.teamIds.includes(this.userTeamId as string))
@@ -8504,6 +8522,9 @@ export class Career {
       firstGoalScorers,
       goalie: goalie ? { playerId: goalie.playerId, name: goalie.name, saves: goalie.saves, shotsAgainst: goalie.shotsAgainst } : null,
       fight,
+      oppName: opp.name,
+      goalsFor: us,
+      goalsAgainst: them,
     })
     if (moment) {
       chronicleEvent(this.chronicle, {
@@ -9800,7 +9821,7 @@ export class Career {
         domestic
           ? `${p.name} signs on with the ${s.competitionName}`
           : `${p.name} heads overseas to the ${s.competitionName}`,
-        `${p.name} (${p.age}) — unsigned in the NHL — has joined ${this.data.teams.get(s.teamId)?.name ?? 'a club'} in the ${s.competitionName} on a ${s.years}-year deal.`,
+        `${p.name}, ${p.age}, couldn't find an NHL contract and has joined ${this.data.teams.get(s.teamId)?.name ?? 'a club'} in the ${s.competitionName} on a ${s.years}-year deal.`,
         { playerId: s.playerId as string, teamId: s.teamId as string }
       )
     }
@@ -14020,7 +14041,7 @@ export class Career {
     this.pushNews(
       'league',
       `${this.data.league.name} ${newYear}–${newYear + 1} season begins`,
-      `A clean sheet of ice. ${this.matchDays.length} match days to the playoffs.`
+      `A fresh sheet of ice. ${this.matchDays.length} game days until the playoffs.`
     )
     this.pushSeeds(odds.newsSeeds)
   }
@@ -14917,29 +14938,29 @@ export class Career {
       const a = assessOf.get(p.id as string)
       if (a) {
         const drafted = draftedIds.has(p.id as string)
-        lines.push(`${p.name}${drafted ? " (this year's pick)" : ''}${(p.id as string) === standoutId ? ' — CAMP STANDOUT' : ''} — ${a.grade}: ${a.read}`)
+        lines.push(`${p.name}${drafted ? " (this year's pick)" : ''}${(p.id as string) === standoutId ? ' (camp standout)' : ''}, grade ${a.grade}. ${a.read}`)
         continue
       }
       // Deterministic camp read; watching him closes a sliver of the fog.
       const { z } = this.devCampRead(p)
       const drafted = draftedIds.has(p.id as string)
       const isStandout = (p.id as string) === standoutId
-      const tag = `${drafted ? " (this year's pick)" : ''}${isStandout ? ' ★ CAMP STANDOUT' : ''}`
+      const tag = `${drafted ? " (this year's pick)" : ''}${isStandout ? ' (camp standout)' : ''}`
       if (z > 0.5) {
-        lines.push(`${p.name}${tag} — turned heads all week. ${p.position === 'G' ? 'Tracked pucks like a veteran' : 'Quicker release and better pace than the book had'}; the staff want him back for main camp.`)
+        lines.push(`${p.name}${tag}: turned heads all week. ${p.position === 'G' ? 'Tracked pucks like a veteran' : 'Quicker release and better pace than the book had'}. The staff want him back for main camp.`)
       } else if (z < -0.5) {
-        lines.push(`${p.name}${tag} — a step behind the group. Nothing alarming at his age, but the summer homework list is long.`)
+        lines.push(`${p.name}${tag}: a step behind the group. Nothing alarming at ${p.age}, but the summer homework list is long.`)
       } else {
-        lines.push(`${p.name}${tag} — solid, unspectacular week. Exactly where a kid his age should be.`)
+        lines.push(`${p.name}${tag}: a solid, unspectacular week. About where a ${p.age}-year-old should be.`)
       }
       void isStandout
     }
     this.pushNews(
       'scouting',
-      `Development camp report — ${coachName}`,
+      `Development camp report from ${coachName}`,
       `Development camp wrapped this week: ${invitees.length} of the organisation's young players on the ice, ` +
       `this year's draft class included.` +
-      `${standout ? ` The staff named ${standout.player.name} the camp standout — he ${standout.reason}.` : ''}` +
+      `${standout ? ` The staff named ${standout.player.name} the camp standout. He ${standout.reason}.` : ''}` +
       (calls.length > 0 ? `\n\nThe calls:\n\n• ${calls.join('\n• ')}` : '') +
       `\n\nThe reads:\n\n• ${lines.slice(0, 40).join('\n• ')}`,
       { teamId: this.userTeamId as string, ...(standoutId ? { playerId: standoutId } : {}) }
@@ -15194,13 +15215,13 @@ export class Career {
           repairLines(affiliate, this.data.players)
           this.lockerArrival(affiliate.id, p.id)
           p.morale = Math.min(100, p.morale + 5)
-          notes.push(`${p.name} signs his entry-level deal and turns pro — assigned to ${affiliate.name}.`)
+          notes.push(`${p.name} signs his entry-level deal and turns pro with ${affiliate.name}.`)
           break
         }
         case 'signReturn':
           p.contract = elc()
           p.morale = Math.min(100, p.morale + 3)
-          notes.push(`${p.name} signs his entry-level deal and goes back to ${a.club ?? 'his club'} for another year — the deal slides.`)
+          notes.push(`${p.name} signs his entry-level deal and goes back to ${a.club ?? 'his club'} for another year. The deal slides.`)
           break
         case 'returnUnsigned':
           if (a.readiness !== 'junior' && p.age >= 19) {
@@ -16724,7 +16745,9 @@ export class Career {
         'contract',
         `${cand.name} placed on waivers by ${team.abbreviation}`,
         `${team.name} have placed ${cand.name} (${cand.position}, ${cand.age}, $${(cand.contract.salary / 1_000_000).toFixed(2)}M) on waivers. ` +
-          `You have until the wire clears to claim him and his contract — head to the Waiver Wire to put in a claim.`,
+          (cand.contract.yearsRemaining > 1
+            ? `A claim takes on all ${cand.contract.yearsRemaining} years of the deal. Claims go through the Waiver Wire.`
+            : `A claim takes on the contract, which ends this season. Claims go through the Waiver Wire.`),
         { playerId: cand.id as string, teamId: tid as string }
       )
     }
@@ -17245,7 +17268,7 @@ export class Career {
     const lines = open.map((id) => {
       const p = this.resolve(id)
       const ask = askTerms(p, this.year)
-      return `• ${p.name} (${p.position}, ${p.age}, ${ratedOverall(p)} OVR): qualify at $${(qualifyingOffer(p) / 1e6).toFixed(2)}M — his ask is $${(ask.salary / 1e6).toFixed(2)}M × ${ask.years}`
+      return `• ${p.name} (${p.position}, ${p.age}): qualify at $${(qualifyingOffer(p) / 1e6).toFixed(2)}M — his ask is $${(ask.salary / 1e6).toFixed(2)}M × ${ask.years}`
     })
     this.pushNews('contract', `QO deadline tonight: ${open.length} RFA${open.length === 1 ? '' : 's'} still undecided`,
       `Tender or walk. A qualifying offer keeps his rights — he can take it, file for arbitration, or draw an offer sheet you can match. ` +
@@ -18427,6 +18450,7 @@ export class Career {
       .reduce((s, p) => s + p.contract.salary, 0) + this.userDeadCap
     const capCeiling = this.userTeam.finances.salaryCap
     const tierOf = (v: number): string => assetValueTier(v).label
+    const needFog = this.fogCtx()
     const pool: NeedsCandidate[] = []
 
     // Free agents, with the REAL bids against you.
@@ -18446,7 +18470,8 @@ export class Career {
       pool.push({
         ...(pending && standing ? { yourOffer: { salary: pending.salary, years: pending.years, standing: standing.standing, note: standing.note } } : {}),
         kind: 'fa', group: grpOf(p), playerId: id as string, name: p.name, position: p.position, age: p.age,
-        overall: ratedOverall(p), ...(p.faceId !== undefined ? { faceId: p.faceId } : {}), hand: p.handedness,
+        // Another club's man (or nobody's): your scouts' read, never the truth.
+        overall: badge(p, needFog).overall, ...(p.faceId !== undefined ? { faceId: p.faceId } : {}), hand: p.handedness,
         capHit: ask, years: raw.years,
         cost: offers.length > 0
           ? `${offers.length} offer${offers.length === 1 ? '' : 's'} on the table — ${leadAbbr} leads (${Career.approxMoney(lead!.bid.salary)} × ${lead!.bid.years}, ${lead!.reason})`
@@ -18498,13 +18523,13 @@ export class Career {
           const stance = posture === 'rebuild'
             ? `${t.abbreviation} are rebuilding and would sell`
             : spare ? `A spare part in ${t.abbreviation}'s depth`
-              : backupG && posture === 'contend' ? `${t.abbreviation} would move their backup — at a price` : `${t.abbreviation} are retooling`
+              : backupG && posture === 'contend' ? `${t.abbreviation} would move their backup, at a price` : `${t.abbreviation} are retooling`
           pool.push({
             kind: 'trade', group: g, playerId: p.id as string, name: p.name, position: p.position, age: p.age,
-            overall: ratedOverall(p), ...(p.faceId !== undefined ? { faceId: p.faceId } : {}), hand: p.handedness,
+            overall: badge(p, needFog).overall, ...(p.faceId !== undefined ? { faceId: p.faceId } : {}), hand: p.handedness,
             teamId: tid as string, teamAbbr: t.abbreviation,
             capHit: p.contract.salary, years: p.contract.yearsRemaining,
-            cost: `${stance}. The price: ${tierOf(v).toLowerCase()} value (${Math.round(v)})`,
+            cost: `${stance}. Signed at ${Career.approxMoney(p.contract.salary)} for ${p.contract.yearsRemaining === 1 ? 'one more season' : `${p.contract.yearsRemaining} more seasons`}; it would take ${tierOf(v).toLowerCase()} value to get him.`,
             assetValue: Math.round(v), assetTier: tierOf(v),
           })
         })
@@ -18522,7 +18547,7 @@ export class Career {
           capHit: p.contract.salary, years: p.contract.yearsRemaining,
           cost: p.contract.noTradeClause
             ? 'No-trade clause — a buyout is the way out'
-            : `Trade him (${tierOf(v).toLowerCase()} value, ${Math.round(v)}) or buy him out`,
+            : `Trade him (${tierOf(v).toLowerCase()} value) or buy him out`,
           assetValue: Math.round(v), assetTier: tierOf(v),
         }
       })
@@ -22933,7 +22958,7 @@ export class Career {
       if (this.namedLines.length > 12) this.namedLines = this.namedLines.slice(-12)
       for (const p of mates) p.morale = Math.min(100, p.morale + 3)
       this.pushNews('result', `They're calling it ${name}`,
-        `${mates.map((p) => p.name).join(', ')}: ${cur.pts} points in ${cur.gp} games together. The city has given the line a name, which is how you know it has arrived. Break it up and people will ask why.`,
+        `${mates.map((p) => p.name).join(', ')}: ${cur.pts} points in ${cur.gp} games together. The city has started calling them by a nickname. Break them up and people will ask why.`,
         { teamId: this.userTeamId as string, salience: 62 })
     }
   }
@@ -24208,7 +24233,7 @@ export class Career {
     const list = this.legends.get(teamId) ?? []
     if (list.some((l) => l.playerId === (p.id as unknown as string))) return
     const tier = ovr >= 88 ? 'franchise icon' : ovr >= 82 ? 'star' : seasonsPlayed >= 12 ? 'long-serving veteran' : 'fan favourite'
-    const blurb = `A ${tier} — ${seasonsPlayed} season${seasonsPlayed === 1 ? '' : 's'}, peak rating ${ovr}.`
+    const blurb = `${tier[0]!.toUpperCase()}${tier.slice(1)}. ${seasonsPlayed} season${seasonsPlayed === 1 ? '' : 's'} in the league.`
     const legend: ClubLegend = {
       playerId: p.id as unknown as string,
       name: p.name,
@@ -27607,7 +27632,7 @@ export class Career {
         }
       })
     const callToAction = cards.length
-      ? ` Their cards are attached — make the calls here, or leave the queue to us.`
+      ? ` Their cards are attached. Make the calls here, or leave the queue to us.`
       : ` Nothing awaits your call in Recruitment → Reports.`
     const body = `${flagged}${working} ${untriaged} flagged prospect${untriaged === 1 ? '' : 's'} await${untriaged === 1 ? 's' : ''} your call.${callToAction}`
     // A8: a week that produced no new name, and no card the GM has not already
@@ -27705,7 +27730,7 @@ export class Career {
           SCOUT_NOTE_POOL,
           { band: potStars >= 4.5 ? 'elite' : potStars >= 3.5 ? 'high' : 'solid', draft: !!elig },
           `note|${p.id as string}`,
-          { role: roleWords }
+          { role: roleWords, age: String(p.age), club: (() => { const tid = this.teamOf(p.id); return tid ? this.data.teams.get(tid)?.name : undefined })() ?? 'his club' }
         )
     const scoutName = scout?.name ?? 'Your scouts'
     const foundDate = dayToDateISO(this.year, day)

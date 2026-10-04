@@ -166,7 +166,7 @@ const SHAPE_POOL: ContentVariant[] = [
     text: `Nothing worked, in front of the net or behind it. {theirGoals} past {goalie}, and the tape from this one will be short and unpleasant.` },
   /* ── shutouts ── */
   { id: 'mr.shutout.for', conditions: { won: true, cleanSheet: true },
-    text: `A clean sheet and a comfortable evening. {goalie} turned aside all {shotsAgainst} and the {us} never let the game get interesting.` },
+    text: `A shutout and a comfortable evening. {goalie} turned aside all {shotsAgainst} and the {us} never let the game get interesting.` },
   { id: 'mr.shutout.against', conditions: { won: false, blanked: true },
     text: `{shots} shots and nothing to show for any of them. The {us} were shut out, and the frustration was visible by the midpoint of the third.` },
   /* ── blowouts ── */
@@ -183,7 +183,7 @@ const SHAPE_POOL: ContentVariant[] = [
   { id: 'mr.ot.win', conditions: { won: true, decidedBy: 'overtime' },
     text: `Three-on-three, and it did not last long. The {us} win it in overtime, {ourGoals}-{theirGoals}.` },
   { id: 'mr.ot.loss', conditions: { won: false, decidedBy: 'overtime' },
-    text: `A point salvaged, a point lost. The {us} fall in overtime, and open ice at three-on-three is a cruel way to end a night this even.` },
+    text: `The {us} fall in overtime and take one point from the {them}, {theirGoals}-{ourGoals}.` },
   { id: 'mr.playoff.tight', conditions: { playoff: true, maxMargin: 1 },
     text: `Playoff hockey, which is to say two hours of very little space and one mistake. {ourGoals}-{theirGoals}.` },
   { id: 'mr.wire', conditions: { won: true, neverTrailed: true, wireToWire: true },
@@ -194,7 +194,7 @@ const SHAPE_POOL: ContentVariant[] = [
     text: `Not once behind. The {us} took the lead early, made the {them} play the game they wanted, and won it {ourGoals}-{theirGoals}.` },
   /* ── generic fallbacks ── */
   { id: 'mr.win.a', conditions: { won: true },
-    text: `Two points, honestly earned. The {us} beat the {them} {ourGoals}-{theirGoals} in a game that stayed in doubt longer than the shot clock suggested.` },
+    text: `Two points. The {us} beat the {them} {ourGoals}-{theirGoals} in a game that stayed in doubt longer than the shot count suggested.` },
   { id: 'mr.win.b', conditions: { won: true },
     text: `The {us} take it {ourGoals}-{theirGoals}. Not a night anyone will frame, but the standings do not ask how.` },
   { id: 'mr.loss.a', conditions: { won: false },
@@ -211,7 +211,7 @@ const DECIDER_POOL: ContentVariant[] = [
   { id: 'mr.dec.ot', conditions: { period: 4 },
     text: `{scorer} ended it in overtime.` },
   { id: 'mr.dec.d', conditions: { pos: 'D' },
-    text: `{scorer} — a defenceman — scored the one that decided it, at {clock} of the {ordinal}.` },
+    text: `The winner came from the blue line: {scorer}, at {clock} of the {ordinal}.` },
   { id: 'mr.dec.pp', conditions: { strength: 'pp' },
     text: `The winner came on the power play, {scorer} at {clock} of the {ordinal}.` },
   { id: 'mr.dec.third', conditions: { period: 3 },

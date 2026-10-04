@@ -208,7 +208,8 @@ export function describePlayerValue(
 
   const tier =
     ovr >= 86 ? 'elite' : ovr >= 78 ? 'top-line' : ovr >= 70 ? 'middle-six' : ovr >= 60 ? 'depth' : 'fringe'
-  drivers.push({ label: `${ovr} OVR — ${tier}`, tone: ovr >= 78 ? 'up' : ovr < 60 ? 'down' : 'flat' })
+  // Owner rule: a hidden rating never prints; the driver says what he IS.
+  drivers.push({ label: `${tier[0]!.toUpperCase()}${tier.slice(1)} player`, tone: ovr >= 78 ? 'up' : ovr < 60 ? 'down' : 'flat' })
 
   if (player.age <= 22) drivers.push({ label: `Age ${player.age} — young`, tone: 'up' })
   else if (player.age <= 27) drivers.push({ label: `Age ${player.age} — prime`, tone: 'up' })
@@ -217,7 +218,7 @@ export function describePlayerValue(
 
   if (player.age < 24) {
     const potOvr = ratedPotential(player)
-    if (potOvr - ovr >= 4) drivers.push({ label: `Upside to ~${potOvr}`, tone: 'up' })
+    if (potOvr - ovr >= 4) drivers.push({ label: potOvr - ovr >= 10 ? 'Lots of upside left' : 'Upside left', tone: 'up' })
   }
 
   const fair = fairSalaryFor(ovr)

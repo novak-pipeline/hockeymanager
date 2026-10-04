@@ -31,7 +31,7 @@ describe('dev camp — the pure half', () => {
     const quiet = showingOf(top, [line({ pm: -2 })], 'F')
     expect(big).toBeGreaterThan(quiet)
     expect(gradeOf(big)).toBe('A')
-    expect(citeWeek(top, [line({ g: 2, sog: 5 })], 'F')).toBe('1st of 24 in the skating test; he scored twice in the first scrimmage')
+    expect(citeWeek(top, [line({ g: 2, sog: 5 })], 'F')).toBe('finished 1st of 24 in the skating test; he scored twice in the first scrimmage')
   })
 
   it('readiness and the calls: the CHL rule, the staff recommendation, tryouts, signed men', () => {

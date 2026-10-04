@@ -154,7 +154,7 @@ export function deriveClubPosture(args: {
   }
   if (weakThird) {
     return args.coreAge >= 29
-      ? { posture: 'rebuild', reason: 'bottom-third strength and an old core — time to tear down' }
+      ? { posture: 'rebuild', reason: 'bottom-third strength and an old core; time to tear down' }
       : { posture: 'rebuild', reason: 'bottom-third strength, accumulating young assets' }
   }
   if (args.coreAge >= 31) {

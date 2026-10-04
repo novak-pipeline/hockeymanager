@@ -610,9 +610,9 @@ const NOW_POOL: ContentVariant[] = [
 
 const INJURY_NOW_POOL: ContentVariant[] = [
   { id: 'bio.hurt.long', conditions: { minInjuryGames: 20 },
-    text: `He is out at the moment with {injury}, and the estimate is another {injuryGames} games in a suit.` },
+    text: `He is out at the moment ({injury}), and the estimate is another {injuryGames} games in a suit.` },
   { id: 'bio.hurt.a',
-    text: `He is currently out with {injury}, roughly {injuryGames} games from returning.` },
+    text: `He is out right now ({injury}), roughly {injuryGames} games from returning.` },
   { id: 'bio.hurt.b',
     text: `Right now he is in the press box: {injury}.` },
 ]

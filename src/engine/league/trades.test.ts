@@ -238,7 +238,9 @@ describe('describePlayerValue / describePickValue', () => {
     const p = makePlayer('p', 88, { age: 24 })
     const pd = describePlayerValue(p)
     expect(pd.drivers.length).toBeGreaterThan(0)
-    expect(pd.drivers.some((d) => d.label.includes('OVR'))).toBe(true)
+    // Owner rule: the tier in words, never the hidden overall.
+    expect(pd.drivers.some((d) => d.label === 'Elite player')).toBe(true)
+    expect(pd.drivers.some((d) => /OVR|\b88\b/.test(d.label))).toBe(false)
 
     const pkd = describePickValue(makePick(2027, 1, 't1'), { year: 2026 })
     expect(pkd.drivers.some((d) => d.label.includes('pick'))).toBe(true)

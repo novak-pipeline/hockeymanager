@@ -198,6 +198,30 @@ describe('detectPersistentMoment', () => {
     expect(m!.kind).toBe('firstGoal')
     expect(m!.playerIds).toEqual(['rk1'])
     expect(m!.headline).toContain('first NHL goal')
+    // Beat-writer voice: the fact and a detail, no em-dash reveal, no moral.
+    expect(m!.storyline).toContain('Rookie Kid')
+    expect(m!.storyline).not.toMatch(/—|retold|in the case/)
+  })
+
+  it('a first goal storyline carries the score and opponent when it has them', () => {
+    const lines = new Set<string>()
+    for (let i = 0; i < 12; i++) {
+      const m = detectPersistentMoment({
+        ...base, won: true, oppName: 'Buffalo Sabres', goalsFor: 4, goalsAgainst: 2,
+        firstGoalScorers: [{ playerId: `rk${i}`, name: 'Rookie Kid', age: 19 }],
+      })!
+      expect(m.storyline).toMatch(/Buffalo Sabres/)
+      expect(m.storyline).toMatch(/4–2/)
+      expect(m.storyline).not.toMatch(/\{|—|loss/)
+      lines.add(m.storyline)
+    }
+    expect(lines.size).toBeGreaterThan(1) // a pool, not one sentence
+    const lost = detectPersistentMoment({
+      ...base, won: false, oppName: 'Buffalo Sabres', goalsFor: 2, goalsAgainst: 5,
+      firstGoalScorers: [{ playerId: 'rk1', name: 'Rookie Kid', age: 19 }],
+    })!
+    expect(lost.storyline).toMatch(/5–2/)
+    expect(lost.storyline).not.toMatch(/ win/)
   })
 
   it('records a goalie steal at >= .950 on 30+ shots in a WIN', () => {

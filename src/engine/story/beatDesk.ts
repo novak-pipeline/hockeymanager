@@ -506,18 +506,24 @@ export function buildGameday(c: DeskCtx, f: GamedayFacts): BeatArticle | null {
   const headline = say(c, GD_HEAD, ctx, slots, 'h')
   const lede = say(c, GD_LEDE, ctx, slots, 'l')
   const body = [lede]
-  if (f.starter) body.push(`Expected in goal: ${f.starter.name} (${f.starter.line}).${f.backup ? ` ${f.backup} is the other option.` : ''}`)
+  if (f.starter) {
+    // The backup line ran 76 times a season as one sentence; vary it stably.
+    const bk = f.backup
+      ? [` ${f.backup} is the other option.`, ` ${f.backup} backs up.`, ` ${f.backup} is on the bench if needed.`, ` ${f.backup} would be next.`][stableSeed(`${c.key}|bk`) % 4]
+      : ''
+    body.push(`Expected in goal: ${f.starter.name} (${f.starter.line}).${bk}`)
+  }
   const watchLines = f.watch.slice(0, 3).map((w, i) =>
     sayStable(
       WATCH,
       { kind: w.kind },
-      { name: w.name ?? '', n: String(w.n ?? ''), other: w.other ?? '', opp: f.opp.nick, nick: c.nick },
+      { name: w.name ?? '', n: String(w.n ?? ''), ptWord: w.n === 1 ? 'point' : 'points', other: w.other ?? '', opp: f.opp.nick, nick: c.nick },
       `${c.key}|w${i}|${w.kind}|${w.name ?? ''}`,
     ),
   ).filter(Boolean)
   const sections = lineSections(f.lines, true)
   if (watchLines.length > 0) sections.unshift({ title: 'What to watch', lines: watchLines })
-  const dek = `${f.home ? 'vs.' : 'at'} ${f.opp.name}. ${f.starter ? `${lastName(f.starter.name)} ${f.playoff ? 'in goal' : 'expected in goal'}.` : ''} Projected lines inside.`
+  const dek = `${f.home ? 'vs.' : 'at'} ${f.opp.name}. ${f.starter ? `${lastName(f.starter.name)} ${f.playoff ? 'in goal' : 'expected in goal'} (${f.starter.line}).` : ''} Projected lines inside.`
   return article(c, 'gameday', headline, dek.replace(/\s+/g, ' ').trim(), body, {
     sections,
     playerIds: f.watch.map((w) => w.playerId).filter((x): x is string => !!x).slice(0, 3),

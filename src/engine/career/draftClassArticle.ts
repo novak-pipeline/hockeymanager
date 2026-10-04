@@ -50,14 +50,19 @@ export function buildDraftClassArticle(rankings: DraftRankRowView[], draftYear: 
   const counts = { C: centres.length, D: d.length, W: wings.length, G: goalies.length }
 
   // Read the shape of the class from the top-32 position split.
+  // Each fact is a phrase that completes "It is a class …"; joining them as
+  // clauses printed "…through the season. and an especially strong year…"
+  // whenever the wing count was unremarkable (writing audit 2026-10).
   const shape: string[] = []
-  if (counts.W >= 10) shape.push('It is a class deep on the wing')
-  else if (counts.W <= 5) shape.push('Wing depth is thinner than usual this year')
-  if (counts.D >= 11) shape.push('and an especially strong year to be shopping for a defenceman')
-  else if (counts.D <= 6) shape.push('and light on blue-line talent')
-  if (counts.C <= 5) shape.push('with a notable lack of depth down the middle')
-  else if (counts.C >= 10) shape.push('with enviable centre depth')
-  const shapeLine = shape.length > 0 ? `${shape.join(', ')}.` : 'It is a balanced class across positions.'
+  if (counts.W >= 10) shape.push('deep on the wing')
+  else if (counts.W <= 5) shape.push('thin on the wing')
+  if (counts.D >= 11) shape.push('unusually strong on defence')
+  else if (counts.D <= 6) shape.push('light on blue-line talent')
+  if (counts.C <= 5) shape.push('short of centres')
+  else if (counts.C >= 10) shape.push('deep at centre')
+  const shapeLine = shape.length > 0
+    ? `It is a class ${shape.length === 1 ? shape[0] : `${shape.slice(0, -1).join(', ')} and ${shape[shape.length - 1]}`}.`
+    : 'It is a balanced class across positions.'
 
   const intro =
     `The ${draftYear} NHL Draft class is headlined by ${lead.join(' and ')}, who have traded the top spot on our board through the season. ` +

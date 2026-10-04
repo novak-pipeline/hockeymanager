@@ -19,6 +19,7 @@
  * Pure module: builders take plain facts, return JSON-safe scenes/results.
  * The career layer supplies state and applies effects.
  */
+import { clubVerb } from '@engine/story/prose'
 import type { Rng } from '@engine/shared/rng'
 import type { BoardState, Mandate } from '@engine/league/board'
 
@@ -189,7 +190,7 @@ function ownerVoice(demeanor: string | undefined, rng: Rng): {
     default: // pragmatic
       return {
         greet: (t) => pick([
-          `Let's keep this efficient. One hour, three decisions, and the ${t} has its marching orders.`,
+          `Let's keep this efficient. One hour, three decisions, and the ${t} ${clubVerb(t, 'has its', 'have their')} marching orders.`,
           `Appreciate you coming in early. Camp's around the corner and I want the ${t}'s plan on one page.`,
         ]),
         demand: (m) => pick([
@@ -254,7 +255,7 @@ export function buildBoardMeeting(facts: BoardMeetingFacts, rng: Rng): BoardMeet
     objectiveOptions.push({
       id: 'askPatience',
       label: 'Ask for patience — at a price',
-      detail: `Argue the roster read (${facts.postureReason}). If the board accepts the softer bar — "${softer.text}" — they'll want a receipt: ${facts.topProspects[0] ?? 'your top prospects'} and the young core get real NHL minutes this season.`,
+      detail: `Argue the roster read (${facts.postureReason}). If the board accepts the softer bar ("${softer.text}"), they'll want a receipt: ${facts.topProspects[0] ?? 'your top prospects'} and the young core get real NHL minutes this season.`,
     })
   }
   const item1: MeetingAgendaItem = {
@@ -328,7 +329,7 @@ function buildWildcard(facts: BoardMeetingFacts, rng: Rng): MeetingAgendaItem | 
       ],
       options: [
         { id: 'shed', label: 'Promise to fix it by the deadline', detail: `Commit to a cap-compliant payroll by season's end. Fail, and the board's trust takes a real hit.` },
-        { id: 'defend', label: 'Defend the spend', detail: `Argue the roster justifies it. The owner backs down — this time — but patience burns now.` },
+        { id: 'defend', label: 'Defend the spend', detail: `Argue the roster justifies it. The owner backs down this time, but his patience is shorter now.` },
       ],
     }
   }

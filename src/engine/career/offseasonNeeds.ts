@@ -178,14 +178,59 @@ function findGaps(input: NeedsInput): Gap[] {
   return gaps.sort((a, b) => b.score - a.score)
 }
 
+/**
+ * Where an overall sits against the league's own depth chart, in the words a
+ * hockey man uses. The owner's rule: text never prints a hidden rating ("(67)",
+ * "+17 over", "74 against 72"); it says what kind of player he is.
+ */
+export function tierWord(group: NeedGroup, ovr: number, bench: number[]): string {
+  const at = (i: number): number => bench[Math.min(i, bench.length - 1)] ?? 60
+  if (group === 'G') {
+    if (ovr >= at(0) + 3) return 'an elite starter'
+    if (ovr >= at(0) - 1) return 'a No. 1 starter'
+    if (ovr >= (at(0) + at(1)) / 2) return 'a 1B'
+    if (ovr >= at(1) - 2) return 'a backup'
+    return 'a fringe goalie'
+  }
+  if (group === 'D') {
+    if (ovr >= at(0) + 3) return 'an elite defenceman'
+    if (ovr >= at(1) - 1) return 'a top-pair defenceman'
+    if (ovr >= at(3) - 1) return 'a second-pair defenceman'
+    if (ovr >= at(5) - 1) return 'a third-pair defenceman'
+    if (ovr >= at(5) - 5) return 'a depth defenceman'
+    return 'a fringe defenceman'
+  }
+  if (ovr >= at(0) + 3) return 'an elite forward'
+  if (ovr >= at(5) - 1) return 'a top-six forward'
+  if (ovr >= at(8) - 1) return 'a third-line forward'
+  if (ovr >= at(11) - 1) return 'a fourth-line forward'
+  if (ovr >= at(11) - 5) return 'a depth forward'
+  return 'a fringe forward'
+}
+
+/** "the top pair" / "the second pair" / "the third pair" for a D role. */
+function pairWord(role: Role): string {
+  return role.key === 'D-1' ? 'the top pair' : role.key === 'D-2' ? 'the second pair' : 'the third pair'
+}
+
+/** The size of an upgrade, in words. Never the number. */
+function upgradeWord(diff: number): string {
+  if (diff >= 8) return 'a clear upgrade on'
+  if (diff >= 4) return 'an upgrade on'
+  if (diff >= 1) return 'a small upgrade on'
+  if (diff > -1) return 'about level with'
+  return 'a step down from'
+}
+
 function fitLine(c: NeedsCandidate, gap: Gap): string {
   const where = gap.role.label.replace(/^an? /, '')
   if (gap.role.hand && gap.weakest && gap.gap < GAP_NEED && gap.empty === 0) {
-    return `A ${gap.role.hand === 'L' ? 'left' : 'right'} shot for the pair: ${Math.round(c.overall)} against ${gap.weakest.name}'s ${Math.round(gap.weakest.ovr)}`
+    return `A ${gap.role.hand === 'L' ? 'left' : 'right'} shot who'd play ${pairWord(gap.role)}, ${upgradeWord(c.overall - gap.weakest.ovr)} ${gap.weakest.name}`
   }
   if (gap.weakest) {
-    const plus = Math.round(c.overall - gap.weakest.ovr)
-    return `Slots in as your ${where}: ${plus >= 0 ? `+${plus}` : `−${-plus}`} over ${gap.weakest.name}`
+    const diff = c.overall - gap.weakest.ovr
+    if (gap.role.group === 'G' && gap.role.key === 'G-1' && diff >= 4) return `A clear upgrade in goal on ${gap.weakest.name}`
+    return `Slots in as your ${where}: ${upgradeWord(diff)} ${gap.weakest.name}`
   }
   return `Fills the empty ${where} spot`
 }
@@ -315,7 +360,8 @@ export function buildNeeds(input: NeedsInput): { needs: OffseasonNeedView[]; hea
       : g.empty > 0
       ? `You have ${g.empty} empty ${g.empty === 1 ? 'spot' : 'spots'} there for next season.`
       : g.weakest
-        ? `Your ${ord(g.slot + 1)} ${groupWord} is ${g.weakest.name} (${Math.round(g.weakest.ovr)}); a normal club dresses a ${Math.round(g.bench)} there.` +
+        ? `Your ${ord(g.slot + 1)} ${groupWord} is ${g.weakest.name}, who reads as ${tierWord(g.role.group, g.weakest.ovr, input.benchmark[g.role.group])}. ` +
+          `Most clubs have ${tierWord(g.role.group, g.bench, input.benchmark[g.role.group])} there.` +
           (g.role.hand ? ` And the pair has no ${g.role.hand === 'L' ? 'left' : 'right'} shot.` : '')
         : 'Below the league at this spot.'
     needs.push({

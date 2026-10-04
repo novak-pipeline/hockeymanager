@@ -58,6 +58,53 @@ export function possessive(name: string): string {
   return /[sS]$/.test(t) ? `${t}'` : `${t}'s`
 }
 
+/** "1 point", "3 points". `many` defaults to `one` + "s". */
+export function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`
+}
+
+/**
+ * "a" or "an" for the word or number that follows, by SOUND: "an 8-game",
+ * "an 11-game", "an 18-year-old", "an A+", "an F", "a 1st", "a B".
+ */
+export function aOrAn(next: string): string {
+  const t = next.trim()
+  if (/^(8|11|18)(\D|$)|^8\d/.test(t)) return 'an'
+  if (/^\d/.test(t)) return 'a'
+  if (/^[AEFHILMNORSX](\+|-|\b|$)(?![a-z])/.test(t)) return 'an' // letter grades / initialisms said as letters
+  if (/^(hour|honest|heir)/i.test(t)) return 'an'
+  if (/^(uni|use|usu|euro|one\b|once)/i.test(t)) return 'a'
+  return /^[aeiou]/i.test(t) ? 'an' : 'a'
+}
+
+/** `aOrAn(word) + ' ' + word`. */
+export function withArticle(next: string): string {
+  return `${aOrAn(next)} ${next}`
+}
+
+/**
+ * Subject-verb agreement for a club name: "the Florida Panthers have", but
+ * "Lukko has". Plural nicknames (ending in s) take the plural verb.
+ */
+export function clubVerb(team: string, singular: string, pluralForm: string): string {
+  return /s$/i.test(team.trim()) ? pluralForm : singular
+}
+
+/**
+ * An inbox subject for a social post: who said it, then the first sentence of
+ * what they said, trimmed on a word boundary. A bare "@CarverNotes" subject
+ * told the GM nothing about the story (audit F9).
+ */
+export function feedPostHeadline(author: string, text: string, max = 72): string {
+  const first = (text.split(/(?<=[.!?])\s+|\n+/)[0] ?? text).trim().replace(/[.]+$/, '')
+  let body = first
+  if (body.length > max) {
+    const cut = body.slice(0, max)
+    body = cut.slice(0, Math.max(cut.lastIndexOf(' '), Math.floor(max * 0.6))).replace(/[,;:\-–—\s]+$/, '') + '…'
+  }
+  return body ? `${author}: ${body}` : author
+}
+
 /* ────────────────────────── stable selection ────────────────────────── */
 
 /** FNV-1a-ish string hash. Stable across runs and machines. */

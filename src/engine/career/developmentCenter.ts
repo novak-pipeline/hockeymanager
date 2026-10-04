@@ -101,45 +101,54 @@ export function systemDevPlan(
   const path = prospectPathway(leagueAbbr, age)
   const league = leagueAbbr && leagueAbbr !== '—' ? leagueAbbr : path === 'college' ? 'college' : path === 'europe' ? 'Europe' : 'junior'
 
-  // Where he is on his pathway.
+  // Where he is on his pathway. Two plain sentences, no em-dash chain (the
+  // 2026-10 audit counted four in one line). A veteran is not "developing",
+  // and a 31-year-old in the KHL is not "raw for the AHL" (audit F11).
+  const veteran = age >= 25
   let where: string
   if (path === 'junior') {
     const yrsLeft = Math.max(0, 20 - age)
-    if (age <= 17) where = `${age}yo — years away; let him lead in ${league}`
-    else if (age >= 20) where = `${age}yo — ages out of junior after this season`
-    else where = `${age}yo — ~${yrsLeft} yr${yrsLeft === 1 ? '' : 's'} of ${league} left`
+    if (age <= 17) where = `${age}, years away. Let him lead in ${league}.`
+    else if (age >= 20) where = `${age}, and this is his last junior season.`
+    else where = `${age}, with about ${yrsLeft} ${yrsLeft === 1 ? 'year' : 'years'} of ${league} left.`
   } else if (path === 'college') {
     const yrsLeft = Math.max(0, 22 - age)
     where = yrsLeft > 0
-      ? `${age}yo — ~${yrsLeft} yr${yrsLeft === 1 ? '' : 's'} of ${league} eligibility left`
-      : `${age}yo — final ${league} season; turns pro after`
+      ? `${age}, with about ${yrsLeft} ${yrsLeft === 1 ? 'year' : 'years'} of ${league} eligibility left.`
+      : `${age}, in his final ${league} season. He turns pro after it.`
   } else {
-    where = `${age}yo, developing in ${league}`
+    where = veteran ? `${age}, playing in ${league}.` : `${age}, developing in ${league}.`
   }
 
   // Recommended next step, driven by CEILING (so quality is reflected) with a
   // current-ability read for "ready now". ECHL is reserved for genuine depth
   // ceilings or a raw player who's about to turn pro — not every young prospect.
   let step: string
-  if (ceiling >= 3) {
+  if (veteran) {
+    step = ceiling >= 3
+      ? 'NHL calibre now.'
+      : ceiling >= 2.5
+        ? 'An AHL regular who could fill in at the NHL level.'
+        : ceiling >= 2 ? 'An AHL depth player.' : 'An ECHL-level player.'
+  } else if (ceiling >= 3) {
     step = ovr >= 64
-      ? 'AHL-ready with real NHL upside — push him onto the farm and up the depth chart'
-      : 'a genuine NHL ceiling — keep developing him, then onto the farm'
+      ? 'AHL-ready with real NHL upside. Push him onto the farm and up the depth chart.'
+      : 'A genuine NHL ceiling. Keep developing him, then onto the farm.'
   } else if (ceiling >= 2.5) {
-    step = 'projects as an AHL regular with a shot at the NHL fringe'
+    step = 'Projects as an AHL regular with a shot at the NHL fringe.'
   } else if (ceiling >= 2) {
-    step = 'an AHL depth projection — useful org body'
+    step = 'Projects as AHL depth.'
   } else {
-    step = 'organisational depth — an ECHL ceiling for now'
+    step = 'Organisational depth with an ECHL ceiling for now.'
   }
   // A raw player about to turn pro may need ECHL seasoning first (overrides above).
-  const turningProSoon = (path === 'junior' && age >= 20) || (path === 'college' && age >= 22) || path === 'europe'
-  if (turningProSoon && ovr < 58 && ceiling >= 2) {
-    step = 'raw for the AHL — an ECHL stint to find his feet, then a call-up'
+  const turningProSoon = (path === 'junior' && age >= 20) || (path === 'college' && age >= 22) || (path === 'europe' && age <= 23)
+  if (turningProSoon && !veteran && ovr < 58 && ceiling >= 2) {
+    step = 'Raw for the AHL. An ECHL stint to find his feet, then a call-up.'
   }
 
   void currentStars
-  return `${where} — ${step}.`
+  return `${where} ${step}`
 }
 
 function devNote(p: Player, location: 'NHL' | 'AHL' | 'Junior', upside: number, tier: ProjectionTier): string {

@@ -39,6 +39,24 @@ function loadLeague(): { data: LeagueData; source: string } {
   return { data: generateLeague({ seed: SEED }), source: 'vanilla generated league' }
 }
 
+/**
+ * The skill's banned AI tells (§2) plus the house-style tells the 2026-10
+ * audit found once the vocabulary was clean: aphoristic closers, persona tics,
+ * vague attribution, football-press voice.
+ */
+const BANNED_TELLS: Array<[string, RegExp]> = [
+  ['AI vocabulary', /\b(?:delve|testament|tapestry|realm|showcas\w*|underscor\w*|foster\w*|bolster\w*|garner\w*|pivotal|crucial|robust|meticulous|intricate|vibrant|enduring|invaluable|seamless\w*|elevat\w*)\b/i],
+  ['stock phrase', /it'?s worth noting|at the end of the day|only time will tell|remains to be seen|a reminder that|speaks volumes|sends? a message|game-changer/i],
+  ['vague attribution', /\b(?:are believed to be|is believed to be|many believe|experts say|some have suggested|it is believed)\b/i],
+  ['aphoristic closer', /which is how (?:they|these|you)|is how these things start|which is the problem|which is (?:exactly )?the point|the habits underneath|with a sentence\b|the way people do/i],
+  ['persona tic', /I'?ll tell you what|make of that what you will|here'?s what we know|on paper, fine|let me tell you something/i],
+  ['hedge', /\bif it comes together\b|might be for real|not yet a trend|\barguably\b|\bperhaps\b/i],
+  ['negative parallelism', /\b(?:isn'?t|is not) (?:about|just) [^.]{1,50}\. It'?s\b|\bnot just\b[^.]{1,60}\bbut\b/i],
+  // "on the table" is ordinary English; "climbing the table" is football press.
+  ['football voice', /\b(?:climb\w*|top of|bottom of|middle of)\s+the table\b|surprise package|\bfixture\b|clean sheet|\bthe manager\b|match days/i],
+  ['quietly', /\bquietly\b/i],
+]
+
 /** Mask the parts that SHOULD differ every time, leaving the authored skeleton. */
 function skeleton(s: string): string {
   return s
@@ -205,6 +223,33 @@ describe.skipIf(!process.env.PA_RUN)('prose audit', () => {
     L.push('', '## Watchwords', '', '| phrase | uses |', '|---|---:|')
     for (const [w, n] of watchCounts) L.push(`| \`${w}\` | ${n} |`)
 
+    // The game-writing skill's gates (§2, §4): banned AI tells, the house-style
+    // tells the 2026-10 audit found, mechanical bugs, and em-dash density.
+    const allText = beats.map((b) => `${b.head}\n${b.body}`)
+    const words = allText.reduce((n, t) => n + (t.match(/\S+/g)?.length ?? 0), 0)
+    const dashes = allText.reduce((n, t) => n + (t.match(/—/g)?.length ?? 0), 0)
+    const dashDensity = (100 * dashes) / Math.max(1, words)
+    const countRe = (re: RegExp): number => allText.reduce((n, t) => n + (t.match(new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g'))?.length ?? 0), 0)
+    const gates: Array<[string, number]> = [
+      ...BANNED_TELLS.map(([label, re]) => [`tell: ${label}`, countRe(re)] as [string, number]),
+      ['bug: unfilled {slot}', countRe(/\{[a-zA-Z.]+\}/)],
+      ['bug: undefined / NaN', countRe(/\bundefined\b|\bNaN\b|\[object/)],
+      ['bug: doubled word (Omsk Omsk)', countRe(/\b([A-Z][a-z]{2,}) \1\b/)],
+      ['bug: a/an before 8, 11, 18, A', countRe(/\b[Aa] (?:8\d*|11|18|A[+-]?)(?=[\s\-.,])/)],
+      ['bug: "1 points"-style plural', countRe(/(?<![\d.,])\b1 (?:points|goals|games|assists|wins|seasons|days|weeks)\b/)],
+      ['bug: "@handle" headline', beats.filter((b) => /^@\w+$/.test(b.head.trim())).length],
+    ]
+    L.push('', '## Writing gates (game-writing skill)', '')
+    L.push(`- words: **${words}**, em-dashes: **${dashes}**, **${dashDensity.toFixed(2)} per 100 words** (target < 0.3)`, '')
+    L.push('| gate | hits |', '|---|---:|')
+    for (const [g, n] of gates) L.push(`| ${g} | ${n} |`)
+    // The first offending line per non-zero gate, so a hit can be traced.
+    const sampleOf = (re: RegExp): string | undefined => allText.map((t) => t.match(new RegExp(`.{0,60}(?:${re.source}).{0,40}`, re.flags.replace('g', '')))?.[0]).find(Boolean)
+    for (const [label, re] of [...BANNED_TELLS, ['bug: plural', /(?<![\d.,])\b1 (?:points|goals|games|assists|wins|seasons|days|weeks)\b/] as [string, RegExp]]) {
+      const hit = sampleOf(re)
+      if (hit) L.push(`- ${label}: \`${hit.replace(/\s+/g, ' ')}\``)
+    }
+
     L.push('', '## Top repeated sentences (names/numbers masked)', '', '| n | sentence |', '|---:|---|')
     for (const [, v] of topSent) L.push(`| ${v.n} | ${v.sample.replace(/\|/g, '\\|').slice(0, 160)} |`)
 
@@ -225,5 +270,11 @@ describe.skipIf(!process.env.PA_RUN)('prose audit', () => {
     console.log('\n' + L.slice(0, 90).join('\n'))
 
     expect(beats.length).toBeGreaterThan(0)
+    // PA_STRICT=1 turns the writing gates into a pass/fail: no mechanical bug,
+    // no banned tell, and em-dash density under the skill's 0.3 per 100 words.
+    if (process.env.PA_STRICT) {
+      for (const [g, n] of gates) expect(n, g).toBe(0)
+      expect(dashDensity).toBeLessThan(0.3)
+    }
   }, 3_600_000)
 })

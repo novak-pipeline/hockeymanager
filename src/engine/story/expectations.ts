@@ -58,8 +58,8 @@ export interface NewsSeed {
 
 const CHAMPION_BLURBS: ReadonlyArray<string> = [
   'The analytics back it up: this is the team to beat.',
-  'On paper, the best roster in the league heading into the season.',
-  'Depth up and down the lineup — every forecaster agrees they are the favourite.',
+  'The best roster in the league heading into the season, by the numbers.',
+  'Depth up and down the lineup. Every forecaster has them as the favourite.',
   'When strength ratings say this clearly, you listen.',
   'Consensus No. 1 and it is hard to argue otherwise.',
 ]
@@ -226,32 +226,41 @@ const CHECKPOINT_THRESHOLDS: ReadonlyArray<{ key: Checkpoint; threshold: number 
   { key: 'q3',   threshold: 45 },
 ]
 
+// Slots: {name} {predicted} {actual} {gp}. Every line is true at any of the
+// three checkpoints (15, 30, 45 games): no "midway" (it fired on day 34, audit
+// F11), no football "table", no "might be for real" hedge.
 const OVERACHIEVER_HEADLINES: ReadonlyArray<string> = [
-  '{name} defying expectations — and it might be for real',
-  '{name} outperforming predictions midway through the season',
-  'Surprise package: {name} climbing the table',
-  '{name} making forecasters eat their words',
+  '{name} are {actual} after {gp} games. They were picked {predicted}.',
+  '{gp} games in, {name} sit {actual}',
+  'Picked {predicted}, running {actual}: {name} keep winning',
+  '{name} {actual} through {gp}, well ahead of the forecast',
+  'Nobody picked {name} to be {actual} after {gp} games',
+  '{name} climb to {actual}, {gp} games in',
 ]
 
 const UNDERACHIEVER_HEADLINES: ReadonlyArray<string> = [
-  '{name} struggling to meet preseason expectations',
-  'What went wrong? {name} lagging behind projections',
-  '{name} underperforming — is it time for a change?',
-  'The gap widens: {name} not living up to the hype',
+  '{name} {actual} after {gp} games, well short of the forecast',
+  'Picked {predicted}, sitting {actual}: what is wrong with {name}?',
+  '{gp} games in, {name} are {actual}',
+  '{name} slide to {actual}, {gp} games in',
+  'The {predicted}-place team the forecasts promised has not shown up for {name}',
+  '{name} at {actual} after {gp}. The preseason picks had them {predicted}.',
 ]
 
 const OVERACHIEVER_BODIES: ReadonlyArray<string> = [
-  'Predicted {predicted}, sitting at {actual}. Something is clicking for this group and the standings show it.',
-  'The analysts had {name} at {predicted}. The players clearly disagreed — they sit {actual} right now.',
-  'Ranked {predicted} in the preseason. Currently {actual}. Hard to argue with results.',
-  '{name} were not supposed to be here at this point. Yet here they are, proving the projections wrong.',
+  'Preseason projection: {predicted}. After {gp} games: {actual}.',
+  'The preseason models had {name} at {predicted}. They are {actual} after {gp} games.',
+  '{name} were projected {predicted}. {gp} games in, they sit {actual} in the standings.',
+  'A {predicted}-place projection and a {actual}-place reality, {gp} games into the season.',
+  '{actual} after {gp} games. The forecasts had {name} at {predicted}.',
 ]
 
 const UNDERACHIEVER_BODIES: ReadonlyArray<string> = [
-  'Projected {predicted} preseason. Currently {actual}. A gap that the coaching staff will need to explain.',
-  'High expectations, disappointing results. {name} sit {actual} — they were meant to be {predicted}.',
-  'The preseason optimism has faded. {name} projected {predicted}, currently {actual}.',
-  'Something is not working for {name}. Ranked {actual} when everyone expected {predicted}.',
+  'Projected {predicted} in the preseason. {actual} after {gp} games.',
+  '{name} were meant to be {predicted}. They sit {actual} after {gp} games, and the coaching staff will be asked why.',
+  'The preseason forecasts had {name} at {predicted}. {gp} games in, they are {actual}.',
+  '{gp} games into the season, {name} are {actual}. The projection was {predicted}.',
+  '{actual} in the standings after {gp} games, against a {predicted}-place projection.',
 ]
 
 function ordinal(n: number): string {
@@ -305,6 +314,7 @@ export function checkExpectations(args: {
         predicted: ordinal(predicted),
         actual: ordinal(team.rank),
         abbr: team.abbr,
+        gp: String(team.gamesPlayed),
       }
 
       if (isOverachiever) {

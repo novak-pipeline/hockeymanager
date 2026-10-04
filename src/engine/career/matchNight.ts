@@ -10,6 +10,8 @@
  * phrases them.
  */
 
+import { plural, renderStable, stableSeed } from '@engine/story/prose'
+import type { ContentVariant } from '@engine/story/contentEngine'
 import type { MatchKeyView, ThreeStarView, TurningPointView } from './views'
 
 /* ────────────────────────── keys to the game (B6.1) ────────────────────────── */
@@ -55,6 +57,11 @@ const sv = (f: number): string => {
 export function buildMatchKeys(args: MatchKeysArgs): MatchKeyView[] {
   const { user, opp } = args
   const cands: Array<{ score: number; key: MatchKeyView }> = []
+  // The coach's closing line per key. One fixed tail per branch printed 45-73
+  // times a season (writing audit 2026-10); a stable pick per matchup and
+  // game count varies it without flickering on re-render.
+  const gameKey = `${user.abbr}|${opp.abbr}|${user.gamesPlayed}`
+  const say = (slot: string, opts: string[]): string => opts[stableSeed(`${gameKey}|${slot}`) % opts.length]!
 
   // Special-teams collision: their PP vs our PK (and the reverse) — cite both
   // percentages. Needs a real sample on both sides of the matchup.
@@ -66,7 +73,9 @@ export function buildMatchKeys(args: MatchKeysArgs): MatchKeyView[] {
         title: `Their power play vs your kill`,
         detail:
           `${opp.abbr} convert ${pct(opp.ppPct)} of their chances; your penalty kill holds ${pct(user.pkPct)}. ` +
-          (opp.ppPct >= 0.22 ? `Stay out of the box — this is where they hurt you.` : `Discipline keeps this a non-factor.`),
+          (opp.ppPct >= 0.22
+            ? say('ppHot', [`Stay out of the box. This is where they hurt you.`, `Every penalty tonight is a chance for them. Keep the sticks down.`, `Don't give that unit a look.`])
+            : say('ppCold', [`Discipline keeps this a non-factor.`, `Their power play isn't the worry tonight.`, `Take a penalty if you must; that unit hasn't punished many.`, `The kill can handle this one.`])),
       },
     })
   }
@@ -77,7 +86,9 @@ export function buildMatchKeys(args: MatchKeysArgs): MatchKeyView[] {
         title: `Your power play vs their kill`,
         detail:
           `Your unit runs at ${pct(user.ppPct)}; ${opp.abbr}'s kill survives ${pct(opp.pkPct)}. ` +
-          (opp.pkPct < 0.78 ? `Draw penalties — their kill leaks.` : `Five-on-five may decide it; their kill is stingy.`),
+          (opp.pkPct < 0.78
+            ? say('pkLeaks', [`Draw penalties. Their kill leaks.`, `Get to the net and make them take penalties.`, `Their kill gives up goals. Make them defend shorthanded.`])
+            : say('pkStingy', [`Five-on-five may decide it; their kill is stingy.`, `Don't count on the power play to bail you out.`, `Their kill is good. Win it at even strength.`, `Power-play goals will be hard to come by.`])),
       },
     })
   }
@@ -90,8 +101,10 @@ export function buildMatchKeys(args: MatchKeysArgs): MatchKeyView[] {
       key: {
         title: `Contain ${hs.name}`,
         detail:
-          `${hs.name} has ${hs.goals} goals and ${hs.assists} assists this season` +
-          (hs.form >= 2 ? ` — and he's running hot right now. Hard-match him.` : `. He drives their offense.`),
+          `${hs.name} has ${plural(hs.goals, 'goal')} and ${plural(hs.assists, 'assist')} this season` +
+          (hs.form >= 2
+            ? say('hsHot', [`, and he's running hot right now. Hard-match him.`, `. He's on a heater; put your best checkers on him.`, `, and he's been better lately. Don't give him the middle.`])
+            : say('hsCold', [`. He drives their offense.`, `. Take him away and they have to find goals elsewhere.`, `. Most of what they do goes through him.`, `. Know where he is every shift.`])),
       },
     })
   }
@@ -108,7 +121,8 @@ export function buildMatchKeys(args: MatchKeysArgs): MatchKeyView[] {
           title: hot ? `${g.name} is standing tall` : `Your crease is shaky`,
           detail:
             `${g.name} carries a ${sv(g.svPct)} save percentage, rating ${g.last5Avg.toFixed(1)} over his last starts. ` +
-            (hot ? `He's been the backbone — lean on him.` : `He needs goal support tonight.`),
+            (hot ? say('ugHot', [`He's been the backbone. Lean on him.`, `Keep the shots to the outside and he'll keep stopping them.`, `He's playing well. Don't hang him out to dry.`])
+                : say('ugCold', [`He needs goal support tonight.`, `Help him: clear the rebounds and block shots.`, `Score early and take the pressure off him.`])),
         },
       })
     }
@@ -122,7 +136,8 @@ export function buildMatchKeys(args: MatchKeysArgs): MatchKeyView[] {
         title: hot ? `Beating ${og.name} won't be easy` : `Test ${og.name} early`,
         detail:
           `${og.name} sits at ${sv(og.svPct)} on the season, rating ${og.last5Avg.toFixed(1)} over his last starts. ` +
-          (hot ? `Traffic and second chances — clean looks die in his glove.` : `He's been beatable — shoot from everywhere.`),
+          (hot ? say('ogHot', [`Traffic and second chances. Clean looks die in his glove.`, `Get bodies in front. He's not giving up the first shot.`, `He's seeing everything. Take his eyes away.`])
+              : say('ogCold', [`He's been beatable. Shoot from everywhere.`, `Get pucks on net early and often.`, `Test him from distance in the first period.`])),
       },
     })
   }
@@ -135,7 +150,7 @@ export function buildMatchKeys(args: MatchKeysArgs): MatchKeyView[] {
       key: {
         title: w ? `${opp.abbr} arrive on a heater` : `${opp.abbr} are wounded`,
         detail: w
-          ? `They've won ${opp.streak} straight. Weather the first ten minutes — confidence like that feeds on early goals.`
+          ? `They've won ${opp.streak} straight. Weather the first ten minutes; a team like that feeds on an early goal.`
           : `They've lost ${Math.abs(opp.streak)} in a row. Bury them early before belief creeps back in.`,
       },
     })
@@ -147,7 +162,7 @@ export function buildMatchKeys(args: MatchKeysArgs): MatchKeyView[] {
       key: {
         title: w ? `Protect the run` : `Stop the slide`,
         detail: w
-          ? `Your club has won ${user.streak} straight — keep the recipe identical: start on time, defend the middle.`
+          ? `Your club has won ${user.streak} straight. Keep it simple: start on time, defend the middle.`
           : `${Math.abs(user.streak)} losses in a row. The first goal tonight is worth double to this room.`,
       },
     })
@@ -162,7 +177,7 @@ export function buildMatchKeys(args: MatchKeysArgs): MatchKeyView[] {
       key: {
         title: `The margins`,
         detail: `You score ${uGf.toFixed(1)} a game; ${opp.abbr} concede ${oGa.toFixed(2)}. ${
-          uGf > oGa ? `The chances will be there — finish them.` : `Expect a tight-checking night; special teams may decide it.`
+          uGf > oGa ? `The chances will be there. Finish them.` : `Expect a tight-checking night; special teams may decide it.`
         }`,
       },
     })
@@ -174,7 +189,7 @@ export function buildMatchKeys(args: MatchKeysArgs): MatchKeyView[] {
       score: 1,
       key: {
         title: `No tape yet`,
-        detail: `${user.gamesPlayed} games played — no book on either side. ${
+        detail: `${plural(user.gamesPlayed, 'game')} played, so there is no book on either side yet. ${
           args.home ? `Use home ice: last change and the matchups are yours.` : `On the road, keep the first period simple.`
         }`,
       },
@@ -285,8 +300,8 @@ export function findTurningPoint(
   const phrase =
     g.period >= 4
       ? ours
-        ? `${g.scorerName} ended it in overtime — yours.`
-        : `${g.scorerName} ended it in overtime. One point, not two.`
+        ? `${g.scorerName} won it in overtime.`
+        : `${g.scorerName} won it for them in overtime. You leave with one point.`
       : best === gwgIndex && scoringSideDiff === 0
         ? ours
           ? `${g.scorerName}'s go-ahead goal ${where} broke the ${u}–${t} tie — the goal that won it.`
@@ -379,7 +394,42 @@ export interface PersistentMomentArgs {
   goalie: { playerId: string; name: string; saves: number; shotsAgainst: number } | null
   /** A fight involving one of ours, when one happened. */
   fight: { ourId: string; ourName: string; theirName: string } | null
+  /** Optional colour for the storyline: the opponent's full name and the
+   *  final score. Absent, the lines fall back to the abbreviation. */
+  oppName?: string
+  goalsFor?: number
+  goalsAgainst?: number
 }
+
+/*
+ * The storylines, as a beat writer files them: the fact, then one detail.
+ * Slots: {name} {age} {opp} {score} {saves} {shots} {svp} {their}. Conditions:
+ * won (bool), scored (a final score is known). Siblings at equal specificity.
+ */
+const FIRST_GOAL_POOL: ContentVariant[] = [
+  { id: 'fg.w.a', conditions: { won: true, scored: true }, text: `{name} scored his first NHL goal in a {score} win over {opp}. He is {age}.` },
+  { id: 'fg.w.b', conditions: { won: true, scored: true }, text: `First NHL goal for {name}, {age}, and it came in a win: {score} over {opp}.` },
+  { id: 'fg.w.c', conditions: { won: true, scored: true }, text: `{name} has his first NHL goal. The {age}-year-old scored against {opp}, and the team won it {score}.` },
+  { id: 'fg.w.d', conditions: { won: true, scored: true }, text: `The trainers kept the puck. {name}, {age}, scored his first NHL goal in the {score} win over {opp}.` },
+  { id: 'fg.l.a', conditions: { won: false, scored: true }, text: `{name} scored his first NHL goal against {opp}. The {score} loss took some of the shine off it.` },
+  { id: 'fg.l.b', conditions: { won: false, scored: true }, text: `First NHL goal for {name}, {age}, on a night that ended {score} for {opp}.` },
+  { id: 'fg.l.c', conditions: { won: false, scored: true }, text: `{name} will keep the puck, if not the result. His first NHL goal came in a {score} loss to {opp}.` },
+  { id: 'fg.x.a', text: `{name}, {age}, scored his first NHL goal against {opp}.` },
+  { id: 'fg.x.b', text: `First NHL goal for {name}. He is {age}, and it came against {opp}.` },
+]
+
+const GOALIE_STEAL_POOL: ContentVariant[] = [
+  { id: 'gs.a', text: `{name} stopped {saves} of {shots} ({svp}) and the team got two points it had no business taking from {opp}.` },
+  { id: 'gs.b', text: `{saves} saves on {shots} shots for {name}. Outshot by {opp}, and won anyway.` },
+  { id: 'gs.c', text: `{name} faced {shots} shots from {opp} and let in {against}. That was the game.` },
+  { id: 'gs.d', text: `A {svp} night for {name}: {saves} saves, and a win {opp} will think they deserved.` },
+]
+
+const RIVAL_SCRAP_POOL: ContentVariant[] = [
+  { id: 'rs.a', text: `{name} dropped the gloves with {their} in the rivalry game against {opp}.` },
+  { id: 'rs.b', text: `{name} and {their} fought against {opp}. The rivalry had a lot of that tonight.` },
+  { id: 'rs.c', text: `{name} took on {their}. Nobody expected the {opp} game to stay quiet, and it didn't.` },
+]
 
 export interface PersistentMoment {
   kind: 'firstGoal' | 'goalieSteal' | 'rivalScrap'
@@ -396,13 +446,19 @@ export interface PersistentMoment {
  * scrap in a rivalry game. Returns null on an ordinary night.
  */
 export function detectPersistentMoment(args: PersistentMomentArgs): PersistentMoment | null {
+  const opp = args.oppName ?? args.oppAbbr
+  const score = args.goalsFor !== undefined && args.goalsAgainst !== undefined
+    ? `${Math.max(args.goalsFor, args.goalsAgainst)}–${Math.min(args.goalsFor, args.goalsAgainst)}`
+    : null
   const fg = args.firstGoalScorers[0]
   if (fg) {
     return {
       kind: 'firstGoal',
       playerIds: [fg.playerId],
       headline: `${fg.name} scores his first NHL goal vs ${args.oppAbbr}`,
-      storyline: `${fg.name}, ${fg.age}, buried his first NHL goal tonight — the puck is going in the case. Nights like this get retold.`,
+      storyline: renderStable(FIRST_GOAL_POOL, { won: args.won, scored: score !== null }, `fg|${fg.playerId}`, {
+        name: fg.name, age: String(fg.age), opp: opp, score: score ?? '',
+      }),
     }
   }
   const g = args.goalie
@@ -416,8 +472,11 @@ export function detectPersistentMoment(args: PersistentMomentArgs): PersistentMo
     return {
       kind: 'goalieSteal',
       playerIds: [g.playerId],
-      headline: `${g.name} steals one vs ${args.oppAbbr} — ${g.saves} of ${g.shotsAgainst} (${svp})`,
-      storyline: `${g.name} stopped ${g.saves} of ${g.shotsAgainst} (${svp}) to steal the two points. A performance the room will bring up for months.`,
+      headline: `${g.name} steals one vs ${args.oppAbbr}: ${g.saves} of ${g.shotsAgainst} (${svp})`,
+      storyline: renderStable(GOALIE_STEAL_POOL, {}, `gs|${g.playerId}|${g.saves}|${g.shotsAgainst}`, {
+        name: g.name, saves: String(g.saves), shots: String(g.shotsAgainst), svp, opp,
+        against: String(g.shotsAgainst - g.saves),
+      }),
     }
   }
   const f = args.fight
@@ -426,7 +485,7 @@ export function detectPersistentMoment(args: PersistentMomentArgs): PersistentMo
       kind: 'rivalScrap',
       playerIds: [f.ourId],
       headline: `${f.ourName} drops the gloves with ${f.theirName} as tempers boil vs ${args.oppAbbr}`,
-      storyline: `${f.ourName} answered the bell against ${f.theirName} — bad blood with ${args.oppAbbr} just got worse, and nobody in either room will forget it.`,
+      storyline: renderStable(RIVAL_SCRAP_POOL, {}, `rs|${f.ourId}|${f.theirName}`, { name: f.ourName, their: f.theirName, opp }),
     }
   }
   return null

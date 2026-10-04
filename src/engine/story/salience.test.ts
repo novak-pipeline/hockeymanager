@@ -100,7 +100,10 @@ describe('detectBreakoutSkater', () => {
     const hits = detectBreakoutSkater(ctx)
     expect(hits).toHaveLength(1)
     expect(hits[0]!.playerId).toBe('p1')
-    expect(hits[0]!.facts.priorNote).toContain('71')
+    // Owner rule: the hidden rating never reaches the page, only its meaning.
+    expect(hits[0]!.facts.priorNote).toContain('role player')
+    expect(hits[0]!.facts.priorNote).not.toMatch(/\d/)
+    expect(hits[0]!.text).not.toMatch(/\b71\b/)
     expect(hits[0]!.text).toContain('Cinderella Story')
   })
 

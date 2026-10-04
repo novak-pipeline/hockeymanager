@@ -298,24 +298,30 @@ export function detectBreakoutSkater(ctx: SalienceCtx): SalienceCandidate[] {
       channel: 'feed',
       authorId: 'stats',
       text: pickLine(`breakout-${s.playerId}-${ctx.year}-${ctx.day}`, [
-        `${s.name} check-in: ${s.points} points in ${s.gp} games — a ${Math.round(pace)}-point pace, ${ordinal(i + 1)} in the league. Nobody's model had him here. This is what a breakout looks like in the data.`,
-        `Nobody drafted ${s.name} in your pool. ${s.points} in ${s.gp} — ${ordinal(i + 1)} in the league on a ${Math.round(pace)}-point pace. Rated ${s.ratedOverall}. The gap between those two numbers is the story of his season.`,
-        `${s.name}, ${s.gp} games in: ${s.points} points. That's ${ordinal(i + 1)} in the entire league from a player the book had at ${s.ratedOverall}. Either the book is wrong or he is playing over his head — and it has stopped looking like the second one.`,
-        `Quietly: ${s.name} is on a ${Math.round(pace)}-point pace. ${s.points} in ${s.gp}. ${s.age <= 23 ? 'He is ' + s.age + '. Nobody peaks at ' + s.age + ' — this is the floor.' : 'Late bloomers are real and this is what one looks like.'}`,
-        `Every model in the league is quietly refitting around ${s.name}. ${s.points} points in ${s.gp} games, ${ordinal(i + 1)} overall, on a ${Math.round(pace)}-point pace. Priors are supposed to move. His moved.`,
+        `${s.name}: ${s.points} points in ${s.gp} games, a ${Math.round(pace)}-point pace and ${ordinal(i + 1)} in the league in points per game. He came into the year as ${priorTier(s.ratedOverall)}.`,
+        `${s.points} points in ${s.gp} games for ${s.name}. That's ${ordinal(i + 1)} in the league per game, from a player most had pegged as ${priorTier(s.ratedOverall)}.`,
+        `${s.name} is on a ${Math.round(pace)}-point pace through ${s.gp} games. ${s.age <= 23 ? `He's ${s.age}, so this may be where he starts.` : `He's ${s.age}, which makes it a late breakout.`}`,
+        `${ordinal(i + 1)} in the league in points per game: ${s.name}, ${s.points} in ${s.gp}. Not bad for ${priorTier(s.ratedOverall)}.`,
+        `The projections had ${s.name} as ${priorTier(s.ratedOverall)}. He has ${s.points} points in ${s.gp} games for ${t.name}.`,
       ]),
       facts: {
         kind: 'breakoutSkater',
         playerIds: [s.playerId],
         teamIds: [s.teamId],
         numbers: { points: s.points, gp: s.gp, pace: Math.round(pace), paceRank: i + 1, ratedOverall: s.ratedOverall, day: ctx.day },
-        priorNote: `rated ${s.ratedOverall} overall`,
+        priorNote: `seen as ${priorTier(s.ratedOverall)} before the season`,
       },
       teamId: s.teamId,
       playerId: s.playerId,
     })
   }
   return out
+}
+
+/** What the league thought of a man before the season, in words. Hidden
+ *  ratings never reach the page (owner rule, 2026-10). */
+function priorTier(ovr: number): string {
+  return ovr >= 74 ? 'a solid middle-of-the-lineup player' : ovr >= 68 ? 'a role player' : ovr >= 62 ? 'a depth player' : 'a fringe player'
 }
 
 /** The quiet wall: a goalie stopping everything without the reputation.
@@ -336,14 +342,14 @@ export function detectGoalieHeater(ctx: SalienceCtx): SalienceCandidate[] {
       channel: 'feed',
       authorId: unheralded ? 'analyst' : 'stats',
       text: unheralded
-        ? `Quiet story of the season so far: ${g.name} is at .${Math.round(svPct * 1000)} on ${g.shotsAgainst} shots for ${t.name}. That's elite work from a name nobody circled in September.`
+        ? `${g.name} is at .${Math.round(svPct * 1000)} on ${g.shotsAgainst} shots for ${t.name}. Elite numbers from a goalie nobody circled in September.`
         : `${g.name}: .${Math.round(svPct * 1000)} save percentage on ${g.shotsAgainst} shots. The workload is real and so is the number.`,
       facts: {
         kind: 'goalieHeater',
         playerIds: [g.playerId],
         teamIds: [g.teamId],
         numbers: { svPct: Math.round(svPct * 1000), shotsAgainst: g.shotsAgainst, ratedOverall: g.ratedOverall, day: ctx.day },
-        priorNote: `rated ${g.ratedOverall} overall`,
+        priorNote: `seen as ${g.ratedOverall >= 80 ? 'a No. 1 goalie' : g.ratedOverall >= 72 ? 'a 1B' : 'a backup'} before the season`,
       },
       teamId: g.teamId,
       playerId: g.playerId,

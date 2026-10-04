@@ -49,13 +49,13 @@ const WIN_STREAK_POOL: ContentVariant[] = [
     text2: `Double digits. {team} haven't lost in {n} games, the kind of run that gets remembered in April — and opponents are starting to play them like a team they'd rather not see.` },
   { id: 'streak.win.hottest',
     text: `{team} ride a {n}-game winning streak`,
-    text2: `{team} have reeled off {n} straight — the hottest team in the league right now.` },
+    text2: `{team} have reeled off {n} straight.` },
   { id: 'streak.win.finding-ways',
     text: `{n} in a row for {team}`,
-    text2: `Tight ones, blowouts, a comeback — {team} keep finding ways. {n} straight wins, and the room has that quiet swagger good teams get.` },
+    text2: `{n} straight wins for {team}, and they've come in every shape.` },
   { id: 'streak.win.building',
     text: `Nobody wants to play {team} right now`,
-    text2: `{n} consecutive wins have turned {team} into the fixture opponents circle nervously. Streaks end; the habits underneath them tend not to.` },
+    text2: `{n} consecutive wins for {team}. Nobody wants them on the schedule right now.` },
 ]
 
 const SKID_POOL: ContentVariant[] = [

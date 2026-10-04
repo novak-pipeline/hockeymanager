@@ -11,6 +11,7 @@
  * lines up with how his players actually get deployed.
  */
 
+import { withArticle } from '@engine/story/prose'
 import type { Player } from '@domain'
 import { classifyArchetype, ARCHETYPE_META } from './archetypes'
 
@@ -103,7 +104,8 @@ function usageNote(position: string, suit: RawBucket[], archetypeLabel: string):
   // checking role even when several buckets round to the same star count.
   const best = [...suit].sort((a, b) => b.raw - a.raw)[0]
   if (best && best.stars >= 3) {
-    return `Best used in a ${best.label.toLowerCase()} role; a ${archetypeLabel.toLowerCase()} who fills a middle-of-the-lineup job.`
+    const roleWord = best.label.toLowerCase().replace(/ role$/, '')
+    return `Best used in ${withArticle(roleWord)} role: ${withArticle(archetypeLabel.toLowerCase())} who fills a middle-of-the-lineup job.`
   }
   return `A depth ${isF ? 'forward' : 'defenseman'} — spot minutes without a defined special-teams role.`
 }

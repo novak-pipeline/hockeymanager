@@ -15,6 +15,7 @@
  */
 
 import type { Player } from '@domain'
+import { stableSeed } from '@engine/story/prose'
 import type { Rng } from '@engine/shared/rng'
 import type { SceneSpeaker } from '@engine/story/decisionEvents'
 import type { LockerRoomState, Relationship } from './lockerRoom'
@@ -208,22 +209,50 @@ function chooseKind(
   return null
 }
 
-function messageFor(_p: Player, kind: InteractionKind, feudName: string | null): string {
+function messageFor(p: Player, kind: InteractionKind, feudName: string | null): string {
   // First person — the player is speaking directly TO the GM (this is voiced on the
   // phone and read as his own words on the inbox card), not narrated in the third
-  // person (#1).
+  // person (#1). Several lines per kind, picked stably per player and kind, each
+  // built from what is true of HIM (his deal, his age), so two men never raise
+  // the same concern in the same sentence (audit F7).
+  const yrs = p.contract.yearsRemaining
+  const pick = (opts: string[]): string => opts[stableSeed(`concern|${p.id as string}|${kind}`) % opts.length]!
   switch (kind) {
     case 'tradeRequest':
-      return `I need to be straight with you — I'm not happy here. I think it's best for both of us if you move me. I want out.`
+      return pick([
+        `I'm not happy here, and I don't see it changing. I think it's best for both of us if you move me.`,
+        `I want a trade. I've thought about it for a while. I'd rather do this the right way than through the papers.`,
+        `I need a fresh start. Can you find me somewhere I'll play?`,
+      ])
     case 'future':
-      return `I wanted to talk about my future. My deal's winding down, and I need to know where I stand with you.`
+      return yrs <= 0
+        ? pick([`My deal's up. I need to know if you want me back.`, `I'm about to be a free agent. Where do we stand?`])
+        : pick([
+            `I've got ${yrs === 1 ? 'one year' : `${yrs} years`} left. I need to know where I stand with you.`,
+            `Can we talk about an extension? I'd like to know before the season gets away from us.`,
+            `My agent keeps asking me what the plan is. I'd like to hear it from you.`,
+          ])
     case 'iceTime':
-      return `I feel like I'm ready for more out there — a bigger role, more responsibility. What's your plan for me?`
+      return pick([
+        `I think I'm ready for more out there. A bigger role, more minutes. What's your plan for me?`,
+        `I want more ice time. I can help this team more than I'm getting the chance to.`,
+        `I'm ${p.age}, and I want to find out what I can do with real minutes. What do I have to do?`,
+      ])
     case 'feud':
-      return `I've got to be honest with you: there's friction in that room${feudName ? ` with ${feudName}` : ''}, and it's starting to get into my head on the ice.`
+      return feudName
+        ? pick([
+            `Me and ${feudName} aren't getting along, and it's starting to get into my head on the ice.`,
+            `I've got a problem with ${feudName}. I'd rather tell you now than have it blow up in the room.`,
+            `It's ${feudName}. We can't play together like this. Something has to give.`,
+          ])
+        : `There's friction in our room, and it's starting to get into my head on the ice.`
     case 'unhappy':
     default:
-      return `Something's been off with me lately. Can we sit down and talk about where things are at?`
+      return pick([
+        `Something's been off with me lately. Can we sit down and talk?`,
+        `I'm not enjoying it right now. I wanted you to hear that from me.`,
+        `Honestly, I'm not in a good place with how things are going. Can we talk?`,
+      ])
   }
 }
 
@@ -417,21 +446,71 @@ export function applyInteractionResponse(args: {
       headline: `${player.name} requests a trade`,
       body: `Unhappy with how his concerns were handled, ${player.name} has asked to be moved.`,
     }
-  } else if (moraleDelta >= 8) {
-    outcome = `${name} left the meeting reassured and in good spirits.`
-  } else if (moraleDelta > 0) {
-    outcome = `${name} appreciated being heard, even if nothing was promised.`
-  } else if (moraleDelta === 0) {
-    outcome = `${name} took the message on board without much reaction.`
-  } else if (moraleDelta > -8) {
-    outcome = `${name} wasn't thrilled with the answer but accepted it.`
   } else {
-    outcome = `${name} was clearly unhappy with how the conversation went.`
+    outcome = outcomeLine(interaction.kind, option.tone, moraleDelta, name)
   }
 
   const result: InteractionResult = { moraleDelta, roomMoraleDelta, escalateToTrade, outcome }
   if (news) result.news = news
   return result
+}
+
+/**
+ * The receipt for a resolved concern. It must agree with BOTH the button the GM
+ * pressed and how the player took it: "Tell him to sort it out himself" can land
+ * well with a pro, but it can never read "appreciated being heard" (audit F7).
+ * Keyed on tone first, then the size of the swing the engine already decided.
+ */
+export function outcomeLine(kind: InteractionKind, tone: ResponseTone, delta: number, last: string): string {
+  const band = delta >= 8 ? 'good' : delta > 0 ? 'ok' : delta === 0 ? 'flat' : delta > -8 ? 'sour' : 'bad'
+  if (kind === 'feud') {
+    if (tone === 'supportive') {
+      return band === 'good' || band === 'ok'
+        ? `${last} said that was all he wanted: somebody above the coaches to know.`
+        : `${last} wanted it kept between the two of them. He did not want it taken to the whole room.`
+    }
+    if (tone === 'firm') {
+      return band === 'good' || band === 'ok'
+        ? `${last} said fine, he'd deal with it himself. He seemed glad to be trusted with it.`
+        : band === 'flat'
+          ? `${last} said he'd handle it. Whether he does is between him and the other guy now.`
+          : `${last} said he'd handle it, in a tone that suggested he'd tried that already.`
+    }
+    return band === 'good' || band === 'ok' || band === 'flat'
+      ? `${last} shrugged and went back to the room. The problem went with him.`
+      : `${last} left without saying much. He came to you with a problem and is leaving with the same one.`
+  }
+  switch (tone) {
+    case 'promise':
+      return band === 'good'
+        ? `${last} shook your hand on it. He will remember exactly what you said.`
+        : band === 'ok' || band === 'flat'
+          ? `${last} took the promise. He has heard promises in this business before.`
+          : `${last} heard the promise and didn't look like he believed it.`
+    case 'supportive':
+      return band === 'good'
+        ? `${last} left lighter than he came in.`
+        : band === 'ok'
+          ? `${last} appreciated being heard, even if nothing was promised.`
+          : band === 'flat'
+            ? `${last} listened politely. It was the same thing he heard last time.`
+            : `${last} wanted something concrete and got a pat on the back. It showed.`
+    case 'firm':
+      return band === 'good' || band === 'ok'
+        ? `${last} nodded. He came for a straight answer and got one.`
+        : band === 'flat'
+          ? `${last} took it without much reaction.`
+          : band === 'sour'
+            ? `${last} didn't like the answer, but he took it.`
+            : `${last} walked out stiff. He wanted help and got a lecture.`
+    case 'dismissive':
+    default:
+      return band === 'good' || band === 'ok' || band === 'flat'
+        ? `${last} shrugged it off. He has been around long enough not to take it personally.`
+        : band === 'sour'
+          ? `${last} heard the brush-off and kept his mouth shut. He won't bring it to you again soon.`
+          : `${last} was clearly unhappy with how that went.`
+  }
 }
 
 /* ─────────────────────── reaction descriptor (RP voice) ─────────────────────── */

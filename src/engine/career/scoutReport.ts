@@ -111,11 +111,11 @@ export const TIER_LABELS: Record<ProjectionTier, string> = {
 
 /** One-line definition of each tier, in hockey terms (shown on the profile). */
 export const TIER_BLURBS: Record<ProjectionTier, string> = {
-  Star: 'A franchise-calibre talent you build the team around — a first-line forward, number-one defenceman, or a true starting goalie.',
-  Key: 'A high-end regular the team leans on every night — a top-six forward, top-four defenceman, or a clear starter.',
-  Core: 'A dependable everyday player through the middle of the lineup — reliable minutes, rarely a liability.',
-  Depth: 'Rounds out the roster — a bottom-six forward, third-pair defenceman, or a backup; valuable in a defined role.',
-  Fringe: 'Replacement-level — an NHL/AHL tweener battling to hold down a job.',
+  Star: 'A franchise-calibre talent you build the team around: a first-line forward, number-one defenceman, or a No. 1 goalie.',
+  Key: 'A high-end regular the team leans on every night: a top-six forward, top-four defenceman, or a clear starter.',
+  Core: 'A dependable everyday player through the middle of the lineup. Reliable minutes, rarely a liability.',
+  Depth: 'Rounds out the roster: a bottom-six forward, third-pair defenceman, or a backup. Valuable in a defined role.',
+  Fringe: 'Replacement level. An NHL/AHL tweener battling to hold down a job.',
   Prospect: 'Young and unproven, judged on his upside rather than his current role.',
 }
 
@@ -264,7 +264,7 @@ const SKATING_PHRASES: PhraseSet = {
     'a good skater with good speed',
     'his skating is among the best in the league',
     'an exceptional skater who covers ice quickly',
-    'tremendous skating ability — very difficult to stay with',
+    'tremendous skating ability; very difficult to stay with',
   ],
   negative: [
     'his skating limits his effectiveness',
@@ -344,7 +344,7 @@ const STRENGTH_PHRASES: PhraseSet = {
 const COMPOSURE_PHRASES: PhraseSet = {
   positive: [
     'stays calm in big moments',
-    'thrives under pressure — a player you can trust in tight games',
+    'thrives under pressure; you can trust him in tight games',
   ],
   negative: [
     'his composure in high-pressure moments is a question mark',
@@ -354,7 +354,7 @@ const COMPOSURE_PHRASES: PhraseSet = {
 const SCORING_PHRASES: PhraseSet = {
   positive: [
     'a prolific goal scorer with excellent instincts in front of net',
-    'has a nose for the net — always in the right place at the right time',
+    'has a nose for the net and finds the soft spots around the crease',
     'a pure finisher who rarely wastes his opportunities',
   ],
   negative: [
@@ -375,7 +375,7 @@ const DEF_ZONE_PHRASES: PhraseSet = {
 
 const GOALIE_REFLEXES_PHRASES: PhraseSet = {
   positive: [
-    'outstanding reflexes — makes saves others cannot',
+    'outstanding reflexes; makes saves others cannot',
     'his reaction time is exceptional',
   ],
   negative: [],
@@ -384,7 +384,7 @@ const GOALIE_REFLEXES_PHRASES: PhraseSet = {
 const GOALIE_POSITIONING_PHRASES: PhraseSet = {
   positive: [
     'takes away angles brilliantly',
-    'positionally very sound — rarely caught out of position',
+    'positionally very sound and rarely caught out of position',
     'reads the play early and squares up to shooters',
   ],
   negative: [],
@@ -407,7 +407,7 @@ const DETERMINATION_HIGH = [
   'brings an intensity that teammates feed off',
 ]
 const PROFESSIONALISM_HIGH = [
-  'a true professional in everything he does',
+  'a pro in everything he does, on and off the ice',
   'his dedication and preparation are exemplary',
 ]
 const LOYALTY_HIGH = [
@@ -420,11 +420,11 @@ const FLAIR_HIGH = [
   'can surprise you with a moment of individual brilliance',
 ]
 const AGGRESSION_HIGH = [
-  'plays with an edge — likes to agitate',
+  'plays with an edge and likes to agitate',
   'brings a combative style that gets under opponents\' skin',
 ]
 const COMPOSURE_PERS_HIGH = [
-  'is the kind of player you want on the ice in crunch time',
+  'is the player you want on the ice late in a close game',
   'a calm head in the storm',
 ]
 
@@ -730,8 +730,15 @@ function assembleProse(player: Player, knowledge: number, clauses: string[]): st
   const first = clauses[0]!
   const rest = clauses.slice(1)
 
-  // Capitalise first letter of first clause
-  const firstSentence = opener + first.charAt(0).toLowerCase() + first.slice(1) + '.'
+  // The first clause has to read as a sentence after the name. Noun phrases
+  // ("an exceptional skater…") need a verb, and "his skating is…" needs the
+  // possessive: "Gustav Forsling an exceptional skater" shipped (audit 2026-10).
+  const lower = first.charAt(0).toLowerCase() + first.slice(1)
+  const firstSentence = /^his /.test(lower)
+    ? `${opener.trimEnd()}${/s$/.test(opener.trimEnd()) ? "'" : "'s"} ${lower.slice(4)}.`
+    : /^(a|an|the) /.test(lower)
+      ? `${opener}is ${lower}.`
+      : `${opener}${lower}.`
 
   const restSentences = rest.map((cl, i) => {
     const capitalized = cl.charAt(0).toUpperCase() + cl.slice(1)
