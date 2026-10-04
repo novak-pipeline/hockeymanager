@@ -171,7 +171,7 @@ export function detectClubBeats(args: {
           headline: `${f.name} has ${f.gamesPlayed} pro games behind him now`,
           body:
             `The first professional season is the one that tells you what a prospect is. ` +
-            `${f.name}, ${f.age}, has ${f.goals} goals and ${f.points} points in ${f.gamesPlayed} games with the affiliate. ` +
+            `${f.name}, ${f.age}, has ${f.goals} ${f.goals === 1 ? 'goal' : 'goals'} and ${f.points} ${f.points === 1 ? 'point' : 'points'} in ${f.gamesPlayed} ${f.gamesPlayed === 1 ? 'game' : 'games'} with the affiliate. ` +
             `Coaches down there say the pace has stopped surprising him.`,
         })
       }

@@ -243,6 +243,12 @@ describe.skipIf(!process.env.PA_RUN)('prose audit', () => {
     L.push(`- words: **${words}**, em-dashes: **${dashes}**, **${dashDensity.toFixed(2)} per 100 words** (target < 0.3)`, '')
     L.push('| gate | hits |', '|---|---:|')
     for (const [g, n] of gates) L.push(`| ${g} | ${n} |`)
+    // The first offending line per non-zero gate, so a hit can be traced.
+    const sampleOf = (re: RegExp): string | undefined => allText.map((t) => t.match(new RegExp(`.{0,60}(?:${re.source}).{0,40}`, re.flags.replace('g', '')))?.[0]).find(Boolean)
+    for (const [label, re] of [...BANNED_TELLS, ['bug: plural', /(?<![\d.,])\b1 (?:points|goals|games|assists|wins|seasons|days|weeks)\b/] as [string, RegExp]]) {
+      const hit = sampleOf(re)
+      if (hit) L.push(`- ${label}: \`${hit.replace(/\s+/g, ' ')}\``)
+    }
 
     L.push('', '## Top repeated sentences (names/numbers masked)', '', '| n | sentence |', '|---:|---|')
     for (const [, v] of topSent) L.push(`| ${v.n} | ${v.sample.replace(/\|/g, '\\|').slice(0, 160)} |`)

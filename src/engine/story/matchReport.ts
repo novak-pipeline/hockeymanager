@@ -166,7 +166,7 @@ const SHAPE_POOL: ContentVariant[] = [
     text: `Nothing worked, in front of the net or behind it. {theirGoals} past {goalie}, and the tape from this one will be short and unpleasant.` },
   /* ── shutouts ── */
   { id: 'mr.shutout.for', conditions: { won: true, cleanSheet: true },
-    text: `A clean sheet and a comfortable evening. {goalie} turned aside all {shotsAgainst} and the {us} never let the game get interesting.` },
+    text: `A shutout and a comfortable evening. {goalie} turned aside all {shotsAgainst} and the {us} never let the game get interesting.` },
   { id: 'mr.shutout.against', conditions: { won: false, blanked: true },
     text: `{shots} shots and nothing to show for any of them. The {us} were shut out, and the frustration was visible by the midpoint of the third.` },
   /* ── blowouts ── */

@@ -112,7 +112,7 @@ export const STAT_POOL: Pool = [
   { id: 'st-depth-2', conditions: { stat: 'depth' }, text: 'Everybody scored.', text2: 'Twenty-goal men all through the lineup. Matchups were somebody else’s problem.' },
   { id: 'st-oneman-1', conditions: { stat: 'oneman' }, text: 'A one-man offence.', text2: 'Nobody else on the roster got to twenty goals. {player} was the only real threat, and the league knew it.' },
   { id: 'st-oneman-2', conditions: { stat: 'oneman' }, text: 'Find him some help.', text2: '{player} did the scoring. The rest of the roster watched.' },
-  { id: 'st-so-1', conditions: { stat: 'shutouts' }, text: 'Doughnuts.', text2: '{player} kept a clean sheet {countWords} times. Some nights the other team simply was not getting one.' },
+  { id: 'st-so-1', conditions: { stat: 'shutouts' }, text: 'Doughnuts.', text2: '{player} posted {countWords} shutouts. Some nights the other team simply was not getting one.' },
   { id: 'st-so-2', conditions: { stat: 'shutouts' }, text: 'The wall.', text2: '{countWords} shutouts from {player}. Opponents left the rink wondering what they did wrong.' },
   { id: 'st-ot-1', conditions: { stat: 'overtime' }, text: 'You lived in overtime.', text2: 'Loser points piled up all year. Close is a nice word for it.' },
   { id: 'st-ot-2', conditions: { stat: 'overtime' }, text: 'So close, so often.', text2: 'A season of three-on-three and shootouts, and too many of them went the wrong way.' },

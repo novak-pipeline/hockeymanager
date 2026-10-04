@@ -166,7 +166,7 @@ export function detectPlayerStory(lines: PlayerGameLine[]): PlayerStoryBeat | nu
       kind: 'shutout',
       playerId: sho.playerId, line: sho,
       headline: `${sho.name} slams the door — ${sho.saves}-save shutout`,
-      body: `${sho.name} turned aside all ${sho.shotsAgainst} shots for the clean sheet.`,
+      body: `${sho.name} turned aside all ${sho.shotsAgainst} shots for the shutout.`,
     }
   }
   return null

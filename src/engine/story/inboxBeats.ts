@@ -174,7 +174,7 @@ export const PLAYER_NIGHT_POOL: ContentVariant[] = [
   { id: 'pn.so.b', conditions: { kind: 'shutout' }, text: `Shutout for {name}: {saves} saves against {opp}`,
     text2: `{name} stopped all {saves} shots he faced for the shutout.` },
   { id: 'pn.so.c', conditions: { kind: 'shutout' }, text: `{name} stops all {saves}`,
-    text2: `A clean sheet for {name}. The {opp} had their looks and he had an answer for every one.` },
+    text2: `A shutout for {name}. The {opp} had their looks and he had an answer for every one.` },
   { id: 'pn.so.d', conditions: { kind: 'shutout' }, text: `{name} perfect in {score} win`,
     text2: `{saves} shots, {saves} saves. {name} earned his zero against {opp}.` },
   { id: 'pn.so.e', conditions: { kind: 'shutout' }, text: `Zero for {opp}`,

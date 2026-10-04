@@ -5713,7 +5713,7 @@ export class Career {
             'feud',
             [a.id as string, b.id as string],
             [this.userTeamId as string],
-            `Tempers simmer between ${a.name} and ${b.name} after the manager's fiery press conference.`,
+            `Tempers simmer between ${a.name} and ${b.name} after the GM's fiery press conference.`,
             this.currentDay,
             this.year
           )
@@ -6765,7 +6765,7 @@ export class Career {
     if (leader && inSeason) {
       items.push({
         topic: 'standout', verdict: '', label: 'the team MVP', playerId: leader.p.id as string,
-        slots: { name: leader.p.name, line: `${leader.line.g} goals and ${leader.line.pts} points in ${leader.line.gp} games`, nick: clubNickname(this.castTeam(team.id)!) },
+        slots: { name: leader.p.name, line: `${leader.line.g} ${leader.line.g === 1 ? 'goal' : 'goals'} and ${leader.line.pts} ${leader.line.pts === 1 ? 'point' : 'points'} in ${leader.line.gp} games`, nick: clubNickname(this.castTeam(team.id)!) },
         weight: 2,
       })
     }
