@@ -6,13 +6,19 @@
  * reported by nation and by league (with a youth split), and a job market lets
  * the GM hire and release scouts.
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { PotentialStars, StarRating } from '../components/Stars'
 import type { ScoutingView, WorkerResponse } from '../../worker/protocol'
 import type {
   ScoutCardView, ScoutCoverageRow, ScoutFindView, ScoutingBriefingView,
-  PlayerSearchQuery, PlayerSearchView, PlayerReadBand,
+  PlayerSearchQuery, PlayerSearchView, PlayerReadBand, NeedCriteriaView,
 } from '../../engine/career/views'
+import { ARCHETYPE_META, type Archetype } from '../../engine/league/archetypes'
+import {
+  ATTRIBUTE_GROUPS, DEFAULT_FILTERS, attrAbbr, attrLabel, deleteSavedSearch, filterChips, filtersToQuery,
+  liveAttrRules, loadSavedSearches, moreFilterCount, storeSavedSearch,
+  type AttrRule, type KeyValueStore, type SavedSearch, type SearchFilters, type SearchOrigin, type SortKey,
+} from '../lib/playerSearchFilters'
 import type { ScoutTarget, ScoutFocus } from '@domain/scouting'
 import { PlayerLink, useNav } from '../components/NavContext'
 import { PlayerFace } from '../components/PlayerFace'
@@ -1008,7 +1014,7 @@ function ReportsTab({ finds, dismissedCount, onTriage }: {
 /* ── Players: the whole-database search (C3) ───────────────────────────────── */
 
 const POS_CHIPS: Array<{ key: string; label: string }> = [
-  { key: 'C', label: 'C' }, { key: 'LW', label: 'LW' }, { key: 'RW', label: 'RW' },
+  { key: 'F', label: 'F' }, { key: 'C', label: 'C' }, { key: 'W', label: 'W' },
   { key: 'D', label: 'D' }, { key: 'G', label: 'G' },
 ]
 const CONTRACT_CHIPS: Array<{ key: 'signed' | 'expiring' | 'freeAgent' | 'unsigned'; label: string }> = [
@@ -1017,7 +1023,7 @@ const CONTRACT_CHIPS: Array<{ key: 'signed' | 'expiring' | 'freeAgent' | 'unsign
   { key: 'freeAgent', label: 'Free agent' },
   { key: 'unsigned', label: 'Unsigned junior' },
 ]
-const SORTS: Array<{ key: NonNullable<PlayerSearchQuery['sort']>; label: string }> = [
+const SORTS: Array<{ key: SortKey; label: string }> = [
   { key: 'potential', label: 'Potential (our read)' },
   { key: 'current', label: 'Current ability' },
   { key: 'points', label: 'Points this season' },
@@ -1056,6 +1062,21 @@ function NumField({ label, value, onChange, width = 62, placeholder }: {
   )
 }
 
+/** The last search, kept across navigation: open a profile, come back, and the
+ *  filters are where you left them. `nonce` is the last preset applied, so a
+ *  back-navigation onto the same route params does not re-apply it. */
+let lastSearch: { filters: SearchFilters; page: number; origin?: SearchOrigin; nonce?: number } = { filters: DEFAULT_FILTERS, page: 0 }
+
+const ARCHETYPE_OPTIONS = (Object.keys(ARCHETYPE_META) as Archetype[]).map((k) => ({ key: k, label: ARCHETYPE_META[k].label }))
+const archetypeLabel = (k: string): string => ARCHETYPE_META[k as Archetype]?.label ?? k
+
+function safeStorage(): KeyValueStore | undefined {
+  try { return window.localStorage } catch { return undefined }
+}
+
+const INPUT_STYLE: React.CSSProperties = { padding: '3px 6px', fontSize: 12, background: 'var(--bg0)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: 4 }
+const SEP = <span style={{ width: 1, height: 16, background: 'var(--line)' }} />
+
 /**
  * The Players tab. Previously a pre-answered "Acquisition Targets" list sorted by
  * value; now a query tool over the whole database that obeys the fog — an
@@ -1066,52 +1087,62 @@ function PlayerSearchTab({ onToggleWatch }: {
   onToggleWatch: (playerId: string) => void
 }): JSX.Element {
   const client = useClient()
-  const [text, setText] = useState('')
-  const [positions, setPositions] = useState<string[]>([])
-  const [contracts, setContracts] = useState<Array<'signed' | 'expiring' | 'freeAgent' | 'unsigned'>>([])
-  const [ageMin, setAgeMin] = useState('')
-  const [ageMax, setAgeMax] = useState('')
-  const [maxSalary, setMaxSalary] = useState('')
-  const [minPot, setMinPot] = useState('')
-  const [minCur, setMinCur] = useState('')
-  const [nation, setNation] = useState('')
-  const [league, setLeague] = useState('')
-  const [hand, setHand] = useState('')
-  const [scoutedOnly, setScoutedOnly] = useState(false)
-  const [watchedOnly, setWatchedOnly] = useState(false)
-  const [draftOnly, setDraftOnly] = useState(false)
-  const [excludeOwn, setExcludeOwn] = useState(true)
-  const [sort, setSort] = useState<NonNullable<PlayerSearchQuery['sort']>>('potential')
-  const [desc, setDesc] = useState(true)
-  const [page, setPage] = useState(0)
+  const nav = useNav()
+  const preset = nav.params.searchPreset
+  // A fresh preset (a new "See more" click) replaces the filters; anything else
+  // restores the last search.
+  const [init] = useState(() => {
+    if (preset && preset.nonce !== lastSearch.nonce) {
+      lastSearch = { filters: preset.filters, page: 0, ...(preset.origin ? { origin: preset.origin } : {}), nonce: preset.nonce }
+    }
+    return lastSearch
+  })
+  const [f, setF] = useState<SearchFilters>(init.filters)
+  const [origin, setOrigin] = useState<SearchOrigin | undefined>(init.origin)
+  const [page, setPage] = useState(init.page)
   const [view, setView] = useState<PlayerSearchView | null>(null)
   const [busy, setBusy] = useState(false)
+  const [more, setMore] = useState(() => moreFilterCount(init.filters) > 0)
+  const [needs, setNeeds] = useState<NeedCriteriaView[] | null>(null)
+  const [saved, setSaved] = useState<SavedSearch[]>([])
+  const [saveName, setSaveName] = useState('')
   const version = useUiStore((s) => s.version)
 
-  const num = (v: string): number | undefined => {
-    const n = Number(v.replace(/[^0-9.]/g, ''))
-    return v.trim() === '' || Number.isNaN(n) ? undefined : n
-  }
-  const query: PlayerSearchQuery = {
-    ...(text.trim() ? { text: text.trim() } : {}),
-    ...(positions.length ? { positions } : {}),
-    ...(contracts.length ? { contracts } : {}),
-    ...(num(ageMin) !== undefined ? { ageMin: num(ageMin)! } : {}),
-    ...(num(ageMax) !== undefined ? { ageMax: num(ageMax)! } : {}),
-    ...(num(maxSalary) !== undefined ? { maxSalary: num(maxSalary)! * 1_000_000 } : {}),
-    ...(num(minPot) !== undefined ? { minPotentialStars: num(minPot)! } : {}),
-    ...(num(minCur) !== undefined ? { minCurrentStars: num(minCur)! } : {}),
-    ...(nation ? { nations: [nation] } : {}),
-    ...(league ? { leagueIds: [league] } : {}),
-    ...(hand ? { handedness: hand } : {}),
-    ...(scoutedOnly ? { scoutedOnly: true } : {}),
-    ...(watchedOnly ? { watchedOnly: true } : {}),
-    ...(draftOnly ? { draftEligibleOnly: true } : {}),
-    ...(excludeOwn ? { excludeOwn: true } : {}),
-    sort, desc, offset: page * 60, limit: 60,
-  }
-  // The serialized query IS the dependency — every filter feeds into it, so one
-  // string covers all sixteen controls without a dependency list that lies.
+  // Re-apply when a NEW preset arrives while the tab is already mounted.
+  useEffect(() => {
+    if (!preset || preset.nonce === lastSearch.nonce) return
+    lastSearch = { filters: preset.filters, page: 0, ...(preset.origin ? { origin: preset.origin } : {}), nonce: preset.nonce }
+    setF(preset.filters); setOrigin(preset.origin); setPage(0)
+  }, [preset])
+
+  useEffect(() => {
+    const next: typeof lastSearch = { filters: f, page }
+    if (origin) next.origin = origin
+    if (lastSearch.nonce !== undefined) next.nonce = lastSearch.nonce
+    lastSearch = next
+  }, [f, page, origin])
+
+  /** Change filters (and go back to page one). */
+  const set = (patch: Partial<SearchFilters>): void => { setF((x) => ({ ...x, ...patch })); setPage(0) }
+
+  // "Fills a need" needs the needs board's criteria — fetched once, on demand.
+  useEffect(() => {
+    if (!f.fillsNeed || needs) return
+    void client.getOffseasonNeeds().then((r) => {
+      if (r.type === 'offseasonNeeds') setNeeds(r.needs.needs.flatMap((n) => (n.criteria ? [n.criteria] : [])))
+    })
+  }, [f.fillsNeed, needs, client])
+
+  const careerKey = view?.careerKey
+  useEffect(() => {
+    if (careerKey) setSaved(loadSavedSearches(safeStorage(), careerKey))
+  }, [careerKey])
+
+  const query = useMemo<PlayerSearchQuery>(
+    () => ({ ...filtersToQuery(f, needs ?? []), offset: page * 60, limit: 60 }),
+    [f, needs, page],
+  )
+  // The serialized query IS the dependency — every filter feeds into it.
   // `version` is the global refresh bus: pinning a player has to re-run the search.
   const key = JSON.stringify(query) + `|${version}`
   const latest = useRef(query)
@@ -1133,35 +1164,38 @@ function PlayerSearchTab({ onToggleWatch }: {
     return () => { live = false; clearTimeout(t) }
   }, [key, client])
 
-  const toggle = <T,>(arr: T[], v: T, set: (a: T[]) => void): void => {
-    set(arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v])
-    setPage(0)
-  }
-  const reset = (): void => {
-    setText(''); setPositions([]); setContracts([]); setAgeMin(''); setAgeMax('')
-    setMaxSalary(''); setMinPot(''); setMinCur(''); setNation(''); setLeague(''); setHand('')
-    setScoutedOnly(false); setWatchedOnly(false); setDraftOnly(false); setExcludeOwn(true)
-    setSort('potential'); setDesc(true); setPage(0)
+  const toggleIn = <T,>(arr: T[], v: T): T[] => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v])
+  const reset = (): void => { setF(DEFAULT_FILTERS); setOrigin(undefined); setPage(0) }
+  const saveCurrent = (): void => {
+    const name = saveName.trim()
+    if (!careerKey || !name) return
+    setSaved(storeSavedSearch(safeStorage(), careerKey, saved, { name, filters: f }))
+    toast(`Saved "${name}".`, 'success')
+    setSaveName('')
   }
 
+  const chips = useMemo(() => filterChips(f, archetypeLabel), [f])
+  const attrCols = useMemo(() => [...new Set(liveAttrRules(f).map((r) => r.key))], [f])
   const total = view?.total ?? 0
   const pages = Math.max(1, Math.ceil(total / 60))
+  const moreCount = moreFilterCount(f)
+  const unread = view?.attrUnread ?? 0
 
   /** A clickable column header — click to sort by it, click again to flip. */
   const SortTh = ({ col, num, children }: {
-    col: NonNullable<PlayerSearchQuery['sort']>; num?: boolean; children: React.ReactNode
+    col: SortKey; num?: boolean; children: React.ReactNode
   }): JSX.Element => (
     <th
       className={`sortable${num ? ' num' : ''}`}
-      onClick={() => {
-        if (sort === col) setDesc((d) => !d)
-        else { setSort(col); setDesc(col !== 'name' && col !== 'age') }
-        setPage(0)
-      }}
+      onClick={() => set(f.sort === col ? { desc: !f.desc } : { sort: col, desc: col !== 'name' && col !== 'age' })}
       title={`Sort by ${col}`}
     >
-      {children}{sort === col ? (desc ? ' ▼' : ' ▲') : ''}
+      {children}{f.sort === col ? (f.desc ? ' ▼' : ' ▲') : ''}
     </th>
+  )
+
+  const field = (label: string, k: keyof SearchFilters, width = 48, placeholder = 'any'): JSX.Element => (
+    <NumField label={label} value={f[k] as string} onChange={(v) => set({ [k]: v } as Partial<SearchFilters>)} placeholder={placeholder} width={width} />
   )
 
   return (
@@ -1173,22 +1207,41 @@ function PlayerSearchTab({ onToggleWatch }: {
           back as a name, an age and a scoresheet.
         </p>
 
+        {/* Applied filters as removable chips; a search opened from a need says so. */}
+        {(origin || chips.length > 0) && (
+          <div className="row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 'var(--sp-2)', padding: '6px 8px', background: 'var(--bg2)', border: '1px solid var(--line)', borderRadius: 'var(--radius-sm)' }}>
+            {origin && (
+              <span className="small" style={{ fontWeight: 700, marginRight: 4 }}>
+                From your need: {origin.label}
+              </span>
+            )}
+            {chips.map((c) => (
+              <button key={c.id} type="button" className="chip chip-accent" title="Remove this filter"
+                style={{ cursor: 'pointer', border: 'none', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                onClick={() => set(c.clear(f))}>
+                {c.label} <span aria-hidden style={{ opacity: 0.7 }}>×</span>
+              </button>
+            ))}
+            <button type="button" className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto' }} onClick={reset}>Clear all</button>
+          </div>
+        )}
+
         {/* Row 1 — name + positions + age */}
         <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
           <input
-            value={text} onChange={(e) => { setText(e.target.value); setPage(0) }} placeholder="Search by name…"
-            style={{ minWidth: 210, padding: '5px 9px', fontSize: 12, background: 'var(--bg0)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: 4 }}
+            value={f.text} onChange={(e) => set({ text: e.target.value })} placeholder="Search by name…"
+            style={{ ...INPUT_STYLE, minWidth: 210, padding: '5px 9px' }}
           />
-          <span style={{ width: 1, height: 16, background: 'var(--line)' }} />
+          {SEP}
           {POS_CHIPS.map((p) => (
-            <Chip key={p.key} on={positions.includes(p.key)} label={p.label} onClick={() => toggle(positions, p.key, setPositions)} />
+            <Chip key={p.key} on={f.positions.includes(p.key)} label={p.label} onClick={() => set({ positions: toggleIn(f.positions, p.key) })} />
           ))}
-          <span style={{ width: 1, height: 16, background: 'var(--line)' }} />
-          <NumField label="Age" value={ageMin} onChange={(v) => { setAgeMin(v); setPage(0) }} placeholder="any" width={52} />
-          <NumField label="to" value={ageMax} onChange={(v) => { setAgeMax(v); setPage(0) }} placeholder="any" width={52} />
+          {SEP}
+          {field('Age', 'ageMin', 52)}
+          {field('to', 'ageMax', 52)}
           <label className="small muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             Shoots
-            <select className="select" value={hand} onChange={(e) => { setHand(e.target.value); setPage(0) }} style={{ fontSize: 12 }}>
+            <select className="select" value={f.hand} onChange={(e) => set({ hand: e.target.value })} style={{ fontSize: 12 }}>
               <option value="">Any</option><option value="L">Left</option><option value="R">Right</option>
             </select>
           </label>
@@ -1198,46 +1251,140 @@ function PlayerSearchTab({ onToggleWatch }: {
         <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'center', marginBottom: 'var(--sp-2)' }}>
           <label className="small muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             League
-            <select className="select" value={league} onChange={(e) => { setLeague(e.target.value); setPage(0) }} style={{ fontSize: 12, maxWidth: 150 }}>
+            <select className="select" value={f.league} onChange={(e) => set({ league: e.target.value })} style={{ fontSize: 12, maxWidth: 150 }}>
               <option value="">Any league</option>
               {(view?.facets.leagues ?? []).map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
             </select>
           </label>
           <label className="small muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             Nation
-            <select className="select" value={nation} onChange={(e) => { setNation(e.target.value); setPage(0) }} style={{ fontSize: 12, maxWidth: 150 }}>
+            <select className="select" value={f.nation} onChange={(e) => set({ nation: e.target.value })} style={{ fontSize: 12, maxWidth: 150 }}>
               <option value="">Any nation</option>
               {(view?.facets.nations ?? []).map((n) => <option key={n} value={n}>{n}</option>)}
             </select>
           </label>
-          <span style={{ width: 1, height: 16, background: 'var(--line)' }} />
+          {SEP}
           {CONTRACT_CHIPS.map((c) => (
-            <Chip key={c.key} on={contracts.includes(c.key)} label={c.label} onClick={() => toggle(contracts, c.key, setContracts)} />
+            <Chip key={c.key} on={f.contracts.includes(c.key)} label={c.label} onClick={() => set({ contracts: toggleIn(f.contracts, c.key) })} />
           ))}
-          <NumField label="Cap hit ≤ $M" value={maxSalary} onChange={(v) => { setMaxSalary(v); setPage(0) }} placeholder="any" width={54} />
+          {field('Cap hit ≤ $M', 'maxSalary', 54)}
         </div>
 
         {/* Row 3 — our-read filters + sort */}
         <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'center' }}>
-          <NumField label="Min potential ★" value={minPot} onChange={(v) => { setMinPot(v); setPage(0) }} placeholder="any" width={46} />
-          <NumField label="Min current ★" value={minCur} onChange={(v) => { setMinCur(v); setPage(0) }} placeholder="any" width={46} />
-          <Chip on={scoutedOnly} label="Scouted only" title="Hide players we have no real read on" onClick={() => { setScoutedOnly((v) => !v); setPage(0) }} />
-          <Chip on={watchedOnly} label="On my watch list" onClick={() => { setWatchedOnly((v) => !v); setPage(0) }} />
-          <Chip on={draftOnly} label="Draft eligible" onClick={() => { setDraftOnly((v) => !v); setPage(0) }} />
-          <Chip on={excludeOwn} label="Exclude my org" onClick={() => { setExcludeOwn((v) => !v); setPage(0) }} />
-          <button type="button" className="btn btn-ghost btn-sm" onClick={reset}>Reset</button>
+          {field('Min potential ★', 'minPot', 46)}
+          {field('Min current ★', 'minCur', 46)}
+          <Chip on={f.scoutedOnly} label="Scouted only" title="Hide players we have no real read on" onClick={() => set({ scoutedOnly: !f.scoutedOnly })} />
+          <Chip on={f.watchedOnly} label="On my watch list" onClick={() => set({ watchedOnly: !f.watchedOnly })} />
+          <Chip on={f.draftOnly} label="Draft eligible" onClick={() => set({ draftOnly: !f.draftOnly })} />
+          <Chip on={f.excludeOwn} label="Exclude my org" onClick={() => set({ excludeOwn: !f.excludeOwn })} />
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setMore((m) => !m)} aria-expanded={more}>
+            {more ? '▾' : '▸'} More filters{moreCount > 0 ? ` (${moreCount})` : ''}
+          </button>
           <label className="small muted" style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
             Sort
-            <select className="select" value={sort} onChange={(e) => { setSort(e.target.value as NonNullable<PlayerSearchQuery['sort']>); setPage(0) }} style={{ fontSize: 12 }}>
+            <select className="select" value={f.sort} onChange={(e) => set({ sort: e.target.value as SortKey })} style={{ fontSize: 12 }}>
               {SORTS.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
             </select>
           </label>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setDesc((d) => !d); setPage(0) }}>{desc ? '▼ High to low' : '▲ Low to high'}</button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => set({ desc: !f.desc })}>{f.desc ? '▼ High to low' : '▲ Low to high'}</button>
+        </div>
+
+        {more && (
+          <div className="stack" style={{ gap: 'var(--sp-2)', marginTop: 'var(--sp-2)', paddingTop: 'var(--sp-2)', borderTop: '1px solid var(--line)' }}>
+            {/* Production + contract */}
+            <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+              {field('GP', 'gpMin', 44, 'min')}{field('to', 'gpMax', 44, 'max')}
+              {field('Pts', 'ptsMin', 44, 'min')}{field('to', 'ptsMax', 44, 'max')}
+              {SEP}
+              {field('Years left ≤', 'yearsLeftMax', 36)}
+              <label className="small muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                At expiry
+                <select className="select" value={f.expiry} onChange={(e) => set({ expiry: e.target.value as SearchFilters['expiry'] })} style={{ fontSize: 12 }}>
+                  <option value="">Any</option><option value="RFA">RFA</option><option value="UFA">UFA</option>
+                </select>
+              </label>
+            </div>
+            {/* Status + build */}
+            <div className="row" style={{ gap: 'var(--sp-2)', flexWrap: 'wrap', alignItems: 'center' }}>
+              <Chip on={f.tradeAvailable} label="Trade available" title="On the trade block, or a man his club would move: a seller's veterans, anyone's spare parts" onClick={() => set({ tradeAvailable: !f.tradeAvailable })} />
+              <Chip on={f.health === 'healthy'} label="Healthy" onClick={() => set({ health: f.health === 'healthy' ? '' : 'healthy' })} />
+              <Chip on={f.health === 'injured'} label="Injured" onClick={() => set({ health: f.health === 'injured' ? '' : 'injured' })} />
+              <Chip on={f.waiverExempt} label="Waiver exempt" title="Can go to the AHL without clearing waivers" onClick={() => set({ waiverExempt: !f.waiverExempt })} />
+              <Chip on={f.fillsNeed} label="Fills a need" title="Answers a hole on next season's roster: position, shot and the bar a normal club sets there" onClick={() => set({ fillsNeed: !f.fillsNeed })} />
+              {SEP}
+              {field('Height cm', 'heightMin', 44, 'min')}{field('to', 'heightMax', 44, 'max')}
+              {field('Weight kg', 'weightMin', 44, 'min')}{field('to', 'weightMax', 44, 'max')}
+            </div>
+            {/* Archetype */}
+            <div className="row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span className="small muted">Type</span>
+              {ARCHETYPE_OPTIONS.map((a) => (
+                <Chip key={a.key} on={f.archetypes.includes(a.key)} label={a.label}
+                  title="Only players your scouts know well enough to type" onClick={() => set({ archetypes: toggleIn(f.archetypes, a.key) })} />
+              ))}
+            </div>
+            {/* Attribute builder */}
+            <div className="stack" style={{ gap: 6 }}>
+              <div className="small muted">Attributes <span style={{ opacity: 0.8 }}>· 1–20, as the profile shows them; starred estimates count, unscouted players drop out</span></div>
+              {f.attrs.map((r, i) => (
+                <div key={i} className="row" style={{ gap: 6, alignItems: 'center' }}>
+                  <span className="small muted" style={{ width: 30 }}>{i > 0 ? 'and' : ''}</span>
+                  <select className="select" value={r.key} style={{ fontSize: 12, width: 190, padding: '4px 6px' }}
+                    onChange={(e) => set({ attrs: f.attrs.map((x, j) => (j === i ? { ...x, key: e.target.value } : x)) })}>
+                    {ATTRIBUTE_GROUPS.map((g) => (
+                      <optgroup key={g.group} label={g.group}>
+                        {g.options.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                      </optgroup>
+                    ))}
+                  </select>
+                  <select className="select" value={r.op} style={{ fontSize: 12, width: 56, padding: '4px 6px' }}
+                    onChange={(e) => set({ attrs: f.attrs.map((x, j) => (j === i ? { ...x, op: e.target.value as AttrRule['op'] } : x)) })}>
+                    <option value="gte">≥</option><option value="lte">≤</option>
+                  </select>
+                  <input value={r.value} inputMode="numeric" placeholder="1–20" style={{ ...INPUT_STYLE, width: 48 }}
+                    onChange={(e) => set({ attrs: f.attrs.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)) })} />
+                  <button type="button" className="btn btn-ghost btn-sm" aria-label="Remove attribute filter"
+                    onClick={() => set({ attrs: f.attrs.filter((_, j) => j !== i) })}>×</button>
+                </div>
+              ))}
+              <div>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => set({ attrs: [...f.attrs, { key: 'speed', op: 'gte', value: '' }] })}>
+                  + Add attribute
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Saved searches (per save) */}
+        <div className="row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 'var(--sp-2)', paddingTop: 'var(--sp-2)', borderTop: '1px solid var(--line)' }}>
+          <span className="small muted">Saved searches</span>
+          {saved.length === 0 && <span className="small muted" style={{ opacity: 0.7 }}>none yet</span>}
+          {saved.map((s) => (
+            <span key={s.name} className="chip" style={{ fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 0, padding: 0 }}>
+              <button type="button" style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer', padding: '2px 4px 2px 8px', fontSize: 11 }}
+                title="Run this search" onClick={() => { setF(s.filters); setOrigin(undefined); setPage(0); setMore(moreFilterCount(s.filters) > 0) }}>{s.name}</button>
+              <button type="button" aria-label={`Delete saved search ${s.name}`} title="Delete" style={{ background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', padding: '2px 8px 2px 2px', fontSize: 11 }}
+                onClick={() => { if (careerKey) setSaved(deleteSavedSearch(safeStorage(), careerKey, saved, s.name)) }}>×</button>
+            </span>
+          ))}
+          <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
+            <input value={saveName} onChange={(e) => setSaveName(e.target.value)} placeholder="Name this search"
+              style={{ ...INPUT_STYLE, width: 150 }}
+              onKeyDown={(e) => { if (e.key === 'Enter') saveCurrent() }} />
+            <button type="button" className="btn btn-sm" disabled={!saveName.trim() || !careerKey} onClick={saveCurrent}>Save search</button>
+          </span>
         </div>
       </Panel>
 
       <Panel title={`Results${view ? ` — ${total.toLocaleString()} match${total === 1 ? '' : 'es'}` : ''}`}>
         {view && <p className="muted small" style={{ marginTop: -4, marginBottom: 8 }}>{view.fogNote}</p>}
+        {unread > 0 && (
+          <p className="muted small" style={{ marginTop: -4, marginBottom: 8 }}>
+            {unread.toLocaleString()} more {unread === 1 ? 'player fits' : 'players fit'} the other filters, but nobody has scouted {unread === 1 ? 'him' : 'them'}, so the attribute filter leaves {unread === 1 ? 'him' : 'them'} out.
+          </p>
+        )}
         {busy && !view && <p className="muted small">Searching the database…</p>}
         {view && view.rows.length === 0 && <p className="muted small">Nothing matches. Loosen a filter.</p>}
         {view && view.rows.length > 0 && (
@@ -1256,10 +1403,11 @@ function PlayerSearchTab({ onToggleWatch }: {
                     <th className="num" title="Games played this season — public information">GP</th>
                     <th className="num">G</th><th className="num">A</th>
                     <SortTh col="points" num>P</SortTh>
+                    {f.archetypes.length > 0 && <th>Type</th>}
+                    {attrCols.map((k) => <th key={k} className="num" title={`${attrLabel(k)}: your scouts' read`}>{attrAbbr(k)}</th>)}
                     <SortTh col="current">Current</SortTh>
                     <SortTh col="potential">Potential</SortTh>
                     <SortTh col="knowledge">Our read</SortTh>
-                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1291,10 +1439,11 @@ function PlayerSearchTab({ onToggleWatch }: {
                       <td className="num muted small">{r.gp ? r.goals : '—'}</td>
                       <td className="num muted small">{r.gp ? r.assists : '—'}</td>
                       <td className="num small" style={{ fontWeight: 700 }}>{r.gp ? r.points : '—'}</td>
+                      {f.archetypes.length > 0 && <td className="muted small">{r.archetype ?? '—'}</td>}
+                      {attrCols.map((k) => <td key={k} className="num small" style={{ fontWeight: 600 }}>{r.attrs?.[k] ?? '—'}</td>)}
                       <td><ReadStars value={r.currentStars} /></td>
                       <td><ReadStars value={r.potentialStars} accent /></td>
                       <td className="small" style={{ color: READ_COLOR[r.read] }} title={`${r.knowledge}% knowledge`}>{r.readLabel}</td>
-
                     </tr>
                   ))}
                 </tbody>

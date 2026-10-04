@@ -4,6 +4,7 @@ import { generateLeague } from '@data/generate'
 import { Career } from './career'
 import { askTerms, faClassDecisionDay, rankOffers, type FaMarketBid } from '@engine/league/contracts'
 import type { TeamId } from '@domain'
+import { overallToStars } from '@engine/ratings/composites'
 
 const d = (id: string, group: 'F' | 'D' | 'G', ovr: number, over: Partial<DepthEntry> = {}): DepthEntry => ({
   playerId: id, name: id, position: group === 'F' ? 'C' : group, group, hand: 'L', ovr, salary: 1e6, age: 27, ...over,
@@ -47,6 +48,10 @@ describe('needs builder', () => {
     expect(dNeed).toBeDefined()
     expect(dNeed.candidates[0]!.playerId).toBe('lhd-fa') // the hand the pair lacks
     expect(r.headline).toContain('a backup G')
+    // Each slot need carries its search criteria for "See more".
+    // …in the stars the UI shows, never the hidden overall.
+    expect(g.criteria).toEqual({ group: 'G', minStars: overallToStars(bench.G[1]!) })
+    expect(dNeed.criteria).toMatchObject({ group: 'D', hand: 'L' })
   })
 
   it('a cap need appears when filling the holes would break the ceiling, with the contracts that clear it', () => {

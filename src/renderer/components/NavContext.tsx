@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react'
 import { openPlayerMenu } from './playerMenuStore'
+import type { SearchPreset } from '../lib/playerSearchFilters'
 
 /**
  * Screen routing — a plain state machine, no router lib. App owns the nav
@@ -161,6 +162,9 @@ export interface NavParams {
   newsId?: string
   /** Match Center deep-link: open this game's box score (Calendar/Schedule). */
   gameId?: string
+  /** Recruitment → Search deep-link: open with these filters applied (the
+   *  needs board's "See more"). */
+  searchPreset?: SearchPreset
 }
 
 export interface NavApi {

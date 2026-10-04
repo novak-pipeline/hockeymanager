@@ -18,13 +18,51 @@
  */
 import type { Player, PlayerId, Team, TeamId } from '@domain'
 import type { ScoutingState } from '@domain/scouting'
-import { knowledgeOf, accuracyOf, SCOUT_SEEN_THRESHOLD } from '@engine/league/scouting'
+import { knowledgeOf, accuracyOf, maskAttribute, SCOUT_SEEN_THRESHOLD } from '@engine/league/scouting'
+import { classifyArchetype, ARCHETYPE_META } from '@engine/league/archetypes'
+import { requiresWaivers, contractStatus } from '@engine/league/contracts'
+import { profileAttributeSource, to20 } from './profileAttributes'
 import { ratedOverall, overallToStars } from '@engine/ratings/composites'
 import { scoutedCeilingK } from './buildViews'
 import { playerValue } from '@engine/league/trades'
 import type {
-  PlayerSearchQuery, PlayerSearchRow, PlayerSearchView, PlayerSearchFacets,
+  PlayerSearchQuery, PlayerSearchRow, PlayerSearchView, PlayerSearchFacets, PlayerSearchAttrFilter,
 } from './views'
+
+/** Knowledge a scout needs before we will name a player's archetype (matches
+ *  the badge's gate in buildViews). */
+const ARCHETYPE_READ = 50
+
+/** The true 0–99 value of one of the profile's attributes (undefined when
+ *  the player has none, e.g. a skater's goalie ratings). */
+export function attributeValue(p: Player, key: string): number | undefined {
+  const source = profileAttributeSource(key)
+  if (!source) return undefined
+  const v = (p.ratings as unknown as Record<string, Record<string, number> | undefined>)[source]?.[key]
+  return typeof v === 'number' ? v : undefined
+}
+
+/** Our read of one attribute on the profile's 1–20 scale — the very number
+ *  the profile prints: the scouts' masked midpoint (the starred estimate), or
+ *  the true value once fully known (or one of ours). */
+export function readAttribute(p: Player, key: string, k: number, acc: number, own: boolean): number | undefined {
+  const v = attributeValue(p, key)
+  if (v === undefined) return undefined
+  const value = Math.round(v)
+  if (own || k >= 95) return to20(value)
+  const { lo, hi } = maskAttribute(value, k, p.id as string, key, acc)
+  return to20(Math.round((lo + hi) / 2))
+}
+
+function passesAttrs(p: Player, filters: readonly PlayerSearchAttrFilter[], k: number, acc: number, own: boolean, out: Record<string, number>): boolean {
+  for (const f of filters) {
+    const v = readAttribute(p, f.key, k, acc, own)
+    if (v === undefined) return false
+    out[f.key] = v
+    if (f.op === 'gte' ? v < f.value : v > f.value) return false
+  }
+  return true
+}
 
 /** Contract situations the search can filter on. */
 export type ContractBucket = 'signed' | 'expiring' | 'freeAgent' | 'unsigned'
@@ -70,6 +108,8 @@ function inPositionFilter(pos: string, wanted: readonly string[]): boolean {
     if (w === 'D' && isD) return true
     if (w === 'F' && !isG && !isD) return true
     if (w === 'W' && (pos === 'LW' || pos === 'RW')) return true
+    // The domain has one wing position ('W'); a side-specific token still finds him.
+    if ((w === 'LW' || w === 'RW') && pos === 'W') return true
   }
   return false
 }
@@ -95,6 +135,11 @@ export interface PlayerSearchCtx {
   ownIds: Set<string>
   /** Live season stats the career keeps outside `p.stats` mid-season, if any. */
   liveLine?: (pid: string) => { gp: number; goals: number; assists: number; points: number } | undefined
+  /** Men their clubs would move (the trade block + surplus). Supplied only
+   *  when the query asks for `tradeAvailable`. */
+  tradeAvailableIds?: Set<string>
+  /** Stable id of the career, echoed on the view. */
+  careerKey?: string
 }
 
 /** Default page size — enough to scroll, small enough to keep the payload sane. */
@@ -125,9 +170,13 @@ export function searchPlayers(ctx: PlayerSearchCtx, q: PlayerSearchQuery): Playe
     read: PlayerSearchRow['read']
     line: { gp: number; goals: number; assists: number; points: number }
     contract: { bucket: ContractBucket; label: string }
+    attrs?: Record<string, number>
   }
   const cands: Cand[] = []
   let scoutedCount = 0
+  let attrUnread = 0
+  const attrFilters = q.attributes ?? []
+  const archetypes = new Set(q.archetypes ?? [])
 
   const facetNations = new Set<string>()
   const facetLeagues = new Map<string, string>()
@@ -153,6 +202,16 @@ export function searchPlayers(ctx: PlayerSearchCtx, q: PlayerSearchQuery): Playe
     const contract = contractLabelOf(p, !!team)
     if (contracts.size && !contracts.has(contract.bucket)) continue
     if (q.maxSalary !== undefined && p.contract.salary > q.maxSalary) continue
+    if (q.yearsLeftMax !== undefined && (team ? p.contract.yearsRemaining : 0) > q.yearsLeftMax) continue
+    if (q.health === 'injured' && !p.injuryStatus) continue
+    if (q.health === 'healthy' && p.injuryStatus) continue
+    if (q.waiverExemptOnly && requiresWaivers(p)) continue
+    if (q.expiryStatus && (contractStatus(p) === 'UFA' ? 'UFA' : 'RFA') !== q.expiryStatus) continue
+    if (q.heightMin !== undefined && !(p.heightCm !== undefined && p.heightCm >= q.heightMin)) continue
+    if (q.heightMax !== undefined && !(p.heightCm !== undefined && p.heightCm <= q.heightMax)) continue
+    if (q.weightMin !== undefined && !(p.weightKg !== undefined && p.weightKg >= q.weightMin)) continue
+    if (q.weightMax !== undefined && !(p.weightKg !== undefined && p.weightKg <= q.weightMax)) continue
+    if (q.tradeAvailable && !ctx.tradeAvailableIds?.has(pid)) continue
 
     const k = own ? 100 : knowledgeOf(scouting, pid)
     const acc = own ? 1 : accuracyOf(scouting, pid)
@@ -169,10 +228,34 @@ export function searchPlayers(ctx: PlayerSearchCtx, q: PlayerSearchQuery): Playe
     const pot = hasRead ? overallToStars(scoutedCeilingK(p, k, acc)) : null
     if (q.minCurrentStars !== undefined && (cur === null || cur < q.minCurrentStars)) continue
     if (q.minPotentialStars !== undefined && (pot === null || pot < q.minPotentialStars)) continue
+    if (q.anyOf && q.anyOf.length > 0) {
+      const hit = q.anyOf.some((n) =>
+        inPositionFilter(p.position as string, n.positions ?? []) &&
+        (!n.handedness || p.handedness === n.handedness) &&
+        (n.minCurrentStars === undefined || (cur !== null && cur >= n.minCurrentStars)))
+      if (!hit) continue
+    }
+
+    const line = ctx.liveLine?.(pid) ?? seasonLine(p)
+    if (q.gpMin !== undefined && line.gp < q.gpMin) continue
+    if (q.gpMax !== undefined && line.gp > q.gpMax) continue
+    if (q.pointsMin !== undefined && line.points < q.pointsMin) continue
+    if (q.pointsMax !== undefined && line.points > q.pointsMax) continue
+    if (archetypes.size > 0) {
+      if (!own && k < ARCHETYPE_READ) continue
+      if (!archetypes.has(classifyArchetype(p).archetype)) continue
+    }
+    let attrs: Record<string, number> | undefined
+    if (attrFilters.length > 0) {
+      // The read, never the truth: a man we have not seen has no numbers to
+      // filter on, so he falls outside — and the view says how many did.
+      if (!own && k < SCOUT_SEEN_THRESHOLD) { attrUnread++; continue }
+      attrs = {}
+      if (!passesAttrs(p, attrFilters, k, acc, own, attrs)) continue
+    }
 
     if (k >= SCOUT_SEEN_THRESHOLD) scoutedCount++
-    const line = ctx.liveLine?.(pid) ?? seasonLine(p)
-    cands.push({ p, pid, team, league, k, acc, cur, pot, read, line, contract })
+    cands.push({ p, pid, team, league, k, acc, cur, pot, read, line, contract, ...(attrs ? { attrs } : {}) })
   }
 
   const dir = q.desc === false ? 1 : -1
@@ -222,6 +305,8 @@ export function searchPlayers(ctx: PlayerSearchCtx, q: PlayerSearchQuery): Playe
     watched: watchSet.has(c.pid),
     // A market value on an unread player would be a leak dressed as a number.
     value: c.k >= SCOUT_SEEN_THRESHOLD ? Math.round(playerValue(c.p)) : null,
+    ...(c.attrs ? { attrs: c.attrs } : {}),
+    ...(ctx.ownIds.has(c.pid) || c.k >= ARCHETYPE_READ ? { archetype: ARCHETYPE_META[classifyArchetype(c.p).archetype].label } : {}),
   }))
 
   const facets: PlayerSearchFacets = {
@@ -236,5 +321,9 @@ export function searchPlayers(ctx: PlayerSearchCtx, q: PlayerSearchQuery): Playe
       ? `Your department has a read on all ${total} of these players.`
       : `${scoutedCount} of ${total} carry a real scouting read; the other ${unread} are names on a sheet until you send someone.`
 
-  return { rows, total, scoutedCount, facets, fogNote, offset, limit }
+  return {
+    rows, total, scoutedCount, facets, fogNote, offset, limit,
+    ...(attrFilters.length > 0 ? { attrUnread } : {}),
+    ...(ctx.careerKey ? { careerKey: ctx.careerKey } : {}),
+  }
 }

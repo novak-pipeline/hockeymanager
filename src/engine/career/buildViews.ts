@@ -3,6 +3,7 @@
  * the slice of Career state it needs — and assembles a frozen view-model from
  * views.ts. No mutation, no simulation, no randomness.
  */
+import { PROFILE_ATTRIBUTE_GROUPS } from './profileAttributes'
 import type {
   Conference,
   Division,
@@ -404,49 +405,16 @@ export function buildSquadView(
 }
 
 
-const TECH_LABELS: Array<[string, string]> = [
-  ['wristShot', 'Wrist shot'],
-  ['slapShot', 'Slap shot'],
-  ['stickhandling', 'Stickhandling'],
-  ['passing', 'Passing'],
-  ['deflections', 'Deflections'],
-  ['faceoffs', 'Faceoffs'],
-]
-const PHYS_LABELS: Array<[string, string]> = [
-  ['speed', 'Speed'],
-  ['acceleration', 'Acceleration'],
-  ['strength', 'Strength'],
-  ['balance', 'Balance'],
-  ['stamina', 'Stamina'],
-  ['agility', 'Agility'],
-  ['height', 'Height'],
-]
-const MENTAL_LABELS: Array<[string, string]> = [
-  ['offensiveIQ', 'Offensive IQ'],
-  ['defensiveIQ', 'Defensive IQ'],
-  ['positioning', 'Positioning'],
-  ['vision', 'Vision'],
-  ['aggression', 'Aggression'],
-  ['composure', 'Composure'],
-  ['workRate', 'Work rate'],
-  ['discipline', 'Discipline'],
-  ['anticipation', 'Anticipation'],
-]
-const DEF_LABELS: Array<[string, string]> = [
-  ['checking', 'Checking'],
-  ['shotBlocking', 'Shot blocking'],
-  ['stickChecking', 'Stick checking'],
-  ['takeaway', 'Takeaways'],
-]
-const GOALIE_LABELS: Array<[string, string]> = [
-  ['reflexes', 'Reflexes'],
-  ['positioningG', 'Positioning'],
-  ['reboundControl', 'Rebound control'],
-  ['glove', 'Glove'],
-  ['blocker', 'Blocker'],
-  ['recovery', 'Recovery'],
-  ['puckHandlingG', 'Puck handling'],
-]
+// The profile's attribute names and groups live in one shared list
+// (profileAttributes.ts) so the player search filters on exactly what the
+// profile shows.
+const profileLabels = (source: string): Array<[string, string]> =>
+  (PROFILE_ATTRIBUTE_GROUPS.find((g) => g.source === source)?.attributes ?? []).map(([k, l]) => [k, l])
+const TECH_LABELS = profileLabels('technical')
+const PHYS_LABELS = profileLabels('physical')
+const MENTAL_LABELS = profileLabels('mental')
+const DEF_LABELS = profileLabels('defensive')
+const GOALIE_LABELS = profileLabels('goalie')
 const COMPOSITE_LABELS: Array<[string, string]> = [
   ['scoring', 'Scoring'],
   ['playmaking', 'Playmaking'],
