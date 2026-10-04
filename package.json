@@ -22,6 +22,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "ui:snap": "electron-vite build && node scripts/dev/ui-snapshot.mjs",
+    "viewer-truth": "electron-vite build && node scripts/dev/viewer-truth.mjs",
+    "reel": "electron-vite build && node scripts/dev/viewer-truth.mjs --record",
     "ui:audit": "electron-vite build && node scripts/dev/ui-snapshot.mjs --audit-only",
     "ui:verify-roster-view": "electron-vite build && node scripts/dev/verify-roster-view.mjs",
     "build:athletes": "node scripts/blender/build.mjs",

@@ -118,6 +118,16 @@ export class SimClient {
     return this.send({ type: 'watch' })
   }
 
+  /** DEV ONLY (viewer-truth runner): a pinned exhibition, not applied to the career. */
+  devWatchFixture(homeId: string, awayId: string, seed: number, engine: 'classic' | 'agent'): Promise<WorkerResponse> {
+    return this.send({ type: 'devWatchFixture', homeId, awayId, seed, engine }, 5 * 60_000)
+  }
+
+  /** DEV ONLY: search pinned seeds for the ten golden scenarios. */
+  devFindScenarios(engine: 'classic' | 'agent', seeds: number[], opponents?: string[]): Promise<WorkerResponse> {
+    return this.send(opponents ? { type: 'devFindScenarios', engine, seeds, opponents } : { type: 'devFindScenarios', engine, seeds }, 30 * 60_000)
+  }
+
   /* ── screens ── */
 
   getDashboard(): Promise<WorkerResponse> {

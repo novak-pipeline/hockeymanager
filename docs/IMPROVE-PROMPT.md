@@ -75,7 +75,9 @@ ABOVE cosmetic work at their severity level.
 2. **Reproduce** the current player-facing state — ideally a throwaway vitest harness that
    loads a real save or generates a league and drives the engine, so you have a before/after.
 3. **Build** it, matching the surrounding code's idioms and comment density.
-4. **Verify like you mean it:** `npm run typecheck` clean, targeted
+4. **Verify like you mean it:** the REAL typecheck ceiling holds (`npm run typecheck` checks
+   nothing — count `npx tsc -p tsconfig.web.json --noEmit` and `-p tsconfig.node.json` errors
+   and don't raise either), targeted
    `npx vitest run <files> --no-file-parallelism` green, and confirm the new lever actually
    *changes outcomes* (season totals shift, a story fires) — not just that it compiles.
 5. **Commit** the increment with a clear, player-facing message. Then pick the next thing.

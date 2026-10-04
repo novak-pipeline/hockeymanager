@@ -19,7 +19,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
-import { absTime, type MatchTimeline } from '@render2d/timeline'
+import { absTime, type MatchTimeline, type PosSnapshot } from '@render2d/timeline'
 import type { MatchRenderer, MatchView, RinkColors, PlayerLabels } from '@render2d/rendererContract'
 import type { GameStream, PlayerId } from '@domain'
 import {
@@ -52,6 +52,7 @@ import {
 import { advanceStridePhase, skaterPose, goaliePose, celebrationWeight, crowdExcitement, facingTarget } from './pose'
 import { Arena, NET_X, REFLECT_LAYER } from './arena'
 import { AthleteBatch, AthleteRig, athleteMaterial, type PoseOverlay } from './athlete'
+import type { ProbeGeometry, ProbeRig, ProbeSink } from './viewerProbe'
 import { loadAthleteAssets, loadOwnerAssets, mergeClips, type AthleteAssets, type OwnerAssets, type OwnerTextures } from './gltfAthlete'
 import { AtlasUploader, type Rect } from './atlasUpload'
 import { OwnerKitPainter, buildOwnerAtlasCanvas, clothesMaterial, gearMaterial, loadTexture, visorMaterial } from './ownerKit'
@@ -1432,6 +1433,83 @@ export class Rink3dRenderer implements MatchRenderer {
 
   // ── Animation loop ────────────────────────────────────────────────────────
 
+  // ── DEV viewer-truth probe (viewerProbe.ts) ─────────────────────────────
+  private lastSnap: PosSnapshot | null = null
+  private probeSink: ProbeSink | null = null
+  private readonly probePrevQ = new WeakMap<AthleteRig, THREE.Quaternion[]>()
+  private readonly probeV = new THREE.Vector3()
+
+  /** DEV ONLY: receive what was DRAWN after every rendered frame (null detaches). */
+  setProbeSink(sink: ProbeSink | null): void {
+    this.probeSink = sink
+  }
+
+  /** DEV ONLY: the geometry the viewer-truth detectors judge against. */
+  probeGeometry(): ProbeGeometry {
+    return { rinkHalfL: 100, rinkHalfW: RINK_HALF_W, benchGates: { home: { ...BENCH_GATE.home }, away: { ...BENCH_GATE.away } } }
+  }
+
+  private emitProbe(dt: number): void {
+    const sink = this.probeSink
+    if (!sink) return
+    const canvas = this.renderer.domElement
+    const w = canvas.clientWidth || 1
+    const h = canvas.clientHeight || 1
+    const v = this.probeV
+    const project = (x: number, y: number, z: number): { sx: number; sy: number; onScreen: boolean } => {
+      v.set(x, y, z).project(this.camera)
+      return { sx: ((v.x + 1) / 2) * w, sy: ((1 - v.y) / 2) * h, onScreen: v.z < 1 && Math.abs(v.x) <= 1 && Math.abs(v.y) <= 1 }
+    }
+    const sim = new Map<string, { x: number; z: number }>()
+    const snap = this.lastSnap
+    if (snap) {
+      snap.home.forEach((p, k) => { const id = snap.homeIds?.[k]; if (id) sim.set(id as string, { x: normXtoWorld(p.x), z: normYtoWorld(p.y) }) })
+      snap.away.forEach((p, k) => { const id = snap.awayIds?.[k]; if (id) sim.set(id as string, { x: normXtoWorld(p.x), z: normYtoWorld(p.y) }) })
+      if (snap.homeGoalieId) sim.set(snap.homeGoalieId as string, { x: normXtoWorld(snap.homeGoalie.x), z: normYtoWorld(snap.homeGoalie.y) })
+      if (snap.awayGoalieId) sim.set(snap.awayGoalieId as string, { x: normXtoWorld(snap.awayGoalie.x), z: normYtoWorld(snap.awayGoalie.y) })
+    }
+    const CORE = ['hips', 'spine', 'chest', 'neck', 'head'] as const
+    const rigs: ProbeRig[] = []
+    const goalies = [this.homeGoaliePose, this.awayGoaliePose]
+    for (const p of this.allPoses()) {
+      const goalie = goalies.includes(p)
+      const rig = p.rig
+      const pr = project(p.worldX.pos, 3, p.worldZ.pos)
+      const id = (p.playerId as string | null) ?? null
+      const sp = id ? sim.get(id) : undefined
+      // body-core bone angular speed (the motion-probe "pop" measure), per wall second
+      let boneW = 0
+      const bones = rig.bones as unknown as Record<string, THREE.Bone | undefined>
+      const prev = this.probePrevQ.get(rig)
+      const cur: THREE.Quaternion[] = []
+      CORE.forEach((n, i) => {
+        const b = bones[n]
+        const q = b ? b.quaternion.clone() : new THREE.Quaternion()
+        cur.push(q)
+        const pq = prev?.[i]
+        if (pq && dt > 0 && rig.root.visible !== false) boneW = Math.max(boneW, pq.angleTo(q) / dt)
+      })
+      this.probePrevQ.set(rig, cur)
+      rigs.push({
+        team: p.team, goalie, id, mode: goalie ? 'play' : p.mode, visible: rig.visible,
+        x: p.worldX.pos, z: p.worldZ.pos, sx: pr.sx, sy: pr.sy, onScreen: pr.onScreen,
+        simX: sp ? sp.x : null, simZ: sp ? sp.z : null, boneW,
+      })
+    }
+    const pm = this.puckMesh.position
+    const pp = project(pm.x, pm.y, pm.z)
+    sink({
+      wall: performance.now() / 1000, dt, clock: this.clockPos, speed: this.speed, playing: this.playing, w, h,
+      cam: { x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z, fov: this.camera.fov, preset: this.camPreset },
+      puck: { x: pm.x, y: pm.y, z: pm.z, sx: pp.sx, sy: pp.sy, onScreen: pp.onScreen, simX: snap ? normXtoWorld(snap.puck.x) : NaN, simZ: snap ? normYtoWorld(snap.puck.y) : NaN },
+      carrier: (snap?.carrier as string | null | undefined) ?? null,
+      windup: this.choreo?.windupActor(this.clockPos) ?? null,
+      goalSeq: this.goalSeq ? this.goalSeq.phase : null,
+      goalSeqT: this.goalSeq ? this.goalSeq.t : null,
+      rigs,
+    })
+  }
+
   private animLoop(time: number): void {
     const t0 = performance.now()
     const dtMs = this.lastFrameTime === 0 ? 16 : time - this.lastFrameTime
@@ -1478,6 +1556,7 @@ export class Rink3dRenderer implements MatchRenderer {
     this.scene.updateMatrixWorld()
     if (this.quality < 2) this.renderReflection()
     this.composer.render(dt)
+    if (this.probeSink) this.emitProbe(dt)
     const cpu = performance.now() - t0
     this.cpuMsAvg = this.cpuMsAvg === 0 ? cpu : this.cpuMsAvg + (cpu - this.cpuMsAvg) * 0.05
   }
@@ -1556,6 +1635,7 @@ export class Rink3dRenderer implements MatchRenderer {
     if (!tl) return
     const snap = tl.sampleAt(absT)
     if (!snap) return
+    this.lastSnap = snap
     this.lastCarrier = snap.carrier
     const puckWx = normXtoWorld(snap.puck.x)
     const puckWz = normYtoWorld(snap.puck.y)
