@@ -57,6 +57,8 @@ export interface ProbeFrame {
   clock: number
   speed: number
   playing: boolean
+  /** The play is dead (whistle → drop) at this clock. */
+  dead: boolean
   w: number
   h: number
   cam: { x: number; y: number; z: number; fov: number; preset: string }
@@ -76,6 +78,8 @@ export interface ProbeGeometry {
   rinkHalfL: number
   rinkHalfW: number
   benchGates: { home: { x: number; z: number }; away: { x: number; z: number } }
+  /** Where a penalised man leaves the ice (optional: older probes). */
+  penaltyBoxes?: { home: { x: number; z: number }; away: { x: number; z: number } }
 }
 
 export type ProbeSink = (frame: ProbeFrame) => void

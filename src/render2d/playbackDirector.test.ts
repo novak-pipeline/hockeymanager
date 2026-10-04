@@ -84,46 +84,31 @@ describe('planFor – full mode', () => {
     expect(last.toAbsT).toBeGreaterThan(0)
   })
 
-  it('goal window plays at 1×', () => {
-    // Goal at t=600 in period 1 → absT=600
-    const stream: GameStream = [goal(1, 600)]
+  it('live play is 1× everywhere — no fast-forwarded hockey (W2 one clock)', () => {
+    const stream: GameStream = [shot(1, 400, 0.1), shot(1, 500, 0.9), goal(1, 600), gameEnd()]
     const plan = planFor(stream, 'full')
-    // At absT=600 (goal time), speed should be 1
-    const spd = currentSpeed(plan, 600)
-    expect(spd).toBe(1)
-    // A few seconds before the goal: also 1×
-    expect(currentSpeed(plan, 596)).toBe(1)
-    // Well before the drama window: baseline speed
-    expect(currentSpeed(plan, 100)).toBeGreaterThan(1)
+    for (const t of [10, 400, 500, 600, 1500, 3500]) expect(currentSpeed(plan, t)).toBe(1)
+    expect(plan.every((s) => s.speed === 1 || s.speed === SKIP_SPEED)).toBe(true)
   })
 
-  it('high-danger shot window plays at 1×', () => {
-    const stream: GameStream = [shot(1, 400, 0.8)]
+  it('a long stoppage plays the whistle, cuts, and plays the set + drop at 1×', () => {
+    const stream: GameStream = [whistle(1, 300), faceoff(1, 330), gameEnd()]
     const plan = planFor(stream, 'full')
-    // Shot at absT=400 — should be in drama window
-    expect(currentSpeed(plan, 400)).toBe(1)
+    expect(currentSpeed(plan, 301)).toBe(1)          // the whistle / the call
+    expect(currentSpeed(plan, 315)).toBe(SKIP_SPEED) // cut
+    expect(nextActiveJump(plan, 315)?.jumpToAbsT).toBe(326)
+    expect(currentSpeed(plan, 328)).toBe(1)          // lineup + drop
   })
 
-  it('low-danger shot does not create a drama window', () => {
-    // Use period 1 t=400, far from the period 3 close-game window.
-    // We also need another event in period 3 so duration extends past
-    // the drama-triggering "final 2 min" zone.
-    const stream: GameStream = [shot(1, 400, 0.1), gameEnd()]
-    const plan = planFor(stream, 'full')
-    // At shot absT=400 (period 1, 400 s in), speed should be baseline (not 1×)
-    const spd = currentSpeed(plan, 400)
-    expect(spd).toBeGreaterThan(1)
+  it('a short stoppage plays through', () => {
+    const plan = planFor([whistle(1, 300), faceoff(1, 305), gameEnd()], 'full')
+    expect(currentSpeed(plan, 302)).toBe(1)
   })
 
-  it('dead time between whistle and faceoff is fast', () => {
-    const stream: GameStream = [
-      whistle(1, 300),
-      faceoff(1, 305),
-    ]
-    const plan = planFor(stream, 'full')
-    // Between whistle and faceoff: fast
-    const spd = currentSpeed(plan, 302)
-    expect(spd).toBeGreaterThan(1)
+  it('after a goal the whole goal sequence plays before the cut', () => {
+    const plan = planFor([goal(1, 600), { ...whistle(1, 600), reason: 'goal' }, faceoff(1, 640), gameEnd()], 'full')
+    expect(currentSpeed(plan, 608)).toBe(1)
+    expect(currentSpeed(plan, 620)).toBe(SKIP_SPEED)
   })
 
   it('all segments have positive speed', () => {
@@ -131,7 +116,7 @@ describe('planFor – full mode', () => {
       shot(1, 200, 0.7),
       goal(1, 600),
       whistle(1, 601),
-      faceoff(1, 605),
+      faceoff(1, 640),
       periodEnd(1),
     ]
     const plan = planFor(stream, 'full')
@@ -170,12 +155,12 @@ describe('planFor – extended mode', () => {
     }
   })
 
-  it('active segments run at 1.5×', () => {
+  it('active segments run at 1× (live hockey is never fast-forwarded)', () => {
     const stream: GameStream = [goal(1, 600)]
     const plan = planFor(stream, 'extended')
     // Near the goal we should have an active segment
     const spd = currentSpeed(plan, 600)
-    expect(spd).toBe(1.5)
+    expect(spd).toBe(1)
   })
 
   it('gaps between highlights run at SKIP_SPEED', () => {
@@ -194,7 +179,7 @@ describe('planFor – extended mode', () => {
     const plan = planFor(stream, 'extended')
     expect(plan.length).toBeGreaterThan(0)
     // absT of goal = (2-1)*1200 + 300 = 1500
-    expect(currentSpeed(plan, 1500)).toBe(1.5)
+    expect(currentSpeed(plan, 1500)).toBe(1)
   })
 })
 

@@ -137,6 +137,7 @@ export class Arena {
     this.buildBoards()
     this.buildNets()
     this.buildBenches()
+    this.buildPenaltyBoxes()
     this.buildBowl()
     this.buildRig()
     this.buildJumbotron()
@@ -507,6 +508,26 @@ export class Arena {
     // there); these block figures stay built for the colour API but are hidden
     fans.visible = false
     this.group.add(fans)
+  }
+
+  /** The penalty boxes: near side, either side of centre (W2: a penalised man
+   *  now has somewhere to go). Matches rink3dRenderer PENALTY_BOX. */
+  private buildPenaltyBoxes(): void {
+    const z0 = -(RINK_HALF_W + 0.75)
+    const deck = new THREE.MeshStandardMaterial({ color: 0x23272f, roughness: 0.9 })
+    const seat = new THREE.MeshStandardMaterial({ color: 0x3a3f4a, roughness: 0.7 })
+    const back = new THREE.MeshStandardMaterial({ color: 0x12161d, roughness: 0.8 })
+    for (const cx of [-9, 9]) {
+      const floor = new THREE.Mesh(new THREE.BoxGeometry(10, 0.6, 5), deck)
+      floor.position.set(cx, 0.3, z0 - 2.5)
+      this.group.add(floor)
+      const bench = new THREE.Mesh(new THREE.BoxGeometry(9, 1.6, 1.4), seat)
+      bench.position.set(cx, 1.4, z0 - 4.2)
+      this.group.add(bench)
+      const wall = new THREE.Mesh(new THREE.BoxGeometry(10.5, 4, 0.5), back)
+      wall.position.set(cx, 2, z0 - 5.3)
+      this.group.add(wall)
+    }
   }
 
   /** Seated figure: torso block + head (head baked slightly darker via vertex colors). */

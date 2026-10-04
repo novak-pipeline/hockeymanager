@@ -131,8 +131,19 @@ export const AGENT_TUNING = {
 }
 
 const PP_SHOT_BOOST = 1.12
-/** Seconds from committing to a shot to the puck leaving the blade (a slapper from the point winds up longer). */
-export const VAL_WINDUP = { near: FRAME_DT, far: FRAME_DT }
+/**
+ * Seconds from committing to a shot to the puck leaving the blade — a REAL sim
+ * state (W2, owner: "shots happen instantly"): the shooter sets, slows and
+ * loads with the puck on his blade, and defenders can close or get a stick in
+ * during it; a slapper from distance winds up longer. It used to be SKIPPED for
+ * a man who had carried the puck a while (most shots). Calibration note: a
+ * 0.5 / 0.75 s wind-up cut goals 2.94 -> 2.28 per team-game (defenders close in
+ * the extra beat), so the wrist wind-up is one think (0.25 s) and the slapper
+ * 0.5 s: goals 3.00, no scalar changed. The renderer's swing (choreo) spans at
+ * least 0.4 s and is timed so contact lands on this release.
+ * One-timers and tips are catch-and-release and don't wind up here.
+ */
+export const VAL_WINDUP = { near: 0.25, far: 0.5 }
 const SHIFT_TARGET = 22
 const PENALTY_SECONDS = 120
 /**
@@ -140,7 +151,12 @@ const PENALTY_SECONDS = 120
  * periods: the home bench is on the home team's first-period defending half,
  * so the second period is the LONG change for both teams.
  */
-const BENCH_GATE = { x: 22, y: -41 }
+const BENCH_GATE = { x: 22, y: 41 }
+/** Into the ice from the bench boards (+1 / −1 in y). The benches are on the
+ *  FAR side from the broadcast camera (+y = world +z), where the 3D arena
+ *  builds them — they were on the near side here, so every change the sim
+ *  made happened at boards the picture had no bench on (W2). */
+const INTO_ICE = -Math.sign(BENCH_GATE.y)
 const GOAL_CELEBRATION_S = 4
 const FACEOFF_MIN_WAIT = 1.5
 const FACEOFF_MAX_WAIT = 12
@@ -300,7 +316,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   let turnSnap = ""
   let tieUp = null as { c: Body; o: Body; since: number } | null
   let deke = null as { c: Body; on: Body; goalie: boolean; move: DekeKind; success: boolean; until: number; dir: number } | null
-  let windup = null as { c: Body; at: number } | null
+  let windup = null as { c: Body; at: number; from: number } | null
   let bite = null as { side: Side; dy: number; until: number } | null
   let prevPoss: { side: Side; since: number; adv: number } | null = null
 
@@ -354,22 +370,21 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   const bindSide = (s: Side, departing: Body[] = []): void => {
     const unit = s.sim.unit
     const free = departing.filter((b) => !unit.skaters.some((r) => r.player.id === b.player.id))
+    let newAtGate = 0
     s.skaters = unit.skaters.map((r) => {
       const had = bodies.get(r.player.id)
       if (had) return had
       const isD = r.player.position === 'D'
       const src = free.find((b) => (b.player.position === 'D') === isD) ?? free[0]
       if (src) free.splice(free.indexOf(src), 1)
-      // Nobody leaving to take the place of (the extra attacker, a man back
-      // from the box): he comes over the boards at the bench door.
-      const gate = { x: gateOf(s).x, y: BENCH_GATE.y + 1.5 }
-      const b = makeBody(r.player, src ? src.x : gate.x, src ? src.y : gate.y, s.a)
-      if (src) {
-        b.vx = src.vx
-        b.vy = src.vy
-        b.hx = src.hx
-        b.hy = src.hy
-      }
+      // Every new man comes over the boards at HIS bench door (W2: he used
+      // to appear in the departing man's skates, mid-ice — "the lines switch
+      // while people are still on the ice"). Several at once spread along it.
+      void src
+      const k = newAtGate++
+      const gate = { x: gateOf(s).x + (k % 3 - 1) * 3, y: BENCH_GATE.y + INTO_ICE * (1.5 + Math.floor(k / 3) * 2) }
+      const b = makeBody(r.player, gate.x, gate.y, s.a)
+      b.vy = 6 * INTO_ICE
       const rest = benchEnergy.get(r.player.id)
       if (rest) b.energy = clamp(rest.e + (now - rest.at) * BENCH_RECOVER_PER_S, 0, 1)
       bodies.set(r.player.id, b)
@@ -442,8 +457,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           continue
         }
         const p = s.sim.resolve(sw.inId)
-        const nb = makeBody(p, gate.x, gate.y + 2, s.a)
-        nb.vy = 8
+        const nb = makeBody(p, gate.x, gate.y + INTO_ICE * 2, s.a)
+        nb.vy = 8 * INTO_ICE
         const rest = benchEnergy.get(p.id)
         if (rest) nb.energy = clamp(rest.e + (now - rest.at) * BENCH_RECOVER_PER_S, 0, 1)
         benchEnergy.set(b.player.id, { e: b.energy, at: now })
@@ -662,6 +677,14 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     for (const s of sides) {
       const spots = faceoffSpots(s, p.dot)
       s.skaters.forEach((b) => {
+        if (foSetAt !== null) {
+          // SET (W2, owner: "no one set and can't even tell there's a
+          // faceoff"): from the linesman stepping in to the drop, nobody moves.
+          b.vx *= 0.2
+          b.vy *= 0.2
+          cmds.set(b, { tx: b.x, ty: b.y, speed: 0.5, arrive: true, urgency: 0.2, faceX: p.dot.x, faceY: p.dot.y })
+          return
+        }
         const spot = spots.get(b) ?? { x: b.x, y: b.y }
         const tx = spot.x
         const ty = spot.y
@@ -974,7 +997,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     return { x: gx + (dx / d) * depth, y: (dy / d) * depth }
   }
 
-  const shoot = (c: Body, s: Side, oneTimer: boolean, beatGoalie = false): void => {
+  const shoot = (c: Body, s: Side, oneTimer: boolean, beatGoalie = false, windupS?: number): void => {
     const opp = oppOf(s)
     const a = s.a
     const from = { x: puck.x, y: puck.y }
@@ -1111,7 +1134,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           target: { x: a, y: clamp(wide / HALF_Y, -1, 1) },
           result: r < 0.08 ? 'post' : r < 0.38 ? 'high' : 'wide',
           shotType: tipped ? 'tip' : shotType(),
-          speedMph: Math.round(speed * 0.6818)
+          speedMph: Math.round(speed * 0.6818),
+          ...(windupS !== undefined && !tipped ? { windupS: Math.round(windupS * 100) / 100 } : {})
         })
       } else {
         // On target: the goalie's read decides it.
@@ -1160,7 +1184,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           shotType: tipped ? 'tip' : shotType(),
           speedMph: Math.round(speed * 0.6818),
           origin: shotOrigin(),
-          oddMan: oddManNow()
+          oddMan: oddManNow(),
+          ...(windupS !== undefined && !tipped ? { windupS: Math.round(windupS * 100) / 100 } : {})
         })
         const st = stat(ctx, shooterB.player.id)
         st.shots++
@@ -1569,8 +1594,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           // The release: the puck leaves the blade at the shot event (the
           // renderer swings in the lead-up, with the puck still on his stick).
           if (now >= windup.at - 1e-6) {
+            const ws = now - windup.from
             windup = null
-            shoot(c, s, false)
+            shoot(c, s, false, false, ws)
           } else cmds.set(c, { tx: c.x + c.vx * 0.6, ty: c.y + c.vy * 0.6, speed: speedOf(c) * 0.9, arrive: false, urgency: 0.5 })
         } else {
         const act = decideCarrier(w, s, c)
@@ -1585,16 +1611,13 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         } else if (act.kind === 'dump') {
           release(c, s, act.at, act.speed, act.lift, 'dump')
         } else {
-          // The puck must have been on his blade for the swing (the renderer
-          // starts the shot clip that long before the release): a man who has
-          // carried it a while releases now; one who just got it winds up first.
+          // Every shot winds up from the moment he commits (the puck on his
+          // blade, the stick loading): the viewer sees the set, and the
+          // defence gets the same beat to close or block.
           const far = Math.hypot(s.a * GOAL_X - c.x, c.y) > 45
           const need = far ? VAL_WINDUP.far : VAL_WINDUP.near
-          if (now - gotAt >= need - 1e-6) shoot(c, s, false)
-          else {
-            windup = { c, at: gotAt + need }
-            cmds.set(c, { tx: c.x + c.vx * 0.6, ty: c.y + c.vy * 0.6, speed: speedOf(c) * 0.9, arrive: false, urgency: 0.5 })
-          }
+          windup = { c, at: now + need, from: now }
+          cmds.set(c, { tx: c.x + c.vx * 0.6, ty: c.y + c.vy * 0.6, speed: speedOf(c) * 0.75, arrive: false, urgency: 0.5 })
         }
         }
         if (w.carrier === c && !cmds.has(c)) cmds.set(c, { tx: c.x + c.vx, ty: c.y + c.vy, speed: speedOf(c), arrive: false, urgency: 0.4 })

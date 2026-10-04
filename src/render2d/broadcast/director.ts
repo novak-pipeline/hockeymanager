@@ -393,6 +393,7 @@ export function directBroadcast(
           }
         } else {
           say(game, 'game', at, 'penalty', `pen:${at}`, { playerId: ev.player, priority: 2 })
+          if (presentationOn) overlay(game, 'game', at, 6500, 3, { kind: 'penaltyCall', playerId: ev.player, infraction: ev.infraction, minutes: ev.minutes }, 300)
           if (presentationOn && !compact) shot(game, 'game', at, 2500, 'penaltyBox', { delayMs: 1500, playerId: ev.player })
         }
         break

@@ -10,7 +10,7 @@ function rig(team: 'home' | 'away', id: string | null, x: number, z: number, ext
 
 function frame(i: number, rigs: ProbeRig[], extra: Partial<ProbeFrame> = {}): ProbeFrame {
   return {
-    wall: i / 60, dt: 1 / 60, clock: 100 + i / 30, speed: 2, playing: true, w: 1600, h: 900,
+    wall: i / 60, dt: 1 / 60, clock: 100 + i / 30, speed: 2, playing: true, dead: false, w: 1600, h: 900,
     cam: { x: 0, y: 40, z: -75, fov: 30, preset: 'broadcast' },
     puck: { x: 0, y: 0, z: 0, sx: 800, sy: 450, onScreen: true, simX: 0, simZ: 0 },
     carrier: null, windup: null, goalSeq: null, goalSeqT: null, rigs,
@@ -62,7 +62,7 @@ describe('viewer-truth detectors', () => {
 
   it('runs all ten and reports n/a with nothing to judge', () => {
     const res = runViewerTruth(input([]))
-    expect(res.map((r) => r.id)).toEqual(['VT1', 'VT2', 'VT3', 'VT4', 'VT5', 'VT6', 'VT7', 'VT8', 'VT9', 'VT10'])
+    expect(res.map((r) => r.id)).toEqual(['VT1', 'VT2', 'VT3', 'VT4', 'VT5', 'VT6', 'VT7', 'VT8', 'VT9', 'VT10', 'VT11'])
     expect(res.every((r) => r.status === 'n/a')).toBe(true)
   })
 })

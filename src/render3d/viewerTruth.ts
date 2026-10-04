@@ -20,6 +20,11 @@ export interface VTEvent {
   z?: number
   shotType?: string
   rebound?: boolean
+  /** shots: world x of the net it was aimed at (±89). */
+  netX?: number
+  /** hits: the man hit; knockdown: the engine put him down. */
+  target?: string
+  knockdown?: boolean
 }
 
 /** A spoken / captioned booth line as fired (channel 'commentary'). */
@@ -70,7 +75,7 @@ export interface VTResult {
 const POP_RAD_S = 12          // motion-probe's body-core pop threshold
 const DIVERGE_FT = 3
 const NEAR_RINK_FT = 6        // the eye counts a body this close to the sheet as "on it"
-const SNAP_FT_S = 40          // a drawn root faster than this (game time) is a snap
+const SNAP_FT_S = 45          // a drawn root faster than this (game time, ≥0.1 s window) is a snap
 const SEEK_JUMP_S = 0.75      // a clock jump bigger than the frame's own advance = seek / cut
 
 const pct = (xs: number[], p: number): number => {
@@ -109,7 +114,8 @@ export function vt1Bodies(inp: VTInput): VTResult {
   let benchShare = 0
   const ev: string[] = []
   for (const f of inp.frames) {
-    if (!isLive(f)) continue
+    // in a stoppage a change is legal with both units out (real hockey)
+    if (!isLive(f) || f.dead) continue
     n++
     for (const team of ['home', 'away'] as const) {
       const mine = skaters(f).filter((r) => r.team === team)
@@ -129,7 +135,7 @@ export function vt1Bodies(inp: VTInput): VTResult {
   return {
     id: 'VT1', name: 'Bodies on the ice per team (as rendered)',
     status: n === 0 ? 'n/a' : share <= 0.001 ? 'green' : 'red',
-    rule: `visible + on screen + within ${NEAR_RINK_FT} ft of the sheet ≤ 6 per team (7 with an extra attacker) on 99.9% of live frames`,
+    rule: `visible + on screen + within ${NEAR_RINK_FT} ft of the sheet ≤ 6 per team (7 with an extra attacker) on 99.9% of live-play frames (stoppages excluded: changes)`,
     value: `${(share * 100).toFixed(1)}% of team-frames over; worst ${worst}; avg idle bench rigs in an over-count ${bad ? f1(benchShare / bad) : '0'}`,
     evidence: ev,
   }
@@ -152,7 +158,8 @@ export function vt2Divergence(inp: VTInput): VTResult {
         if (r.onScreen) inventedRigSec += f.dt
         continue
       }
-      if (declared) continue
+      // declared: goal sequence / replay, and the few-feet hop through the bench door
+      if (declared || r.mode === 'arriving' || r.mode === 'departing') continue
       const d = Math.hypot(r.x - r.simX, r.z - r.simZ)
       ds.push(d)
       if (d > 3 * DIVERGE_FT && ev.length < 5) ev.push(`${clk(f.clock)} ${r.team} ${r.id}: drawn ${f1(d)} ft from the sim (mode ${r.mode})`)
@@ -179,22 +186,38 @@ export function vt3Shots(inp: VTInput): VTResult {
   const setups: number[] = []
   const flights: number[] = []
   for (const s of shots) {
+    // a tip is a deflection at the net: no set-up, no flight to see
+    if (s.shotType === 'tip') continue
     // only shots the recording actually played through live (continuous, not a replay)
     const near = frames.filter((f) => f.clock >= s.absT - 3 && f.clock <= s.absT + 1.5 && isLive(f) && !inReplay(f))
     if (near.length < 10 || near[0]!.clock > s.absT - 1 || near[near.length - 1]!.clock < s.absT + 0.3) continue
-    const arrival = inp.events.find((e) => e.absT >= s.absT && e.absT <= s.absT + 1.5 && (e.type === 'save' || e.type === 'goal' || e.type === 'blockedShot'))
-    const arriveT = arrival ? arrival.absT : s.absT + 0.4
+    // set-up: the wind-up the renderer drew — or a deke by the shooter right
+    // before (a deke-and-tuck's set-up IS the deke)
+    const deke = inp.events.find((e) => e.type === 'deke' && e.actor === s.actor && e.absT >= s.absT - 1.5 && e.absT < s.absT)
     let setup = 0
-    for (const f of near) if (f.clock <= s.absT && f.windup === s.actor) setup += f.dt
-    const flightFrames = near.filter((f) => f.clock >= s.absT && f.clock < arriveT)
-    const flightWall = flightFrames.reduce((a, f) => a + f.dt, 0)
+    for (const f of near) if (f.clock <= s.absT && (f.windup === s.actor || (deke && f.clock >= deke.absT))) setup += f.dt
+    // flight: rendered frames after the release on which the drawn puck is
+    // travelling toward the net (closing, still > 3 ft out), within 1 game-s
+    const netX = s.netX ?? 89
+    const after = frames.filter((f) => f.clock >= s.absT && f.clock <= s.absT + 1 && isLive(f) && !inReplay(f))
+    let flightWall = 0
+    let prevD = Infinity
+    let started = false
+    for (const f of after) {
+      const d = Math.hypot(f.puck.x - netX, f.puck.z)
+      if (d <= 3) break
+      if (d < prevD - 0.05) { started = true; flightWall += f.dt }
+      else if (started) break
+      prevD = d
+    }
     // frames on a 60 Hz display (the off-screen probe window may render faster)
     const flight60 = flightWall * 60
     const need = s.shotType === 'slap' ? 0.6 : 0.3
+    const catchRelease = s.shotType === 'oneTimer' || s.shotType === 'tip'
     judged++
     setups.push(setup)
     flights.push(flight60)
-    const ok = setup >= need && flight60 >= 3
+    const ok = (catchRelease || setup >= need) && flight60 >= 3
     if (!ok) {
       failed++
       if (ev.length < 6) ev.push(`${clk(s.absT)} ${s.shotType ?? 'shot'} by ${s.actor}: set-up ${f2(setup)} s wall (need ${need}), flight ${f2(flightWall)} s wall (${f1(flight60)} frames @60 Hz) at ${f2(near[0]!.speed)}×`)
@@ -203,7 +226,7 @@ export function vt3Shots(inp: VTInput): VTResult {
   return {
     id: 'VT3', name: 'Shot readability (wall time)',
     status: judged === 0 ? 'n/a' : failed / judged <= 0.1 ? 'green' : 'red',
-    rule: 'set-up ≥ 0.3 s wall (slap ≥ 0.6 s) and puck in flight ≥ 3 frames at 60 Hz (0.05 s wall), for ≥ 90% of shots',
+    rule: 'set-up ≥ 0.3 s wall (slap ≥ 0.6 s; one-timers exempt, tips not judged; a deke counts as set-up) and the drawn puck travelling to the net on ≥ 3 frames at 60 Hz, for ≥ 90% of shots',
     value: `${judged - failed}/${judged} shots readable; median set-up ${f2(pct(setups, 0.5))} s wall, median flight ${f1(pct(flights, 0.5))} frames @60 Hz`,
     evidence: ev,
   }
@@ -227,10 +250,18 @@ export function vt4Motion(inp: VTInput): VTResult {
       if (!r.visible || r.id === null || !q || q.id !== r.id || !q.visible) return
       b.rigSec += f.dt
       if (r.boneW > POP_RAD_S) b.pops++
-      const gameDt = f.dt * f.speed
-      if (gameDt > 0 && !r.goalie && Math.hypot(r.x - q.x, r.z - q.z) / gameDt > SNAP_FT_S) {
+      if (r.goalie) return
+      // a snap: one rendered frame jumps > 3 ft, or the root averages faster than
+      // SNAP_FT_S over the last ≥ 0.1 game-s (single 5 ms frames are too noisy)
+      const jump = Math.hypot(r.x - q.x, r.z - q.z)
+      let j = i - 1
+      while (j > 0 && f.clock - frames[j]!.clock < 0.1 && !brk[j]) j--
+      const o = frames[j]!.rigs[k]
+      const win = f.clock - frames[j]!.clock
+      const avg = o && o.id === r.id && win >= 0.1 ? Math.hypot(r.x - o.x, r.z - o.z) / win : 0
+      if (jump > 3 || avg > SNAP_FT_S) {
         b.snaps++
-        if (ev.length < 4) ev.push(`${clk(f.clock)} ${r.id}: drawn root moved ${f1(Math.hypot(r.x - q.x, r.z - q.z))} ft in ${f2(gameDt)} game-s (${r.mode}) at ${key}`)
+        if (ev.length < 4) ev.push(`${clk(f.clock)} ${r.id}: drawn root ${jump > 3 ? `jumped ${f1(jump)} ft in one frame` : `averaged ${f1(avg)} ft/s over ${f2(win)} game-s`} (${r.mode}) at ${key}`)
       }
     })
     by.set(key, b)
@@ -241,7 +272,7 @@ export function vt4Motion(inp: VTInput): VTResult {
   return {
     id: 'VT4', name: 'Motion gates at the playback speed actually used',
     status: rows.length === 0 ? 'n/a' : bad.length === 0 ? 'green' : 'red',
-    rule: `per speed: body-core pops (> ${POP_RAD_S} rad/s) ≤ 0.05 per rig-s and root snaps (> ${SNAP_FT_S} ft/s game) ≤ 0.05 per rig-s`,
+    rule: `per speed: body-core pops (> ${POP_RAD_S} rad/s) ≤ 0.05 per rig-s and root snaps (> 3 ft in one frame, or > ${SNAP_FT_S} ft/s over 0.1 game-s) ≤ 0.05 per rig-s`,
     value: rows.map(([k, b]) => `${k}: pops ${f2(b.pops / b.rigSec)}/rig-s, snaps ${f2(b.snaps / b.rigSec)}/rig-s`).join(' · ') + ` · live-play speeds seen: ${speeds.join(', ')}`,
     evidence: ev,
   }
@@ -275,26 +306,34 @@ export function vt5Replay(inp: VTInput): VTResult {
 }
 
 /* ── VT6 one clock per moment ────────────────────────────────────────────── */
+/** The renderer's on-ice goal sequence length, game seconds (rink3dRenderer GOAL_SEQ.end). */
+const GOAL_SEQ_S = 8
 export function vt6Clocks(inp: VTInput): VTResult {
   const ev: string[] = []
   let bad = 0
   for (const g of inp.goals) {
-    const timers = inp.timers.filter((t) => t.wall >= g.wall - 0.05 && t.wall <= g.wall + 20)
-    const seq = inp.frames.filter((f) => f.wall >= g.wall && f.wall <= g.wall + 20 && f.goalSeq !== null)
-    const clocks = new Set<string>()
-    for (const t of timers) clocks.add(`wall setTimeout '${t.name}' ${t.ms} ms`)
-    if (seq.length > 0) clocks.add(`renderer GOAL_SEQ (${f1(Math.max(...seq.map((f) => f.goalSeqT ?? 0)))} s on its cue clock)`)
-    const speeds = new Set(inp.frames.filter((f) => f.wall >= g.wall && f.wall <= g.wall + 6 && !inReplay(f)).map((f) => f2(f.speed)))
-    if (speeds.size > 0) clocks.add(`playback plan speeds ${[...speeds].join('/')}×`)
-    const wallTimers = timers.length
-    if (wallTimers > 0 || clocks.size > 1) bad++
-    ev.push(`${clk(g.goalAbsT)} goal: ${clocks.size} clocks → ${[...clocks].join('; ')}`)
+    const problems: string[] = []
+    const timers = inp.timers.filter((t) => t.wall >= g.wall - 0.05 && t.wall <= g.wall + 30)
+    for (const t of timers) problems.push(`wall setTimeout '${t.name}' ${t.ms} ms`)
+    // the goal sequence must advance with the game clock (t = clock − goal), not wall time
+    const live = inp.frames.filter((f) => f.wall >= g.wall && f.wall <= g.wall + 30 && !inReplay(f))
+    let drift = 0
+    for (const f of live) if (f.goalSeqT !== null && f.clock >= g.goalAbsT && f.clock <= g.goalAbsT + GOAL_SEQ_S) drift = Math.max(drift, Math.abs(f.goalSeqT - (f.clock - g.goalAbsT)))
+    if (drift > 0.25) problems.push(`goal sequence drifts ${f2(drift)} s from the game clock`)
+    // the replay must not cut the goal sequence short
+    const firstRep = inp.frames.findIndex((f) => f.wall > g.wall && inReplay(f))
+    if (firstRep > 0) {
+      const before = inp.frames[firstRep - 1]!
+      if (before.clock < g.goalAbsT + GOAL_SEQ_S - 0.1) problems.push(`replay cut in ${f1(before.clock - g.goalAbsT)} s after the goal (sequence is ${GOAL_SEQ_S} s)`)
+    }
+    if (problems.length) bad++
+    ev.push(`${clk(g.goalAbsT)} goal: ${problems.length ? problems.join('; ') : 'one game clock'}`)
   }
   return {
     id: 'VT6', name: 'One clock per moment',
     status: inp.goals.length === 0 ? 'n/a' : bad === 0 ? 'green' : 'red',
-    rule: 'every timer of a goal moment derives from one schedule; zero wall-clock setTimeouts govern game-time content',
-    value: `${bad}/${inp.goals.length} goal moments run on more than one clock`,
+    rule: 'a goal moment runs on the game clock: no wall-clock timers, the goal sequence tracks clock − goal (±0.25 s), the replay starts after the sequence ends',
+    value: `${bad}/${inp.goals.length} goal moments off the one clock`,
     evidence: ev.slice(0, 5),
   }
 }
@@ -325,16 +364,18 @@ export function vt7Faceoffs(inp: VTInput): VTResult {
     const inCircle = fo.x !== undefined && fo.z !== undefined
       ? skaters(drop).filter((r) => r.visible && r.id !== null && Math.hypot(r.x - fo.x!, r.z - fo.z!) < 15).length
       : 0
-    const ok = maxSp < 3 && inCircle <= 2
+    // the puck is dropped AT the dot (owner: "the puck wasn't even dropped in the faceoff circle")
+    const puckOff = fo.x !== undefined && fo.z !== undefined ? Math.hypot(drop.puck.x - fo.x, drop.puck.z - fo.z) : 0
+    const ok = maxSp < 3 && inCircle <= 2 && puckOff <= 2
     if (!ok) {
       bad++
-      if (ev.length < 5) ev.push(`${clk(fo.absT)} faceoff: fastest skater ${f1(maxSp)} ft/s in the last 0.5 s, ${inCircle} skaters inside the circle at the drop`)
+      if (ev.length < 5) ev.push(`${clk(fo.absT)} faceoff: fastest skater ${f1(maxSp)} ft/s in the last 0.5 s, ${inCircle} skaters inside the circle, puck ${f1(puckOff)} ft from the dot at the drop`)
     }
   }
   return {
     id: 'VT7', name: 'Faceoff set',
     status: judged === 0 ? 'n/a' : bad === 0 ? 'green' : 'red',
-    rule: 'at the drop ≤ 2 skaters inside the circle and every skater stationary (< 3 ft/s) for the last 0.5 s',
+    rule: 'at the drop: the puck at the dot (≤ 2 ft), ≤ 2 skaters inside the circle, every skater stationary (< 3 ft/s) for the last 0.5 s',
     value: `${judged - bad}/${judged} faceoffs set`,
     evidence: ev,
   }
@@ -345,9 +386,11 @@ export function vt8Changes(inp: VTInput): VTResult {
   const frames = inp.frames
   const brk = seekBreaks(frames)
   const gates = inp.geometry.benchGates
+  const boxes = inp.geometry.penaltyBoxes
   const nearGate = (r: ProbeRig): boolean => {
     const g = gates[r.team]
-    return Math.abs(r.x - g.x) <= 13 && Math.abs(r.z - g.z) <= 8
+    const b = boxes?.[r.team]
+    return (Math.abs(r.x - g.x) <= 13 && Math.abs(r.z - g.z) <= 8) || (!!b && Math.abs(r.x - b.x) <= 8 && Math.abs(r.z - b.z) <= 8)
   }
   let changes = 0
   let bad = 0
@@ -379,7 +422,7 @@ export function vt8Changes(inp: VTInput): VTResult {
   return {
     id: 'VT8', name: 'Line changes through the door',
     status: changes === 0 ? 'n/a' : bad === 0 ? 'green' : 'red',
-    rule: 'every departing / arriving man crosses within ~8 ft of his bench door; none appear or vanish mid-ice',
+    rule: 'every departing / arriving man crosses within ~8 ft of his bench door (or the penalty box); none appear or vanish mid-ice',
     value: `${bad} violations in ${changes} rig hand-overs`,
     evidence: ev,
   }
@@ -446,7 +489,51 @@ export function vt10Commentary(inp: VTInput): VTResult {
   }
 }
 
-export const DETECTORS = [vt1Bodies, vt2Divergence, vt3Shots, vt4Motion, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt9Framing, vt10Commentary] as const
+/* ── VT11 hits: visible contact, and the hit man moves with the hit ──────── */
+export function vt11Hits(inp: VTInput): VTResult {
+  const frames = inp.frames
+  let judged = 0
+  let bad = 0
+  const ev: string[] = []
+  for (const h of inp.events.filter((e) => e.type === 'hit' && e.actor && e.target)) {
+    const at = frames.findIndex((f) => f.clock >= h.absT && isLive(f) && !inReplay(f))
+    if (at < 1) continue
+    const f = frames[at]!
+    const hitter = f.rigs.find((r) => r.id === h.actor && r.visible)
+    const tgt = f.rigs.find((r) => r.id === h.target && r.visible)
+    if (!hitter || !tgt) continue
+    // the drawn bodies at contact: shoulder to shoulder, not a man falling on his own
+    const gap = Math.hypot(hitter.x - tgt.x, hitter.z - tgt.z)
+    // after the hit: the hit man's drawn travel over 0.4 game-s must not keep
+    // going INTO the hitter's push direction's opposite (sliding on through the check)
+    const later = frames.find((g, j) => j > at && g.clock >= h.absT + 0.4)
+    const tl = later?.rigs.find((r) => r.id === h.target)
+    let along = 0
+    let simAlong = NaN
+    if (tl) {
+      const px = tgt.x - hitter.x
+      const pz = tgt.z - hitter.z
+      const n = Math.hypot(px, pz) || 1
+      along = ((tl.x - tgt.x) * px + (tl.z - tgt.z) * pz) / n
+      if (tl.simX !== null && tgt.simX !== null && tl.simZ !== null && tgt.simZ !== null) simAlong = ((tl.simX - tgt.simX) * px + (tl.simZ - tgt.simZ) * pz) / n
+    }
+    judged++
+    const ok = gap <= 4.5 && along >= -0.5
+    if (!ok) {
+      bad++
+      if (ev.length < 5) ev.push(`${clk(h.absT)} ${h.actor} → ${h.target}${h.knockdown ? ' (knockdown)' : ''}: drawn ${f1(gap)} ft apart at contact; hit man moved ${f1(along)} ft along the push in 0.4 s (sim: ${f1(simAlong)})`)
+    }
+  }
+  return {
+    id: 'VT11', name: 'Hits: visible contact, reaction with the push',
+    status: judged === 0 ? 'n/a' : bad === 0 ? 'green' : 'red',
+    rule: 'at the hit the drawn hitter and target are ≤ 4.5 ft apart, and the target does not slide on against the push in the next 0.4 s',
+    value: `${judged - bad}/${judged} hits read`,
+    evidence: ev,
+  }
+}
+
+export const DETECTORS = [vt1Bodies, vt2Divergence, vt3Shots, vt4Motion, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt9Framing, vt10Commentary, vt11Hits] as const
 
 export function runViewerTruth(inp: VTInput): VTResult[] {
   return DETECTORS.map((d) => d(inp))

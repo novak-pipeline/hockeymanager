@@ -12,7 +12,7 @@ const clock = (t) => {
   return `P${p} ${Math.floor(r / 60)}:${String(Math.floor(r % 60)).padStart(2, '0')}`
 }
 
-export function buildReelHtml(report, checklist) {
+export function buildReelHtml(report, checklist, name = 'v0') {
   const cards = []
   for (const [engine, { clips }] of Object.entries(report.engines ?? {})) {
     for (const c of clips) {
@@ -42,7 +42,7 @@ export function buildReelHtml(report, checklist) {
   }
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Reel v0 — watched game</title>
+<title>Reel ${name} — watched game</title>
 <style>
 :root{--bg:#0e1116;--card:#171b22;--ink:#e8ebf0;--dim:#97a0ad;--line:#2a313c;--red:#ff6b6b;--green:#5fd38d;--acc:#7aa2ff}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,Segoe UI,sans-serif}
@@ -61,13 +61,13 @@ textarea{grid-column:1/-1;min-height:60px;background:#0b0e14;color:var(--ink);bo
 .red{color:var(--red)}.green{color:var(--green)}
 @media (max-width:700px){.judge{grid-template-columns:1fr}}
 </style></head><body><main>
-<h1>Reel v0 — the watched game, as you see it</h1>
+<h1>Reel ${name} — the watched game, as you see it</h1>
 <p class="lead">Recorded from the real app on a copy of your save, at your settings (3D, broadcast camera, Full mode, replays on). Watch each clip, tick what reads right, score it 1–5 (5 = "I'd show a friend"), and note what's wrong. Scores save in this page as you go; press <b>Export scores</b> when done and send the file back. The milestone exits when every clip scores 4 or more.</p>
 <div class="bar"><span>Average: <b id="avg">–</b></span><span id="done"></span><button id="export">Export scores</button></div>
 ${cards.join('\n')}
 </main>
 <script>
-const KEY = 'reel-v0-scores'
+const KEY = 'reel-${name}-scores'
 let data = {}
 try { data = JSON.parse(localStorage.getItem(KEY) || '{}') } catch (e) { data = {} }
 const save = () => { try { localStorage.setItem(KEY, JSON.stringify(data)) } catch (e) {} ; summary() }
@@ -86,8 +86,8 @@ for (const card of document.querySelectorAll('.clip')) {
   }
 }
 document.getElementById('export').onclick = () => {
-  const blob = new Blob([JSON.stringify({ reel: 'v0', exportedAt: new Date().toISOString(), scores: data }, null, 2)], { type: 'application/json' })
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'reel-v0-scores.json'; a.click()
+  const blob = new Blob([JSON.stringify({ reel: '${name}', exportedAt: new Date().toISOString(), scores: data }, null, 2)], { type: 'application/json' })
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'reel-${name}-scores.json'; a.click()
 }
 summary()
 </script></body></html>

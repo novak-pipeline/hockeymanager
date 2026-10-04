@@ -92,6 +92,8 @@ export type ShotEvent = GameEventBase & {
   speedMph?: number
   origin?: ShotOrigin
   oddMan?: { attackers: number; defenders: number }
+  /** Additive (agent engine, W2): seconds the shooter wound up (committed → release); renderers time the swing to it. */
+  windupS?: number
 }
 
 /**
@@ -108,6 +110,8 @@ export type MissedShotEvent = GameEventBase & {
   result: 'wide' | 'high' | 'post'
   shotType?: ShotType
   speedMph?: number
+  /** Additive (W2): seconds the shooter wound up (see ShotEvent.windupS). */
+  windupS?: number
 }
 
 /**

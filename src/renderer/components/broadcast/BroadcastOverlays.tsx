@@ -298,6 +298,26 @@ export function MilestoneCard(props: { ctx: BroadcastContext; playerId: string; 
   )
 }
 
+/** The penalty call: the offender, his team, the infraction and the minutes —
+ *  up while he goes to the box. */
+export function PenaltyCall(props: { ctx: BroadcastContext; playerId: string; infraction: string; minutes: number }): JSX.Element {
+  const p = props.ctx.players[props.playerId]
+  const side = p?.side ?? 'home'
+  const c = colorsFor(props.ctx, side)
+  const abbr = side === 'home' ? props.ctx.homeAbbr : props.ctx.awayAbbr
+  const what = props.infraction.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/^./, (m) => m.toUpperCase())
+  const len = props.minutes >= 10 ? `${props.minutes}-minute misconduct` : props.minutes >= 5 ? `${props.minutes}-minute major` : `${props.minutes} minutes`
+  return (
+    <div className="bc-card bc-texture" style={{ '--bc-team': c.main } as CSSProperties}>
+      {p && <FaceCutout player={p} color={c.main} className="face" />}
+      <div className="txt">
+        <div className="k">PENALTY · {abbr}</div>
+        <div className="d">{p?.name ?? 'Unknown'} — {what}, {len}</div>
+      </div>
+    </div>
+  )
+}
+
 export function MomentCaption(props: { caption: string }): JSX.Element {
   return (
     <div className="bc-caption">
@@ -436,6 +456,7 @@ export function BroadcastOverlayLayer(props: {
             break
           }
           case 'powerPlay': node = null; break
+          case 'penaltyCall': node = <PenaltyCall ctx={ctx} playerId={d.playerId} infraction={d.infraction} minutes={d.minutes} />; break
         }
         if (!node) return null
         return (

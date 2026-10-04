@@ -8878,10 +8878,13 @@ export class Career {
    *  dress the best available; 'fillGaps' only fills holes (GM keeps control). */
   private lineManagementMode: 'coach' | 'fillGaps' = 'coach'
   /** Which engine plays the user's games: the calibrated director, or the agent engine (beta, opt-in). An app preference, not saved. */
-  private matchEngine: 'classic' | 'agent' = 'classic'
-  getMatchEngine(): 'classic' | 'agent' { return this.matchEngine }
-  setMatchEngine(engine: 'classic' | 'agent'): void { this.matchEngine = engine }
-  private watchSim(): typeof fullSimGame { return this.matchEngine === 'agent' ? agentSimGame : fullSimGame }
+  /**
+   * The user's games (watched or not) play on the agent engine — the owner's
+   * W0 reel decision (docs/gameplan-2026-09-28: agent 1.9/5 vs classic 1.25/5).
+   * The classic engine stays as code (quick-sim reference, dev reel compare),
+   * off the watched path.
+   */
+  private watchSim(): typeof fullSimGame { return agentSimGame }
   getLineManagementMode(): 'coach' | 'fillGaps' { return this.lineManagementMode }
   setLineManagementMode(mode: 'coach' | 'fillGaps'): void { this.lineManagementMode = mode }
 

@@ -73,7 +73,7 @@ import { Choreographer, extractActionCues, FACEOFF_LEAD_S, type LocoMode } from 
 import { kitFor, type Kit } from './palette'
 import { ATLAS_GRID, buildAtlasCanvas, paintJerseySlot, paintOfficialSlot } from './textures'
 import { RINK_HALF_W } from './iceCanvas'
-import { assignRigs, capStep, type RigMode } from './lineChange'
+import { approach, assignRigs, capStep, type RigMode } from './lineChange'
 import { layoutLabels, type LabelRequest, type PlacedLabel } from '@render2d/labelLayout'
 import { MOMENT_CHOREOGRAPHY, type MomentCue, type ShotCue } from '@render2d/broadcast/types'
 
@@ -85,9 +85,18 @@ const LABEL_GOALIE_NEAR_FT = 28
 const LABEL_MAX = 5
 
 /** Bench gates on the far boards (home bench at x = -26, away at +26, matching arena.ts). */
-const BENCH_GATE = { home: { x: -26, z: RINK_HALF_W - 1.5 }, away: { x: 26, z: RINK_HALF_W - 1.5 } } as const
+/** Bench doors — the agent engine's own (agentSim BENCH_GATE: x ∓22 on the far boards). */
+const BENCH_GATE = { home: { x: -22, z: RINK_HALF_W - 1.5 }, away: { x: 22, z: RINK_HALF_W - 1.5 } } as const
+/** The bench floor behind the boards, where a changing man hops to / from. */
+const BENCH_Z = RINK_HALF_W + 3
+/** Penalty boxes, near side either side of centre (arena.ts buildPenaltyBoxes). */
+const PENALTY_BOX = { home: { x: -9, z: -(RINK_HALF_W + 3) }, away: { x: 9, z: -(RINK_HALF_W + 3) } } as const
+/** A change within this far of the door is drawn through it; farther, the sim moved him (seek, stoppage). */
+const DOOR_NEAR_FT = 12
+/** Skating through the hop over the boards (ft/s) and how high the root rises. */
+const HOP_SPEED = 16
+const HOP_RISE_FT = 2.2
 /** Standing spots along each bench (arena.ts: 30 ft benches centred on the gates). */
-const BENCH_SLOTS = 9
 
 /**
  * Athlete source: 'owner' = the owner-supplied rigged athletes imported by
@@ -159,11 +168,11 @@ const smoothstep01 = (e0: number, e1: number, x: number) => {
 // Nothing on the ice moves faster than an elite skater: a residual teleport in
 // the stream (faceoff resets, a stoppage) becomes a skate, never a snap.
 const MAX_RENDER_SPEED = 40   // ft/s
-const ARRIVE_SPEED = 30       // skating out from the bench gate
 const DEPART_SPEED = 30       // heading off to the bench
 const DEPART_TIMEOUT_S = 2.2  // a departing player is off the ice by this (a change is quick)
 // Rigs per team: up to 6 skaters on the ice + 6 skating off during a full change.
-const SKATER_RIGS_PER_TEAM = 12
+/** 5 on + 5 walking off + 5 coming on in a stoppage change (+1): no rig is ever stolen from a man still on the ice. */
+const SKATER_RIGS_PER_TEAM = 16
 // Body yaw eases toward its target on a critically damped spring (no chasing a
 // wobbling target at the max turn rate), then the rate clamp still applies.
 const FACING_HL = 0.16
@@ -172,20 +181,30 @@ const FACING_HL = 0.16
 const SPEED_TAU = 0.18        // stride-amplitude smoothing (s) — no leg flicker
 const TURN_TAU = 0.25         // bank-into-turn smoothing (s)
 const SHOT_SWING_S = 0.32     // stick swing duration on a shot cue
-const GOAL_CUE_S = 4.2        // lifetime of the goal cue (celebration cam)
+const GOAL_CUE_S = 4.2
+/** The linesman holds the puck at about chest height over the dot … */
+const FACEOFF_HAND_Y = 4.2
+/** … for at least this long before the drop, and it falls in this long (his drop clip). */
+const FACEOFF_HOLD_MIN_S = 2.5
+const FACEOFF_DROP_S = 8 / 30
+/** A hit's contact is drawn over ±this (game s) around the engine's hit time … */
+const HIT_CONTACT_S = 0.25
+/** … with each man this far from the contact point (shoulder to shoulder ≈ 2.4 ft). */
+const HIT_SHOULDER_FT = 1.2        // lifetime of the goal cue (celebration cam)
 /** Post-goal sequence timing (s of game time from the goal). */
-const GOAL_SEQ = { celly: 1.1, bench: 4.6, crowd: 6.4, back: 8.0, end: 8.0 } as const
+export const GOAL_SEQ = { celly: 1.1, bench: 4.6, crowd: 6.4, back: 8.0, end: 8.0 } as const
 type GoalPhase = 'hold' | 'celly' | 'bench' | 'crowd' | 'done'
 function goalPhaseAt(t: number): GoalPhase {
   return t < GOAL_SEQ.celly ? 'hold' : t < GOAL_SEQ.bench ? 'celly' : t < GOAL_SEQ.crowd ? 'bench' : t < GOAL_SEQ.back ? 'crowd' : 'done'
 }
 
-// Atlas cells (6×6): home rigs 0-11 + G 12, away rigs 13-24 + G 25, 26-35 spare
+// Atlas cells (6×6): home rigs 0-15 + G 16, away rigs 17-32 + G 33, linesman 34
 // — same-team neighbours, so mip bleed between cells rarely mixes teams.
-const HOME_G_SLOT = 12
-const AWAY_G_SLOT = 25
+const HOME_G_SLOT = SKATER_RIGS_PER_TEAM
+const AWAY_SKATER_SLOT0 = SKATER_RIGS_PER_TEAM + 1
+const AWAY_G_SLOT = AWAY_SKATER_SLOT0 + SKATER_RIGS_PER_TEAM
 // the linesman: a spare atlas cell, white / black stripes, black breezers + socks
-const OFFICIAL_SLOT = 26
+const OFFICIAL_SLOT = AWAY_G_SLOT + 1
 const OFFICIAL_KIT: Kit = { jersey: 0xf2f2ee, trim: 0x121212, trim2: 0x121212, number: 0x121212, numberOutline: 0xf2f2ee, pants: 0x121212, helmet: 0x121212, gloves: 0x121212, socks: 0x121212 }
 /** He waits along the far boards (the benches are on +Z). */
 const LINESMAN_BOARDS_Z = 38
@@ -317,6 +336,54 @@ export class Rink3dRenderer implements MatchRenderer {
   private linesman: PlayerPose | null = null
   private linesmanDropped = -1
   /** The faceoff that ends the stoppage in progress at time t (null in live play). */
+  /** Penalties (absolute t, offender) — a man sent off walks to the box. */
+  private penalties: Array<{ t: number; id: string }> = []
+  /** Was `id` just penalised (the call up to 20 s ago)? */
+  private penaltyFor(id: string, t: number): boolean {
+    return this.penalties.some((p) => p.id === id && t >= p.t - 1 && t <= p.t + 20)
+  }
+
+  /** Body contacts (agent engine hit events: who, whom, where). */
+  private hits: Array<{ t: number; x: number; z: number; by: string; on: string }> = []
+
+  /**
+   * Contact at a hit (W2, owner: "he wasn't even hit by anyone when he falls
+   * over"): the engine resolves the collision between two 4 Hz frames, so the
+   * interpolated bodies can be 5+ ft apart at the moment it says they met. Over
+   * ±0.25 game-s the two men are drawn INTO the engine's own contact point —
+   * a fact from the stream, not an invention.
+   */
+  private contactAt(id: string, t: number, tx: number, tz: number): { x: number; z: number } {
+    for (const h of this.hits) {
+      if (h.t < t - HIT_CONTACT_S) continue
+      if (h.t > t + HIT_CONTACT_S) break
+      if (h.by !== id && h.on !== id) continue
+      const w = 1 - Math.abs(t - h.t) / HIT_CONTACT_S
+      // each man on his own side of the contact point, shoulder to shoulder
+      const dx = tx - h.x
+      const dz = tz - h.z
+      const d = Math.hypot(dx, dz) || 1
+      const cx = h.x + (dx / d) * HIT_SHOULDER_FT
+      const cz = h.z + (dz / d) * HIT_SHOULDER_FT
+      return { x: tx + (cx - tx) * w, z: tz + (cz - tz) * w }
+    }
+    return { x: tx, z: tz }
+  }
+
+  /** The faceoff whose set/drop window holds `t` (the linesman has the puck over the dot). */
+  private faceoffAround(t: number): (typeof this.faceoffs)[number] | null {
+    for (const f of this.faceoffs) {
+      if (f.t < t) continue
+      return t >= Math.min(f.set, f.t - FACEOFF_HOLD_MIN_S) ? f : null
+    }
+    return null
+  }
+  /** A faceoff is coming in this stoppage (the puck has been collected for it). */
+  private faceoffAhead(t: number): boolean {
+    const d = this.deadAt(t)
+    return d !== null && this.faceoffs.some((f) => f.t >= t && f.t <= t + 30)
+  }
+
   private deadAt(t: number): { x: number; z: number } | null {
     const d = this.deadTimes
     let lo = 0
@@ -329,7 +396,8 @@ export class Rink3dRenderer implements MatchRenderer {
     const w = d[lo - 1]
     return w && t < w.to ? w : null
   }
-  private goalSeq: { t: number; scorer: string; side: 'home' | 'away'; phase: GoalPhase } | null = null
+  /** The goal sequence runs on the GAME clock: t = clock − at (W2 one clock; VT6). */
+  private goalSeq: { t: number; at: number; scorer: string; side: 'home' | 'away'; phase: GoalPhase } | null = null
 
   // ── Play-focus smoother ────────────────────────────────────────────────────
   // Two-layer approach: raw puck → play-focus EMA (long tau, deadzone) → camera spring.
@@ -859,7 +927,7 @@ export class Rink3dRenderer implements MatchRenderer {
     }
     for (let i = 0; i < SKATER_RIGS_PER_TEAM; i++) {
       const h = mk('home', false, i, BENCH_GATE.home.x, BENCH_GATE.home.z)
-      const a = mk('away', false, 13 + i, BENCH_GATE.away.x, BENCH_GATE.away.z)
+      const a = mk('away', false, AWAY_SKATER_SLOT0 + i, BENCH_GATE.away.x, BENCH_GATE.away.z)
       h.rig.visible = false
       a.rig.visible = false
       this.homePoses.push(h)
@@ -1237,6 +1305,10 @@ export class Rink3dRenderer implements MatchRenderer {
       }
     }
     const cues = extractActionCues(stream)
+    this.penalties = stream.flatMap((e) => (e.type === 'penalty' ? [{ t: absTime(e.period, e.t), id: e.player as string }] : []))
+    this.hits = cues
+      .filter((c) => c.kind === 'hit' && c.actorId && c.targetId)
+      .map((c) => ({ t: c.absT, x: normXtoWorld(c.nx), z: normYtoWorld(c.ny), by: c.actorId, on: c.targetId! }))
     this.faceoffs = cues
       .filter((c) => c.kind === 'faceoff')
       .map((c) => ({ t: c.absT, set: c.setT ?? c.absT - FACEOFF_LEAD_S, x: normXtoWorld(c.nx), z: normYtoWorld(c.ny) }))
@@ -1446,7 +1518,11 @@ export class Rink3dRenderer implements MatchRenderer {
 
   /** DEV ONLY: the geometry the viewer-truth detectors judge against. */
   probeGeometry(): ProbeGeometry {
-    return { rinkHalfL: 100, rinkHalfW: RINK_HALF_W, benchGates: { home: { ...BENCH_GATE.home }, away: { ...BENCH_GATE.away } } }
+    return {
+      rinkHalfL: 100, rinkHalfW: RINK_HALF_W,
+      benchGates: { home: { ...BENCH_GATE.home }, away: { ...BENCH_GATE.away } },
+      penaltyBoxes: { home: { x: PENALTY_BOX.home.x, z: -(RINK_HALF_W - 1.5) }, away: { x: PENALTY_BOX.away.x, z: -(RINK_HALF_W - 1.5) } },
+    }
   }
 
   private emitProbe(dt: number): void {
@@ -1499,7 +1575,7 @@ export class Rink3dRenderer implements MatchRenderer {
     const pm = this.puckMesh.position
     const pp = project(pm.x, pm.y, pm.z)
     sink({
-      wall: performance.now() / 1000, dt, clock: this.clockPos, speed: this.speed, playing: this.playing, w, h,
+      wall: performance.now() / 1000, dt, clock: this.clockPos, speed: this.speed, playing: this.playing, dead: this.deadAt(this.clockPos) !== null, w, h,
       cam: { x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z, fov: this.camera.fov, preset: this.camPreset },
       puck: { x: pm.x, y: pm.y, z: pm.z, sx: pp.sx, sy: pp.sy, onScreen: pp.onScreen, simX: snap ? normXtoWorld(snap.puck.x) : NaN, simZ: snap ? normYtoWorld(snap.puck.y) : NaN },
       carrier: (snap?.carrier as string | null | undefined) ?? null,
@@ -1708,7 +1784,20 @@ export class Rink3dRenderer implements MatchRenderer {
     this.puck = puckTrackStep(this.puck, pTargetX, pTargetZ, carrierPose?.playerId ?? '', dt)
 
     // a loose puck rides the engine's height (agent engine: chips, saucers, clears; absent = on the ice)
-    const puckY = carrierPose === null ? Math.max(0, snap.puckZ ?? 0) : 0
+    let puckY = carrierPose === null ? Math.max(0, snap.puckZ ?? 0) : 0
+    // The faceoff (W2, owner: "the puck wasn't even dropped in the faceoff
+    // circle"): from the set, the linesman holds the puck over the dot and
+    // DROPS it there; before the set, in the dead time, it is out of play.
+    this.puckMesh.visible = true
+    const fo = this.faceoffAround(absT)
+    if (fo) {
+      const drop = fo.t - FACEOFF_DROP_S
+      const u = absT <= drop ? 0 : Math.min(1, (absT - drop) / FACEOFF_DROP_S)
+      this.puck = { x: fo.x, z: fo.z, cx: 0, cz: 0, key: '' }
+      puckY = FACEOFF_HAND_Y * (1 - u * u)
+    } else if (this.deadAt(absT) !== null && this.goalSeq === null && carrierPose === null && dt > 0 && this.faceoffAhead(absT)) {
+      this.puckMesh.visible = false
+    }
     this.puckMesh.position.set(this.puck.x, PUCK_H / 2 + puckY, this.puck.z)
     this.carrierMarkPose = carrierPose
 
@@ -1915,10 +2004,16 @@ export class Rink3dRenderer implements MatchRenderer {
   private departSeq = 0
 
   /**
-   * Bind one team's on-ice skaters to rigs and move every rig: players in play
-   * follow the sim, a player who just came on skates out from the bench gate, a
-   * player who just went off coasts to the gate and steps off. On a seek (dt 0)
-   * everything snaps and nobody is mid-change.
+   * Bind one team's on-ice skaters to rigs and move every rig — from the
+   * ENGINE's facts (W2). The agent engine changes through the bench door: a
+   * man coming on appears at his door, a man going off has skated to it. So
+   * the renderer only draws the step through the door (a hop over the boards),
+   * and invents nothing on the ice:
+   *  - no idle bench rigs standing at the boards (the owner's "too many men");
+   *  - a man the sim took off FAR from his door (a stoppage change) walks to it
+   *    only while the play is dead, and is gone the instant play is live;
+   *  - never more drawn on the ice than the sim has there.
+   * On a seek (dt 0) everything snaps and nobody is mid-change.
    */
   private syncSide(
     team: 'home' | 'away',
@@ -1929,6 +2024,7 @@ export class Rink3dRenderer implements MatchRenderer {
     facing?: ReadonlyArray<number | undefined>,
   ): void {
     const gate = BENCH_GATE[team]
+    const dead = this.deadAt(this.clockPos) !== null
     const idList = (ids ?? []).map((id) => (id as string | undefined))
     const slots = poses.map((p) => ({ id: p.playerId as string | null, mode: p.mode }))
     const { follow, entered, left } = assignRigs(slots, idList, poses.map((p) => p.departSeq))
@@ -1937,78 +2033,135 @@ export class Rink3dRenderer implements MatchRenderer {
       poses[r]!.departSeq = ++this.departSeq
       poses[r]!.labelOn = false
     }
-    let benchSlot = 0
     poses.forEach((pose, r) => {
       const slot = slots[r]!
       pose.mode = slot.mode
       if (slot.id !== (pose.playerId as string | null)) this.updatePoseLabelForPlayer(pose, slot.id as PlayerId | null)
       const k = follow[r]!
       if (pose.mode === 'idle' || (pose.mode === 'departing' && dt === 0)) {
-        // idle, or a seek landed mid-change: nobody is skating off — he's on
-        // the bench, standing at the boards and watching the play
+        // on the bench: not drawn (the arena's bench is the bench)
         pose.mode = 'idle'
         pose.playerId = null
         pose.labelOn = false
-        const slot = benchSlot++
-        const b = BENCH_GATE[team]
-        pose.rig.visible = slot < BENCH_SLOTS
-        if (pose.rig.visible) this.updatePose(pose, b.x - 12 + slot * 3 + (slot % 2) * 0.4, RINK_HALF_W + 4.9, dt, simDt, puckWx, puckWz, 10)
+        pose.rig.visible = false
+        return
+      }
+      if (pose.mode === 'departing') {
+        pose.departT += dt
+        // a penalised man goes to the PENALTY BOX, not the bench (W2)
+        const box = dead && pose.playerId !== null ? this.penaltyFor(pose.playerId as string, this.clockPos) : null
+        if (box) {
+          pose.rig.visible = true
+          const bx = PENALTY_BOX[team].x
+          const inside = -(RINK_HALF_W - 1.5)
+          if (pose.worldZ.pos > inside + 0.5) {
+            this.updatePose(pose, bx, inside, dt, simDt, puckWx, puckWz, DEPART_SPEED * 0.7)
+          } else {
+            this.moveDirect(pose, bx, -BENCH_Z, dt, simDt, puckWx, puckWz)
+            this.hopOver(pose)
+            if (pose.worldZ.pos <= -BENCH_Z + 0.5) {
+              pose.mode = 'idle'
+              pose.playerId = null
+              pose.rig.visible = false
+            }
+          }
+          return
+        }
+        const door = Math.hypot(pose.worldX.pos - gate.x, pose.worldZ.pos - gate.z)
+        // far from his door in live play: the sim has him off — so is the picture
+        if (door > DOOR_NEAR_FT && !dead) {
+          pose.mode = 'idle'
+          pose.playerId = null
+          pose.rig.visible = false
+          return
+        }
+        pose.rig.visible = true
+        const exitX = gate.x + ((pose.departSeq % 3) - 1) * 3
+        if (door > 2.5 && pose.worldZ.pos < gate.z) {
+          this.updatePose(pose, exitX, gate.z, dt, simDt, puckWx, puckWz, DEPART_SPEED)
+        } else {
+          // over the boards and down onto the bench
+          this.moveDirect(pose, exitX, BENCH_Z, dt, simDt, puckWx, puckWz)
+          this.hopOver(pose)
+          if (pose.worldZ.pos >= BENCH_Z - 0.5 || pose.departT > DEPART_TIMEOUT_S) {
+            pose.mode = 'idle'
+            pose.playerId = null
+            pose.rig.visible = false
+          }
+        }
         return
       }
       pose.rig.visible = true
-      if (pose.mode === 'departing') {
-        pose.departT += dt
-        // spread along the bench front (5 men don't all hop the boards at one spot)
-        const exitX = gate.x + ((pose.departSeq % 5) - 2) * 2.6
-        this.updatePose(pose, exitX, gate.z, dt, simDt, puckWx, puckWz, DEPART_SPEED)
-        const home = Math.hypot(pose.worldX.pos - exitX, pose.worldZ.pos - gate.z)
-        // he hops the boards once he is close to the bench (not skating up to a point)
-        if (home < 7 || pose.departT > DEPART_TIMEOUT_S) {
-          // through the gate: from next frame he stands on the bench (idle)
-          pose.mode = 'idle'
-          pose.playerId = null
-        }
-        return
-      }
       const p = pos[k]
-      const tx = normXtoWorld(p?.x ?? 0)
-      const tz = normYtoWorld(p?.y ?? 0)
+      const c = this.contactAt(slot.id ?? '', this.clockPos, normXtoWorld(p?.x ?? 0), normYtoWorld(p?.y ?? 0))
+      const tx = c.x
+      const tz = c.z
       if (entered.includes(r)) {
-        if (dt === 0) pose.mode = 'play'
-        else {
-          // over the boards from where he stood on the bench (else the gate),
-          // not from wherever this rig last was — and not all from one spot
-          const onBench = pose.rig.visible && Math.abs(pose.worldZ.pos - (RINK_HALF_W + 4.9)) < 1.5 && Math.abs(pose.worldX.pos - gate.x) < 16
-          const ex = onBench ? pose.worldX.pos : gate.x
-          pose.worldX = snapSpring(ex)
-          pose.worldZ = snapSpring(gate.z)
-          pose.prevWx = ex
-          pose.prevWz = gate.z
+        const nearDoor = Math.hypot(tx - gate.x, tz - gate.z) < DOOR_NEAR_FT
+        if (dt === 0 || !nearDoor) {
+          // a seek, or a man the sim put straight onto the ice: draw him where he is
+          pose.mode = 'play'
+          pose.worldX = snapSpring(tx)
+          pose.worldZ = snapSpring(tz)
+          pose.prevWx = tx
+          pose.prevWz = tz
           pose.velSmX = 0
           pose.velSmZ = 0
-          pose.angle = Math.atan2(tx - ex, tz - gate.z)
+        } else {
+          // over the boards from the bench, right behind his door
+          pose.worldX = snapSpring(tx)
+          pose.worldZ = snapSpring(BENCH_Z)
+          pose.prevWx = tx
+          pose.prevWz = BENCH_Z
+          pose.velSmX = 0
+          pose.velSmZ = 0
+          pose.angle = Math.PI
         }
       }
       if (pose.mode === 'arriving') {
-        this.updatePose(pose, tx, tz, dt, simDt, puckWx, puckWz, ARRIVE_SPEED)
-        if (Math.hypot(pose.worldX.pos - tx, pose.worldZ.pos - tz) < 1.5) pose.mode = 'play'
-        return
+        // once over the boards he is in the play: the normal follow takes him
+        if (pose.worldZ.pos <= RINK_HALF_W - 1.2 || Math.hypot(pose.worldX.pos - tx, pose.worldZ.pos - tz) < 1.5) {
+          pose.mode = 'play'
+        } else {
+          this.moveDirect(pose, tx, tz, dt, simDt, puckWx, puckWz)
+          this.hopOver(pose)
+          return
+        }
       }
       this.updatePose(pose, tx, tz, dt, simDt, puckWx, puckWz, MAX_RENDER_SPEED, facing?.[k])
     })
-    // Never too many men: at most one departing skater may still be on the
-    // ice alongside the full unit (the real change rule is within ~5 ft of the
-    // bench). Extras hop off — the ones nearest the bench first.
+    // Never too many men: in live play at most one departing skater (inside
+    // ~10 ft of his door) may still be drawn alongside the sim's full unit.
+    if (dead) return
     const onIce = poses.filter((p) => p.rig.visible && (p.mode === 'play' || p.mode === 'arriving')).length
     const leaving = poses
       .filter((p) => p.rig.visible && p.mode === 'departing')
       .sort((a, b) => Math.hypot(a.worldX.pos - gate.x, a.worldZ.pos - gate.z) - Math.hypot(b.worldX.pos - gate.x, b.worldZ.pos - gate.z))
     const allowed = Math.max(0, Math.min(1, 6 - onIce))
-    for (const p of leaving.slice(0, Math.max(0, leaving.length - allowed))) {
+    for (const p of leaving.slice(allowed)) {
       p.mode = 'idle'
       p.playerId = null
       p.labelOn = false
+      p.rig.visible = false
     }
+  }
+
+  /** Move a rig at the hop's own pace (no position spring lag): a change is a
+   *  few feet through the door, not a chase across the ice. */
+  private moveDirect(pose: PlayerPose, tx: number, tz: number, dt: number, simDt: number, puckWx: number, puckWz: number): void {
+    const step = approach(pose.worldX.pos, pose.worldZ.pos, tx, tz, simDt, HOP_SPEED, 0.2)
+    pose.worldX = snapSpring(step.x)
+    pose.worldZ = snapSpring(step.z)
+    this.updatePose(pose, step.x, step.z, dt, simDt, puckWx, puckWz, HOP_SPEED)
+  }
+
+  /** The hop over the bench boards: the root rises over the boards line (W2;
+   *  code-only until W5's animation data). */
+  private hopOver(pose: PlayerPose): void {
+    // either boards: the bench side (+z) or the penalty-box side (−z)
+    const u = (Math.abs(pose.worldZ.pos) - (RINK_HALF_W - 1.2)) / (BENCH_Z - (RINK_HALF_W - 1.2))
+    if (u <= 0 || u >= 1) return
+    pose.rig.root.position.y = Math.sin(Math.PI * u) * HOP_RISE_FT
   }
 
   private updatePose(pose: PlayerPose, wx: number, wz: number, dt: number, simDt: number, puckWx: number, puckWz: number, maxSpeed = MAX_RENDER_SPEED, simFacing?: number): void {
@@ -2191,14 +2344,15 @@ export class Rink3dRenderer implements MatchRenderer {
     }
     this.lastEvaluatedClock = absT
 
-    const cueDt = this.playing ? dt : 0
+    // cue lifetimes are GAME seconds (a replay at 0.6× plays them slower, like the picture)
+    const cueDt = this.playing ? dt * this.speed : 0
     this.activeCues = this.activeCues.filter((ac) => {
       ac.elapsed += cueDt
       return ac.elapsed < this.cueLifetime(ac.cue.kind)
     })
     if (this.goalSeq) {
-      this.goalSeq.t += cueDt
-      if (this.goalSeq.t >= GOAL_SEQ.end) this.goalSeq = null
+      this.goalSeq.t = absT - this.goalSeq.at
+      if (this.goalSeq.t >= GOAL_SEQ.end || this.goalSeq.t < 0) this.goalSeq = null
     }
     if (this.celebration) {
       this.celebration.elapsed += cueDt
@@ -2246,7 +2400,7 @@ export class Rink3dRenderer implements MatchRenderer {
       const netX = Math.sign(gx || 1) * NET_X
       this.celebration = { elapsed: 0, x: gx + (netX - gx) * 0.35, z: gz * 0.6 }
       const scorer = this.allPoses().find((p) => p.playerId === cue.actorId)
-      if (scorer) this.goalSeq = { t: 0, scorer: cue.actorId, side: this.homePoses.includes(scorer) ? 'home' : 'away', phase: 'hold' }
+      if (scorer) this.goalSeq = { t: 0, at: cue.absT, scorer: cue.actorId, side: this.homePoses.includes(scorer) ? 'home' : 'away', phase: 'hold' }
     } else if (this.choreo) {
       // authored clips (shots, saves, hits) are started by the choreographer
     } else if (cue.kind === 'save') {

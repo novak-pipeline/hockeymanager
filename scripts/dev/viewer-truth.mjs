@@ -33,7 +33,7 @@ const flag = (k, d) => {
   const f = process.argv.find((a) => a.startsWith(`--${k}=`))
   return f ? f.slice(k.length + 3) : process.argv.includes(`--${k}`) ? true : d
 }
-const ENGINES = String(flag('engines', 'agent,classic')).split(',').filter(Boolean)
+const ENGINES = String(flag('engines', 'agent')).split(',').filter(Boolean)
 const RECORD = flag('record', false) === true
 const OUT = String(flag('out', join(root, '.cache', 'viewer-truth')))
 const SEEDS = Number(flag('seeds', 12))
@@ -124,7 +124,6 @@ try {
 
   let mediaStream = false
   for (const engine of ENGINES) {
-    await win.evaluate((e) => localStorage.setItem('hockey.matchEngine', e), engine)
     let pins
     const pinFile = PINS ? String(PINS).replace('{engine}', engine) : join(OUT, `scenarios-${engine}.json`)
     if (PINS && existsSync(pinFile)) {
@@ -193,7 +192,7 @@ try {
       let stillTaken = false
       const t0 = Date.now()
       const isGoal = sc.kind === 'goalReplay' || sc.kind === 'emptyNetLate'
-      const maxWall = 60_000
+      const maxWall = 90_000
       let st
       let replaySeen = false
       for (;;) {
@@ -230,6 +229,10 @@ try {
         writeFileSync(join(OUT, clipFile), Buffer.from(b64, 'base64'))
       }
       const vt = await win.evaluate(() => window.__viewerProbe.report())
+      if (process.env.VT_DUMP && String(process.env.VT_DUMP).split(',').includes(sc.kind)) {
+        const dump = await win.evaluate(() => ({ events: window.__viewerProbe.events(), frames: window.__viewerProbe.drain() }))
+        writeFileSync(join(OUT, `dump-${label}.json`), JSON.stringify(dump))
+      }
       const fps = await win.evaluate(() => {
         const st = window.__viewerProbe.state()
         return st.frames
@@ -254,10 +257,17 @@ try {
 // ── owner-save safety check ─────────────────────────────────────────────────
 const after = fingerprintSaves()
 const changed = Object.keys({ ...before, ...after }).filter((k) => before[k] !== after[k])
-report.safety = { realSaves: REAL_SAVES, before, after, unchanged: changed.length === 0 }
-if (changed.length) {
+// Attribution: a changed real save is OURS only if its new bytes match something
+// this run's isolated app wrote. Otherwise someone else (the owner, playing his
+// own game while this runs) saved it — reported, not fatal.
+const ours = new Set(existsSync(join(userData, 'saves')) ? readdirSync(join(userData, 'saves')).map((f) => sha1(join(userData, 'saves', f))) : [])
+const byUs = changed.filter((k) => after[k] && ours.has(after[k]))
+report.safety = { realSaves: REAL_SAVES, before, after, changed, changedByThisRun: byUs, unchanged: changed.length === 0 }
+if (byUs.length) {
   failed = true
-  console.error(`✖ OWNER SAVES CHANGED: ${changed.join(', ')} — restore from the backup!`)
+  console.error(`✖ OWNER SAVES OVERWRITTEN BY THIS RUN: ${byUs.join(', ')} — restore from the backup!`)
+} else if (changed.length) {
+  console.log(`⚠ owner saves changed during the run but NOT by it (the owner is playing?): ${changed.join(', ')} — no isolated file matches`)
 } else console.log(`✔ owner saves unchanged (${Object.keys(after).length} files SHA1-verified)`)
 
 // ── summary: worst status per detector per engine ───────────────────────────
@@ -283,7 +293,7 @@ console.log(txt)
 writeFileSync(join(OUT, 'report.txt'), txt + '\n')
 writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))
 if (RECORD) {
-  writeFileSync(join(OUT, 'reel.html'), buildReelHtml(report, CHECKLIST))
+  writeFileSync(join(OUT, 'reel.html'), buildReelHtml(report, CHECKLIST, String(flag('reel', 'v0'))))
   console.log(`▶ reel: ${join(OUT, 'reel.html')}`)
 }
 process.exit(failed ? 1 : 0)

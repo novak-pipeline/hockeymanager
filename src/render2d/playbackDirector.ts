@@ -7,16 +7,17 @@
  *   cover the full game. Every second of game time belongs to exactly one
  *   segment (contiguous, no gaps, no overlaps).
  *
- * Modes:
- *   'full'     — base 2× live play; goal & high-danger windows at 1×; final
- *                2 min of a one-goal 3rd or any OT at 1×; whistle→faceoff
- *                dead time at 5×; ~3.5 s post-goal celebration at 1×.
- *                Target wall time: 8–11 min.
- *   'extended' — 1.5× through extended highlight segments, SKIP_SPEED elsewhere.
- *   'comprehensive' — 1.25× through the broadcast moments (goals, big saves,
- *                fights, posts, big hits), SKIP_SPEED elsewhere.
- *   'key'      — 1× through goal + best-chance + deciding moments, SKIP_SPEED
- *                elsewhere.
+ * Modes (W2 one-clock rule, docs/gameplan-2026-09-28): LIVE HOCKEY PLAYS AT 1×
+ * in every mode, and the speed never changes during play — only the user's
+ * nudge does. Time is saved by CUTTING dead time and filler, never by
+ * fast-forwarding hockey (FM plays its highlights in real time; at 2× the
+ * owner saw "glitchy playback", instant shots and a puck zipping around).
+ *   'full'     — every second of live play at 1×; a stoppage plays its first
+ *                seconds (the whistle, the call; after a goal the whole
+ *                celebration) then CUTS to just before the next drop, so the
+ *                lineup and the drop are seen at 1×.
+ *   'extended' / 'comprehensive' / 'key' — 1× through their highlight
+ *                segments, SKIP_SPEED (a cut) elsewhere.
  *
  * Helpers:
  *   currentSpeed(plan, absT)          — speed at a given absolute game clock.
@@ -26,43 +27,34 @@
  */
 
 import type { GameStream } from '@domain'
-import { absTime } from './timeline'
 import { highlightsFor, type HighlightMode } from './highlights'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-/** Base playback multiplier for a 'full' game (no drama window). */
-const BASE_FULL_SPEED = 2
+/** Live hockey, every mode. */
+const LIVE_SPEED = 1
+
+/** A stoppage plays this long at 1× after the whistle before the cut (the call, the reaction). */
+const STOPPAGE_SHOWN_S = 3
 
 /**
- * Speed through whistle → faceoff dead time in 'full' mode.
- * Ranges 2.5–7 s between whistle and drop; we blast through at 5×.
+ * After a GOAL the stoppage plays through the whole on-ice goal sequence
+ * (celebration → bench → crowd; rink3dRenderer GOAL_SEQ ends at 8 s) and the
+ * instant replay starts from the end of it, on this same game clock.
  */
-const DEAD_TIME_SPEED = 5
+export const GOAL_STOPPAGE_SHOWN_S = 8.5
 
-/** Speed for the ~3.5 s post-goal celebration window in 'full' mode. */
-const CELEBRATION_SPEED = 1
+/** The cut lands this long before the drop: the set and the drop play at 1×. */
+const PRE_DROP_S = 4
 
-/** How long the post-goal celebration window lasts (seconds). */
-const CELEBRATION_DURATION = 3.5
+/** A stoppage shorter than this plays through (a cut would save nothing). */
+const MIN_CUT_S = 3
 
-/** Window (seconds) around a goal/high-danger shot that plays at 1× in 'full' mode. */
-const DRAMA_HALF_WINDOW = 6
-
-/** High-danger shot threshold */
-const HIGH_DANGER_THRESHOLD = 0.5
-
-/** Speed through skipped sections in 'extended' / 'key' mode. */
+/** Speed through skipped sections (a cut, never rendered as motion). */
 export const SKIP_SPEED = 30
 
-/** Speed through active segments in 'extended' mode. */
-const EXTENDED_ACTIVE_SPEED = 1.5
-
-/** Speed for active segments in 'comprehensive' mode. */
-const COMPREHENSIVE_ACTIVE_SPEED = 1.25
-
-/** Speed through active segments in 'key' mode. */
-const KEY_ACTIVE_SPEED = 1
+/** Highlight modes play their segments at 1× too. */
+const HIGHLIGHT_ACTIVE_SPEED = 1
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -153,90 +145,38 @@ export function nextActiveJump(
 // ── Full-mode plan ─────────────────────────────────────────────────────────────
 
 /**
- * Build the 'full' speed plan.
- *
- * Layering order (higher priority overrides lower):
- *  1. Goal celebration window (+0 to +CELEBRATION_DURATION after goal): 1×
- *  2. Drama window (±DRAMA_HALF_WINDOW around goal or high-danger shot): 1×
- *  3. Final 2 min of one-goal 3rd / any OT: 1×
- *  4. Dead time (whistle → faceoff within each period): DEAD_TIME_SPEED
- *  5. Baseline: BASE_FULL_SPEED
+ * 'full': 1× everywhere, except the middle of each whistle → faceoff stoppage,
+ * which is a cut (SKIP_SPEED). The viewer jumps it instantly, like a TV
+ * broadcast cutting from the bench reaction to the faceoff dot.
  */
 function _planFull(stream: GameStream, duration: number): SpeedSegment[] {
-  // Build a per-second speed array (integer seconds, indexed from 0)
-  const len = Math.ceil(duration) + 1
-  const speeds = new Float32Array(len).fill(BASE_FULL_SPEED)
-
-  // --- Layer 5 is already set (baseline) ---
-
-  // --- Layer 4: dead time (whistle → next faceoff) ---
-  // We find whistle events (type 'whistle') and the following faceoff, then
-  // mark those seconds at DEAD_TIME_SPEED.
-  {
-    let whistleAbsT: number | null = null
-    for (const ev of stream) {
-      const at = absTime(ev.period, ev.t)
-      if (ev.type === 'whistle') {
-        whistleAbsT = at
-      } else if (ev.type === 'faceoff' && whistleAbsT !== null) {
-        // Mark whistle→faceoff as dead time
-        const start = Math.floor(whistleAbsT)
-        const end = Math.min(Math.ceil(at), len - 1)
-        for (let s = start; s <= end; s++) speeds[s] = DEAD_TIME_SPEED
-        whistleAbsT = null
-      } else if (ev.type === 'periodEnd' || ev.type === 'gameEnd') {
-        whistleAbsT = null
-      }
-    }
-  }
-
-  // --- Layer 3: final 2 min of one-goal 3rd or any OT ---
-  {
-    const finalScore = _computeFinalScore(stream)
-    const periods = _computePeriodBases(stream)
-    for (const [period, base] of periods) {
-      const len_p = _computePeriodLength(stream, period)
-      if (period >= 4) {
-        // Any OT: last 2 min (or entire OT if short)
-        const windowStart = base + Math.max(0, len_p - 120)
-        const windowEnd = base + len_p
-        _setRange(speeds, Math.floor(windowStart), Math.min(Math.ceil(windowEnd), len - 1), 1)
-      } else if (period === 3) {
-        const diff = Math.abs(finalScore.home - finalScore.away)
-        if (diff <= 1) {
-          const windowStart = base + Math.max(0, len_p - 120)
-          const windowEnd = base + len_p
-          _setRange(speeds, Math.floor(windowStart), Math.min(Math.ceil(windowEnd), len - 1), 1)
-        }
-      }
-    }
-  }
-
-  // --- Layer 2: drama windows around goals and high-danger shots ---
+  const bases = _computePeriodBases(stream)
+  const at = (period: number, t: number): number => (bases.get(period) ?? (period - 1) * 1200) + t
+  const segs: SpeedSegment[] = []
+  let cursor = 0
+  let whistle: { at: number; goal: boolean } | null = null
+  let lastGoalAt = -Infinity
   for (const ev of stream) {
-    const at = absTime(ev.period, ev.t)
-    if (ev.type === 'goal') {
-      const start = Math.max(0, Math.floor(at - DRAMA_HALF_WINDOW))
-      const end = Math.min(Math.ceil(at + DRAMA_HALF_WINDOW), len - 1)
-      _setRange(speeds, start, end, 1)
-    } else if (ev.type === 'shot' && ev.danger >= HIGH_DANGER_THRESHOLD) {
-      const start = Math.max(0, Math.floor(at - DRAMA_HALF_WINDOW))
-      const end = Math.min(Math.ceil(at + DRAMA_HALF_WINDOW), len - 1)
-      _setRange(speeds, start, end, 1)
+    if (ev.type === 'goal') lastGoalAt = at(ev.period, ev.t)
+    if (ev.type === 'whistle') {
+      const w = at(ev.period, ev.t)
+      whistle = { at: w, goal: ev.reason === 'goal' || w - lastGoalAt < 1.5 }
+    } else if (ev.type === 'faceoff' && whistle !== null) {
+      const drop = at(ev.period, ev.t)
+      const from = whistle.at + (whistle.goal ? GOAL_STOPPAGE_SHOWN_S : STOPPAGE_SHOWN_S)
+      const to = drop - PRE_DROP_S
+      if (to - from >= MIN_CUT_S && from > cursor) {
+        segs.push({ fromAbsT: cursor, toAbsT: from, speed: LIVE_SPEED })
+        segs.push({ fromAbsT: from, toAbsT: to, speed: SKIP_SPEED })
+        cursor = to
+      }
+      whistle = null
+    } else if (ev.type === 'periodEnd' || ev.type === 'gameEnd') {
+      whistle = null
     }
   }
-
-  // --- Layer 1: post-goal celebration window ---
-  for (const ev of stream) {
-    if (ev.type === 'goal') {
-      const at = absTime(ev.period, ev.t)
-      const start = Math.floor(at)
-      const end = Math.min(Math.ceil(at + CELEBRATION_DURATION), len - 1)
-      _setRange(speeds, start, end, CELEBRATION_SPEED)
-    }
-  }
-
-  return _compressToSegments(speeds, duration)
+  if (cursor < duration) segs.push({ fromAbsT: cursor, toAbsT: duration, speed: LIVE_SPEED })
+  return segs
 }
 
 // ── Highlight-mode plan ────────────────────────────────────────────────────────
@@ -253,7 +193,7 @@ function _planHighlight(
     return [{ fromAbsT: 0, toAbsT: duration, speed: SKIP_SPEED }]
   }
 
-  const activeSpeed = mode === 'extended' ? EXTENDED_ACTIVE_SPEED : mode === 'comprehensive' ? COMPREHENSIVE_ACTIVE_SPEED : KEY_ACTIVE_SPEED
+  const activeSpeed = HIGHLIGHT_ACTIVE_SPEED
   const result: SpeedSegment[] = []
   let cursor = 0
 
@@ -280,27 +220,6 @@ function _planHighlight(
 }
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
-
-function _setRange(arr: Float32Array, from: number, to: number, speed: number): void {
-  for (let i = from; i <= to && i < arr.length; i++) arr[i] = speed
-}
-
-function _compressToSegments(speeds: Float32Array, duration: number): SpeedSegment[] {
-  const segs: SpeedSegment[] = []
-  let start = 0
-  let current = speeds[0]
-
-  for (let i = 1; i < speeds.length; i++) {
-    if (speeds[i] !== current) {
-      segs.push({ fromAbsT: start, toAbsT: i, speed: current })
-      start = i
-      current = speeds[i]
-    }
-  }
-  // Final segment: stretch to exact duration
-  segs.push({ fromAbsT: start, toAbsT: duration, speed: current })
-  return segs
-}
 
 function _streamDuration(stream: GameStream): number {
   // Find the latest absTime in the stream
@@ -344,60 +263,4 @@ function _computePeriodBases(stream: GameStream): Map<number, number> {
   return bases
 }
 
-function _computePeriodLength(stream: GameStream, period: number): number {
-  if (period <= 3) return 1200
-  let max = 0
-  for (const ev of stream) {
-    if (ev.period === period && ev.t > max) max = ev.t
-  }
-  return max > 0 ? max : 1200
-}
 
-interface FinalScore { home: number; away: number }
-
-function _computeFinalScore(stream: GameStream): FinalScore {
-  const score: FinalScore = { home: 0, away: 0 }
-  // We can't resolve isHome in pure context — use the periodEnd/gameEnd heuristic
-  // via goals. Since we don't have team info here, we'll look at any goal events
-  // to find the diff. Actually we just need "is it a one-goal game?" which we
-  // can approximate: count goal events by their GoalEvent scorer.
-  // Simple approach: check for a 'gameEnd' event, then count goals before it.
-  // Since we don't know home/away here, we track total goals and whether the
-  // difference might be 1. Return dummy values — callers only check the diff.
-
-  // Better: walk the stream for goal events. We won't know home vs away in this
-  // pure context, so we track a "score gap" counter: +1 per goal.
-  // This loses home/away info. Instead, look at the StoppageReason.
-  // Actually, we can look at absTime ordering + goal type — but we STILL lack
-  // home/away. Simplest correct answer: if there's a 'goal' reason on a
-  // periodEnd/whistle near the end of the game, it's probably a one-goal game.
-  // For the purposes of the "final 2 min" heuristic, we want to be conservative
-  // (i.e., show those 2 min whenever there's a tight score). We'll use a different
-  // approach: count whether we have a gameEnd event, and count goals in the 3rd.
-
-  // Practical approach: since this is only used to determine "is it close?",
-  // we can just return a value that triggers the drama window in most cases.
-  // Real tightness: count total goals in periods >= 3.
-  let period3PlusGoals = 0
-  for (const ev of stream) {
-    if (ev.type === 'goal' && ev.period >= 3) period3PlusGoals++
-  }
-  // If there are any OT events, call it close
-  const hasOT = stream.some((ev) => ev.period >= 4)
-  if (hasOT) {
-    score.home = 1
-    score.away = 0
-    return score
-  }
-  // Heuristic: treat as one-goal game if goals scored in periods 1-3 is odd
-  // (meaning both sides can't tie — the last goal breaks the tie).
-  // This is imperfect but conservative. In production the caller passes
-  // actual score data via a separate path.
-  // For the speed planner, we'll just always enable the final-2-min drama
-  // window if 3rd period ends with a one-goal difference (unknown here).
-  // SAFE DEFAULT: always treat 3rd period as close — we'd rather show 2 more
-  // minutes of action than skip a dramatic finish.
-  score.home = 2
-  score.away = 1
-  return score
-}

@@ -234,6 +234,19 @@ export function resolveHit(w: World, ct: Contact, intents: Map<Body, HitIntent>,
   victim.vy += ny * dvV
   hitter.vx -= nx * (jImp / mh) * 0.8
   hitter.vy -= ny * (jImp / mh) * 0.8
+  // After the check the two separate along the line of impact: a man who was
+  // skating INTO the hitter does not carry on through him (W2, owner: "he gets
+  // hit and still slides forward"). Decisions above (force, knockdown) are made
+  // first, so hit counts and outcomes are unchanged.
+  {
+    const vnV = victim.vx * nx + victim.vy * ny
+    const vnH = hitter.vx * nx + hitter.vy * ny
+    const sep = vnH + 1.5
+    if (vnV < sep) {
+      victim.vx += nx * (sep - vnV)
+      victim.vy += ny * (sep - vnV)
+    }
+  }
   // Off his feet when the shove beats what his balance and strength can take.
   const knockdown = dvV > HIT_PHYS.downDv * (0.6 + bal * 0.8)
   // Into the boards: pinned there for a beat — a board battle, not a bounce.

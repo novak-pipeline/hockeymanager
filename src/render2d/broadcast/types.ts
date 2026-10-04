@@ -131,6 +131,8 @@ export type OverlayData =
   | { kind: 'periodSummary'; summary: PeriodDetail }
   | { kind: 'momentCaption'; moment: MomentKind; caption: string; playerId?: string }
   | { kind: 'powerPlay'; side: 'home' | 'away'; offenderId: string; infraction: string }
+  /** The call (W2, owner: "there's a penalty and I don't know what it's for"): who, what, how long. */
+  | { kind: 'penaltyCall'; playerId: string; infraction: string; minutes: number }
 
 export interface OverlayCue {
   channel: 'overlay'
