@@ -199,55 +199,92 @@ export interface TickRumorsResult {
  * Slots: {name} {team} {abbr}
  */
 const RUMOR_SPAWN_POOL: ContentVariant[] = [
+  // Slots: {name} {last} {team} {abbr} {age} {pos} {cap}. Conditions: why,
+  // plus rich (cap hit ≥ $5M) so "an expensive contract" is only ever said of
+  // one (audit F11: it was said of near-minimum depth players).
   { id: 'rum.unhappy.a', conditions: { why: 'unhappy' },
     text: `{name} unhappy at {team}, asking for a trade`,
-    text2: `It has been coming for weeks. {name} has asked {team} to find him a new address, and clubs with cap room are already returning calls.` },
-  { id: 'rum.unhappy.b', conditions: { why: 'unhappy' },
+    text2: `{name} has asked {team} to move him. Clubs with cap room are already returning calls.` },
+  { id: 'rum.unhappy.b', conditions: { why: 'unhappy', rich: true },
     text: `{name} wants out of {team}`,
-    text2: `A player who has stopped pretending. {name} has made his position clear to {team}, and a discontented man on an expensive contract is a difficult thing to move quietly.` },
+    text2: `{name} has made it clear to {team} that he wants a trade. At {cap} a season, he won't be easy to move.` },
+  { id: 'rum.unhappy.b2', conditions: { why: 'unhappy', rich: false },
+    text: `{name} wants out of {team}`,
+    text2: `{name} has told {team} he wants a trade. At {cap}, there's a market for a {age}-year-old {pos} if they want to use it.` },
   { id: 'rum.unhappy.c', conditions: { why: 'unhappy' },
     text: `Word from {team}: {name} has asked for a move`,
-    text2: `Nothing about this is subtle any more. {name} wants a trade, {team} would rather he did not say so out loud, and every rival GM now knows the answer to a question they had not asked.` },
+    text2: `{name} wants a trade. {team} would rather he hadn't said so out loud, and every rival GM now knows anyway.` },
   { id: 'rum.expiring.a', conditions: { why: 'expiring' },
-    text: `{namePoss} deal runs out — and {team} have a decision`,
-    text2: `A year left, twenty-nine candles on the cake, and no extension talk anybody will confirm. Clubs shopping for a rental have {name} circled.` },
+    text: `{namePoss} deal runs out, and {team} have a decision`,
+    text2: `{name} is {age} with one year left and no extension talk anyone will confirm. Clubs shopping for a rental have him on the list.` },
   { id: 'rum.expiring.b', conditions: { why: 'expiring' },
     text: `Is this the last season {name} spends at {team}?`,
-    text2: `The contract says one more year. The silence around it says something else. {team} have not moved to extend {name}, and the rest of the league has noticed.` },
+    text2: `One year left on the deal, and {team} haven't moved to extend {name}. The rest of the league has noticed.` },
   { id: 'rum.expiring.c', conditions: { why: 'expiring' },
     text: `{team} may be running out of time on {name}`,
-    text2: `An expiring deal turns a player into a question every March: extend, trade, or lose him for nothing. {team} have not answered it about {name}.` },
+    text2: `Extend him, trade him, or lose him for nothing in July. {team} haven't picked one for {name} yet.` },
   { id: 'rum.seller.a', conditions: { why: 'seller' },
     text: `{team} open to offers for {name}`,
-    text2: `A club going nowhere with a player worth something. {team} would listen on {name}, and interest is described as early-stage.` },
+    text2: `{team} are near the bottom and {name} is worth something. They'd listen. Interest is early.` },
   { id: 'rum.seller.b', conditions: { why: 'seller' },
     text: `{name} is the prize on a {team} roster going nowhere`,
-    text2: `Sellers sell. {team} are out of the race and {name} is the asset that would move the needle for somebody else — the calls have started.` },
+    text2: `{team} are out of it and {name} is the piece that would help somebody else. The calls have started.` },
   { id: 'rum.seller.c', conditions: { why: 'seller' },
     text: `Rivals circle {name} as {team} slip out of it`,
-    text2: `The standings have made the decision for them. {team} are listening on {name}, quietly, and quietly is how these things start.` },
+    text2: `The standings have made the call for {team}. They're listening on {name}, a {age}-year-old {pos} at {cap}.` },
   { id: 'rum.any',
     text: `{name} linked with a move away from {team}`,
-    text2: `Sources indicate {team} would take a call on {name}. Nothing is close, and nothing has been denied either.` },
+    text2: `{team} would take a call on {name}. Nothing is close, and nothing has been denied either.` },
 ]
 
 const RUMOR_HOT_POOL: ContentVariant[] = [
+  // The mill at a boil. Every man whose heat crosses the line reads one of
+  // these, so the pool is deep and every line carries a fact about HIM
+  // ({age} {pos} {cap}) instead of "are believed to be in contact" (178× a
+  // season before the 2026-10 pass). Siblings at equal specificity.
   { id: 'rum.hot.a',
     text: `Trade talk heats up: {name} close to leaving {team}?`,
-    text2: `With the deadline approaching, chatter around {name} is intensifying. Multiple clubs are believed to be in contact with {team}.` },
+    text2: `The calls about {name} have picked up. {team} have had more than one serious conversation about the {age}-year-old.` },
   { id: 'rum.hot.b',
     text: `Three clubs said to be in on {name}`,
-    text2: `What was a whisper in January is a queue in February. {team} are fielding real offers for {name}, and a man who has been asked about this twice a week is starting to sound like a man who expects to move.` },
+    text2: `{team} are fielding real offers for {name}. He's been asked about it twice a week and has stopped pretending not to know.` },
   { id: 'rum.hot.c',
     text: `{name} to a rival of {team}? The calls are getting serious`,
-    text2: `The temperature has changed. {team} have gone from listening on {name} to negotiating, and the difference is visible in how carefully everyone involved is now speaking.` },
+    text2: `{team} have gone from listening on {name} to negotiating. Nobody involved is saying much in public.` },
   { id: 'rum.hot.d',
     text: `{team} said to be closing in on a deal for {name}`,
-    text2: `Nobody will put a name to it, which is usually the last stage. {name}'s situation at {team} has moved from speculation to logistics.` },
+    text2: `Nobody will put a name to the other club yet. For {name}, it's moved from speculation to logistics.` },
   { id: 'rum.hot.e',
     text: `The {name} market is wide open`,
-    text2: `Half the contenders have called {team} about {name}, and the asking price has gone up twice this week. Something gives before the deadline.` },
+    text2: `Half the contenders have called {team} about {name}, and the asking price has gone up twice this week.` },
+  { id: 'rum.hot.f',
+    text: `{team} set a price on {name}`,
+    text2: `A {age}-year-old {pos} at {cap}. {team} have told callers what it takes, and at least one club didn't hang up.` },
+  { id: 'rum.hot.g',
+    text: `{name} skips the media scrum as trade talk grows`,
+    text2: `{name} wasn't available after practice. {team} are talking to more than one club about him.` },
+  { id: 'rum.hot.h',
+    text: `Scouts in the building for {name}`,
+    text2: `Pro scouts from several clubs were in to watch {team} this week. Most of them were there for {name}.` },
+  { id: 'rum.hot.i',
+    text: `{abbr} listening on {name}, and the line is busy`,
+    text2: `{team} have had enough calls about {name} that the conversation has turned to what comes back. A {pos} at {cap} fits a lot of rosters.` },
+  { id: 'rum.hot.j',
+    text: `{name} has played his way onto the market`,
+    text2: `{team} didn't plan to move {name}. The offers changed that, and now they're comparing them.` },
 ]
+
+/** Slot fills for a rumour about one man: his age, position and cap hit
+ *  give every line something true and specific to say. */
+function rumorSlotsFor(p: Player, team: Team): Record<string, string> {
+  const pos = p.position === 'D' ? 'defenceman' : p.position === 'G' ? 'goalie' : p.position === 'C' ? 'centre' : 'winger'
+  const m = p.contract.salary / 1_000_000
+  const cap = m >= 1 ? `$${m.toFixed(m >= 10 ? 0 : 1).replace(/\.0$/, '')} million` : `$${Math.round(p.contract.salary / 1000)}K`
+  return {
+    name: p.name, last: p.name.split(' ').slice(-1)[0] ?? p.name, team: team.name, abbr: team.abbreviation,
+    namePoss: possessive(p.name), teamPoss: possessive(team.name), age: String(p.age), pos, cap,
+  }
+}
 
 export function tickRumors(args: TickRumorsArgs): TickRumorsResult {
   const { state, teams, players, userTeamId, deadlineDay, day, year, rng } = args
@@ -308,8 +345,8 @@ export function tickRumors(args: TickRumorsArgs): TickRumorsResult {
       rumorSet.add(pid as string)
 
       const why = isUnhappy ? 'unhappy' : isExpiring ? 'expiring' : 'seller'
-      const rumorSlots = { name: p.name, team: team.name, abbr: team.abbreviation, namePoss: possessive(p.name), teamPoss: possessive(team.name) }
-      const spawnV = pickStable(RUMOR_SPAWN_POOL, { why }, `rum|${pid as string}|${year}`) ?? RUMOR_SPAWN_POOL[RUMOR_SPAWN_POOL.length - 1]!
+      const rumorSlots = rumorSlotsFor(p, team)
+      const spawnV = pickStable(RUMOR_SPAWN_POOL, { why, rich: p.contract.salary >= 5_000_000 }, `rum|${pid as string}|${year}`) ?? RUMOR_SPAWN_POOL[RUMOR_SPAWN_POOL.length - 1]!
       const headline = renderTemplate(spawnV.text, rumorSlots)
       const body = renderTemplate(spawnV.text2 ?? '', rumorSlots)
 
@@ -358,7 +395,7 @@ export function tickRumors(args: TickRumorsArgs): TickRumorsResult {
       emitted.add(hotKey)
       const team = teams.get(rumor.teamId as TeamId)
       if (p && team) {
-        const hotSlots = { name: p.name, team: team.name, abbr: team.abbreviation, namePoss: possessive(p.name), teamPoss: possessive(team.name) }
+        const hotSlots = rumorSlotsFor(p, team)
         const hotV = pickStable(RUMOR_HOT_POOL, {}, `hot|${rumor.playerId}|${year}`) ?? RUMOR_HOT_POOL[0]!
         newsSeeds.push({
           category: 'trade',

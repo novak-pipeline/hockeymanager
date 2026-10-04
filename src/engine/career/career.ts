@@ -5308,7 +5308,7 @@ export class Career {
         ? this.data.teams.get(asTeamId(tid))?.name
         : undefined
     const beat = arc.beats[arc.beats.length - 1]?.summary ?? ''
-    return who ? `${who} — ${beat}` : beat
+    return who ? `${who}: ${beat}` : beat
   }
 
   /* ────────────────────────── press corps (Wave 2) ────────────────────────── */
@@ -5362,11 +5362,18 @@ export class Career {
       }
     }
 
-    const rumors = this.tentpoles.rumors.map((r) => ({
-      playerName: nameOf(r.playerId),
-      teamAbbr: this.data.teams.get(asTeamId(r.teamId))?.abbreviation ?? r.teamId,
-      heat: r.heat,
-    }))
+    // Only a rumour a columnist would actually write about: a player on a
+    // league club (not a farm depth body), hottest first (audit F10: the GM's
+    // own AHL depth man was 'at a fever pitch' 14 times a season).
+    const leagueClubs = new Set(this.data.league.teams.map((t) => t as string))
+    const rumors = this.tentpoles.rumors
+      .filter((r) => leagueClubs.has(r.teamId) && r.heat >= 50)
+      .sort((a, b) => b.heat - a.heat)
+      .map((r) => ({
+        playerName: nameOf(r.playerId),
+        teamAbbr: this.data.teams.get(asTeamId(r.teamId))?.abbreviation ?? r.teamId,
+        heat: r.heat,
+      }))
 
     const recordsWatch: string[] = []
     const pts = this.recordsState.singleSeason.points[0]
@@ -8506,6 +8513,9 @@ export class Career {
       firstGoalScorers,
       goalie: goalie ? { playerId: goalie.playerId, name: goalie.name, saves: goalie.saves, shotsAgainst: goalie.shotsAgainst } : null,
       fight,
+      oppName: opp.name,
+      goalsFor: us,
+      goalsAgainst: them,
     })
     if (moment) {
       chronicleEvent(this.chronicle, {
