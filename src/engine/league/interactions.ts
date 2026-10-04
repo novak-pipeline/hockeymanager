@@ -15,6 +15,7 @@
  */
 
 import type { Player } from '@domain'
+import { stableSeed } from '@engine/story/prose'
 import type { Rng } from '@engine/shared/rng'
 import type { SceneSpeaker } from '@engine/story/decisionEvents'
 import type { LockerRoomState, Relationship } from './lockerRoom'
@@ -208,22 +209,50 @@ function chooseKind(
   return null
 }
 
-function messageFor(_p: Player, kind: InteractionKind, feudName: string | null): string {
+function messageFor(p: Player, kind: InteractionKind, feudName: string | null): string {
   // First person — the player is speaking directly TO the GM (this is voiced on the
   // phone and read as his own words on the inbox card), not narrated in the third
-  // person (#1).
+  // person (#1). Several lines per kind, picked stably per player and kind, each
+  // built from what is true of HIM (his deal, his age), so two men never raise
+  // the same concern in the same sentence (audit F7).
+  const yrs = p.contract.yearsRemaining
+  const pick = (opts: string[]): string => opts[stableSeed(`concern|${p.id as string}|${kind}`) % opts.length]!
   switch (kind) {
     case 'tradeRequest':
-      return `I need to be straight with you — I'm not happy here. I think it's best for both of us if you move me. I want out.`
+      return pick([
+        `I'm not happy here, and I don't see it changing. I think it's best for both of us if you move me.`,
+        `I want a trade. I've thought about it for a while. I'd rather do this the right way than through the papers.`,
+        `I need a fresh start. Can you find me somewhere I'll play?`,
+      ])
     case 'future':
-      return `I wanted to talk about my future. My deal's winding down, and I need to know where I stand with you.`
+      return yrs <= 0
+        ? pick([`My deal's up. I need to know if you want me back.`, `I'm about to be a free agent. Where do we stand?`])
+        : pick([
+            `I've got ${yrs === 1 ? 'one year' : `${yrs} years`} left. I need to know where I stand with you.`,
+            `Can we talk about an extension? I'd like to know before the season gets away from us.`,
+            `My agent keeps asking me what the plan is. I'd like to hear it from you.`,
+          ])
     case 'iceTime':
-      return `I feel like I'm ready for more out there — a bigger role, more responsibility. What's your plan for me?`
+      return pick([
+        `I think I'm ready for more out there. A bigger role, more minutes. What's your plan for me?`,
+        `I want more ice time. I can help this team more than I'm getting the chance to.`,
+        `I'm ${p.age}, and I want to find out what I can do with real minutes. What do I have to do?`,
+      ])
     case 'feud':
-      return `I've got to be honest with you: there's friction in that room${feudName ? ` with ${feudName}` : ''}, and it's starting to get into my head on the ice.`
+      return feudName
+        ? pick([
+            `Me and ${feudName} aren't getting along, and it's starting to get into my head on the ice.`,
+            `I've got a problem with ${feudName}. I'd rather tell you now than have it blow up in the room.`,
+            `It's ${feudName}. We can't play together like this. Something has to give.`,
+          ])
+        : `There's friction in our room, and it's starting to get into my head on the ice.`
     case 'unhappy':
     default:
-      return `Something's been off with me lately. Can we sit down and talk about where things are at?`
+      return pick([
+        `Something's been off with me lately. Can we sit down and talk?`,
+        `I'm not enjoying it right now. I wanted you to hear that from me.`,
+        `Honestly, I'm not in a good place with how things are going. Can we talk?`,
+      ])
   }
 }
 

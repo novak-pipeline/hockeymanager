@@ -300,8 +300,8 @@ export function findTurningPoint(
   const phrase =
     g.period >= 4
       ? ours
-        ? `${g.scorerName} ended it in overtime — yours.`
-        : `${g.scorerName} ended it in overtime. One point, not two.`
+        ? `${g.scorerName} won it in overtime.`
+        : `${g.scorerName} won it for them in overtime. You leave with one point.`
       : best === gwgIndex && scoringSideDiff === 0
         ? ours
           ? `${g.scorerName}'s go-ahead goal ${where} broke the ${u}–${t} tie — the goal that won it.`

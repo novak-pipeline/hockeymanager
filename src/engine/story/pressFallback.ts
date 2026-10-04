@@ -147,11 +147,19 @@ function expectationBlurb(sheet: PressFactSheet): string | null {
     return `They're behind a preseason projection of ${ordinal(t.expectedRank)}, though ${gp} ${gp === 1 ? 'game is' : 'games is'} a small sample.`
   }
   if (overPerforming(sheet)) {
-    if (diff >= 5) return `They were projected ${ordinal(t.expectedRank)} before the season. They're ${diff} places better than that.`
+    if (diff >= 5) return alt(sheet, 'expO', [
+      `They were projected ${ordinal(t.expectedRank)} before the season. They're ${diff} places better than that.`,
+      `${diff} places better than the ${ordinal(t.expectedRank)}-place preseason projection.`,
+      `The preseason models had them ${ordinal(t.expectedRank)}. They're ${ordinal(t.rank)}.`,
+    ])
     return `The preseason numbers had them ${ordinal(t.expectedRank)}; they've beaten that projection by ${diff} spots.`
   }
   if (underPerforming(sheet)) {
-    if (diff >= 5) return `They were projected ${ordinal(t.expectedRank)}. They're ${diff} places worse than that.`
+    if (diff >= 5) return alt(sheet, 'expU', [
+      `They were projected ${ordinal(t.expectedRank)}. They're ${diff} places worse than that.`,
+      `${diff} places below the ${ordinal(t.expectedRank)}-place preseason projection.`,
+      `The preseason models had them ${ordinal(t.expectedRank)}. They're ${ordinal(t.rank)}.`,
+    ])
     return `The club sits ${diff} ${diff === 1 ? 'spot' : 'spots'} below their preseason projection of ${ordinal(t.expectedRank)}.`
   }
   return `They're running exactly to projection, sitting ${ordinal(t.rank)} as expected.`

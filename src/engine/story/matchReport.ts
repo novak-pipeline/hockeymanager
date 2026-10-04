@@ -183,7 +183,7 @@ const SHAPE_POOL: ContentVariant[] = [
   { id: 'mr.ot.win', conditions: { won: true, decidedBy: 'overtime' },
     text: `Three-on-three, and it did not last long. The {us} win it in overtime, {ourGoals}-{theirGoals}.` },
   { id: 'mr.ot.loss', conditions: { won: false, decidedBy: 'overtime' },
-    text: `A point salvaged, a point lost. The {us} fall in overtime, and open ice at three-on-three is a cruel way to end a night this even.` },
+    text: `The {us} fall in overtime and take one point from the {them}, {theirGoals}-{ourGoals}.` },
   { id: 'mr.playoff.tight', conditions: { playoff: true, maxMargin: 1 },
     text: `Playoff hockey, which is to say two hours of very little space and one mistake. {ourGoals}-{theirGoals}.` },
   { id: 'mr.wire', conditions: { won: true, neverTrailed: true, wireToWire: true },

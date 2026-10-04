@@ -523,7 +523,7 @@ export function buildGameday(c: DeskCtx, f: GamedayFacts): BeatArticle | null {
   ).filter(Boolean)
   const sections = lineSections(f.lines, true)
   if (watchLines.length > 0) sections.unshift({ title: 'What to watch', lines: watchLines })
-  const dek = `${f.home ? 'vs.' : 'at'} ${f.opp.name}. ${f.starter ? `${lastName(f.starter.name)} ${f.playoff ? 'in goal' : 'expected in goal'}.` : ''} Projected lines inside.`
+  const dek = `${f.home ? 'vs.' : 'at'} ${f.opp.name}. ${f.starter ? `${lastName(f.starter.name)} ${f.playoff ? 'in goal' : 'expected in goal'} (${f.starter.line}).` : ''} Projected lines inside.`
   return article(c, 'gameday', headline, dek.replace(/\s+/g, ' ').trim(), body, {
     sections,
     playerIds: f.watch.map((w) => w.playerId).filter((x): x is string => !!x).slice(0, 3),

@@ -207,7 +207,7 @@ const HATTRICK_POOL: ContentVariant[] = [
   { id: 'v.hat.pro', conditions: { minProfessionalism: 14 },
     text: `Fun night. Pucks went in. The two points are what actually matters.` },
   { id: 'v.hat.loyal', conditions: { minLoyalty: 14 },
-    text: `a hatty in front of these fans. {city} you're the best. keeping one of the hats.` },
+    text: `hat trick at home. {city} you were loud tonight. keeping one of the hats.` },
   { id: 'v.hat.fiery', conditions: { maxTemperament: 8 },
     text: `nice to shut a few people up for a night` },
   { id: 'v.hat.grinder', conditions: { minDetermination: 15 },

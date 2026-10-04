@@ -5849,8 +5849,8 @@ export class Career {
   private static teaserTail(a: BeatArticle): string {
     switch (a.kind) {
       case 'gameday': return 'Projected lines and what to watch.'
-      case 'grades': return 'Grades for everyone who dressed.'
-      case 'mailbag': return `${a.qa?.length ?? 0} of your questions, answered.`
+      case 'grades': return a.dek || 'Grades for everyone who dressed.'
+      case 'mailbag': return a.dek || `${a.qa?.length ?? 0} of your questions, answered.`
       case 'notebook': return a.dek
       case 'moves': return 'The day\u2019s transactions.'
       default: return a.dek
@@ -16736,7 +16736,9 @@ export class Career {
         'contract',
         `${cand.name} placed on waivers by ${team.abbreviation}`,
         `${team.name} have placed ${cand.name} (${cand.position}, ${cand.age}, $${(cand.contract.salary / 1_000_000).toFixed(2)}M) on waivers. ` +
-          `You have until the wire clears to claim him and his contract — head to the Waiver Wire to put in a claim.`,
+          (cand.contract.yearsRemaining > 1
+            ? `A claim takes on all ${cand.contract.yearsRemaining} years of the deal. Claims go through the Waiver Wire.`
+            : `A claim takes on the contract, which ends this season. Claims go through the Waiver Wire.`),
         { playerId: cand.id as string, teamId: tid as string }
       )
     }
@@ -18514,13 +18516,13 @@ export class Career {
           const stance = posture === 'rebuild'
             ? `${t.abbreviation} are rebuilding and would sell`
             : spare ? `A spare part in ${t.abbreviation}'s depth`
-              : backupG && posture === 'contend' ? `${t.abbreviation} would move their backup — at a price` : `${t.abbreviation} are retooling`
+              : backupG && posture === 'contend' ? `${t.abbreviation} would move their backup, at a price` : `${t.abbreviation} are retooling`
           pool.push({
             kind: 'trade', group: g, playerId: p.id as string, name: p.name, position: p.position, age: p.age,
             overall: badge(p, needFog).overall, ...(p.faceId !== undefined ? { faceId: p.faceId } : {}), hand: p.handedness,
             teamId: tid as string, teamAbbr: t.abbreviation,
             capHit: p.contract.salary, years: p.contract.yearsRemaining,
-            cost: `${stance}. The price: ${tierOf(v).toLowerCase()} value`,
+            cost: `${stance}. ${Career.approxMoney(p.contract.salary)} × ${p.contract.yearsRemaining}; it would take ${tierOf(v).toLowerCase()} value to get him.`,
             assetValue: Math.round(v), assetTier: tierOf(v),
           })
         })
@@ -27563,7 +27565,7 @@ export class Career {
         }
       })
     const callToAction = cards.length
-      ? ` Their cards are attached — make the calls here, or leave the queue to us.`
+      ? ` Their cards are attached. Make the calls here, or leave the queue to us.`
       : ` Nothing awaits your call in Recruitment → Reports.`
     const body = `${flagged}${working} ${untriaged} flagged prospect${untriaged === 1 ? '' : 's'} await${untriaged === 1 ? 's' : ''} your call.${callToAction}`
     // A8: a week that produced no new name, and no card the GM has not already
@@ -27661,7 +27663,7 @@ export class Career {
           SCOUT_NOTE_POOL,
           { band: potStars >= 4.5 ? 'elite' : potStars >= 3.5 ? 'high' : 'solid', draft: !!elig },
           `note|${p.id as string}`,
-          { role: roleWords }
+          { role: roleWords, age: String(p.age), club: (() => { const tid = this.teamOf(p.id); return tid ? this.data.teams.get(tid)?.name : undefined })() ?? 'his club' }
         )
     const scoutName = scout?.name ?? 'Your scouts'
     const foundDate = dayToDateISO(this.year, day)

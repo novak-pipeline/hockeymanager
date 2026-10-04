@@ -39,7 +39,7 @@ const POOLS: Array<[string, ContentVariant[], string[]]> = [
   ['CEILING', CEILING_POOL, ['name', 'namePoss', 'role', 'age']],
   ['ANNIVERSARY', ANNIVERSARY_POOL, ['what', 'years']],
   ['GAMES_MILESTONE', GAMES_MILESTONE_POOL, ['name', 'n', 'nth', 'pos', 'team']],
-  ['SCOUT_NOTE', SCOUT_NOTE_POOL, ['role']],
+  ['SCOUT_NOTE', SCOUT_NOTE_POOL, ['role', 'age', 'club']],
   ['FIGHT_LINE', FIGHT_LINE_POOL, ['ours', 'theirs', 'opp']],
   ['UFA_SIGNING', UFA_SIGNING_POOL, ['team', 'name', 'pos', 'age', 'years', 'term', 'aav', 'total']],
   ['TRADE_SLOT', TRADE_SLOT_POOL, ['name', 'caliber']],

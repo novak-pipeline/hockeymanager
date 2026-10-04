@@ -338,9 +338,9 @@ export function registerGame(args: RegisterGameArgs): RegisterGameResult {
         const label = threshold >= FLASH_THRESHOLD_2 ? 'bitter' : 'heated'
         const winnerTeam = goalsA > goalsB ? dispA : goalsA < goalsB ? dispB : null
         const winnerLine = winnerTeam
-          ? ` ${winnerTeam} took this one, adding fuel to the fire.`
-          : ' The game ended level, settling nothing.'
-        const tenor = threshold >= FLASH_THRESHOLD_2 ? 'boiled over into genuine bad blood' : 'grown into a real, simmering rivalry'
+          ? ` ${winnerTeam} won this one ${Math.max(goalsA, goalsB)}-${Math.min(goalsA, goalsB)}.`
+          : ' The game ended level.'
+        const tenor = threshold >= FLASH_THRESHOLD_2 ? 'boiled over into genuine bad blood' : 'grown into a real rivalry'
         newsSeeds.push({
           category: 'league',
           headline: `${dispA} vs ${dispB}: a ${label} rivalry ignites`,
