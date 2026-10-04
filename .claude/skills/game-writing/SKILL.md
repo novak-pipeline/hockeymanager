@@ -11,6 +11,8 @@ Every sentence the game shows is read by someone who loves hockey and has read t
 
 1. **True to the sim.** Every claim must be derivable from game state you were actually given: the score, the stat line, the standings, the contract, the injury, the relationship history. Never invent a cause, a quote, a feeling or a number. If the facts don't support a sentence, cut the sentence.
    *Why:* false text is worse than no text. The owner has flagged "doesn't make sense" lines as the top problem.
+   **Never expose hidden numbers.** Text never prints a raw rating: no "overall 68", no "(67)", no "+17 over him", no "74 against 72". The player sees ratings only as the profile shows them (1–20 attributes, with scout estimates), so prose speaks in tiers and words: "a backup-level starter", "a clear upgrade", "top-pair", "fringe". Base those words on the user's scouted read, never the true hidden rating.
+   *Why:* the owner flagged it twice. It breaks fog-of-war and reads like a spreadsheet.
 2. **Specific beats general.** Names, numbers, dates, places, opponents and stakes. Replace any sentence that could appear in any game about any team.
    - Bad: "He has been playing well lately."
    - Good: "Five goals in his last four, two of them on the power play."
