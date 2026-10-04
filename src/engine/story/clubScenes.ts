@@ -46,7 +46,7 @@ export const DRAFT_CALL_EVENTS: DecisionEvent[] = [
         effects: { morale: 12, roomRespect: -2 },
         outcome:
           `You told an eighteen-year-old that July is an audition. He believed you, which means development ` +
-          `camp now has his name on it — and the staff will be asked, in front of him, what they saw.`,
+          `camp now has his name on it, and the staff will be asked, in front of him, what they saw.`,
       },
       {
         id: 'go-back',
@@ -62,7 +62,7 @@ export const DRAFT_CALL_EVENTS: DecisionEvent[] = [
         effects: { morale: -10, roomRespect: 8, residue: 'wasDismissed' },
         outcome:
           `A cold thing to say to a kid on the best day of his life, and a policy the whole room will hear about ` +
-          `by Tuesday. Nobody in your organisation will ever accuse you of selling something you can't deliver.`,
+          `by Tuesday.`,
       },
     ],
   },
@@ -82,7 +82,7 @@ export const DRAFT_CALL_EVENTS: DecisionEvent[] = [
         effects: { morale: -8, roomRespect: 7 },
         outcome:
           `You read him his own scouting file. It was not kind and it was not wrong, and he now knows precisely ` +
-          `what he has to disprove — to you, in writing, this season.`,
+          `what he has to prove wrong this season.`,
       },
       {
         id: 'chip',
@@ -90,7 +90,7 @@ export const DRAFT_CALL_EVENTS: DecisionEvent[] = [
         effects: { morale: 10, roomMorale: 2, roomRespect: -3, leakChance: 0.25 },
         outcome:
           `He will carry it. Your development staff would rather you had coached him than motivated him, and a ` +
-          `general manager telling a teenager to play angry is the kind of line that gets repeated.`,
+          `general manager telling a teenager to play angry will get repeated.`,
       },
       {
         id: 'brush-off',
@@ -144,7 +144,7 @@ export const ARRIVAL_EVENTS: DecisionEvent[] = [
         effects: { morale: 6, roomRespect: 4, roomMorale: -3, promise: 'iceTime' },
         outcome:
           `A defined role is worth more to some players than a bigger vague one. He left knowing exactly what ` +
-          `"a good night" means here — and so did the man who has been doing that job all season.`,
+          `"a good night" means here. So did the man who has been doing that job all season.`,
       },
     ],
   },
@@ -173,7 +173,7 @@ export const FARM_TRIP_EVENTS: DecisionEvent[] = [
         effects: { roomRespect: 3, promise: 'iceTime' },
         outcome:
           `You spent the week in a half-full building watching nineteen-year-olds play the biggest games of their ` +
-          `lives. You now have opinions about them that no report could have given you — and the ones who ` +
+          `lives. You now have your own opinions about them, and the ones who ` +
           `played well know you saw it.`,
       },
       {
@@ -228,7 +228,7 @@ export const RACE_EVENTS: DecisionEvent[] = [
         effects: { roomRespect: 5, roomMorale: -3 },
         outcome:
           `{last} nodded like a man who had been hoping you would say it. The music got quieter. The standard ` +
-          `in that room is now higher than the standings, which is either exactly right or a long April.`,
+          `in that room is now higher than the standings.`,
       },
       {
         id: 'promise-rest',
@@ -316,7 +316,7 @@ export const CODE_EVENTS: DecisionEvent[] = [
         label: `"The league has the tape. Let Player Safety handle it."`,
         effects: { roomMorale: -4, roomRespect: -2, residue: 'wasDismissed' },
         outcome:
-          `Correct on paper and cold in the room. {last} nodded and left. Nobody will do anything stupid ` +
+          `The coaches agreed with you. {last} nodded and left. Nobody will do anything stupid ` +
           `tomorrow, and nobody will forget that you asked them not to.`,
       },
     ],

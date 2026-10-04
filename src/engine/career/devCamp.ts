@@ -102,9 +102,9 @@ export function citeDrills(results: DrillResult[]): string | null {
   const best = [...results].sort((a, b) => a.rank / a.of - b.rank / b.of)[0]
   const worst = [...results].sort((a, b) => b.rank / b.of - a.rank / a.of)[0]
   if (!best) return null
-  if (best.rank <= Math.max(1, Math.ceil(best.of * 0.15))) return `${ORD(best.rank)} of ${best.of} in ${drillPhrase(best.drill)}`
-  if (worst && worst.rank >= Math.floor(worst.of * 0.85) && worst.of >= 4) return `${ORD(worst.rank)} of ${worst.of} in ${drillPhrase(worst.drill)}`
-  return `mid-pack in testing (his best: ${ORD(best.rank)} of ${best.of} in ${drillPhrase(best.drill)})`
+  if (best.rank <= Math.max(1, Math.ceil(best.of * 0.15))) return `finished ${ORD(best.rank)} of ${best.of} in ${drillPhrase(best.drill)}`
+  if (worst && worst.rank >= Math.floor(worst.of * 0.85) && worst.of >= 4) return `finished ${ORD(worst.rank)} of ${worst.of} in ${drillPhrase(worst.drill)}`
+  return `was mid-pack in testing (his best: ${ORD(best.rank)} of ${best.of} in ${drillPhrase(best.drill)})`
 }
 
 /** The whole week's evidence as one clause. */

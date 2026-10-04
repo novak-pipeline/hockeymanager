@@ -14929,29 +14929,29 @@ export class Career {
       const a = assessOf.get(p.id as string)
       if (a) {
         const drafted = draftedIds.has(p.id as string)
-        lines.push(`${p.name}${drafted ? " (this year's pick)" : ''}${(p.id as string) === standoutId ? ' — CAMP STANDOUT' : ''} — ${a.grade}: ${a.read}`)
+        lines.push(`${p.name}${drafted ? " (this year's pick)" : ''}${(p.id as string) === standoutId ? ' (camp standout)' : ''}, grade ${a.grade}. ${a.read}`)
         continue
       }
       // Deterministic camp read; watching him closes a sliver of the fog.
       const { z } = this.devCampRead(p)
       const drafted = draftedIds.has(p.id as string)
       const isStandout = (p.id as string) === standoutId
-      const tag = `${drafted ? " (this year's pick)" : ''}${isStandout ? ' ★ CAMP STANDOUT' : ''}`
+      const tag = `${drafted ? " (this year's pick)" : ''}${isStandout ? ' (camp standout)' : ''}`
       if (z > 0.5) {
-        lines.push(`${p.name}${tag} — turned heads all week. ${p.position === 'G' ? 'Tracked pucks like a veteran' : 'Quicker release and better pace than the book had'}; the staff want him back for main camp.`)
+        lines.push(`${p.name}${tag}: turned heads all week. ${p.position === 'G' ? 'Tracked pucks like a veteran' : 'Quicker release and better pace than the book had'}. The staff want him back for main camp.`)
       } else if (z < -0.5) {
-        lines.push(`${p.name}${tag} — a step behind the group. Nothing alarming at his age, but the summer homework list is long.`)
+        lines.push(`${p.name}${tag}: a step behind the group. Nothing alarming at ${p.age}, but the summer homework list is long.`)
       } else {
-        lines.push(`${p.name}${tag} — solid, unspectacular week. Exactly where a kid his age should be.`)
+        lines.push(`${p.name}${tag}: a solid, unspectacular week. About where a ${p.age}-year-old should be.`)
       }
       void isStandout
     }
     this.pushNews(
       'scouting',
-      `Development camp report — ${coachName}`,
+      `Development camp report from ${coachName}`,
       `Development camp wrapped this week: ${invitees.length} of the organisation's young players on the ice, ` +
       `this year's draft class included.` +
-      `${standout ? ` The staff named ${standout.player.name} the camp standout — he ${standout.reason}.` : ''}` +
+      `${standout ? ` The staff named ${standout.player.name} the camp standout. He ${standout.reason}.` : ''}` +
       (calls.length > 0 ? `\n\nThe calls:\n\n• ${calls.join('\n• ')}` : '') +
       `\n\nThe reads:\n\n• ${lines.slice(0, 40).join('\n• ')}`,
       { teamId: this.userTeamId as string, ...(standoutId ? { playerId: standoutId } : {}) }
@@ -15206,13 +15206,13 @@ export class Career {
           repairLines(affiliate, this.data.players)
           this.lockerArrival(affiliate.id, p.id)
           p.morale = Math.min(100, p.morale + 5)
-          notes.push(`${p.name} signs his entry-level deal and turns pro — assigned to ${affiliate.name}.`)
+          notes.push(`${p.name} signs his entry-level deal and turns pro with ${affiliate.name}.`)
           break
         }
         case 'signReturn':
           p.contract = elc()
           p.morale = Math.min(100, p.morale + 3)
-          notes.push(`${p.name} signs his entry-level deal and goes back to ${a.club ?? 'his club'} for another year — the deal slides.`)
+          notes.push(`${p.name} signs his entry-level deal and goes back to ${a.club ?? 'his club'} for another year. The deal slides.`)
           break
         case 'returnUnsigned':
           if (a.readiness !== 'junior' && p.age >= 19) {
@@ -22937,7 +22937,7 @@ export class Career {
       if (this.namedLines.length > 12) this.namedLines = this.namedLines.slice(-12)
       for (const p of mates) p.morale = Math.min(100, p.morale + 3)
       this.pushNews('result', `They're calling it ${name}`,
-        `${mates.map((p) => p.name).join(', ')}: ${cur.pts} points in ${cur.gp} games together. The city has given the line a name, which is how you know it has arrived. Break it up and people will ask why.`,
+        `${mates.map((p) => p.name).join(', ')}: ${cur.pts} points in ${cur.gp} games together. The city has started calling them by a nickname. Break them up and people will ask why.`,
         { teamId: this.userTeamId as string, salience: 62 })
     }
   }

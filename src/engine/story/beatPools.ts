@@ -140,7 +140,7 @@ export const GD_LEDE: ContentVariant[] = [
   { id: 'gd.l.op.b', conditions: { opener: true }, text: `The season starts tonight against the {oppNick}. The lineup below is the one camp built.` },
   { id: 'gd.l.op.c', conditions: { opener: true }, text: `Game one. The projected lineup, the starter, and what I will be watching against the {oppNick}.` },
   { id: 'gd.l.po.a', conditions: { playoff: true }, text: `Playoff hockey. {starter} gets the net and the lines should look like the ones from the last game.` },
-  { id: 'gd.l.po.b', conditions: { playoff: true }, text: `Another game in the series. Nobody is saying much about injuries, which is how it goes this time of year.` },
+  { id: 'gd.l.po.b', conditions: { playoff: true }, text: `Another game in the series. Nobody is saying much about injuries this time of year.` },
   { id: 'gd.l.po.c', conditions: { playoff: true }, text: `The morning skate was quiet and the lineup looks unchanged. Here is what matters tonight.` },
 ]
 
@@ -301,7 +301,7 @@ export const GR_CLOSE: ContentVariant[] = [
   { id: 'gr.c.la.c', conditions: { won: false, tilt: 'ally' }, text: `Flush it. The {nick} are better than this. Next up: {next}, a chance to show it.` },
   { id: 'gr.c.lc.a', conditions: { won: false, tilt: 'critic' }, text: `Next up: {next}. The front office should be watching as closely as the fans are.` },
   { id: 'gr.c.lc.b', conditions: { won: false, tilt: 'critic' }, text: `The players will be asked about this. They are not the only ones who should be. Next: {next}.` },
-  { id: 'gr.c.lc.c', conditions: { won: false, tilt: 'critic' }, text: `Next: {next}. The roster will be the same, which is the problem.` },
+  { id: 'gr.c.lc.c', conditions: { won: false, tilt: 'critic' }, text: `Next: {next}. Same roster, same questions.` },
 ]
 
 /* ═══════════════════════════════ ROSTER MOVES ═══════════════════════════════
