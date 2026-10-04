@@ -293,7 +293,7 @@ console.log(txt)
 writeFileSync(join(OUT, 'report.txt'), txt + '\n')
 writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))
 if (RECORD) {
-  writeFileSync(join(OUT, 'reel.html'), buildReelHtml(report, CHECKLIST))
+  writeFileSync(join(OUT, 'reel.html'), buildReelHtml(report, CHECKLIST, String(flag('reel', 'v0'))))
   console.log(`▶ reel: ${join(OUT, 'reel.html')}`)
 }
 process.exit(failed ? 1 : 0)
