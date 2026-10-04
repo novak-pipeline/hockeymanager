@@ -38,8 +38,8 @@ describe('decisionEvents — library integrity', () => {
   })
 
   it('every scene is ABOUT its subject — it is delivered as a meeting with him', () => {
-    // The runner attaches each dilemma to a specific player and announces it as
-    // "{name} is waiting in your office". A scene that never mentions him (an
+    // The runner attaches each dilemma to a specific player and headlines it
+    // with him (sceneHeadline). A scene that never mentions him (an
     // owner phone call, a press-conference question) reads as a non-sequitur
     // staged as a private meeting.
     for (const e of DECISION_EVENTS) {

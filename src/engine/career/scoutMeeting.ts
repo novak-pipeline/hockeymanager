@@ -15,6 +15,7 @@
  * outcome — the engine applies the chosen action, deterministically.
  */
 
+import { withArticle } from '@engine/story/prose'
 import type { MeetingSpeaker, MeetingLine } from './boardMeeting'
 import type { ScoutTarget, ScoutFocus } from '@domain/scouting'
 
@@ -139,7 +140,7 @@ export function buildScoutMeetingScene(input: ScoutMeetingInput): ScoutMeetingSc
       title: `${f.name} — worth tracking`,
       intro: [{
         speakerId: host.id,
-        text: `We've filed ${f.name} (${f.position}) as a ${f.grade}. ${f.reason} I'd pin him to the shortlist so we keep eyes on him.`,
+        text: `We've filed ${f.name} (${f.position}) as ${withArticle(f.grade)}. ${f.reason} I'd pin him to the shortlist so we keep eyes on him.`,
       }],
       options: [
         { id: 'track', label: '★ Track him', detail: `Add ${f.name} to your shortlist`, action: { type: 'track', playerId: f.playerId } },

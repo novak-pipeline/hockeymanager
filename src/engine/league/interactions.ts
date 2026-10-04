@@ -417,21 +417,71 @@ export function applyInteractionResponse(args: {
       headline: `${player.name} requests a trade`,
       body: `Unhappy with how his concerns were handled, ${player.name} has asked to be moved.`,
     }
-  } else if (moraleDelta >= 8) {
-    outcome = `${name} left the meeting reassured and in good spirits.`
-  } else if (moraleDelta > 0) {
-    outcome = `${name} appreciated being heard, even if nothing was promised.`
-  } else if (moraleDelta === 0) {
-    outcome = `${name} took the message on board without much reaction.`
-  } else if (moraleDelta > -8) {
-    outcome = `${name} wasn't thrilled with the answer but accepted it.`
   } else {
-    outcome = `${name} was clearly unhappy with how the conversation went.`
+    outcome = outcomeLine(interaction.kind, option.tone, moraleDelta, name)
   }
 
   const result: InteractionResult = { moraleDelta, roomMoraleDelta, escalateToTrade, outcome }
   if (news) result.news = news
   return result
+}
+
+/**
+ * The receipt for a resolved concern. It must agree with BOTH the button the GM
+ * pressed and how the player took it: "Tell him to sort it out himself" can land
+ * well with a pro, but it can never read "appreciated being heard" (audit F7).
+ * Keyed on tone first, then the size of the swing the engine already decided.
+ */
+export function outcomeLine(kind: InteractionKind, tone: ResponseTone, delta: number, last: string): string {
+  const band = delta >= 8 ? 'good' : delta > 0 ? 'ok' : delta === 0 ? 'flat' : delta > -8 ? 'sour' : 'bad'
+  if (kind === 'feud') {
+    if (tone === 'supportive') {
+      return band === 'good' || band === 'ok'
+        ? `${last} said that was all he wanted: somebody above the coaches to know.`
+        : `${last} wanted it handled quietly. He did not want it taken to the whole room.`
+    }
+    if (tone === 'firm') {
+      return band === 'good' || band === 'ok'
+        ? `${last} said fine, he'd deal with it himself. He seemed glad to be trusted with it.`
+        : band === 'flat'
+          ? `${last} said he'd handle it. Whether he does is between him and the other guy now.`
+          : `${last} said he'd handle it, in a tone that suggested he'd tried that already.`
+    }
+    return band === 'good' || band === 'ok' || band === 'flat'
+      ? `${last} shrugged and went back to the room. The problem went with him.`
+      : `${last} left without saying much. He came to you with a problem and is leaving with the same one.`
+  }
+  switch (tone) {
+    case 'promise':
+      return band === 'good'
+        ? `${last} shook your hand on it. He will remember exactly what you said.`
+        : band === 'ok' || band === 'flat'
+          ? `${last} took the promise. He has heard promises in this business before.`
+          : `${last} heard the promise and didn't look like he believed it.`
+    case 'supportive':
+      return band === 'good'
+        ? `${last} left lighter than he came in.`
+        : band === 'ok'
+          ? `${last} appreciated being heard, even if nothing was promised.`
+          : band === 'flat'
+            ? `${last} listened politely. It was the same thing he heard last time.`
+            : `${last} wanted something concrete and got a pat on the back. It showed.`
+    case 'firm':
+      return band === 'good' || band === 'ok'
+        ? `${last} nodded. He came for a straight answer and got one.`
+        : band === 'flat'
+          ? `${last} took it without much reaction.`
+          : band === 'sour'
+            ? `${last} didn't like the answer, but he took it.`
+            : `${last} walked out stiff. He wanted help and got a lecture.`
+    case 'dismissive':
+    default:
+      return band === 'good' || band === 'ok' || band === 'flat'
+        ? `${last} shrugged it off. He has been around long enough not to take it personally.`
+        : band === 'sour'
+          ? `${last} heard the brush-off and kept his mouth shut. He won't bring it to you again soon.`
+          : `${last} was clearly unhappy with how that went.`
+  }
 }
 
 /* ─────────────────────── reaction descriptor (RP voice) ─────────────────────── */

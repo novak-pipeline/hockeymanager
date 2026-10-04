@@ -16,6 +16,7 @@
  * Pure + deterministic (hash of playerId + seed). No Rng / Date.
  */
 
+import { plural } from '@engine/story/prose'
 import type { Player } from '@domain'
 import type { DraftEligibility } from '@engine/league/draftRankings'
 import { classifyArchetype, ARCHETYPE_META } from '@engine/league/archetypes'
@@ -110,7 +111,7 @@ export function buildScoutSummary(a: ScoutSummaryArgs): ScoutSummary {
       : ''
     const verb = a.preDraft ? 'finished the season with' : 'has put up'
     paras.push(
-      `${first} ${verb} ${pts} points (${a.goals}G, ${a.assists}A) in ${a.gamesPlayed} games in the ${a.leagueName}${rankClause} — ${paceWord}. ${productionColour(ppg, a.draftLabel, pid, a.leagueScoringRank)}`,
+      `${first} ${verb} ${plural(pts, 'point')} (${a.goals}G, ${a.assists}A) in ${plural(a.gamesPlayed, 'game')} in the ${a.leagueName}${rankClause}: ${paceWord}. ${productionColour(ppg, a.draftLabel, pid, a.leagueScoringRank)}`,
     )
   } else if (a.gamesPlayed > 0 && isGoalie) {
     paras.push(`${first} has carried a real workload in the ${a.leagueName} this season, and our staff has built a read off those starts.`)

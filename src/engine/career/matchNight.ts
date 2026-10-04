@@ -10,6 +10,7 @@
  * phrases them.
  */
 
+import { plural } from '@engine/story/prose'
 import type { MatchKeyView, ThreeStarView, TurningPointView } from './views'
 
 /* ────────────────────────── keys to the game (B6.1) ────────────────────────── */
@@ -90,7 +91,7 @@ export function buildMatchKeys(args: MatchKeysArgs): MatchKeyView[] {
       key: {
         title: `Contain ${hs.name}`,
         detail:
-          `${hs.name} has ${hs.goals} goals and ${hs.assists} assists this season` +
+          `${hs.name} has ${plural(hs.goals, 'goal')} and ${plural(hs.assists, 'assist')} this season` +
           (hs.form >= 2 ? ` — and he's running hot right now. Hard-match him.` : `. He drives their offense.`),
       },
     })
@@ -174,7 +175,7 @@ export function buildMatchKeys(args: MatchKeysArgs): MatchKeyView[] {
       score: 1,
       key: {
         title: `No tape yet`,
-        detail: `${user.gamesPlayed} games played — no book on either side. ${
+        detail: `${plural(user.gamesPlayed, 'game')} played, so there is no book on either side yet. ${
           args.home ? `Use home ice: last change and the matchups are yours.` : `On the road, keep the first period simple.`
         }`,
       },

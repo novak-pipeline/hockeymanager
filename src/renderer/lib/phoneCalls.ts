@@ -103,8 +103,8 @@ function sceneCaller(
 /**
  * Turn one open concern into a call — or null when it belongs in the office.
  *
- * `scene` interactions are authored dilemmas staged in your office (their news
- * item literally reads "…is waiting in your office"): they ring only if somebody
+ * `scene` interactions are authored dilemmas brought to you in person (their news
+ * item announces who is raising it): they ring only if somebody
  * in them speaks. A plain concern is the player's own first-person words, so it
  * always rings and is spoken whole.
  */

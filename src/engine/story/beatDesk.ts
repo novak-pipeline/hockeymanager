@@ -511,7 +511,7 @@ export function buildGameday(c: DeskCtx, f: GamedayFacts): BeatArticle | null {
     sayStable(
       WATCH,
       { kind: w.kind },
-      { name: w.name ?? '', n: String(w.n ?? ''), other: w.other ?? '', opp: f.opp.nick, nick: c.nick },
+      { name: w.name ?? '', n: String(w.n ?? ''), ptWord: w.n === 1 ? 'point' : 'points', other: w.other ?? '', opp: f.opp.nick, nick: c.nick },
       `${c.key}|w${i}|${w.kind}|${w.name ?? ''}`,
     ),
   ).filter(Boolean)

@@ -19,6 +19,7 @@
  * Pure module: builders take plain facts, return JSON-safe scenes/results.
  * The career layer supplies state and applies effects.
  */
+import { clubVerb } from '@engine/story/prose'
 import type { Rng } from '@engine/shared/rng'
 import type { BoardState, Mandate } from '@engine/league/board'
 
@@ -189,7 +190,7 @@ function ownerVoice(demeanor: string | undefined, rng: Rng): {
     default: // pragmatic
       return {
         greet: (t) => pick([
-          `Let's keep this efficient. One hour, three decisions, and the ${t} has its marching orders.`,
+          `Let's keep this efficient. One hour, three decisions, and the ${t} ${clubVerb(t, 'has its', 'have their')} marching orders.`,
           `Appreciate you coming in early. Camp's around the corner and I want the ${t}'s plan on one page.`,
         ]),
         demand: (m) => pick([

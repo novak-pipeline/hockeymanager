@@ -126,5 +126,25 @@ export function renderTemplate(
     return inner.replace(/\{cb\.([a-zA-Z0-9_]+)\}/g, (_m2, key: string) => callback[key] ?? '')
   })
   out = out.replace(/\{([a-zA-Z0-9_.]+)\}/g, (_m, key: string) => slots[key] ?? `{${key}}`)
-  return out.replace(/ {2,}/g, ' ').replace(/ ([,.;!?])/g, '$1').trim()
+  return tidyProse(out.replace(/ {2,}/g, ' ').replace(/ ([,.;!?])/g, '$1').trim())
+}
+
+const SINGULAR: Record<string, string> = {
+  points: 'point', goals: 'goal', games: 'game', assists: 'assist', wins: 'win', losses: 'loss',
+  seasons: 'season', days: 'day', weeks: 'week', starts: 'start', nights: 'night', shots: 'shot',
+  saves: 'save', years: 'year', minutes: 'minute', penalties: 'penalty', shutouts: 'shutout',
+}
+
+/**
+ * The mechanical safety net under every rendered template: a slot filled with
+ * a number can't know the noun after it. "a 8-game streak" → "an 8-game
+ * streak", "as a A+" → "as an A+", "1 points" → "1 point". Templates should
+ * still be written right; this catches what a slot does to them.
+ */
+export function tidyProse(s: string): string {
+  return s
+    .replace(/\b([Aa]) (8\d*|11|18)(?=[\s\-–.,;:)%]|$)/g, (_m, a: string, n: string) => `${a}n ${n}`)
+    .replace(/\b([Aa]) ([AEF][+-]?)(?=[\s.,;:)]|$)/g, (_m, a: string, g: string) => `${a}n ${g}`)
+    .replace(/(?<![\d.,])\b1 (points|goals|games|assists|wins|losses|seasons|days|weeks|starts|nights|shots|saves|years|minutes|penalties|shutouts)\b/g,
+      (_m, w: string) => `1 ${SINGULAR[w] ?? w}`)
 }

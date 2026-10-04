@@ -14,6 +14,7 @@
  * Pure: the career layer supplies the depth, the league benchmarks and the
  * candidate pools; this decides what is a need and who answers it.
  */
+import { withArticle } from '@engine/story/prose'
 import type { NeedCandidateView, OffseasonNeedView } from './views'
 
 export type NeedGroup = 'F' | 'D' | 'G'
@@ -294,7 +295,7 @@ export function buildNeeds(input: NeedsInput): { needs: OffseasonNeedView[]; hea
       : g.empty > 0
       ? `You have ${g.empty} empty ${g.empty === 1 ? 'spot' : 'spots'} there for next season.`
       : g.weakest
-        ? `Your ${ord(g.slot + 1)} ${groupWord} is ${g.weakest.name} (${Math.round(g.weakest.ovr)}); a normal club dresses a ${Math.round(g.bench)} there.` +
+        ? `Your ${ord(g.slot + 1)} ${groupWord} is ${g.weakest.name} (${Math.round(g.weakest.ovr)}); a normal club dresses ${withArticle(String(Math.round(g.bench)))} there.` +
           (g.role.hand ? ` And the pair has no ${g.role.hand === 'L' ? 'left' : 'right'} shot.` : '')
         : 'Below the league at this spot.'
     needs.push({

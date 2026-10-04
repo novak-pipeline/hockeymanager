@@ -458,8 +458,8 @@ import {
   type PendingLedgerReaction,
   type ResidueFlag,
 } from './livingLedger'
-import { markUsed, renderTemplate, type ContentCtx, type ContentUse, type ContentVariant } from '@engine/story/contentEngine'
-import { oneSentence, possessive, prosaicList, renderStable, stableSeed } from '@engine/story/prose'
+import { markUsed, renderTemplate, tidyProse, type ContentCtx, type ContentUse, type ContentVariant } from '@engine/story/contentEngine'
+import { feedPostHeadline, aOrAn, oneSentence, possessive, prosaicList, renderStable, stableSeed } from '@engine/story/prose'
 import { writeBeat } from '@engine/story/beatWriter'
 import {
   ANNIVERSARY_POOL,
@@ -504,7 +504,7 @@ import {
   walkThread,
   type TradeThread,
 } from './tradeThread'
-import { DECISION_EVENTS, decisionSlots, pickDecisionEvent, type DecisionAct, type DecisionEffects } from '@engine/story/decisionEvents'
+import { DECISION_EVENTS, decisionSlots, pickDecisionEvent, sceneHeadline, type DecisionAct, type DecisionEffects } from '@engine/story/decisionEvents'
 import {
   ARRIVAL_EVENTS,
   CLUB_SCENES,
@@ -2363,8 +2363,10 @@ export class Career {
       year: this.year,
       ...(beatISO !== null ? { dateISO: beatISO } : {}),
       category,
-      headline,
-      body,
+      // The mechanical net (a/an before numbers, "1 points") under every
+      // template that reaches the desk, authored or composed.
+      headline: tidyProse(headline),
+      body: tidyProse(body),
       read: false,
       ...(refs.teamId !== undefined ? { teamId: refs.teamId } : {}),
       ...(refs.playerId !== undefined ? { playerId: refs.playerId } : {}),
@@ -3877,7 +3879,7 @@ export class Career {
       this.decisionEventFor.set(`i${this.interactionCounter - 1}`, ev.id)
       markUsed(this.contentLedger, ev.id, this.year, day)
       this.lastDecisionDay = day
-      this.pushNews('contract', `${p.name} is waiting in your office`,
+      this.pushNews('contract', renderTemplate(sceneHeadline(ev), slots),
         renderTemplate(ev.scene, slots), { playerId: p.id as string, teamId: this.userTeamId as string })
       return // one dilemma at a time
     }
@@ -3978,7 +3980,13 @@ export class Career {
     }
     // A refused act rewrites the receipt: the authored outcome describes the
     // thing as done, and it was not.
-    const receipt = refused ? acted.message : acted?.message ? `${chosen.outcome} ${acted.message}` : chosen.outcome
+    // Outcomes are templates too ("{last} nodded and left"): fill them from the
+    // same slots the scene was rendered with, or the receipt prints "{last}".
+    const outcome = renderTemplate(
+      chosen.outcome,
+      decisionSlots(player, player.stats.reduce((n, s) => n + s.gamesPlayed, 0), this.userTeam.name)
+    )
+    const receipt = refused ? acted.message : acted?.message ? `${outcome} ${acted.message}` : outcome
     if (e.leakChance && new Rng(deriveSeed(this.seed, Career.DECISION_NS, this.year, day, 7)).chance(e.leakChance)) {
       this.pushNews('contract', `Word gets out about ${player.name}'s meeting`,
         `What was said behind your office door did not stay there. ${receipt}`,
@@ -4553,7 +4561,7 @@ export class Career {
     for (const post of published) {
       if (!shouldReachInbox(post, this.followedFeedAuthors)) continue
       const author = this.feedAuthorFor(post.authorId)
-      this.pushNews('league', `@${author?.handle ?? post.authorId}`, post.text, {
+      this.pushNews('league', feedPostHeadline(author?.name ?? `@${author?.handle ?? post.authorId}`, post.text), post.text, {
         ...(post.teamId !== undefined ? { teamId: post.teamId } : {}),
         ...(post.playerId !== undefined ? { playerId: post.playerId } : {}),
         channel: post.channel,
@@ -5380,7 +5388,10 @@ export class Career {
       if (g.homeTeamId !== this.userTeamId && g.awayTeamId !== this.userTeamId) continue
       const home = g.homeTeamId === this.userTeamId
       const opp = this.data.teams.get(home ? g.awayTeamId : g.homeTeamId)!
-      upcoming.push(`${home ? 'vs' : '@'} ${opp.abbreviation} (day ${g.day})`)
+      // A date a reader can use ("Nov 3"), never the sim's internal day index.
+      const d = new Date(`${dayToDateISO(this.year, g.day)}T12:00:00Z`)
+      const when = `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()]} ${d.getUTCDate()}`
+      upcoming.push(`${home ? 'home to' : 'at'} ${opp.name} (${when})`)
       if (upcoming.length >= 3) break
     }
 
@@ -7225,7 +7236,7 @@ export class Career {
           feature: 'draft',
           ctx: {},
           slots: { name: firstP.name, n: String(lines.length) },
-          paragraphs: [`${firstP.name} is the headline, a ${firstP.age}-year-old ${firstP.position === 'D' ? 'defenceman' : firstP.position === 'G' ? 'goaltender' : firstP.position === 'C' ? 'centre' : 'winger'}. The rest of the class is a longer bet, as the rest of every class is.`],
+          paragraphs: [`${firstP.name} is the headline, ${aOrAn(String(firstP.age))} ${firstP.age}-year-old ${firstP.position === 'D' ? 'defenceman' : firstP.position === 'G' ? 'goaltender' : firstP.position === 'C' ? 'centre' : 'winger'}. The rest of the class is a longer bet, as the rest of every class is.`],
           sections: [{ title: `The ${nick} class`, lines }],
           dek: `${lines.length} picks, led by ${firstP.name}.`,
           playerIds: [firstP.id as string],

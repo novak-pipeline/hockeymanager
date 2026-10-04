@@ -48,6 +48,32 @@ import {
   type TeamStaff,
 } from '@engine/league/staff'
 
+/** Fold case and accents so "Ambri" matches "Ambrì-Piotta". */
+function foldName(s: string): string {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim()
+}
+
+/**
+ * The club's display name from its city and nickname. EHM's European clubs
+ * often carry the city (or part of it) AS the nickname, and joining them
+ * blindly printed "Omsk Omsk", "Nizhny Novgorod Novgorod", "Hradec Kralove
+ * Králové" and "Ambri Ambrì-Piotta" about 300 times a season (audit F12).
+ */
+export function clubDisplayName(city: string, nickname: string): string {
+  const c = (city ?? '').trim()
+  const n = (nickname ?? '').trim()
+  if (!n) return c
+  if (!c) return n
+  const fc = foldName(c)
+  const fn = foldName(n)
+  if (fc === fn) return n
+  // The nickname is the tail of the city: "Nizhny Novgorod" + "Novgorod".
+  if (fc.endsWith(' ' + fn)) return c
+  // The nickname already contains the city: "Ambri" + "Ambrì-Piotta".
+  if (fn.startsWith(fc + ' ') || fn.startsWith(fc + '-') || fn.endsWith(' ' + fc)) return n
+  return `${c} ${n}`
+}
+
 /* ─────────────────────────── Public schema types ─────────────────────────── */
 
 /**
@@ -1453,7 +1479,7 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
 
         const team: Team = {
           id: teamId,
-          name: `${modTeam.city} ${modTeam.nickname}`,
+          name: clubDisplayName(modTeam.city, modTeam.nickname),
           abbreviation: modTeam.abbreviation,
           city: modTeam.city,
           colors: { primary: primaryColor, secondary: secondaryColor },
@@ -1686,7 +1712,7 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
       const ahlLines = buildLinesFromRoster(ahlRoster)
       const ahlTeam: Team = {
         id: ahlTeamId,
-        name: `${aff.city} ${aff.nickname}`,
+        name: clubDisplayName(aff.city, aff.nickname),
         abbreviation: aff.abbreviation,
         city: aff.city,
         colors: { primary: affPrimaryColor, secondary: affSecondaryColor },
@@ -1820,7 +1846,7 @@ export function loadModDatabase(mod: ModDatabase, opts: LoadModOptions): LeagueD
         }
         const team: Team = {
           id: teamId,
-          name: `${mt.city} ${mt.nickname}`,
+          name: clubDisplayName(mt.city, mt.nickname),
           abbreviation: mt.abbreviation,
           city: mt.city,
           colors: { primary: parseColor(mt.primary)!, secondary: parseColor(mt.secondary)! },
