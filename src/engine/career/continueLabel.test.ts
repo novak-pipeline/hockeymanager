@@ -157,6 +157,21 @@ describe('a standing trade offer is a beat gate (playtest A6, bar B2.2)', () => 
     // Whatever fresh offers the day generated, the one we tabled is answered.
     expect(gates.tradeOffers.some((o) => (o as { offerId: string }).offerId === 'a6-1')).toBe(false)
   })
+
+  it('loop audit F4: the card says the real clock — the next Continue', () => {
+    const data = generateLeague({ seed: 2029 })
+    const career = new Career(data, 2029, data.league.teams[3]!)
+    const gates = career as unknown as Gates
+    gates.trainingCamp = null
+    career.advanceDay()
+    tableOffer(career, gates, data, 0, 'f4-1')
+    const card = career.getTrades().incoming.find((o) => o.offerId === 'f4-1')!
+    // Its nominal clock says 999; the truth is one press.
+    expect(card.expiresOnDay).toBe(999)
+    expect(card.expiryLabel).toBe('Answer before you Continue')
+    career.advanceDay()
+    expect(career.getTrades().incoming.some((o) => o.offerId === 'f4-1')).toBe(false)
+  })
 })
 
 /* ───────────────────── playtest A7 — the trade deadline ───────────────────────

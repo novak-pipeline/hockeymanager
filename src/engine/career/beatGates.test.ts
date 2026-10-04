@@ -4,7 +4,7 @@
  * to render. Both used to leave Continue pressing forever with no escape.
  */
 import { describe, expect, it } from 'vitest'
-import { liveBeatGates, routeContinue, sceneToOpen, type GateFlags, type LastRoute } from './beatGates'
+import { DRAFT_WAITING, liveBeatGates, routeContinue, SceneLedger, sceneToOpen, type GateFlags, type LastRoute } from './beatGates'
 
 /** Press Continue `n` times from `screen`, following the law like the shell
  *  does, and report every distinct thing it decided to do. */
@@ -68,7 +68,8 @@ describe('beat gates — Continue never dead-ends', () => {
   it('hard gates route to their own screen and say so when you are already there', () => {
     const draft: GateFlags = { draftPending: true, continueLabel: 'Go to the entry draft' }
     const dec = routeContinue({ dashboard: draft, screen: 'draft', lastRoute: null })
-    expect(dec).toEqual({ kind: 'hardGate', screen: 'draft', alreadyThere: true })
+    // Loop audit F2: never a silent no-op — the press says what it waits on.
+    expect(dec).toEqual({ kind: 'hardGate', screen: 'draft', alreadyThere: true, message: DRAFT_WAITING })
     // A hard gate outranks every soft one — you cannot sim past the draft.
     const both: GateFlags = { draftPending: true, staffMeetingDue: true }
     expect(routeContinue({ dashboard: both, screen: 'staffBriefing', lastRoute: null }).kind).toBe('hardGate')
@@ -100,5 +101,37 @@ describe('beat gates — dismissed (E3)', () => {
     const held: GateFlags = { gmFired: true, draftPending: true, continueLabel: 'Take a new job to continue' }
     expect(routeContinue({ dashboard: held, screen: 'draft', lastRoute: null })).toMatchObject({ kind: 'hardGate', screen: 'gmCareer', alreadyThere: false })
     expect(routeContinue({ dashboard: held, screen: 'gmCareer', lastRoute: null })).toMatchObject({ kind: 'hardGate', screen: 'gmCareer', alreadyThere: true })
+  })
+})
+
+describe('scene ledger — live rooms the GM never saw open themselves (loop audit F3)', () => {
+  it('the boardroom armed alongside camp opens when camp breaks, not before', () => {
+    const led = new SceneLedger()
+    // Sep 15: camp and the preseason board meeting arm on the same press.
+    const sep15: GateFlags = { campPending: true, boardMeetingPending: true }
+    expect(led.afterPress(sep15, {})?.key).toBe('trainingCamp')
+    // Camp days: the boardroom waits its turn behind camp.
+    expect(led.afterPress(sep15, sep15)).toBeNull()
+    // Break camp: the old rule saw an "old" gate and never opened it.
+    const broke: GateFlags = { boardMeetingPending: true }
+    expect(sceneToOpen(broke, sep15)).toBeNull()
+    expect(led.afterPress(broke, sep15)?.key).toBe('boardMeeting')
+    // Walked away from it: it is not reopened.
+    expect(led.afterPress(broke, broke)).toBeNull()
+  })
+
+  it('a room live before the first press (takeover dev camp, a load) opens once', () => {
+    const led = new SceneLedger()
+    const takeover: GateFlags = { devCampPending: true }
+    expect(led.unseen(takeover)?.key).toBe('devCamp')
+    led.markShown('devCamp')
+    expect(led.unseen(takeover)).toBeNull()
+    // It stands down; next summer's camp is a new beat and opens again.
+    led.sync({})
+    expect(led.unseen(takeover)?.key).toBe('devCamp')
+  })
+
+  it('the scout digest is mail, never an unseen scene', () => {
+    expect(new SceneLedger().unseen({ scoutDigestPending: true, scoutDigestNewsId: 'n1' })).toBeNull()
   })
 })

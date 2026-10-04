@@ -9,6 +9,7 @@ import { fmtMoney } from '../components/format'
 import { OverallStars } from '../components/Stars'
 import { PlayerFace } from '../components/PlayerFace'
 import { useClient, useScreenData } from '../hooks/useSim'
+import { useShellActions } from '../components/ActionsContext'
 import { toast } from '../components/store'
 import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
 
@@ -784,20 +785,10 @@ export function OffseasonScreen(): JSX.Element {
     (r) => (r.type === 'offseason' ? r.offseason : null)
   )
 
-  const [advBusy, setAdvBusy] = useState(false)
-  const [advErr, setAdvErr] = useState<string | null>(null)
-
-  async function handleAdvance() {
-    setAdvBusy(true)
-    setAdvErr(null)
-    const r = await client.advanceOffseason()
-    setAdvBusy(false)
-    if (r.type === 'error') {
-      setAdvErr(r.message)
-    } else {
-      refetch()
-    }
-  }
+  // Loop audit F2: the summer moves through the ONE Continue path (the
+  // topbar's), never a private advanceOffseason() call that skips the shell's
+  // refresh, its overlay and its gates. This button is a second door to it.
+  const actions = useShellActions()
 
   return (
     <section>
@@ -811,8 +802,6 @@ export function OffseasonScreen(): JSX.Element {
         empty={!loading && !error && !data}
         emptyText="The offseason has not started."
       />
-
-      {advErr && <Notice kind="warn">{advErr}</Notice>}
 
       {data && (
         <div className="stack">
@@ -872,10 +861,10 @@ export function OffseasonScreen(): JSX.Element {
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <button
                 className="btn"
-                disabled={advBusy}
-                onClick={handleAdvance}
+                disabled={actions.busy}
+                onClick={actions.continueGame}
               >
-                {advBusy ? 'Advancing…' : `Advance to ${STAGE_LABELS[STAGE_ORDER[STAGE_ORDER.indexOf(data.stage) + 1]] ?? 'next stage'}`}
+                {actions.busy ? 'Advancing…' : 'Continue'}
               </button>
             </div>
           )}

@@ -1492,6 +1492,10 @@ export interface TradeOfferView {
    *  man he wants and what he's offering. `message` is card prose. Optional. */
   spoken?: string
   expiresOnDay: number
+  /** When the offer really lapses, in words (loop audit F4). In season a
+   *  standing offer is answered by the AGM on the next Continue, whatever its
+   *  nominal clock says, so the card says exactly that. */
+  expiryLabel?: string
   /** Why this deal cannot be completed RIGHT NOW (cap room, roster limit), in
    *  plain English. The offer stays on the desk — the club could shed salary and
    *  make it legal — but Accept must be disabled while this is set. Absent when

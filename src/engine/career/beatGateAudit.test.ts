@@ -15,7 +15,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { generateLeague } from '@data/generate'
 import { loadModDatabase, validateModDatabase } from '@data'
 import { Career } from './career'
-import { routeContinue, sceneToOpen, type LastRoute } from './beatGates'
+import { routeContinue, SceneLedger, type LastRoute } from './beatGates'
 
 /** The whole visible state of the game, as the GM would judge "did anything
  *  happen?" — phase, date, offseason stage, camp day, and the button's promise. */
@@ -25,7 +25,7 @@ function stateKey(c: Career): string {
   return [d.phase, d.year, d.day, os?.stageLabel ?? '-', c.getDevCamp()?.day ?? '-', d.continueLabel].join('|')
 }
 
-interface WalkResult { presses: number; end: string; gatesSeen: Set<string> }
+interface WalkResult { presses: number; end: string; gatesSeen: Set<string>; scenesOpened: string[] }
 
 /**
  * Press Continue `presses` times exactly as the shell does, and throw the moment
@@ -38,6 +38,8 @@ function walkPressingContinue(c: Career, presses: number): WalkResult {
   let lastRoute: LastRoute | null = null
   const recent: string[] = []
   const gatesSeen = new Set<string>()
+  const scenesOpened: string[] = []
+  const ledger = new SceneLedger()
   const trail: string[] = []
   // 10 identical states in a row is a softlock: no beat legitimately holds the
   // same label, day and stage that long (dev camp, the longest, runs 3).
@@ -83,21 +85,38 @@ function walkPressingContinue(c: Career, presses: number): WalkResult {
       screen = dec.gate.screen
       continue
     }
-    if (dec.kind === 'spend') gatesSeen.add(dec.gate.key)
+    if (dec.kind === 'spend') {
+      gatesSeen.add(dec.gate.key)
+      ledger.markShown(dec.gate.key)
+    }
     lastRoute = null
+    // Loop audit F3, as the shell does it: a live room never shown opens
+    // before time moves past it.
+    if (dec.kind === 'advance') {
+      const unseen = ledger.unseen(d)
+      if (unseen) {
+        ledger.markShown(unseen.key)
+        gatesSeen.add(unseen.key)
+        scenesOpened.push(`${unseen.key}@${d.date}`)
+        screen = unseen.screen
+        continue
+      }
+    }
     try {
       c.step()
     } catch (e) {
       throw new Error(`DEAD END at press ${i} (${key}): ${(e as Error).message}`)
     }
     // PHASE 0: a moment that arrived on this press opens its own room.
-    const scene = sceneToOpen(c.getDashboard(), d)
+    const after = c.getDashboard()
+    const scene = ledger.afterPress(after, d)
     if (scene) {
       gatesSeen.add(scene.key)
+      scenesOpened.push(`${scene.key}@${after.date}`)
       screen = scene.screen
     }
   }
-  return { presses, end: stateKey(c), gatesSeen }
+  return { presses, end: stateKey(c), gatesSeen, scenesOpened }
 }
 
 describe('beat gates — a full career year of pressing Continue', () => {
@@ -112,6 +131,22 @@ describe('beat gates — a full career year of pressing Continue', () => {
       expect(res.gatesSeen.size).toBeGreaterThan(2)
     }, 60_000)
   }
+
+  it('loop audit F3: the takeover dev camp and the preseason boardroom open themselves', () => {
+    const data = generateLeague({ seed: 313 })
+    const c = new Career(data, 313, data.league.teams[0]!)
+    c.startAtOffseason()
+    expect(c.getDashboard().devCampPending).toBe(true)
+    const res = walkPressingContinue(c, 60)
+    // The first press lands in the dev camp, before a camp day is spent.
+    expect(res.scenesOpened[0]).toMatch(/^devCamp@/)
+    // The preseason boardroom opens (behind camp when there is one: camp
+    // first, then the board — the pure case is pinned in beatGates.test.ts).
+    const camp = res.scenesOpened.findIndex((s) => s.startsWith('trainingCamp@'))
+    const board = res.scenesOpened.findIndex((s) => s.startsWith('boardMeeting@'))
+    expect(board).toBeGreaterThanOrEqual(0)
+    if (camp >= 0) expect(board).toBeGreaterThan(camp)
+  }, 60_000)
 
   it('a development camp with nobody in it is not a beat at all', () => {
     // #182 lets the GM cut every invite. The gate was armed off a pool computed

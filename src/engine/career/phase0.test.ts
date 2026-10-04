@@ -7,6 +7,8 @@
 import { describe, expect, it } from 'vitest'
 import { generateLeague } from '@data/generate'
 import { Career } from './career'
+import { routeContinue } from './beatGates'
+import { playerValue } from '@engine/league/trades'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function makeCareer(seed: number): { career: Career; c: any } {
@@ -216,6 +218,29 @@ describe('calendar pack (PHASE 0)', () => {
     console.log("[summer beats] inbox items per press:", sizes)
     expect(Math.max(...sizes)).toBeLessThan(total)
     expect(sizes.filter((n) => n > 0).length).toBeGreaterThanOrEqual(3)
+
+    // Loop audit F2: "Sim entire draft" clears the hard gate. Continue,
+    // pressed on the draft screen itself, must now ADVANCE (it used to be a
+    // silent no-op on a stale gate), and the label names where it goes.
+    career.autoDraft()
+    const done = career.getDashboard()
+    expect(done.draftPending).toBe(false)
+    expect(done.continueLabel).not.toBe('Go to the entry draft')
+    expect(routeContinue({ dashboard: done, screen: 'draft', lastRoute: null }).kind).toBe('advance')
+    const camp = done.continueLabel === 'Continue to development camp'
+    if (!camp) expect(done.continueLabel).toBe('Continue — re-signing window')
+    // One press moves on exactly one beat: camp or the window, never July 1.
+    career.step()
+    expect(career.getOffseason()?.stage).toBe('resign')
+    expect(career.getDashboard().date.slice(5)).toBe(camp ? '06-22' : '06-27')
+    if (camp) {
+      expect(career.getDashboard().offseasonStageLabel).toBe('Development camp')
+      expect(career.getDashboard().continueLabel).toBe('Continue — development camp scrimmage')
+      career.step()
+      expect(career.getDashboard().continueLabel).toBe('Continue — development camp, final reads')
+      career.step()
+      expect(career.getDashboard().continueLabel).toBe('Continue — re-signing window, day 1')
+    }
   }, 240_000)
 })
 
@@ -228,9 +253,19 @@ describe('interruption diet — engine side (PHASE 0)', () => {
     const partner = c.data.league.teams.find((t: unknown) => t !== c.userTeamId)
     const offer = { offerId: 'x', partnerTeamId: partner, userReceivesPlayerIds: [], userReceivesPicks: [], userGivesPlayerIds: [depth], userGivesPicks: [], message: '', expiresOnDay: 99 }
     expect(c.offerWorthTheGm(offer)).toBe(false)
-    // …but the same call is the GM's when it is about a man he promised a role,
+    // …and a lowball for a man he promised a role is STILL the AGM's (loop
+    // audit F4: "a 2nd-round pick for the starting goalie" used to interrupt
+    // just because it named a core player),
     c.data.players.get(depth).squadStatus = 'coreStarter'
-    expect(c.offerWorthTheGm(offer)).toBe(true)
+    expect(c.offerWorthTheGm(offer)).toBe(false)
+    // …but a serious bid for him (≥ 0.8× on our numbers) is the GM's call.
+    const want = playerValue(c.data.players.get(depth))
+    const theirs = [...c.data.players.values()].find((p: any) => {
+      const v = playerValue(p)
+      return v >= want * 0.9 && v <= want * 1.2
+    })
+    expect(theirs).toBeDefined()
+    expect(c.offerWorthTheGm({ ...offer, userReceivesPlayerIds: [theirs.id] })).toBe(true)
     delete c.data.players.get(depth).squadStatus
     // …or when it is deadline week.
     c.currentDay = c.deadlineDay - 3

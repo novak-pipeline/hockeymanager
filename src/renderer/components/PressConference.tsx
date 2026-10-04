@@ -29,8 +29,13 @@ function pressApi() {
   return hockey?.press ?? null
 }
 
-export function PressConference(): JSX.Element | null {
+/** `hold` (loop audit F4): something else owns the screen — a scene room, the
+ *  processing overlay, a ringing phone. The presser waits behind it rather
+ *  than stacking a third layer on top. */
+export function PressConference(props: { hold?: boolean; onLive?: (live: boolean) => void } = {}): JSX.Element | null {
   const client = useClient()
+  const holdRef = useRef(false)
+  holdRef.current = props.hold === true
   const [presser, setPresser] = useState<PressConferenceState | null>(null)
   const [phase, setPhase] = useState<Phase>('idle')
   const [answer, setAnswer] = useState('')
@@ -43,7 +48,7 @@ export function PressConference(): JSX.Element | null {
 
   // Poll for presser on mount and when refresh bumps (via re-render).
   useEffect(() => {
-    if (pollRef.current || !settings.pressersEnabled) return
+    if (pollRef.current || !settings.pressersEnabled || holdRef.current) return
     pollRef.current = true
     void (async () => {
       try {
@@ -64,7 +69,12 @@ export function PressConference(): JSX.Element | null {
     })()
   })
 
+  const shown = !!presser && phase !== 'idle' && !(props.hold && phase === 'answering')
+  const onLive = props.onLive
+  useEffect(() => { onLive?.(shown) }, [onLive, shown])
+
   if (!presser || phase === 'idle') return null
+  if (props.hold && phase === 'answering') return null
 
   async function handleTypedAnswer() {
     if (!presser || !answer.trim()) return

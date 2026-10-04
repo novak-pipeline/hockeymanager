@@ -8,7 +8,7 @@ import { OverallStars, PotentialStars } from '../components/Stars'
 import { Notice, Panel, ScreenHeader, ScreenStateNotices } from '../components/ui'
 import { Icon } from '../components/primitives'
 import { useClient, useScreenData } from '../hooks/useSim'
-import { toast } from '../components/store'
+import { bumpRefresh, toast } from '../components/store'
 import { SortHeaders, sortColumns, useTableSort } from '../components/sortable'
 
 // ─── draft board ──────────────────────────────────────────────────────────────
@@ -700,6 +700,7 @@ export function DraftScreen(): JSX.Element {
     } else {
       toast('Pick submitted.', 'success')
       refetch()
+      bumpRefresh()
     }
   }
 
@@ -712,6 +713,7 @@ export function DraftScreen(): JSX.Element {
       setMutErr(r.message)
     } else {
       refetch()
+      bumpRefresh()
     }
   }
 
@@ -724,6 +726,7 @@ export function DraftScreen(): JSX.Element {
       setMutErr(r.message)
     } else {
       refetch()
+      bumpRefresh()
     }
   }
 
@@ -737,20 +740,19 @@ export function DraftScreen(): JSX.Element {
     } else {
       toast('Draft completed — best available auto-picked for your club.', 'success')
       refetch()
+      // Loop audit F2: the topbar's Continue reads the SHELL dashboard. Without
+      // this bump it kept saying "Go to the entry draft" over a finished draft.
+      bumpRefresh()
     }
   }
 
-  /** Draft done → resume the offseason (move to re-signings) and return. */
-  async function handleProceed() {
-    setBusy(true)
-    setMutErr(null)
-    const r = await client.advanceOffseason()
-    setBusy(false)
-    if (r.type === 'error') {
-      setMutErr(r.message)
-    } else {
-      nav.navigate('offseason')
-    }
+  /** Draft done → back to the summer desk. Navigation ONLY (loop audit F2):
+   *  this used to call advanceOffseason() on every click, so walking between
+   *  this screen and the desk silently spent the re-signing window, July 1
+   *  and dev camp. Time moves on the topbar's Continue, nowhere else. */
+  function handleProceed() {
+    bumpRefresh()
+    nav.navigate('offseason')
   }
 
   return (
@@ -819,7 +821,7 @@ export function DraftScreen(): JSX.Element {
                 disabled={busy}
                 onClick={handleProceed}
               >
-                {busy ? '…' : 'Proceed to re-signings →'}
+                Back to the offseason desk →
               </button>
             )}
           </div>

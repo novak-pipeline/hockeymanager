@@ -917,9 +917,13 @@ th.sortable:hover {
   white-space: nowrap;
 }
 
-/* date + phase (center) */
+/* date + phase (center). It is the ONLY part of row 1 that gives way when the
+   window is narrow (loop audit F5): min-width 0 lets it shrink below its
+   nowrap content, so the Continue button on the right is never pushed off. */
 .topnav-date {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -983,6 +987,28 @@ button.topnav-beat:hover { filter: brightness(1.25); }
   gap: var(--sp-2);
   flex-shrink: 0;
   margin-left: auto;
+}
+/* The most-pressed control in the game: never shrinks, never wraps, never clipped. */
+.topnav-actions .btn-hero {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.topnav-club-name {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Narrower windows (1600x900 at 150% is 1067 CSS px of app; a 1920 laptop at
+   125% is 1536): shed the secondary furniture before anything else moves. */
+@media (max-width: 1700px) {
+  .topnav-version,
+  .topnav-next { display: none; }
+}
+@media (max-width: 1450px) {
+  .topnav-date-sub { display: none; }
+  .topnav-club-name { max-width: 150px; }
+  .topnav-util-btn { padding: 5px 7px; }
+  .sim-secondary .btn { padding: 6px 7px; }
 }
 
 /* Save/Load small icon buttons */
