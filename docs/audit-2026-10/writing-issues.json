@@ -1,0 +1,3973 @@
+[
+ {
+  "type": "ai-tell",
+  "text": "With the deadline approaching, chatter around Sonny Milano is intensifying. Multiple clubs are believed to be in contact with Hershey Bears.",
+  "source": "src/engine/league/tentpoles.ts:237",
+  "count": 178,
+  "views": [
+   "news(ambient/ticker)"
+  ],
+  "why": "are believed to be",
+  "moreExamples": [
+   "With the deadline approaching, chatter around Lucas Nordsäter is intensifying. Multiple clubs are believed to be in contact with Umea Löven.",
+   "With the deadline approaching, chatter around Jérôme Bachofner is intensifying. Multiple clubs are believed to be in contact with Langnau Im Emmental Tigers.",
+   "With the deadline approaching, chatter around Pierre-Édouard Bellemare is intensifying. Multiple clubs are believed to be in contact with Porrentruy Ajoie."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "18yo — ~2 yrs of USHL left — organisational depth — an ECHL ceiling for now.",
+  "source": "src/engine/career/developmentCenter.ts:133",
+  "count": 29,
+  "views": [
+   "development"
+  ],
+  "why": "em-dash",
+  "moreExamples": [
+   "19yo — ~1 yr of J20 left — organisational depth — an ECHL ceiling for now.",
+   "21yo — ~1 yr of NCAA eligibility left — organisational depth — an ECHL ceiling for now.",
+   "19yo — ~1 yr of OHL left — organisational depth — an ECHL ceiling for now."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "21yo, developing in HA — raw for the AHL — an ECHL stint to find his feet, then a call-up.",
+  "source": "src/engine/career/developmentCenter.ts:138",
+  "count": 26,
+  "views": [
+   "development"
+  ],
+  "why": "em-dash",
+  "moreExamples": [
+   "23yo — final NCAA season; turns pro after — raw for the AHL — an ECHL stint to find his feet, then a call-up."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "FLORIDA — October is in the books. The Florida Panthers are 5–4–3 (13 pts, 13th of 32). Here is the honest assessment. Month in brief: Gabriel Vilardi — 4 away from 100 career goals Alexis Lafrenière — 4 away from 100 career goals Alex DeBrincat (DET) leads with 22 points. Leo Carlsson (ANA) leads with 18 points. They were projected 27th before puck drop — they're running 14 places ahead of schedu",
+  "source": "src/engine/story/pressFallback.ts:150",
+  "count": 10,
+  "views": [
+   "inbox"
+  ],
+  "why": "em-dash",
+  "moreExamples": [
+   "Another month of hockey is in the books. Here is the league narrative after November. Alexandre Texier — 18th straight game without a point Marco Kasper — 21st straight game without a point Alex DeBrincat (DET) leads with 29 points. Dylan Holloway (STL) leads with 25 points. The Florida Panthers sit at 8–6–3 (19 pts, 17th of 32) through November. They were projected 27th before puck drop — they're",
+   "FLORIDA — We are well into the season now. Patterns are forming. The Florida Panthers have settled at 10–7–6 (26 pts, 18th of 32) through the early going, going 2–3 in their most recent stretch. Nate Danielson — 18th straight game without a point Pierre-Luc Dubois — 25th straight game without a point Alex DeBrincat (DET) leads with 39 points. Lucas Raymond (DET) leads with 29 points. They were pro",
+   "Somebody has to say it plainly. Here is my order. 1. Carolina Hurricanes — 28–4–3 (59 pts) 2. Colorado Avalanche — 25–5–5 (55 pts) 3. Buffalo Sabres — 27–7–0 (54 pts) 4. Detroit Red Wings — 23–8–4 (50 pts) 5. Dallas Stars — 21–10–4 (46 pts) 6. Columbus Blue Jackets — 21–9–3 (45 pts) 7. Tampa Bay Lightning — 20–10–4 (44 pts) 8. Utah Mammoth — 21–10–2 (44 pts) The Florida Panthers are ranked 17th in"
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "The Florida Panthers are 5–3–2 (12 pts, 8th of 32). A 4–1 week. Make of that what you will — and I'll tell you what I make of it. They are ahead of a preseason projection of 27th — on 10 games, which is not yet a trend. Also on the radar: Patrick Kane — 5 away from 500 career goals. Alex DeBrincat (DET) leads the league with 15 points. The rumor mill keeps spinning around Casey Mittelstadt (BOS) —",
+  "source": "src/engine/story/pressFallback.ts:238",
+  "count": 9,
+  "views": [
+   "inbox"
+  ],
+  "why": "Make of that what you will; which is not yet a trend; em-dash",
+  "moreExamples": [
+   "The Florida Panthers are 5–3–2 (12 pts, 8th of 32). A 4–1 week. Make of that what you will — and I'll tell you what I make of it. They are ahead of a preseason projection of 27th — on 10 games, which is not yet a trend. Also on the radar: Patrick Kane — 5 away from 500 career goals. Alex DeBrincat (DET) leads the league with 15 points. The rumor mill keeps spinning around Casey Mittelstadt (BOS) —",
+   "The Florida Panthers are 5–3–2 (12 pts, 8th of 32). A 4–1 week. Make of that what you will — and I'll tell you what I make of it. They are ahead of a preseason projection of 27th — on 10 games, which is not yet a trend. Also on the radar: Patrick Kane — 5 away from 500 career goals. Alex DeBrincat (DET) leads the league with 15 points. The rumor mill keeps spinning around Casey Mittelstadt (BOS) —",
+   "The Florida Panthers are 9–6–5 (23 pts, 18th of 32). A 2–3 week. Make of that what you will — and I'll tell you what I make of it. They were projected 27th before puck drop — they're running 9 places ahead of schedule. Also on the radar: Pierre-Luc Dubois — 18th straight game without a point. Alex DeBrincat (DET) leads the league with 35 points. The rumor mill keeps spinning around Casey Mittelsta"
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "I'll tell you what, folks — I've been on the phone all week with people around this league, and nobody is sleeping on the Florida Panthers right now. We're 10–7–6 (26 pts, 18th of 32), and that record doesn't tell the whole story of what we've been building. Things are a bit quiet in the dressing room. Brad Marchand will be expected to change that. And yes, I've heard the whispers — Off the ice, f",
+  "source": "src/engine/story/pressFallback.ts:564",
+  "count": 8,
+  "views": [
+   "inbox"
+  ],
+  "why": "I'll tell you what; em-dash",
+  "moreExamples": [
+   "I'll tell you what, folks — I've been on the phone all week with people around this league, and nobody is sleeping on the Florida Panthers right now. We're 10–7–6 (26 pts, 18th of 32), and that record doesn't tell the whole story of what we've been building. Things are a bit quiet in the dressing room. Brad Marchand will be expected to change that. And yes, I've heard the whispers — Off the ice, f",
+   "I'll tell you what, folks — I've been on the phone all week with people around this league, and nobody is sleeping on the Florida Panthers right now. We're 35–33–13 (83 pts, 21st of 32), and that record doesn't tell the whole story of what we've been building. Morale is poor, and people are starting to look at Brad Marchand for an answer. And yes, I've heard the whispers — Off the ice, friction be",
+   "I'll tell you what, folks — I've been on the phone all week with people around this league, and nobody is sleeping on the Florida Panthers right now. We're 35–33–13 (83 pts, 21st of 32), and that record doesn't tell the whole story of what we've been building. Morale is poor, and people are starting to look at Brad Marchand for an answer. And yes, I've heard the whispers — Off the ice, friction be"
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Noah Laba, 23: a middle-six forward if it comes together",
+  "source": "src/engine/story/inboxBeats.ts:367",
+  "count": 7,
+  "views": [
+   "inbox"
+  ],
+  "why": "if it comes together",
+  "moreExamples": [
+   "Denver Barkey, 21: a top-six forward if it comes together",
+   "Drew Roscoe, 17: a second-pair defenceman if it comes together",
+   "Cameron Reid, 19: a No. 1 defenceman if it comes together"
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Philadelphia Flyers defying expectations — and it might be for real",
+  "source": "src/engine/story/expectations.ts:230",
+  "count": 7,
+  "views": [
+   "inbox"
+  ],
+  "why": "might be for real",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "A +2 in 23:20. Quietly effective.",
+  "source": "unlocated (composed at runtime)",
+  "count": 7,
+  "views": [
+   "beat"
+  ],
+  "why": "Quietly",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "18yo — ~2 yrs of U20SM left — an AHL depth projection — useful org body.",
+  "source": "src/engine/career/developmentCenter.ts:131",
+  "count": 7,
+  "views": [
+   "development"
+  ],
+  "why": "em-dash",
+  "moreExamples": [
+   "19yo — ~1 yr of J20 left — an AHL depth projection — useful org body.",
+   "18yo — ~2 yrs of OHL left — an AHL depth projection — useful org body.",
+   "19yo — ~1 yr of WHL left — an AHL depth projection — useful org body."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Here's what we know about the Florida Panthers: they are 15–10–7 (37 pts, 16th of 32) and they just went 3–2 over the last 5 games. Here's what we don't know: whether any of it is sustainable. They were projected 27th before puck drop — they're running 11 places ahead of schedule. One to keep an eye on: Carl Grundström — 17th straight game without a point. Alex DeBrincat (DET) leads the league wit",
+  "source": "src/engine/story/pressFallback.ts:463",
+  "count": 6,
+  "views": [
+   "inbox"
+  ],
+  "why": "Here's what we know; em-dash",
+  "moreExamples": [
+   "Here's what we know about the Florida Panthers: they are 15–10–7 (37 pts, 16th of 32) and they just went 3–2 over the last 5 games. Here's what we don't know: whether any of it is sustainable. They were projected 27th before puck drop — they're running 11 places ahead of schedule. One to keep an eye on: Carl Grundström — 17th straight game without a point. Alex DeBrincat (DET) leads the league wit"
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Brenden Dillon (37) — unsigned in the NHL — has joined Vladivostok Admiral in the Kontinental Hockey League on a 1-year deal.",
+  "source": "src/engine/career/career.ts:9794",
+  "count": 6,
+  "views": [
+   "news(wire)"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "FLORIDA — Numbers tell part of the story. The Florida Panthers are 8–6–3 (19 pts, 17th of 32) after a 3–2 week. But a lot of what happens on the ice in this building starts long before puck drop. The energy is not quite there, and Brad Marchand knows it. Off the ice, friction between Gustav Forsling vs Anton Lundell is worth watching. Also on the radar: Alexandre Texier — 18th straight game withou",
+  "source": "src/engine/story/pressFallback.ts:367",
+  "count": 5,
+  "views": [
+   "inbox"
+  ],
+  "why": "em-dash",
+  "moreExamples": [
+   "FLORIDA — Numbers tell part of the story. The Florida Panthers are 26–20–11 (63 pts, 19th of 32) after a 1–4 week. But a lot of what happens on the ice in this building starts long before puck drop. It is a tense group. Brad Marchand has his hands full. Off the ice, friction between Gustav Forsling vs Anton Lundell is worth watching. Worth watching: Cole Eiserman — 17th straight game without a poi",
+   "FLORIDA — Numbers tell part of the story. The Florida Panthers are 29–21–11 (69 pts, 18th of 32) after a 4–1 week. But a lot of what happens on the ice in this building starts long before puck drop. Brad Marchand has some work to do: the group feels a little flat right now. Off the ice, friction between Gustav Forsling vs Anton Lundell is worth watching. Worth watching: Felix Nilsson — 17th straig",
+   "FLORIDA — Numbers tell part of the story. The Florida Panthers are 32–31–11 (75 pts, 20th of 32) after a 1–4 week. But a lot of what happens on the ice in this building starts long before puck drop. The dressing room is in a difficult place, and a lot rides on Brad Marchand's leadership right now. Off the ice, friction between Gustav Forsling vs Anton Lundell is worth watching. One to keep an eye "
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Rankings are always a conversation. Here is mine — and I'll stand behind every line of it. 1. Vegas Golden Knights — 1–0–0 (2 pts) 2. Buffalo Sabres — 1–0–0 (2 pts) 3. Ottawa Senators — 1–0–0 (2 pts) 4. Colorado Avalanche — 1–0–0 (2 pts) 5. Edmonton Oilers — 1–0–0 (2 pts) 6. San Jose Sharks — 1–0–0 (2 pts) 7. Toronto Maple Leafs — 1–0–0 (2 pts) 8. Winnipeg Jets — 1–0–0 (2 pts) The Florida Panthers",
+  "source": "src/engine/story/pressFallback.ts:146",
+  "count": 4,
+  "views": [
+   "inbox"
+  ],
+  "why": "which is not yet a trend; em-dash",
+  "moreExamples": [
+   "Rankings are always a conversation. Here is mine — and I'll stand behind every line of it. 1. Vegas Golden Knights — 1–0–0 (2 pts) 2. Buffalo Sabres — 1–0–0 (2 pts) 3. Ottawa Senators — 1–0–0 (2 pts) 4. Colorado Avalanche — 1–0–0 (2 pts) 5. Edmonton Oilers — 1–0–0 (2 pts) 6. San Jose Sharks — 1–0–0 (2 pts) 7. Toronto Maple Leafs — 1–0–0 (2 pts) 8. Winnipeg Jets — 1–0–0 (2 pts) The Florida Panthers"
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "The Florida Panthers are 5–4–3 (13 pts, 13th of 32) after a 3–2 week. On paper, fine. On the ice — honestly? We showed some things this week that I think are going to matter come the second half. They were projected 27th before puck drop — they're running 14 places ahead of schedule. Elsewhere, Gabriel Vilardi — 4 away from 100 career goals. Next up: vs DAL (day 30), vs WSH (day 32). And when we'r",
+  "source": "src/engine/story/pressFallback.ts:617",
+  "count": 4,
+  "views": [
+   "inbox"
+  ],
+  "why": "On paper; em-dash",
+  "moreExamples": [
+   "The Florida Panthers are 5–4–3 (13 pts, 13th of 32) after a 3–2 week. On paper, fine. On the ice — honestly? We showed some things this week that I think are going to matter come the second half. They were projected 27th before puck drop — they're running 14 places ahead of schedule. Elsewhere, Gabriel Vilardi — 4 away from 100 career goals. Next up: vs DAL (day 30), vs WSH (day 32). And when we'r",
+   "The Florida Panthers are 24–16–9 (57 pts, 16th of 32) after a 1–4 week. On paper, fine. On the ice — honestly? We showed some things this week that I think are going to matter down the stretch. They were projected 27th before puck drop — they're running 11 places ahead of schedule. One to keep an eye on: Tom Wilson — 1 away from 200 career goals. Next up: @ DET (day 122), vs CBJ (day 124). And whe",
+   "The Florida Panthers are 24–16–9 (57 pts, 16th of 32) after a 1–4 week. On paper, fine. On the ice — honestly? We showed some things this week that I think are going to matter down the stretch. They were projected 27th before puck drop — they're running 11 places ahead of schedule. One to keep an eye on: Tom Wilson — 1 away from 200 career goals. Next up: @ DET (day 122), vs CBJ (day 124). And whe"
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "A player who has stopped pretending. Joel Hanley has made his position clear to Anaheim Ducks, and a discontented man on an expensive contract is a difficult thing to move quietly.",
+  "source": "src/engine/league/tentpoles.ts:207",
+  "count": 4,
+  "views": [
+   "news(ambient/ticker)"
+  ],
+  "why": "quietly",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Fair question. Sam Reinhart has 8 points and he is one of the better players on the roster on paper. My read: the coach wants him to earn it back, and he has not yet.",
+  "source": "src/engine/story/beatPools.ts:473",
+  "count": 4,
+  "views": [
+   "beat"
+  ],
+  "why": "on paper",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "20yo — ages out of junior after this season — raw for the AHL — an ECHL stint to find his feet, then a call-up.",
+  "source": "src/engine/career/developmentCenter.ts:109",
+  "count": 4,
+  "views": [
+   "development"
+  ],
+  "why": "em-dash",
+  "moreExamples": [
+   "20yo — ages out of junior after this season — organisational depth — an ECHL ceiling for now."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "severity": "S2",
+  "text": "I'll tell you what, folks — I've been on the phone all week with people around this league, and nobody is sleeping on the Florida Panthers right now.",
+  "source": "src/engine/story/pressFallback.ts:564",
+  "count": 4,
+  "views": [
+   "inbox (homer column)"
+  ],
+  "why": "persona written as a stack of verbal tics ('I'll tell you what', 'Make of that what you will — and I'll tell you what I make of it' :238, 'Here's what we know ... Here's what we don't know' :463, 'Alright — ... let me tell you something' :195, 'On paper, fine. On the ice — honestly?' :617); each column is a tic + record + filler, not an opinion with a reason",
+  "origin": "code read / real app"
+ },
+ {
+  "type": "ai-tell",
+  "text": "I'm less worried than the scoreline suggests. The expected-goals gap was narrow — but 'close on paper' doesn't pay the bills, so we correct it anyway.",
+  "source": "src/engine/story/coachQuotes.ts:455",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "on paper",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "The physio's report is careful; Mikkola is not. \"It's manageable. I want to play.\" Your medical staff won't say no outright — they'll say it's your call, which is how they say no.",
+  "source": "src/engine/story/decisionEvents.ts:216",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "which is how they",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Look — 2–3 isn't the week we wanted. But I've been around hockey long enough to know that a tough week doesn't define a season. Not for a team with this group. They were projected 27th before puck drop — they're running 13 places ahead of schedule. Nobody believed in us — and we've been proving them wrong every night. Brad Marchand has some work to do: the group feels a little flat right now. Next",
+  "source": "src/engine/story/pressFallback.ts:529",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "This is not the man anyone circled in October. Charlie McAvoy has a point in 10 consecutive games and is quietly rewriting what the Boston Bruins thought they had.",
+  "source": "src/engine/story/arcs.ts:410",
+  "count": 3,
+  "views": [
+   "news(wire)"
+  ],
+  "why": "quietly",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "FLORIDA — December is in the books. The Florida Panthers are 15–11–8 (38 pts, 16th of 32). Here is the honest assessment. Month in brief: Travis Konecny — 1 away from 500 career points Taylor Hall — 4 away from 300 career goals Alex DeBrincat (DET) leads with 61 points. Lucas Raymond (DET) leads with 44 points. They were projected 27th before puck drop — they're running 11 places ahead of schedule",
+  "source": "src/engine/story/pressFallback.ts:193",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "em-dash; let me tell you something",
+  "moreExamples": [
+   "Alright — January didn't go the way we wanted. But let me tell you something about this Florida Panthers group: they don't quit. 17–13–8 (42 pts, 19th of 32). Zack Ostapchuk — 17th straight game without a point Rasmus Dahlin — 3 away from 100 career goals Alex DeBrincat (DET) leads with 68 points. Lucas Raymond (DET) leads with 53 points. Brad Marchand has some work to do: the group feels a little",
+   "Alright — January didn't go the way we wanted. But let me tell you something about this Florida Panthers group: they don't quit. 17–13–8 (42 pts, 19th of 32). Zack Ostapchuk — 17th straight game without a point Rasmus Dahlin — 3 away from 100 career goals Alex DeBrincat (DET) leads with 68 points. Lucas Raymond (DET) leads with 53 points. Brad Marchand has some work to do: the group feels a little"
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "18yo — ~2 yrs of OHL left — a genuine NHL ceiling — keep developing him, then onto the farm.",
+  "source": "src/engine/career/developmentCenter.ts:127",
+  "count": 3,
+  "views": [
+   "development"
+  ],
+  "why": "em-dash",
+  "moreExamples": [
+   "19yo — ~1 yr of NL left — a genuine NHL ceiling — keep developing him, then onto the farm."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Gustav Forsling an exceptional skater who covers ice quickly. Opens up tremendous ice with his passing. Very reliable in his own end. Thrives under pressure — a player you can trust in tight games. Brings an intensity that teammates feed off. A true professional in everything he does. Has the flair to pull off the highlight-reel move. Brings a combative style that gets under opponents' skin. A cal",
+  "source": "src/engine/career/scoutReport.ts:347",
+  "count": 3,
+  "views": [
+   "playerProfile"
+  ],
+  "why": "A true professional; the kind of player",
+  "moreExamples": [
+   "Dmitri Kulikov thrives under pressure — a player you can trust in tight games. Brings an intensity that teammates feed off. Can surprise you with a moment of individual brilliance. Plays with an edge — likes to agitate. Is the kind of player you want on the ice in crunch time.",
+   "Niko Mikkola takes away time and space in the defensive zone. An imposing physical presence on the ice. Extremely strong on the puck. Thrives under pressure — a player you can trust in tight games. A relentless competitor who never gives up on a play. Has the flair to pull off the highlight-reel move. Brings a combative style that gets under opponents' skin. Is the kind of player you want on the i"
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Watch: 3rd line — 38/100 · No dedicated scorer — goals will be hard to come by",
+  "source": "src/engine/league/archetypes.ts:355",
+  "count": 3,
+  "views": [
+   "getStaffMeeting"
+  ],
+  "why": "em-dash",
+  "moreExamples": [
+   "Watch: 4th line — 33/100 · No dedicated scorer — goals will be hard to come by",
+   "Watch: Top line — 38/100 · No dedicated scorer — goals will be hard to come by"
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Place the Florida Panthers on the league map and here's what you get: 2–3–2 (6 pts, 18th of 32), a 2–3 week, and a club that sits above where the preseason models expected. They are ahead of a preseason projection of 27th — on 7 games, which is not yet a trend. Zach Benson (BUF) leads the league with 10 points. Also on the radar: Joel Farabee — 5 away from 100 career goals. Things are a bit quiet ",
+  "source": "src/engine/story/pressFallback.ts:486",
+  "count": 2,
+  "views": [
+   "inbox"
+  ],
+  "why": "which is not yet a trend; em-dash",
+  "moreExamples": [
+   "Place the Florida Panthers on the league map and here's what you get: 2–3–2 (6 pts, 18th of 32), a 2–3 week, and a club that sits above where the preseason models expected. They are ahead of a preseason projection of 27th — on 7 games, which is not yet a trend. Zach Benson (BUF) leads the league with 10 points. Also on the radar: Joel Farabee — 5 away from 100 career goals. Things are a bit quiet "
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Alright — October didn't go the way we wanted. But let me tell you something about this Florida Panthers group: they don't quit. 2–3–2 (6 pts, 18th of 32). Joel Farabee — 5 away from 100 career goals Jakob Chychrun — 3 away from 100 career goals Zach Benson (BUF) leads with 10 points. Alex DeBrincat (DET) leads with 9 points. Things are a bit quiet in the dressing room. Brad Marchand will be expec",
+  "source": "src/engine/story/pressFallback.ts:195",
+  "count": 2,
+  "views": [
+   "inbox"
+  ],
+  "why": "let me tell you something; em-dash",
+  "moreExamples": [
+   "Alright — October didn't go the way we wanted. But let me tell you something about this Florida Panthers group: they don't quit. 2–3–2 (6 pts, 18th of 32). Joel Farabee — 5 away from 100 career goals Jakob Chychrun — 3 away from 100 career goals Zach Benson (BUF) leads with 10 points. Alex DeBrincat (DET) leads with 9 points. Things are a bit quiet in the dressing room. Brad Marchand will be expec"
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "I've watched every game. 15th is fair, and I hate that it's fair. 1. Colorado Avalanche — 13–4–1 (27 pts) 2. Buffalo Sabres — 13–5–0 (26 pts) 3. Carolina Hurricanes — 12–3–2 (26 pts) 4. Philadelphia Flyers — 11–3–3 (25 pts) 5. Dallas Stars — 11–4–2 (24 pts) 6. Detroit Red Wings — 12–6–0 (24 pts) The Florida Panthers are ranked 15th in the standings. Chin up. Somebody has to say it.",
+  "source": "src/engine/story/pressFallback.ts:1144",
+  "count": 2,
+  "views": [
+   "inbox"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "FLORIDA — The middle of the season is where good teams separate. Some have. Here is the order. 1. Carolina Hurricanes — 22–3–3 (47 pts) 2. Colorado Avalanche — 21–5–4 (46 pts) 3. Detroit Red Wings — 20–6–3 (43 pts) 4. Buffalo Sabres — 21–7–0 (42 pts) 5. Nashville Predators — 18–10–3 (39 pts) 6. Dallas Stars — 17–8–4 (38 pts) 7. Boston Bruins — 18–10–1 (37 pts) 8. Tampa Bay Lightning — 17–10–3 (37 ",
+  "source": "src/engine/story/pressFallback.ts:1108",
+  "count": 2,
+  "views": [
+   "inbox"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "FLORIDA — Standings are undefeated. The Florida Panthers check in at 25–17–10 (60 pts, 16th of 32) after going 1–4 this week, still running ahead of what anyone predicted back in October. They were projected 27th before puck drop — they're running 11 places ahead of schedule. Elsewhere, Leon Draisaitl — 1 away from 1000 career points. The rumor mill keeps spinning around Casey Mittelstadt (BOS) — ",
+  "source": "src/engine/story/pressFallback.ts:318",
+  "count": 2,
+  "views": [
+   "inbox"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "The rankings are out and the Florida Panthers are 17th. Not a fun read. 1. Carolina Hurricanes — 42–6–5 (89 pts) 2. Buffalo Sabres — 39–12–2 (80 pts) 3. Colorado Avalanche — 36–9–8 (80 pts) 4. Boston Bruins — 35–16–3 (73 pts) 5. Columbus Blue Jackets — 34–14–5 (73 pts) 6. Detroit Red Wings — 32–12–8 (72 pts) The Florida Panthers are ranked 17th in the standings. We've been here before. We got out ",
+  "source": "src/engine/story/pressFallback.ts:1145",
+  "count": 2,
+  "views": [
+   "inbox"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Alright — March didn't go the way we wanted. But let me tell you something about this Florida Panthers group: they don't quit. 30–24–11 (71 pts, 18th of 32). Elias Pettersson — 2 away from 500 career points Cullen Potter — 18th straight game without a point Alex DeBrincat (DET) leads with 83 points. Martin Necas (COL) leads with 78 points. The energy is not quite there, and Brad Marchand knows it.",
+  "source": "src/engine/story/pressFallback.ts:1387",
+  "count": 2,
+  "views": [
+   "inbox"
+  ],
+  "why": "let me tell you something; em-dash",
+  "moreExamples": [
+   "Alright — March didn't go the way we wanted. But let me tell you something about this Florida Panthers group: they don't quit. 30–24–11 (71 pts, 18th of 32). Elias Pettersson — 2 away from 500 career points Cullen Potter — 18th straight game without a point Alex DeBrincat (DET) leads with 83 points. Martin Necas (COL) leads with 78 points. The energy is not quite there, and Brad Marchand knows it."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "New this week: Owen Hayden (A+). We have not split the group — it is all the draft class at the moment. 75 flagged prospects await your call. Their cards are attached — make the calls here, or leave the queue to us.",
+  "source": "src/engine/career/career.ts:1234",
+  "count": 2,
+  "views": [
+   "inbox"
+  ],
+  "why": "em-dash",
+  "moreExamples": [
+   "New this week: Carter Bear (A). We have not split the group — it is all the draft class at the moment. 78 flagged prospects await your call. Their cards are attached — make the calls here, or leave the queue to us."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Argue the roster read (bottom-third strength and an old core — time to tear down). If the board accepts the softer bar — \"Develop the young core — results are secondary.\" — they'll want a receipt: Jack Devine and the young core get real NHL minutes this season.",
+  "source": "src/engine/league/gmPersona.ts:157",
+  "count": 2,
+  "views": [
+   "boardMeeting",
+   "deadlineDay"
+  ],
+  "why": "em-dash",
+  "moreExamples": [
+   "We're selling — bottom-third strength and an old core — time to tear down. Every expiring veteran is a draft pick wearing skates."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "20yo — ~2 yrs of NCAA eligibility left — projects as an AHL regular with a shot at the NHL fringe.",
+  "source": "src/engine/career/career.ts:27606",
+  "count": 2,
+  "views": [
+   "development"
+  ],
+  "why": "em-dash",
+  "moreExamples": [
+   "21yo — ~1 yr of NCAA eligibility left — projects as an AHL regular with a shot at the NHL fringe."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Niko Mikkola tremendous skating ability — very difficult to stay with. Takes away time and space in the defensive zone. An imposing physical presence on the ice. Extremely strong on the puck. Thrives under pressure — a player you can trust in tight games. A relentless competitor who never gives up on a play. Has the flair to pull off the highlight-reel move. Brings a combative style that gets unde",
+  "source": "src/engine/career/scoutReport.ts:267",
+  "count": 2,
+  "views": [
+   "playerProfile"
+  ],
+  "why": "the kind of player; em-dash",
+  "moreExamples": [
+   "Uvis Balinskis tremendous skating ability — very difficult to stay with. Reads the play well and anticipates lanes others miss. Thrives under pressure — a player you can trust in tight games. A relentless competitor who never gives up on a play. Can surprise you with a moment of individual brilliance. Plays with an edge — likes to agitate."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Best: 2nd line — 75/100 · Sam Bennett feeds Carter Verhaeghe's shot — a dangerous combination",
+  "source": "src/engine/league/archetypes.ts:392",
+  "count": 2,
+  "views": [
+   "getStaffMeeting"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "The 2026 NHL Draft class is headlined by Brock Cripps and Anthony Timmerman, who have traded the top spot on our board through the season. and an especially strong year to be shopping for a defenceman, with enviable centre depth. What follows is our scouts' read on the prospects to know at each position heading toward draft day. TOP CENTRES • Kaden McGregor (PBO, OHL) — #3 overall; high-end upside",
+  "source": "src/engine/career/draftClassArticle.ts:63",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "FLORIDA — Another October, another chance. The Florida Panthers open the 2025–2026 season with a new set of objectives and a roster that has been reshaped since we last saw them in April. Here is the full picture. League favorites to watch: Colorado Avalanche, Buffalo Sabres, Carolina Hurricanes. They are ahead of a preseason projection of 27th — on 1 games, which is not yet a trend. Brad Marchand",
+  "source": "src/engine/story/pressFallback.ts:1258",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "which is not yet a trend",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "FLORIDA — Standings are undefeated. The Florida Panthers check in at 0–1–2 (2 pts, 27th of 32) after going 0–3 this week, right about where the preseason models had them. They sit exactly where the preseason numbers put them, 27th, on a book this thin. Also on the radar: Tyler Myers — 1 away from 100 career goals. The rumor mill keeps spinning around Casey Mittelstadt (BOS) — the trade chatter is ",
+  "source": "src/engine/story/pressFallback.ts:321",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "OTT send C Shane Pinto to PHI for a 2026 1st and a 2027 2nd. Samu Carlsson adds a forward with term — Shane Pinto beats what he had; Owen Petrov keeps selling — term on a veteran is years the rebuild does not need.",
+  "source": "src/engine/league/aiMarket.ts:421",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "FLORIDA — It is early, and some of this will not last. Here is where things stand. 1. Colorado Avalanche — 6–0–0 (12 pts) 2. Dallas Stars — 6–0–0 (12 pts) 3. Washington Capitals — 5–1–1 (11 pts) 4. Carolina Hurricanes — 5–1–1 (11 pts) 5. Boston Bruins — 5–1–0 (10 pts) 6. Nashville Predators — 5–2–0 (10 pts) 7. Philadelphia Flyers — 4–0–2 (10 pts) 8. St. Louis Blues — 4–2–1 (9 pts) The Florida Pant",
+  "source": "src/engine/story/pressFallback.ts:1105",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "You promised him “Let him play — the standings won't wait” — his minutes are up since that conversation, and he knows you made it happen.",
+  "source": "src/engine/career/career.ts:4893",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "6 consecutive wins have turned Florida Panthers into the fixture opponents circle nervously. Streaks end; the habits underneath them tend not to.",
+  "source": "src/engine/league/ambientNews.ts:58",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "the habits underneath",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Regular-season points are nice. Here is who I trust when they stop being handed out. 1. Carolina Hurricanes — 50–11–7 (107 pts) 2. Colorado Avalanche — 47–13–8 (102 pts) 3. Buffalo Sabres — 46–16–4 (96 pts) 4. Dallas Stars — 43–20–5 (91 pts) 5. Boston Bruins — 41–21–6 (88 pts) 6. Philadelphia Flyers — 40–20–8 (88 pts) 7. Detroit Red Wings — 39–17–10 (88 pts) 8. Tampa Bay Lightning — 39–19–9 (87 pt",
+  "source": "src/engine/story/pressFallback.ts:1124",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "FLORIDA — April is in the books. The Florida Panthers are 35–33–13 (83 pts, 21st of 32). Here is the honest assessment. Month in brief: William Nylander — 2 away from 300 career goals Felix Nilsson — 19th straight game without a point Mark Scheifele (WPG) leads with 94 points. Alex DeBrincat (DET) leads with 91 points. They were projected 27th before puck drop — they're running 6 places ahead of s",
+  "source": "src/engine/story/pressFallback.ts:201",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "FLORIDA — With the season in the books and trophies on the table, here is the state of play for every major award. Art Ross: Mark Scheifele (WPG) — 94 points Art Ross: Alex DeBrincat (DET) — 91 points Art Ross: Tim Stützle (OTT) — 89 points The Florida Panthers finish the year at 36–33–13 (85 pts, 20th of 32).",
+  "source": "src/engine/story/pressFallback.ts:1473",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Lukewarm — patience wearing. Engagement is down after this season — and that shapes what ownership puts on the table next year.",
+  "source": "src/engine/career/career.ts:11601",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Development camp wrapped this week: 37 of the organisation's young players on the ice, this year's draft class included. The staff named Sandis Vilmanis the camp standout — he 3rd of 31 in the shot; he scored three times in the first scrimmage and had 3 points (3G 0A) in his one game. The calls: • Brock England signs his entry-level deal and goes back to Kent T-Birds (WHL) for another year — the d",
+  "source": "src/engine/career/career.ts:14907",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "The 2026 season is upon us. Our analysts have crunched the numbers and Buffalo Sabres emerge as the clear favourite to claim the title. On paper, the best roster in the league heading into the season. Our dark horse: Washington Capitals at No. 12, capable of outrunning their seed. At the other end, Vancouver Canucks face an uphill battle — projected last in the league.",
+  "source": "src/engine/story/expectations.ts:61",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "On paper",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Argue the roster justifies it. The owner backs down — this time — but patience burns now.",
+  "source": "src/engine/career/boardMeeting.ts:331",
+  "count": 1,
+  "views": [
+   "boardMeeting"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "The Boston Bruins leave with both points, 5-2. The Florida Panthers had their stretches; they did not have enough of them. Charlie McAvoy — a defenceman — scored the one that decided it, at 12:45 of the second. David Pastrnak scored 0:50 into the game — some of the building had not sat down.",
+  "source": "src/engine/story/matchReport.ts:201",
+  "count": 1,
+  "views": [
+   "postgame"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "The Florida Panthers take it 5-3. Not a night anyone will frame, but the standings do not ask how. Uvis Balinskis — a defenceman — scored the one that decided it, at 4:33 of the third. The shorthanded goal at 9:25 of the second was the low-percentage moment of the night — Brock Faber, a man down, and gone the other way.",
+  "source": "src/engine/story/matchReport.ts:199",
+  "count": 1,
+  "views": [
+   "postgame"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "A bad night from the opening faceoff. 9-3, and the Florida Panthers were second to most of the pucks that mattered. Janis Moser — a defenceman — scored the one that decided it, at 0:06 of the second.",
+  "source": "src/engine/story/matchReport.ts:214",
+  "count": 1,
+  "views": [
+   "postgame"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Dustin Wolf was the whole difference. The Florida Panthers threw 35 shots at him and got 2 back; some nights the other goalie simply says no. Simon Nemec — a defenceman — scored the one that decided it, at 7:30 of the third. The shorthanded goal at 11:42 of the second was the low-percentage moment of the night — Simon Nemec, a man down, and gone the other way.",
+  "source": "src/engine/story/matchReport.ts:243",
+  "count": 1,
+  "views": [
+   "postgame"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "22yo — final NCAA season; turns pro after — organisational depth — an ECHL ceiling for now.",
+  "source": "src/engine/career/developmentCenter.ts:115",
+  "count": 1,
+  "views": [
+   "development"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "18yo — ~2 yrs of OHL left — projects as an AHL regular with a shot at the NHL fringe.",
+  "source": "src/engine/career/developmentCenter.ts:129",
+  "count": 1,
+  "views": [
+   "development"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Seth Jones a hard point shot that generates traffic chances. Consistently finds the right pass. Can be trusted in all situations on the penalty kill. Extremely strong on the puck. Stays calm in big moments. Brings an intensity that teammates feed off. A true professional in everything he does. Isn't afraid to try the spectacular. Plays with an edge — likes to agitate. Is the kind of player you wan",
+  "source": "src/engine/career/scoutReport.ts:427",
+  "count": 1,
+  "views": [
+   "playerProfile"
+  ],
+  "why": "A true professional",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "A franchise-calibre talent you build the team around — a first-line forward, number-one defenceman, or a true starting goalie.",
+  "source": "src/engine/career/scoutReport.ts:114",
+  "count": 1,
+  "views": [
+   "playerProfile"
+  ],
+  "why": "a true starting",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Elite — a true number-one defenceman.",
+  "source": "src/engine/career/multiScout.ts:223",
+  "count": 1,
+  "views": [
+   "playerProfile"
+  ],
+  "why": "a true number",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "The NHL took its time with him — no games until 2023–24, when the Panthers gave him 26. Nothing on the sheet beats 2024–25 — 4 goals, 14 assists, 76 games.",
+  "source": "src/engine/story/biography.ts:393",
+  "count": 1,
+  "views": [
+   "playerProfile"
+  ],
+  "why": "em-dash",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Dmitri Kulikov a below-average skater who struggles to keep up at this level. Thrives under pressure — a player you can trust in tight games. Brings an intensity that teammates feed off. Can surprise you with a moment of individual brilliance. Plays with an edge — likes to agitate. Is the kind of player you want on the ice in crunch time.",
+  "source": "src/engine/career/scoutReport.ts:271",
+  "count": 1,
+  "views": [
+   "playerProfile"
+  ],
+  "why": "the kind of player",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Drives play and finishes — a true number-one forward.",
+  "source": "src/engine/career/multiScout.ts:191",
+  "count": 1,
+  "views": [
+   "playerProfile"
+  ],
+  "why": "a true number",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "He believed you completely, which is the problem — you just took your best trade chip off the market with a sentence.",
+  "source": "src/engine/story/decisionEvents.ts:424",
+  "count": 1,
+  "views": [
+   "scene/concern outcome"
+  ],
+  "why": "which is the problem",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "Correct on paper and cold in the room. {last} nodded and left. Nobody will do anything stupid tomorrow, and nobody will forget that you asked them not to.",
+  "source": "src/engine/story/clubScenes.ts:320",
+  "count": 1,
+  "views": [
+   "scene/concern outcome"
+  ],
+  "why": "on paper",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "text": "He dressed. Your medical staff logged their objection in writing, the way people do when they expect to be asked later. (Medical overruled: Jones is cleared to dress, and he will be playing hurt.)",
+  "source": "src/engine/story/decisionEvents.ts:364",
+  "count": 1,
+  "views": [
+   "scene/concern outcome"
+  ],
+  "why": "the way people do",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "ai-tell",
+  "severity": "S3",
+  "text": "Brady Tkachuk, Aleksander Barkov, Matthew Tkachuk: 33 points in 15 games together. The city has given the line a name, which is how you know it has arrived. Break it up and people will ask why.",
+  "source": "src/engine/career/career.ts:22891 (name from src/engine/story/hockeySoul.ts:73)",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "aphoristic \"which is how you know\" closer; and the fallback nickname is surname initials (\"the TBT Line\"), which no city would coin",
+  "origin": "code read / real app"
+ },
+ {
+  "type": "ai-tell",
+  "severity": "S3",
+  "text": "The standings have made the decision for them. {team} are listening on {name}, quietly, and quietly is how these things start.",
+  "source": "src/engine/league/tentpoles.ts:228",
+  "count": 0,
+  "views": [
+   "ticker"
+  ],
+  "why": "aphoristic closer pattern (also 'Streaks end; the habits underneath them tend not to.' ambientNews.ts:58, 'which is how they say no' decisionEvents.ts:216, 'which is the problem' :424, 'the way people do when they expect to be asked later' :364, 'Something gives before the deadline' tentpoles.ts:249)",
+  "origin": "code read / real app"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Projects as a second-pair defenceman.",
+  "source": "unlocated (composed at runtime)",
+  "count": 45,
+  "views": [
+   "inbox",
+   "beat",
+   "getStaffMeeting"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [
+   "Projects as a top-pair defenceman.",
+   "Projects as a first-line forward.",
+   "Eetu Luostarinen sidelined with lower-body injury"
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "severity": "S3",
+  "text": "Projects as a second-pair defenceman.",
+  "source": "src/engine/story/inboxBeats.ts / scoutSummary.ts (scout card tail)",
+  "count": 45,
+  "views": [
+   "inbox scouting cards"
+  ],
+  "why": "scouting cards are 19% of the season inbox (123/651) and end on the same projection stub",
+  "origin": "code read / real app"
+ },
+ {
+  "type": "generic-filler",
+  "text": "CGY are rebuilding and would sell.",
+  "source": "src/engine/career/career.ts:18468",
+  "count": 25,
+  "views": [
+   "offseasonNeeds"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "John Tavares ended it in overtime.",
+  "source": "src/engine/career/matchNight.ts:289",
+  "count": 21,
+  "views": [
+   "postgame"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Louis Blues outperforming predictions midway through the season",
+  "source": "src/engine/story/expectations.ts:231",
+  "count": 12,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "UTA would move their backup — at a price.",
+  "source": "src/engine/career/career.ts:18470",
+  "count": 11,
+  "views": [
+   "offseasonNeeds"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "The tools say a middle-six forward; the consistency is coming.",
+  "source": "src/engine/story/inboxBeats.ts:563",
+  "count": 10,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [
+   "The tools say a second-pair defenceman; the consistency is coming."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Two shorthanded goals in one game.",
+  "source": "src/engine/story/matchReport.ts:245",
+  "count": 10,
+  "views": [
+   "postgame"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [
+   "Special teams coaches on both benches will be watching that tape through their fingers."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "I showed the group ten clips this morning.",
+  "source": "src/engine/story/coachQuotes.ts:691",
+  "count": 9,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [
+   "Same structural error in seven of them.",
+   "When the mistake is that repeatable, so is the fix."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "I've mapped out the sequence failures.",
+  "source": "src/engine/story/coachQuotes.ts:686",
+  "count": 9,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [
+   "Our transition defense has been the root cause.",
+   "We address it today."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "New Jersey Devils were not supposed to be here at this point.",
+  "source": "src/engine/story/expectations.ts:247",
+  "count": 8,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "It is a message.",
+  "source": "src/engine/story/beatPools.ts:475",
+  "count": 8,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [
+   "How Matthew Tkachuk answers it decides where he is in a month."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Pittsburgh you're the best.",
+  "source": "src/engine/story/voices.ts:210",
+  "count": 8,
+  "views": [
+   "feed"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "severity": "S3",
+  "text": "Hard to find on the ice. That can be good or bad.",
+  "source": "src/engine/story/beatPools.ts:272",
+  "count": 8,
+  "views": [
+   "beat grades"
+  ],
+  "why": "grade line for a player with no events says nothing; 'That can be good or bad' is the definition of filler (also 'Not much to say, good or bad.' :269, 'Nothing jumped out either way.' :271)",
+  "origin": "code read / real app"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Young C Cole Sillinger gets the full report",
+  "source": "src/engine/story/inboxBeats.ts:369",
+  "count": 7,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "New Jersey Devils making forecasters eat their words",
+  "source": "src/engine/story/expectations.ts:233",
+  "count": 7,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Philadelphia Flyers defying expectations — and it might be for real",
+  "source": "src/engine/story/expectations.ts:230",
+  "count": 7,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Spencer Knight was the whole difference.",
+  "source": "src/engine/story/matchReport.ts:164",
+  "count": 7,
+  "views": [
+   "postgame"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Beating Alex Nedeljkovic won't be easy",
+  "source": "src/engine/career/matchNight.ts:122",
+  "count": 7,
+  "views": [
+   "matchDayPreview"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Carter Verhaeghe did his part; the grades show who did not.",
+  "source": "src/engine/story/beatPools.ts:219",
+  "count": 7,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Power rankings: the definitive list, explained",
+  "source": "src/engine/story/pressFallback.ts:1117",
+  "count": 6,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [
+   "Rankings are always a conversation."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Minnesota Wild underperforming — is it time for a change?",
+  "source": "src/engine/story/expectations.ts:239",
+  "count": 6,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Matthew Tkachuk still out; the rest of the lineup holds.",
+  "source": "src/engine/story/beatDesk.ts:440",
+  "count": 6,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Calum Ritchie — worth tracking",
+  "source": "src/engine/career/scoutMeeting.ts:139",
+  "count": 6,
+  "views": [
+   "getScoutMeeting"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Add Calum Ritchie to your shortlist",
+  "source": "src/engine/career/scoutMeeting.ts:145",
+  "count": 6,
+  "views": [
+   "getScoutMeeting"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Seth Jones is waiting in your office",
+  "source": "src/engine/career/career.ts:3880",
+  "count": 5,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Everyone is on the draft class this week.",
+  "source": "src/engine/career/career.ts:27679",
+  "count": 5,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Parker Schellenberg is leveling up",
+  "source": "src/engine/career/career.ts:11736",
+  "count": 5,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "A bad night from the opening faceoff.",
+  "source": "src/engine/story/matchReport.ts:176",
+  "count": 5,
+  "views": [
+   "postgame"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Stay out of the box — this is where they hurt you.",
+  "source": "src/engine/career/matchNight.ts:69",
+  "count": 5,
+  "views": [
+   "matchDayPreview"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Draw penalties — their kill leaks.",
+  "source": "src/engine/career/matchNight.ts:80",
+  "count": 5,
+  "views": [
+   "matchDayPreview"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "CBJ arrive on a heater",
+  "source": "src/engine/career/matchNight.ts:136",
+  "count": 5,
+  "views": [
+   "matchDayPreview"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "First, the rest of the league.",
+  "source": "src/engine/story/beatPools.ts:573",
+  "count": 5,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Here is the day.",
+  "source": "src/engine/story/beatPools.ts:574",
+  "count": 5,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "There is other news, though.",
+  "source": "src/engine/story/beatPools.ts:575",
+  "count": 5,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Anything that makes them better makes this harder.",
+  "source": "src/engine/story/beatPools.ts:585",
+  "count": 5,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Shea Busch leads the pipeline update.",
+  "source": "src/engine/story/beatDesk.ts:849",
+  "count": 5,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "The lineup around him shifts.",
+  "source": "src/engine/story/beatPools.ts:160",
+  "count": 5,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Brady Tkachuk has gone cold",
+  "source": "src/engine/career/staffMeetingScene.ts:47",
+  "count": 5,
+  "views": [
+   "getStaffMeeting"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "I'd shake it up.",
+  "source": "src/engine/career/staffMeetingScene.ts:215",
+  "count": 5,
+  "views": [
+   "getStaffMeeting"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Scratch Brady Tkachuk for the next game",
+  "source": "src/engine/career/career.ts:30317",
+  "count": 5,
+  "views": [
+   "getStaffMeeting"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Let's go through the board.",
+  "source": "src/engine/career/scoutMeeting.ts:174",
+  "count": 5,
+  "views": [
+   "getScoutMeeting"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Worth a lot of travel to see again.",
+  "source": "src/engine/story/inboxBeats.ts:560",
+  "count": 4,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Here is the honest assessment.",
+  "source": "src/engine/story/pressFallback.ts:1324",
+  "count": 4,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Aaron Ekblad should be back in a week or two.",
+  "source": "src/engine/story/inboxBeats.ts:207",
+  "count": 4,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Nobody believed in us — and we've been proving them wrong every night.",
+  "source": "src/engine/story/pressFallback.ts:538",
+  "count": 4,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "November power report: who has separated — and who has fallen off",
+  "source": "src/engine/story/pressFallback.ts:1359",
+  "count": 4,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Another month of hockey is in the books.",
+  "source": "src/engine/story/pressFallback.ts:1360",
+  "count": 4,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "SJS took this one, adding fuel to the fire.",
+  "source": "src/engine/league/rivalries.ts:341",
+  "count": 4,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Martin Ruzicka losing a step",
+  "source": "src/engine/career/career.ts:11741",
+  "count": 4,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Nothing worked, in front of the net or behind it.",
+  "source": "src/engine/story/matchReport.ts:166",
+  "count": 4,
+  "views": [
+   "postgame"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Not a night anyone will frame, but the standings do not ask how.",
+  "source": "src/engine/story/matchReport.ts:199",
+  "count": 4,
+  "views": [
+   "postgame"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "He will read whatever you say.",
+  "source": "src/engine/story/pressQuestions.ts:72",
+  "count": 4,
+  "views": [
+   "pressConference"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "He had been in the press box.",
+  "source": "src/renderer/screens/MediaCircuitScreen.tsx:128",
+  "count": 4,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "The effort was there.",
+  "source": "src/engine/story/beatPools.ts:251",
+  "count": 4,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Niko Mikkola did not skate.",
+  "source": "src/engine/story/beatPools.ts:70",
+  "count": 4,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Right now he's earned it.\"",
+  "source": "src/engine/story/beatPools.ts:89",
+  "count": 4,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Aaron Ekblad was not on the ice.",
+  "source": "src/engine/story/beatPools.ts:68",
+  "count": 4,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "A regulation win matters.",
+  "source": "src/engine/story/beatPools.ts:163",
+  "count": 4,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Hathaway appreciated being heard, even if nothing was promised.",
+  "source": "src/engine/league/interactions.ts:423",
+  "count": 4,
+  "views": [
+   "scene/concern outcome"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "I'm less worried than the scoreline suggests.",
+  "source": "src/engine/story/coachQuotes.ts:455",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "We need to close passing lanes faster.",
+  "source": "src/engine/story/coachQuotes.ts:684",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "The system breakdown is specific and fixable.",
+  "source": "src/engine/story/coachQuotes.ts:685",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "We see a middle-six forward in him.",
+  "source": "src/engine/career/career.ts:22163",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Nothing the staff are worried about.",
+  "source": "src/engine/story/inboxBeats.ts:201",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "We're spending too much time in our own end.",
+  "source": "src/engine/story/coachQuotes.ts:688",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Tough week, but we're not throwing in the towel — not even close",
+  "source": "src/engine/story/pressFallback.ts:523",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Not for a team with this group.",
+  "source": "src/engine/story/pressFallback.ts:529",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "The preseason optimism has faded.",
+  "source": "src/engine/story/expectations.ts:253",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "One for the draft list: could be a middle-six forward.",
+  "source": "src/engine/story/inboxBeats.ts:572",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Kaiden Guhle projection revised down",
+  "source": "src/engine/story/inboxBeats.ts:399",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Here's what we don't know: whether any of it is sustainable.",
+  "source": "src/engine/story/pressFallback.ts:451",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Credit where it's due.",
+  "source": "src/engine/story/pressFallback.ts:463",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Marek Strnad takes over behind the bench.",
+  "source": "src/engine/career/career.ts:24532",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "He lasted a season and change.",
+  "source": "src/engine/league/coachCarousel.ts:191",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "His name joins the market.",
+  "source": "src/engine/league/coachCarousel.ts:206",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Around the league, the phones ring accordingly.",
+  "source": "src/engine/career/career.ts:21175",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Lars Eller hits free agency",
+  "source": "src/engine/career/career.ts:12195",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "You keep his rights while he plays college hockey.",
+  "source": "src/engine/career/career.ts:10227",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Bold, and it worked.",
+  "source": "src/engine/story/matchReport.ts:257",
+  "count": 3,
+  "views": [
+   "postgame"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Justin Sourdif's empty-netter ended a one-goal game that had been anyone's for ten minutes.",
+  "source": "src/engine/story/matchReport.ts:253",
+  "count": 3,
+  "views": [
+   "postgame"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Weather the first ten minutes — confidence like that feeds on early goals.",
+  "source": "src/engine/career/matchNight.ts:138",
+  "count": 3,
+  "views": [
+   "matchDayPreview"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "The goalie had his number.",
+  "source": "src/engine/story/beatPools.ts:252",
+  "count": 3,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "The team has not confirmed that, and will not.",
+  "source": "src/engine/story/beatPools.ts:367",
+  "count": 3,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Good things happened when he was out there.",
+  "source": "src/engine/story/beatPools.ts:263",
+  "count": 3,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Unofficially, the whole lineup shifts until he is back.",
+  "source": "src/engine/story/beatPools.ts:366",
+  "count": 3,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "That does not go unnoticed.",
+  "source": "src/engine/story/beatDesk.ts:418",
+  "count": 3,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "The development plan here is years, not weeks.",
+  "source": "src/engine/story/beatPools.ts:470",
+  "count": 3,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Here's what else happened",
+  "source": "src/engine/story/beatPools.ts:564",
+  "count": 3,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Niko Mikkola to the second pair.",
+  "source": "src/engine/career/career.ts:4126",
+  "count": 3,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "The Panthers will spend the next stretch finding out how deep they really are.",
+  "source": "src/engine/story/beatPools.ts:365",
+  "count": 3,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "Two walls, one trophy.",
+  "source": "src/engine/story/salience.ts:446",
+  "count": 3,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "This is one of those games that counts twice.",
+  "source": "src/engine/story/beatPools.ts:162",
+  "count": 3,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "The official description undersells it.",
+  "source": "src/engine/story/beatPools.ts:384",
+  "count": 3,
+  "views": [
+   "beat"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "I genuinely do not know what to say.",
+  "source": "src/engine/story/voices.ts:218",
+  "count": 3,
+  "views": [
+   "feed"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "generic-filler",
+  "text": "I wanted to talk about my future.",
+  "source": "src/engine/league/interactions.ts:219",
+  "count": 3,
+  "views": [
+   "scene/concern"
+  ],
+  "why": "context-free sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "severity": "S1",
+  "text": "Correct on paper and cold in the room. {last} nodded and left. Nobody will do anything stupid tomorrow, and nobody will forget that you asked them not to.",
+  "source": "src/engine/story/clubScenes.ts:319 (rendered unfilled by src/engine/career/career.ts:3981: chosen.outcome is never passed through renderTemplate)",
+  "count": 1,
+  "views": [
+   "scene outcome / inbox receipt"
+  ],
+  "why": "unfilled {last} slot in every summoned-scene outcome that uses a slot (also clubScenes.ts:230, :238, :311)",
+  "origin": "autopilot season (interaction i? 2025 d127)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "severity": "S2",
+  "text": "Omsk Omsk win the Gagarin Cup / Trinec Trinec win the Extraliga title / Nizhny Novgorod Novgorod win the Kharlamov Cup / Hradec Kralove Králové / Ambri Ambrì-Piotta",
+  "source": "src/data/modSchema.ts:1823 (world clubs: name = `${city} ${nickname}` where the EHM nickname repeats the city)",
+  "count": 300,
+  "views": [
+   "inbox, ticker, Feed, dev camp, scouting"
+  ],
+  "why": "bad slot fill at import; ~300 occurrences per season across rumours and champions",
+  "origin": "code read / real app"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "Half the contenders have called Novosibirsk Novosibirsk about Chase Priskie, and the asking price has gone up twice this week. Something gives before the deadline.",
+  "source": "src/engine/league/tentpoles.ts:249",
+  "count": 46,
+  "views": [
+   "news(ambient/ticker)"
+  ],
+  "why": "doubled word: Novosibirsk Novosibirsk; doubled word: Kladno Kladno",
+  "moreExamples": [
+   "Half the contenders have called Kladno Kladno about Jérémie Blain, and the asking price has gone up twice this week. Something gives before the deadline."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "What was a whisper in January is a queue in February. Togliatti Togliatti are fielding real offers for Artur Tyanulin, and a man who has been asked about this twice a week is starting to sound like a man who expects to move.",
+  "source": "src/engine/league/tentpoles.ts:240",
+  "count": 40,
+  "views": [
+   "news(ambient/ticker)"
+  ],
+  "why": "doubled word: Togliatti Togliatti; doubled word: Bern Bern; doubled word: Karlskoga Karlskoga",
+  "moreExamples": [
+   "What was a whisper in January is a queue in February. Bern Bern are fielding real offers for Hardy Häman Aktell, and a man who has been asked about this twice a week is starting to sound like a man who expects to move.",
+   "What was a whisper in January is a queue in February. Karlskoga Karlskoga are fielding real offers for Henrik Björklund, and a man who has been asked about this twice a week is starting to sound like a man who expects to move."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "@CarverNotes",
+  "source": "unlocated (composed at runtime)",
+  "count": 33,
+  "views": [
+   "inbox",
+   "news(wire)",
+   "beat",
+   "playerProfile",
+   "devCamp"
+  ],
+  "why": "handle used as headline: @CarverNotes; handle used as headline: @puckmodel; a/an: a 8; a/an: a 18; doubled word: Davos Davos; doubled word: Omsk Omsk; doubled word: Chelyabinsk Chelyabinsk; plural: 1 goals; doubled word: Oskarshamn Oskarshamn",
+  "moreExamples": [
+   "@puckmodel",
+   "The Buffalo Sabres ride Josh Norris through a 8-game run",
+   "Yanni Gourde ends a 18-game drought"
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "Novosibirsk Novosibirsk said to be closing in on a deal for Mikhail Berdin",
+  "source": "src/engine/league/tentpoles.ts:245",
+  "count": 30,
+  "views": [
+   "news(ambient/ticker)"
+  ],
+  "why": "doubled word: Novosibirsk Novosibirsk; doubled word: Karlskoga Karlskoga; doubled word: Pardubice Pardubice; doubled word: Fribourg Fribourg",
+  "moreExamples": [
+   "Karlskoga Karlskoga said to be closing in on a deal for Gustaf Franzén",
+   "Pardubice Pardubice said to be closing in on a deal for Vladimír Sobotka",
+   "Fribourg Fribourg-Gottéron said to be closing in on a deal for Lucas Wallmark"
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "Nobody will put a name to it, which is usually the last stage. Mikhail Berdin's situation at Novosibirsk Novosibirsk has moved from speculation to logistics.",
+  "source": "src/engine/league/tentpoles.ts:246",
+  "count": 30,
+  "views": [
+   "news(ambient/ticker)"
+  ],
+  "why": "doubled word: Novosibirsk Novosibirsk; doubled word: Karlskoga Karlskoga; doubled word: Pardubice Pardubice; doubled word: Fribourg Fribourg",
+  "moreExamples": [
+   "Nobody will put a name to it, which is usually the last stage. Gustaf Franzén's situation at Karlskoga Karlskoga has moved from speculation to logistics.",
+   "Nobody will put a name to it, which is usually the last stage. Vladimír Sobotka's situation at Pardubice Pardubice has moved from speculation to logistics.",
+   "Nobody will put a name to it, which is usually the last stage. Lucas Wallmark's situation at Fribourg Fribourg-Gottéron has moved from speculation to logistics."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "Trade talk heats up: Artyom Zemchyonok close to leaving Togliatti Togliatti?",
+  "source": "src/engine/league/tentpoles.ts:192",
+  "count": 29,
+  "views": [
+   "news(ambient/ticker)"
+  ],
+  "why": "doubled word: Togliatti Togliatti",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "With the deadline approaching, chatter around Artyom Zemchyonok is intensifying. Multiple clubs are believed to be in contact with Togliatti Togliatti.",
+  "source": "src/engine/league/tentpoles.ts:237",
+  "count": 29,
+  "views": [
+   "news(ambient/ticker)"
+  ],
+  "why": "doubled word: Togliatti Togliatti",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "Nail Yakupov to a rival of Omsk Omsk? The calls are getting serious",
+  "source": "src/engine/league/tentpoles.ts:242",
+  "count": 25,
+  "views": [
+   "news(ambient/ticker)"
+  ],
+  "why": "doubled word: Omsk Omsk; doubled word: Boleslav Boleslav; doubled word: Zug Zug; doubled word: Yekaterinburg Yekaterinburg; doubled word: Moskva Moskva; doubled word: Fribourg Fribourg",
+  "moreExamples": [
+   "Filip Pavlík to a rival of Mlada Boleslav Boleslav? The calls are getting serious",
+   "Mike Künzle to a rival of Zug Zug? The calls are getting serious",
+   "Stéphane Da Costa to a rival of Yekaterinburg Yekaterinburg? The calls are getting serious"
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "The temperature has changed. Omsk Omsk have gone from listening on Nail Yakupov to negotiating, and the difference is visible in how carefully everyone involved is now speaking.",
+  "source": "src/engine/league/tentpoles.ts:243",
+  "count": 25,
+  "views": [
+   "news(ambient/ticker)"
+  ],
+  "why": "doubled word: Omsk Omsk; doubled word: Boleslav Boleslav; doubled word: Zug Zug; doubled word: Yekaterinburg Yekaterinburg; doubled word: Moskva Moskva; doubled word: Fribourg Fribourg",
+  "moreExamples": [
+   "The temperature has changed. Mlada Boleslav Boleslav have gone from listening on Filip Pavlík to negotiating, and the difference is visible in how carefully everyone involved is now speaking.",
+   "The temperature has changed. Zug Zug have gone from listening on Mike Künzle to negotiating, and the difference is visible in how carefully everyone involved is now speaking.",
+   "The temperature has changed. Yekaterinburg Yekaterinburg have gone from listening on Stéphane Da Costa to negotiating, and the difference is visible in how carefully everyone involved is now speaking."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "severity": "S3",
+  "text": "@CarverNotes",
+  "source": "src/engine/career/career.ts:4556",
+  "count": 14,
+  "views": [
+   "inbox headline"
+  ],
+  "why": "a followed/breaking Feed post enters the inbox with the author handle as its headline; the reader sees '@CarverNotes' as the subject line",
+  "origin": "code read / real app"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "Seth has put up 1 points (0G, 1A) in 3 games in the NHL — a modest return. The points have been harder to come by than the talent suggests.",
+  "source": "src/engine/career/scoutSummary.ts:176",
+  "count": 9,
+  "views": [
+   "playerProfile"
+  ],
+  "why": "plural: 1 points; plural: 1 games",
+  "moreExamples": [
+   "Dmitri has put up 0 points (0G, 0A) in 1 games in the NHL — a modest return. The scoresheet has not always reflected his minutes."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "severity": "S3",
+  "text": "We've filed Zayne Parekh (D) as a A+. The real thing — a No. 1 defenceman if he stays on track.",
+  "source": "src/engine/career/scoutMeeting.ts:142",
+  "count": 4,
+  "views": [
+   "scout meeting"
+  ],
+  "why": "a/an before A+/A",
+  "origin": "code read / real app"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "Alex Weiermair in a 8-game point drought",
+  "source": "src/engine/story/arcs.ts:486",
+  "count": 3,
+  "views": [
+   "news(wire)"
+  ],
+  "why": "a/an: a 8",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "Davos Davos win the National League title, beating Geneve HC 4–2 in the final. Playoff MVP: Adam Tambellini (10 PTS). Regular-season MVP: Sandro Aeschlimann, HCD (.936).",
+  "source": "src/engine/world/international.ts:314",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "doubled word: Davos Davos; doubled word: Pardubice Pardubice; doubled word: Omsk Omsk",
+  "moreExamples": [
+   "Pardubice Pardubice win the Extraliga title, beating Praha Praha 4–3 in the final. Playoff MVP: Jachym Kondelik (10 PTS). Regular-season MVP: Tomas Vomacka, PAR (.938). Your prospect John Ludvig lifts the trophy.",
+   "Omsk Omsk win the Gagarin Cup, beating Kazan Kazan 4–2 in the final. Playoff MVP: Konstantin Okulov (17 PTS). Regular-season MVP: Yegor Zavragin, SKA (.930)."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "Through 7 games of 2025–26 he has 1 points for the Panthers.",
+  "source": "src/engine/story/beatPools.ts:170",
+  "count": 3,
+  "views": [
+   "playerProfile"
+  ],
+  "why": "plural: 1 points",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "The Florida Panthers are 5–3–2 (12 pts, 8th of 32). A 4–1 week. Make of that what you will — and I'll tell you what I make of it. They are ahead of a preseason projection of 27th — on 10 games, which is not yet a trend. Also on the radar: Patrick Kane — 5 away from 500 career goals. Alex DeBrincat (DET) leads the league with 15 points. The rumor mill keeps spinning around Casey Mittelstadt (BOS) —",
+  "source": "src/engine/story/pressFallback.ts:238",
+  "count": 2,
+  "views": [
+   "inbox"
+  ],
+  "why": "vs vs: vs NJD (day 24), vs; vs vs: vs COL (day 72), vs",
+  "moreExamples": [
+   "The Florida Panthers are 14–9–6 (34 pts, 14th of 32). A 4–1 week. Make of that what you will — and I'll tell you what I make of it. They were projected 27th before puck drop — they're running 13 places ahead of schedule. Elsewhere, Peyton Krebs — 18th straight game without a point. Alex DeBrincat (DET) leads the league with 48 points. The rumor mill keeps spinning around Casey Mittelstadt (BOS) — "
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "FLORIDA — Another October, another chance. The Florida Panthers open the 2025–2026 season with a new set of objectives and a roster that has been reshaped since we last saw them in April. Here is the full picture. League favorites to watch: Colorado Avalanche, Buffalo Sabres, Carolina Hurricanes. They are ahead of a preseason projection of 27th — on 1 games, which is not yet a trend. Brad Marchand",
+  "source": "src/engine/story/pressFallback.ts:1258",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "plural: 1 games",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "Rankings are always a conversation. Here is mine — and I'll stand behind every line of it. 1. Vegas Golden Knights — 1–0–0 (2 pts) 2. Buffalo Sabres — 1–0–0 (2 pts) 3. Ottawa Senators — 1–0–0 (2 pts) 4. Colorado Avalanche — 1–0–0 (2 pts) 5. Edmonton Oilers — 1–0–0 (2 pts) 6. San Jose Sharks — 1–0–0 (2 pts) 7. Toronto Maple Leafs — 1–0–0 (2 pts) 8. Winnipeg Jets — 1–0–0 (2 pts) The Florida Panthers",
+  "source": "src/engine/story/pressFallback.ts:146",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "plural: 1 games",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "FLORIDA — Standings are undefeated. The Florida Panthers check in at 0–1–2 (2 pts, 27th of 32) after going 0–3 this week, right about where the preseason models had them. They sit exactly where the preseason numbers put them, 27th, on a book this thin. Also on the radar: Tyler Myers — 1 away from 100 career goals. The rumor mill keeps spinning around Casey Mittelstadt (BOS) — the trade chatter is ",
+  "source": "src/engine/story/pressFallback.ts:321",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "vs vs: vs SEA (day 8), vs",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "Place the Florida Panthers on the league map and here's what you get: 2–3–2 (6 pts, 18th of 32), a 2–3 week, and a club that sits above where the preseason models expected. They are ahead of a preseason projection of 27th — on 7 games, which is not yet a trend. Zach Benson (BUF) leads the league with 10 points. Also on the radar: Joel Farabee — 5 away from 100 career goals. Things are a bit quiet ",
+  "source": "src/engine/story/pressFallback.ts:486",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "vs vs: vs PHI (day 16), vs",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "The Florida Panthers are 5–4–3 (13 pts, 13th of 32) after a 3–2 week. On paper, fine. On the ice — honestly? We showed some things this week that I think are going to matter come the second half. They were projected 27th before puck drop — they're running 14 places ahead of schedule. Elsewhere, Gabriel Vilardi — 4 away from 100 career goals. Next up: vs DAL (day 30), vs WSH (day 32). And when we'r",
+  "source": "src/engine/story/pressFallback.ts:617",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "vs vs: vs DAL (day 30), vs",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "Look — 2–3 isn't the week we wanted. But I've been around hockey long enough to know that a tough week doesn't define a season. Not for a team with this group. They were projected 27th before puck drop — they're running 13 places ahead of schedule. Nobody believed in us — and we've been proving them wrong every night. Brad Marchand has some work to do: the group feels a little flat right now. Next",
+  "source": "src/engine/story/pressFallback.ts:529",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "vs vs: vs WPG (day 40), vs",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "I'll tell you what, folks — I've been on the phone all week with people around this league, and nobody is sleeping on the Florida Panthers right now. We're 10–7–6 (26 pts, 18th of 32), and that record doesn't tell the whole story of what we've been building. Things are a bit quiet in the dressing room. Brad Marchand will be expected to change that. And yes, I've heard the whispers — Off the ice, f",
+  "source": "src/engine/story/pressFallback.ts:564",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "vs vs: vs PIT (day 60), vs",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "Somebody finally solved him. Nick Schmaltz finishes a 11-game point streak with a quiet sixty minutes, and the Utah Mammoth will not be complaining about the month it bought them.",
+  "source": "src/engine/story/arcs.ts:447",
+  "count": 1,
+  "views": [
+   "news(wire)"
+  ],
+  "why": "a/an: a 11",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "Development camp wrapped this week: 37 of the organisation's young players on the ice, this year's draft class included. The staff named Sandis Vilmanis the camp standout — he 3rd of 31 in the shot; he scored three times in the first scrimmage and had 3 points (3G 0A) in his one game. The calls: • Brock England signs his entry-level deal and goes back to Kent T-Birds (WHL) for another year — the d",
+  "source": "src/engine/career/career.ts:14907",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "doubled word: Oskarshamn Oskarshamn",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "1 games played — no book on either side. On the road, keep the first period simple.",
+  "source": "src/engine/career/matchNight.ts:178",
+  "count": 1,
+  "views": [
+   "matchDayPreview"
+  ],
+  "why": "plural: 1 games",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "Berkly Catton has 1 goals and 3 assists this season — and he's running hot right now. Hard-match him.",
+  "source": "src/engine/career/matchNight.ts:94",
+  "count": 1,
+  "views": [
+   "matchDayPreview"
+  ],
+  "why": "plural: 1 goals",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "Your 1st defenseman is Seth Jones (81); a normal club dresses a 84 there.",
+  "source": "src/engine/career/offseasonNeeds.ts:297",
+  "count": 1,
+  "views": [
+   "offseasonNeeds"
+  ],
+  "why": "a/an: a 84",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "1 points separate these two clubs. A regulation win matters.",
+  "source": "src/engine/story/beatPools.ts:163",
+  "count": 1,
+  "views": [
+   "beat"
+  ],
+  "why": "plural: 1 points",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "Standings check: 1 points between the Panthers and the Devils. Four-point game.",
+  "source": "src/engine/story/beatPools.ts:164",
+  "count": 1,
+  "views": [
+   "beat"
+  ],
+  "why": "plural: 1 points",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "The Islanders are 1 points away in the standings. This is one of those games that counts twice.",
+  "source": "src/engine/story/beatPools.ts:162",
+  "count": 1,
+  "views": [
+   "beat"
+  ],
+  "why": "plural: 1 points",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "Drew Roscoe is the headline, a 18-year-old defenceman. The rest of the class is a longer bet, as the rest of every class is.",
+  "source": "src/engine/career/career.ts:7228",
+  "count": 1,
+  "views": [
+   "beat"
+  ],
+  "why": "a/an: a 18",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "Best used in a offensive role role; a puck mover who fills a middle-of-the-lineup job.",
+  "source": "src/engine/league/deployment.ts:106",
+  "count": 1,
+  "views": [
+   "playerProfile"
+  ],
+  "why": "doubled word: role role",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "Through 10 games of 2025–26 he has 1 points for the Panthers. He is currently out with blocked a shot — bruised foot, roughly 4 games from returning.",
+  "source": "src/engine/league/condition.ts:50",
+  "count": 1,
+  "views": [
+   "playerProfile"
+  ],
+  "why": "plural: 1 points",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "2025–26 so far: 14 games, 0 goals, 3 assists, one Panthers sweater. He is currently out with tweaked a knee on an awkward fall, roughly 1 games from returning.",
+  "source": "src/engine/league/condition.ts:55",
+  "count": 1,
+  "views": [
+   "playerProfile"
+  ],
+  "why": "plural: 1 games",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "A steady week: mid-pack in testing (best: 3rd of 6, tracking). Another year with Oskarshamn Oskarshamn is what he needs.",
+  "source": "src/engine/career/devCamp.ts:100",
+  "count": 1,
+  "views": [
+   "devCamp"
+  ],
+  "why": "doubled word: Oskarshamn Oskarshamn",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "text": "Correct on paper and cold in the room. {last} nodded and left. Nobody will do anything stupid tomorrow, and nobody will forget that you asked them not to.",
+  "source": "src/engine/story/clubScenes.ts:320",
+  "count": 1,
+  "views": [
+   "scene/concern outcome"
+  ],
+  "why": "unfilled slot: {last}",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "grammar-placeholder",
+  "severity": "S3",
+  "text": "Let's keep this efficient. One hour, three decisions, and the Florida Panthers has its marching orders.",
+  "source": "src/engine/career/boardMeeting.ts:192",
+  "count": 1,
+  "views": [
+   "board meeting"
+  ],
+  "why": "plural club name with singular verb",
+  "origin": "code read / real app"
+ },
+ {
+  "type": "nonsense-or-false",
+  "severity": "S3",
+  "text": "A steady week: 27th of 31 in the puck skills. Another year in junior is what he needs.",
+  "source": "src/engine/career/devCamp.ts:171",
+  "count": 40,
+  "views": [
+   "dev camp report (inbox)"
+  ],
+  "why": "'steady' is the default lead for every B grade, whether he finished 1st or 27th of 31; 'the puck skills' article bug",
+  "origin": "code read / real app"
+ },
+ {
+  "type": "nonsense-or-false",
+  "severity": "S3",
+  "text": "31yo, developing in KHL — organisational depth — an ECHL ceiling for now.",
+  "source": "src/engine/career/developmentCenter.ts:117",
+  "count": 20,
+  "views": [
+   "Dev. Center"
+  ],
+  "why": "veterans in their late 20s/30s described as 'developing' and 'raw for the AHL — an ECHL stint to find his feet, then a call-up' (developmentCenter.ts:138)",
+  "origin": "code read / real app"
+ },
+ {
+  "type": "nonsense-or-false",
+  "severity": "S3",
+  "text": "The rumor mill keeps spinning around Joona Koppanen (WBS) — the trade chatter has reached a fever pitch.",
+  "source": "src/engine/story/pressFallback.ts:238 (rumour slot)",
+  "count": 14,
+  "views": [
+   "inbox (weekly column)"
+  ],
+  "why": "the column picks any rumour, including an AHL depth body on the GM's own farm, and calls it 'fever pitch'; the same rumour sentence ran 14x in one season",
+  "origin": "code read / real app"
+ },
+ {
+  "type": "nonsense-or-false",
+  "severity": "S3",
+  "text": "St. Louis Blues outperforming predictions midway through the season",
+  "source": "src/engine/story/expectations.ts:231",
+  "count": 12,
+  "views": [
+   "inbox"
+  ],
+  "why": "fires on day ~34 of 184 (and in the real app on 7 Nov); 'midway' is not conditioned on the calendar",
+  "origin": "code read / real app"
+ },
+ {
+  "type": "nonsense-or-false",
+  "text": "A year left, twenty-nine candles on the cake, and no extension talk anybody will confirm. Clubs shopping for a rental have Alex Lyon circled.",
+  "source": "src/engine/league/tentpoles.ts:213",
+  "count": 7,
+  "views": [
+   "news(ambient/ticker)"
+  ],
+  "why": "hard-coded age 29 for every expiring player",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "nonsense-or-false",
+  "severity": "S2",
+  "text": "A year left, twenty-nine candles on the cake, and no extension talk anybody will confirm. Clubs shopping for a rental have Yevgeni Malkin circled.",
+  "source": "src/engine/league/tentpoles.ts:213",
+  "count": 7,
+  "views": [
+   "news ticker / Feed"
+  ],
+  "why": "age 29 hard-coded for every expiring player (Malkin 39, Makar 27)",
+  "origin": "code read / real app"
+ },
+ {
+  "type": "nonsense-or-false",
+  "severity": "S3",
+  "text": "Lundell appreciated being heard, even if nothing was promised.",
+  "source": "src/engine/league/interactions.ts:423",
+  "count": 6,
+  "views": [
+   "concern outcome"
+  ],
+  "why": "outcome line picked only by morale delta, so 'Tell him to sort it out himself' (firm) reads as 'appreciated being heard'; the words contradict the button",
+  "origin": "code read / real app"
+ },
+ {
+  "type": "nonsense-or-false",
+  "text": "A player who has stopped pretending. Joel Hanley has made his position clear to Anaheim Ducks, and a discontented man on an expensive contract is a difficult thing to move quietly.",
+  "source": "src/engine/league/tentpoles.ts:207",
+  "count": 4,
+  "views": [
+   "news(ambient/ticker)"
+  ],
+  "why": "\"expensive contract\" asserted regardless of salary",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "nonsense-or-false",
+  "severity": "S2",
+  "text": "A player who has stopped pretending. Joel Hanley has made his position clear to Anaheim Ducks, and a discontented man on an expensive contract is a difficult thing to move quietly.",
+  "source": "src/engine/league/tentpoles.ts:207",
+  "count": 4,
+  "views": [
+   "news ticker / Feed"
+  ],
+  "why": "'expensive contract' asserted for depth players on near-minimum deals; also the only world trade-request story and it is identical every time",
+  "origin": "code read / real app"
+ },
+ {
+  "type": "nonsense-or-false",
+  "severity": "S2",
+  "text": "I've got to be honest with you: there's friction in that room with Gustav Forsling, and it's starting to get into my head on the ice.",
+  "source": "src/engine/league/interactions.ts:224 (messageFor 'feud'); feud created at src/engine/league/lockerRoom.ts:308-325",
+  "count": 4,
+  "views": [
+   "phone call / inbox concern"
+  ],
+  "why": "FEUD CONCERN: no cause named (feuds are seeded from two personality numbers plus a 35% roll); 'that room' spoken by a player about his own room; the same two players raised it 4 times in one season (Lundell d15, d36; Forsling d66, d106) even after 'Step in and address the room' twice, because that option resolves the story arc but not the locker-room relationship",
+  "origin": "code read / real app"
+ },
+ {
+  "type": "nonsense-or-false",
+  "text": "The physio's report says Jones sits two weeks. Jones says he's playing. \"It's a playoff race. I've played through worse and you know it.\"",
+  "source": "src/engine/story/decisionEvents.ts:358",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "\"playoff race\" on day 1",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "nonsense-or-false",
+  "text": "St. Louis Blues outperforming predictions midway through the season",
+  "source": "src/engine/story/expectations.ts:231",
+  "count": 3,
+  "views": [
+   "inbox"
+  ],
+  "why": "\"midway\" on day 34",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "nonsense-or-false",
+  "severity": "S2",
+  "text": "Seth Jones is waiting in your office — body: \"The owner's office called before the tickets report even reached you. Attendance is sliding, the renewal window opens in three weeks, and he wants 'something to announce.'\"",
+  "source": "src/engine/career/career.ts:3880",
+  "count": 3,
+  "views": [
+   "inbox headline for authored decision scenes"
+  ],
+  "why": "headline is hard-coded '<anchor player> is waiting in your office' for EVERY authored scene, including ones where the owner calls or a columnist writes; the named player is not in the office",
+  "origin": "autopilot season 2025 d90 and d177"
+ },
+ {
+  "type": "nonsense-or-false",
+  "severity": "S2",
+  "text": "The physio's report says Jones sits two weeks. Jones says he's playing. \"It's a playoff race. I've played through worse and you know it.\"",
+  "source": "src/engine/story/decisionEvents.ts:358",
+  "count": 2,
+  "views": [
+   "scene"
+  ],
+  "why": "fires on day 1 (autopilot) and 10 Oct at 4-0-1 (real app, Tommy Novak): there is no playoff race in October; the condition does not check the calendar or the standings",
+  "origin": "autopilot 2025 d1 + real app 10 Oct 2026"
+ },
+ {
+  "type": "nonsense-or-false",
+  "severity": "S2",
+  "text": "FLORIDA — Standings are undefeated. The Florida Panthers check in at 0–1–2 (2 pts, 27th of 32) after going 0–3 this week",
+  "source": "src/engine/story/pressFallback.ts:322",
+  "count": 2,
+  "views": [
+   "inbox (weekly column)"
+  ],
+  "why": "meaningless lede, printed for a winless team",
+  "origin": "code read / real app"
+ },
+ {
+  "type": "nonsense-or-false",
+  "text": "Panthers mailbag: Marchand's slump, plus a word on the playoff race. 3 of your questions, answered.",
+  "source": "src/engine/story/beatPools.ts:393",
+  "count": 1,
+  "views": [
+   "feed"
+  ],
+  "why": "\"playoff race\" on day 0",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "nonsense-or-false",
+  "text": "Friday mailbag: Bennett's slump, the playoff race, more. 4 of your questions, answered.",
+  "source": "src/engine/career/career.ts:5835",
+  "count": 1,
+  "views": [
+   "feed"
+  ],
+  "why": "\"playoff race\" on day 0",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "nonsense-or-false",
+  "severity": "S3",
+  "text": "PIT ahead of the curve: what 5–0 means in this league — body: '7–0–1 (15 pts, 3rd of 32), a 5–0 week ... The rumor mill keeps spinning around Joona Koppanen (WBS)'",
+  "source": "src/engine/story/pressFallback.ts:481",
+  "count": 1,
+  "views": [
+   "inbox (real app)"
+  ],
+  "why": "headline frames the week as the season; filler rumour slot about a farm depth player",
+  "origin": "code read / real app"
+ },
+ {
+  "type": "repetition",
+  "text": "Schmid expected in goal.",
+  "source": "src/engine/story/beatPools.ts:135",
+  "count": 82,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [
+   "Schmid is expected in goal."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Jacob Markström is the other option.",
+  "source": "src/engine/story/beatDesk.ts:509",
+  "count": 76,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Five-on-five may decide it; their kill is stingy.",
+  "source": "src/engine/career/matchNight.ts:80",
+  "count": 73,
+  "views": [
+   "matchDayPreview"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Grades for everyone who dressed.",
+  "source": "src/engine/career/career.ts:5834",
+  "count": 53,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "He drives their offense.",
+  "source": "src/engine/career/matchNight.ts:94",
+  "count": 52,
+  "views": [
+   "matchDayPreview"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Discipline keeps this a non-factor.",
+  "source": "src/engine/career/matchNight.ts:69",
+  "count": 45,
+  "views": [
+   "matchDayPreview"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "The price: depth value (7)",
+  "source": "unlocated (composed at runtime)",
+  "count": 45,
+  "views": [
+   "offseasonNeeds",
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [
+   "The price: fringe value (5)",
+   "The bad: Akira Schmid, F.",
+   "The good: Brady Tkachuk, A+."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "He is ready for pro hockey — the AHL would push him.",
+  "source": "src/engine/career/devCamp.ts:175",
+  "count": 42,
+  "views": [
+   "inbox"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [
+   "The AHL is the right level for him next season."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "You have until the wire clears to claim him and his contract — head to the Waiver Wire to put in a claim.",
+  "source": "src/engine/career/career.ts:16694",
+  "count": 40,
+  "views": [
+   "inbox"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Whoever draws that matchup has the night's hardest job.",
+  "source": "src/engine/story/beatPools.ts:168",
+  "count": 23,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "That is the assignment.",
+  "source": "src/engine/story/beatPools.ts:170",
+  "count": 22,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "The lines from the morning skate, and what I will be watching.",
+  "source": "src/engine/story/beatPools.ts:136",
+  "count": 21,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "A point salvaged, a point lost.",
+  "source": "src/engine/story/matchReport.ts:186",
+  "count": 20,
+  "views": [
+   "postgame"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [
+   "The Florida Panthers fall in overtime, and open ice at three-on-three is a cruel way to end a night this even."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "The projected lineup is below, and it looks a lot like the last one.",
+  "source": "src/engine/story/beatPools.ts:134",
+  "count": 20,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Made his minutes count.",
+  "source": "src/engine/story/beatPools.ts:242",
+  "count": 20,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Here is how the Panthers should line up, based on the morning skate.",
+  "source": "src/engine/story/beatPools.ts:133",
+  "count": 20,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Their cards are attached — make the calls here, or leave the queue to us.",
+  "source": "src/engine/career/career.ts:27519",
+  "count": 19,
+  "views": [
+   "inbox"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Needed one more save.",
+  "source": "src/engine/story/beatPools.ts:276",
+  "count": 19,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "The coaches trust him.",
+  "source": "src/engine/story/beatPools.ts:267",
+  "count": 18,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "He is getting chances; he needs one to go in.",
+  "source": "src/engine/story/beatPools.ts:147",
+  "count": 17,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "The longer it goes, the more the other numbers get asked about.",
+  "source": "src/engine/story/beatPools.ts:148",
+  "count": 17,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Watch his shot volume more than the scoresheet.",
+  "source": "src/engine/story/beatPools.ts:149",
+  "count": 17,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Keep him to the outside.",
+  "source": "src/engine/story/beatPools.ts:169",
+  "count": 17,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Another year in junior is what he needs.",
+  "source": "src/engine/career/devCamp.ts:176",
+  "count": 16,
+  "views": [
+   "inbox"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Hard to find on the ice.",
+  "source": "src/engine/story/beatPools.ts:272",
+  "count": 16,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [
+   "That can be good or bad."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Heavy night, handled it.",
+  "source": "src/engine/story/beatPools.ts:268",
+  "count": 16,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "a hatty in front of these fans.",
+  "source": "src/engine/story/voices.ts:210",
+  "count": 16,
+  "views": [
+   "feed"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [
+   "keeping one of the hats."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "He is pushing for an NHL look at main camp.",
+  "source": "src/engine/career/devCamp.ts:173",
+  "count": 15,
+  "views": [
+   "inbox"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "The rumor mill keeps spinning around Casey Mittelstadt (BOS) — the trade chatter has reached a fever pitch.",
+  "source": "src/engine/story/pressFallback.ts:238",
+  "count": 14,
+  "views": [
+   "inbox"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "He's been the backbone — lean on him.",
+  "source": "src/engine/career/matchNight.ts:111",
+  "count": 13,
+  "views": [
+   "matchDayPreview"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "His goal changed the night.",
+  "source": "src/engine/story/beatPools.ts:244",
+  "count": 13,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "3 of your questions, answered.",
+  "source": "src/engine/career/career.ts:5835",
+  "count": 13,
+  "views": [
+   "feed"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Things are a bit quiet in the dressing room.",
+  "source": "src/engine/story/pressFallback.ts:195",
+  "count": 12,
+  "views": [
+   "inbox"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [
+   "Brad Marchand will be expected to change that."
+  ],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "One point, not two.",
+  "source": "src/engine/career/matchNight.ts:289",
+  "count": 12,
+  "views": [
+   "postgame"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "A few players can hold their heads up.",
+  "source": "src/engine/story/beatPools.ts:217",
+  "count": 12,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Invisible most of the night.",
+  "source": "src/engine/story/beatPools.ts:270",
+  "count": 12,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Nothing jumped out either way.",
+  "source": "src/engine/story/beatPools.ts:271",
+  "count": 12,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Not much to say, good or bad.",
+  "source": "src/engine/story/beatPools.ts:269",
+  "count": 12,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Grades for every player who dressed, and they are not kind.",
+  "source": "src/engine/story/beatPools.ts:216",
+  "count": 12,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Practice tomorrow will be louder than usual.",
+  "source": "src/engine/story/beatPools.ts:292",
+  "count": 12,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "They need a better start than this one.",
+  "source": "src/engine/story/beatPools.ts:293",
+  "count": 12,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Calm and square all night.",
+  "source": "src/engine/story/beatPools.ts:274",
+  "count": 11,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "At least one he wants back.",
+  "source": "src/engine/story/beatPools.ts:277",
+  "count": 11,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Nothing easy got by him.",
+  "source": "src/engine/story/beatPools.ts:275",
+  "count": 11,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Hard to argue with results.",
+  "source": "src/engine/story/expectations.ts:246",
+  "count": 10,
+  "views": [
+   "inbox"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "The Florida Panthers had their stretches; they did not have enough of them.",
+  "source": "src/engine/story/matchReport.ts:201",
+  "count": 10,
+  "views": [
+   "postgame"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "No direct line to the Panthers, but it moves the market.",
+  "source": "src/engine/story/beatPools.ts:592",
+  "count": 10,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Scored, and was involved every shift he took.",
+  "source": "src/engine/story/beatPools.ts:241",
+  "count": 10,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Found the soft spots all night.",
+  "source": "src/engine/story/beatPools.ts:238",
+  "count": 10,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "The chances were roughly even and the finishing was not.",
+  "source": "src/engine/story/matchReport.ts:203",
+  "count": 9,
+  "views": [
+   "postgame"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "The first goal tonight is worth double to this room.",
+  "source": "src/engine/career/matchNight.ts:151",
+  "count": 9,
+  "views": [
+   "matchDayPreview"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Not every player had his best night, but enough of them did.",
+  "source": "src/engine/story/beatPools.ts:213",
+  "count": 9,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Here is how everybody played.",
+  "source": "src/engine/story/beatPools.ts:218",
+  "count": 9,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Did what was asked.",
+  "source": "src/engine/story/beatPools.ts:279",
+  "count": 9,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Let's go through the group before the next one.",
+  "source": "src/engine/career/staffMeetingScene.ts:184",
+  "count": 9,
+  "views": [
+   "getStaffMeeting"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "He's earned a look.",
+  "source": "src/engine/career/staffMeetingScene.ts:294",
+  "count": 9,
+  "views": [
+   "getStaffMeeting"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Brad Marchand has some work to do: the group feels a little flat right now.",
+  "source": "src/engine/story/pressFallback.ts:193",
+  "count": 8,
+  "views": [
+   "inbox"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "The tools say a top-six forward; the consistency is coming.",
+  "source": "src/engine/story/inboxBeats.ts:563",
+  "count": 8,
+  "views": [
+   "inbox"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "One of the better ones we have seen this year.",
+  "source": "src/engine/story/inboxBeats.ts:559",
+  "count": 8,
+  "views": [
+   "inbox"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "A milestone that puts him in rare company.",
+  "source": "src/engine/career/career.ts:2938",
+  "count": 8,
+  "views": [
+   "inbox"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "We have not split the group — it is all the draft class at the moment.",
+  "source": "src/engine/career/career.ts:1234",
+  "count": 8,
+  "views": [
+   "inbox"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Yet here they are, proving the projections wrong.",
+  "source": "src/engine/story/expectations.ts:247",
+  "count": 8,
+  "views": [
+   "inbox"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Two points, honestly earned.",
+  "source": "src/engine/story/matchReport.ts:197",
+  "count": 8,
+  "views": [
+   "postgame"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "EDM are rebuilding and would sell.",
+  "source": "src/engine/career/career.ts:18468",
+  "count": 8,
+  "views": [
+   "offseasonNeeds"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Everything went in, and it was not luck.",
+  "source": "src/engine/story/beatPools.ts:240",
+  "count": 8,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "The best player out there.",
+  "source": "src/engine/story/beatPools.ts:239",
+  "count": 8,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "They will take it and move on.",
+  "source": "src/engine/story/beatPools.ts:287",
+  "count": 8,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "The Florida Panthers scored first and never once had to chase it.",
+  "source": "src/engine/story/matchReport.ts:190",
+  "count": 7,
+  "views": [
+   "postgame"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Traffic and second chances — clean looks die in his glove.",
+  "source": "src/engine/career/matchNight.ts:125",
+  "count": 7,
+  "views": [
+   "matchDayPreview"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Not the night the Panthers wanted.",
+  "source": "src/engine/career/career.ts:27030",
+  "count": 7,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "2 points ahead of the Panthers.",
+  "source": "src/engine/agent/brain.ts:568",
+  "count": 7,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "He's played the right way and he gets the minutes.\"",
+  "source": "src/engine/story/beatPools.ts:88",
+  "count": 7,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Tough night in his own end.",
+  "source": "src/engine/story/beatPools.ts:262",
+  "count": 7,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Projects as a middle-six forward.",
+  "source": "src/engine/career/career.ts:22163",
+  "count": 6,
+  "views": [
+   "inbox"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "The whole department is pointed at the draft class.",
+  "source": "src/engine/career/career.ts:1233",
+  "count": 6,
+  "views": [
+   "inbox"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Something is clicking for this group and the standings show it.",
+  "source": "src/engine/story/expectations.ts:244",
+  "count": 6,
+  "views": [
+   "inbox"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "They were projected 27th before puck drop — they're running 11 places ahead of schedule.",
+  "source": "src/engine/story/pressFallback.ts:150",
+  "count": 6,
+  "views": [
+   "inbox"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Front-running, and no apologies for it.",
+  "source": "src/engine/story/matchReport.ts:192",
+  "count": 6,
+  "views": [
+   "postgame"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "A performance the room will bring up for months.",
+  "source": "src/engine/career/matchNight.ts:420",
+  "count": 6,
+  "views": [
+   "postgame"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Paul Maurice went to the whiteboard.",
+  "source": "src/engine/story/beatPools.ts:65",
+  "count": 6,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "We needed more from that line, and he can give it.\"",
+  "source": "src/engine/story/beatPools.ts:87",
+  "count": 6,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Not our team, but every move like this changes what the rest cost.",
+  "source": "src/engine/story/beatPools.ts:593",
+  "count": 6,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Plenty happened around the league while you were celebrating.",
+  "source": "src/engine/story/beatPools.ts:572",
+  "count": 6,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "He has been the best player on the ice most nights.",
+  "source": "src/engine/story/beatPools.ts:151",
+  "count": 6,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Here is what else you need to know.",
+  "source": "src/engine/story/beatPools.ts:570",
+  "count": 6,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "On to everything else.",
+  "source": "src/engine/story/beatPools.ts:571",
+  "count": 6,
+  "views": [
+   "beat"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "I'd pin him to the shortlist so we keep eyes on him.",
+  "source": "src/engine/career/scoutMeeting.ts:142",
+  "count": 6,
+  "views": [
+   "getScoutMeeting"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "text": "Get the hats off the ice.",
+  "source": "src/engine/story/voices.ts:549",
+  "count": 6,
+  "views": [
+   "feed"
+  ],
+  "why": "exact sentence",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "repetition",
+  "severity": "S3",
+  "text": "SEA vs SJS: a heated rivalry ignites — The SEA–SJS rivalry has grown into a real, simmering rivalry, driven by division, chippy games, close races, playoff history. SJS took this one, adding fuel to the fire.",
+  "source": "src/engine/league/rivalries.ts:343-348",
+  "count": 5,
+  "views": [
+   "inbox"
+  ],
+  "why": "one template for every rivalry flash; abbreviations in prose; the reasons array dumped as a list (rule-of-four padding); \"heated rivalry ignites\" + \"real, simmering rivalry\" in back-to-back sentences; reaches the GM inbox for clubs he has nothing to do with",
+  "origin": "code read / real app"
+ },
+ {
+  "type": "repetition",
+  "severity": "S3",
+  "text": "You promised him “Let him play — the standings won't wait” — his minutes are up since that conversation, and he knows you made it happen.",
+  "source": "src/engine/career/career.ts:4893",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "the 'kept' receipt quotes a promise that was about dressing an injured player, then talks about minutes being up; one receipt line for every ice-time promise kind",
+  "origin": "code read / real app"
+ },
+ {
+  "type": "wrong-voice",
+  "text": "Surprise package: Nashville Predators climbing the table",
+  "source": "src/engine/story/expectations.ts:232",
+  "count": 8,
+  "views": [
+   "inbox"
+  ],
+  "why": "the table",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "wrong-voice",
+  "severity": "S3",
+  "text": "Surprise package: Nashville Predators climbing the table",
+  "source": "src/engine/story/expectations.ts:232",
+  "count": 8,
+  "views": [
+   "inbox"
+  ],
+  "why": "'surprise package' + 'the table' is football-press voice; hockey says 'standings'",
+  "origin": "code read / real app"
+ },
+ {
+  "type": "wrong-voice",
+  "text": "6 consecutive wins have turned Florida Panthers into the fixture opponents circle nervously. Streaks end; the habits underneath them tend not to.",
+  "source": "src/engine/league/ambientNews.ts:58",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "fixture",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "wrong-voice",
+  "text": "A clean sheet of ice. 183 match days to the playoffs.",
+  "source": "src/engine/career/career.ts:13990",
+  "count": 1,
+  "views": [
+   "inbox"
+  ],
+  "why": "clean sheet",
+  "moreExamples": [],
+  "origin": "autopilot season (seed 2029, FLA, mod DB)"
+ },
+ {
+  "type": "wrong-voice",
+  "severity": "S3",
+  "text": "Tempers simmer between {a} and {b} after the manager's fiery press conference.",
+  "source": "src/engine/career/career.ts:5698",
+  "count": 1,
+  "views": [
+   "arc summary / feud"
+  ],
+  "why": "soccer 'manager' for the GM; also the feud pair is two random skaters",
+  "origin": "code read / real app"
+ }
+]
