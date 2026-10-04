@@ -3,7 +3,7 @@ import { motion, MotionConfig } from 'framer-motion'
 import { SimClient } from '../worker/client'
 import type { CalendarView, DashboardView, PostgameReceiptView, TeamInfo, WatchedGame, WorkerResponse } from '../worker/protocol'
 import { receiptWorthAStop, shouldHoldOverlay } from '@renderer/lib/cadence'
-import { routeContinue, sceneToOpen, type LastRoute } from '@engine/career/beatGates'
+import { liveBeatGates, routeContinue, SceneLedger, type LastRoute } from '@engine/career/beatGates'
 import { listCareerSaves, loadCareer, saveCareer, type CareerSaveInfo } from '@renderer/lib/saves'
 import { listMods, readModDatabase, type ModListEntry } from '@renderer/lib/mods'
 import { MatchViewer } from './MatchViewer'
@@ -349,6 +349,10 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
   // FM-style processing overlay: non-null while a normal day-advance is showing
   // its "what just happened" card (incoming mail + trending story + calendar).
   const [processing, setProcessing] = useState<ProcessingData | null>(null)
+  /** Loop audit F4: one modal layer at a time. A phone call and a presser wait
+   *  behind an open scene room, the processing overlay, and each other. */
+  const [phoneLive, setPhoneLive] = useState(false)
+  const [presserLive, setPresserLive] = useState(false)
   // F6: the save/load manager, opened from the topbar's Save/Load buttons.
   const [savesOpen, setSavesOpen] = useState(false)
 
@@ -406,7 +410,14 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
 
   /** B6.1: which match day the pregame frame was already shown for — the next
    *  Continue on that day plays the game instead of re-showing the frame. */
-  const pregameShownRef = useRef<number | null>(null)
+  const pregameShownRef = useRef<string | null>(null)
+  /** Loop audit F3: the scene rooms the GM has been shown — a live gate he has
+   *  never seen opens itself instead of being delegated behind his back. */
+  const sceneLedgerRef = useRef(new SceneLedger())
+  /** One Continue at a time: the press re-reads the engine before it routes. */
+  const continuingRef = useRef(false)
+  const navScreenRef = useRef<ScreenId>(nav.screen)
+  navScreenRef.current = nav.screen
   /** The beat screen the previous Continue press routed to, and the label it
    *  routed for. If the GM is still not there on the next press, the screen
    *  bounced him and the gate is spent instead (see engine/career/beatGates.ts). */
@@ -421,12 +432,18 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
   /** PHASE 0: a routine result that did not hold its own stop — shown on the
    *  next match-day frame instead ("Last game: …"). */
   const lastReceiptRef = useRef<PostgameReceiptView | null>(null)
-  const advanceRef = useRef<(() => void) | null>(null)
+  const advanceRef = useRef<((opts?: { inRoom?: boolean; before?: DashboardView | null }) => void) | null>(null)
   /** The last calendar the overlay was given. The overlay used to open on a
    *  BARE month grid while the day processed (the calendar was only fetched
    *  after the sim) — the "empty calendar when it loads" the owner saw. */
   const lastCalendarRef = useRef<CalendarView | null>(null)
-  const advanceWithOverlay = useCallback((): void => {
+  /** `inRoom`: the press was made standing in a live scene's room — it spends
+   *  that beat in place (no processing overlay, the room IS the stop), but a
+   *  match day still gets its frame and its result (loop audit F1: ten games a
+   *  season used to be simmed blind from the Trade Centre). `before` is the
+   *  gate state the press was decided on. */
+  const advanceWithOverlay = useCallback((opts?: { inRoom?: boolean; before?: DashboardView | null }): void => {
+    const inRoom = opts?.inRoom === true
     void (async () => {
       // B5: "the postgame screen is slow to load". Where the time actually goes
       // is not obvious from the outside — the sim itself, the four view fetches
@@ -440,8 +457,12 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
       try {
         const pv = await client.getMatchDayPreview()
         perf.mark('matchDayPreview')
-        if (pv.type === 'matchDayPreview' && pv.preview && pregameShownRef.current !== pv.preview.day) {
-          pregameShownRef.current = pv.preview.day
+        // Keyed on the game's own date, not a bare day number: day numbers
+        // repeat every season, and a frame shown for another date must never
+        // suppress this one.
+        const frameKey = pv.type === 'matchDayPreview' && pv.preview ? `${pv.preview.date}|${pv.preview.playoff ? 'po' : 'rs'}|${pv.preview.opponentTeamId}` : null
+        if (pv.type === 'matchDayPreview' && pv.preview && frameKey && pregameShownRef.current !== frameKey) {
+          pregameShownRef.current = frameKey
           const lastReceipt = lastReceiptRef.current
           lastReceiptRef.current = null
           setProcessing({
@@ -468,7 +489,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
       } catch { /* non-fatal — worst case every item reads as "new" */ }
       perf.mark('inboxBefore')
 
-      setProcessing({
+      if (!inRoom) setProcessing({
         phase: 'running', nextGame: dashboard?.nextGame ?? null, incoming: [],
         ...(lastCalendarRef.current ? { calendar: lastCalendarRef.current } : {}),
         ...(dashboard?.date ? { dateISO: dashboard.date } : {}),
@@ -496,8 +517,10 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
       // PHASE 0: a real moment that ARRIVED on this advance (deadline day, a
       // convened meeting, the boardroom, a trade offer worth your time) opens
       // itself — the scene replaces the overlay. No signpost, no extra press.
-      const scene = sceneToOpen(dash, dashboard)
-      if (scene) {
+      // Loop audit F3: and a live room the GM has never been shown (the
+      // boardroom queued behind camp) opens once the room ahead of it closes.
+      const scene = sceneLedgerRef.current.afterPress(dash, opts?.before ?? dashboard)
+      if (scene && !(inRoom && scene.screen === navScreenRef.current)) {
         rollRef.current = 0
         setProcessing(null)
         navigate(scene.screen, scene.params ?? {})
@@ -526,6 +549,15 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
       // PHASE 0: a routine result rides on the next match-day frame; only a
       // result that is a story (or the season's last) holds its own stop.
       const receiptStops = !!receipt && receiptWorthAStop(receipt, !dash?.nextGame)
+      // Spending a beat in its room: the room is the stop. Only a result that
+      // earns its own stop interrupts; a routine one rides on the next frame.
+      if (inRoom && !receiptStops) {
+        if (receipt) lastReceiptRef.current = receipt
+        rollRef.current = 0
+        setProcessing(null)
+        perf.done(false)
+        return
+      }
       if (!shouldHoldOverlay(incoming, receiptStops)) {
         if (receipt) lastReceiptRef.current = receipt
         perf.done(false)
@@ -536,7 +568,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         const nextDec = dash ? routeContinue({ dashboard: dash, screen: 'dashboard', lastRoute: null }) : null
         if (dash && dash.phase === 'regularSeason' && dash.day > 0 && nextDec?.kind === 'advance' && rollRef.current < 6) {
           rollRef.current++
-          setTimeout(() => advanceRef.current?.(), 0)
+          setTimeout(() => advanceRef.current?.({ before: dash }), 0)
           return
         }
         rollRef.current = 0
@@ -558,75 +590,105 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
       })
       perf.done(!!receipt)
     })()
-  }, [client, dashboard?.nextGame, dashboard?.date, run])
+  }, [client, dashboard, run, navigate])
   advanceRef.current = advanceWithOverlay
+
+  /** One press of Continue. */
+  const continueOnce = useCallback(async (): Promise<void> => {
+    // Loop audit F2: decide on the engine's state NOW, not on the shell's last
+    // refetch. A screen that mutated the world without bumping the refresh bus
+    // (the draft's "Sim entire draft") left a stale hard gate here, and the
+    // press did nothing at all. A gate that has cleared falls through.
+    let fresh: DashboardView | null = dashboard ?? null
+    try {
+      const r = await client.getDashboard()
+      if (r.type === 'dashboard') {
+        if (fresh && r.dashboard.continueLabel !== fresh.continueLabel) bumpRefresh()
+        fresh = r.dashboard
+      }
+    } catch { /* fall back to the last dashboard */ }
+
+    // ── THE BEAT-GATE LAW (Gap #1 / bar B2.2) ────────────────────────────
+    // One decision, taken by the pure `routeContinue` in engine/career/beatGates.ts:
+    // walk into a beat, or spend one, never neither. Deciding gate-by-gate
+    // here is what softlocked the game whenever two gates were live at once
+    // (each press bounced to the other's screen and the sim never ticked).
+    const decision = routeContinue({
+      dashboard: fresh,
+      screen: navScreenRef.current,
+      lastRoute: lastGateRouteRef.current,
+    })
+    if (decision.kind !== 'advance') setProcessing(null)
+    switch (decision.kind) {
+      // Hard gates: the engine cannot sim past them, so the escape lives on
+      // the screen (auto-pick the draft; "let the coach name him").
+      case 'hardGate':
+        lastGateRouteRef.current = null
+        // PHASE 0: a hard gate that has a one-click fix offers it INLINE,
+        // once — no detour through a signposted screen unless you want it.
+        if (!decision.alreadyThere && decision.screen === 'leadership') {
+          if (window.confirm('No captain is named, and the season cannot open without one.\n\nOK — let the coach name him (the man the room follows).\nCancel — pick the C yourself.')) {
+            void run(() => client.nameCaptainByCoach())
+          } else navigate('leadership')
+          return
+        }
+        if (!decision.alreadyThere && decision.screen === 'squad') {
+          if (window.confirm(`${decision.message ?? 'You cannot dress a legal lineup.'}\n\nOK — let the AGM sign emergency cover.\nCancel — fix it yourself.`)) {
+            void run(() => client.signEmergencyCover())
+          } else navigate('squad')
+          return
+        }
+        if (!decision.alreadyThere) navigate(decision.screen)
+        else if (decision.screen === 'leadership')
+          toast('Name a captain to open the season — pick the C on this screen.')
+        else toast(decision.message ?? 'Settle this screen first, then Continue.', 'error')
+        return
+      case 'route':
+        lastGateRouteRef.current = { screen: decision.gate.screen, label: fresh?.continueLabel ?? '' }
+        sceneLedgerRef.current.markShown(decision.gate.key)
+        navigate(decision.gate.screen, decision.gate.params ?? {})
+        return
+      // Attending (or bounced off) a beat: the press ADVANCES the sub-flow in
+      // place — no processing overlay, no calendar detour. It still goes
+      // through the one advance path, so a game on the next day gets its
+      // match-day frame and its result (loop audit F1).
+      case 'spend':
+        lastGateRouteRef.current = null
+        sceneLedgerRef.current.markShown(decision.gate.key)
+        rollRef.current = 0
+        advanceWithOverlay({ inRoom: true, before: fresh })
+        return
+      default:
+        lastGateRouteRef.current = null
+    }
+    // Loop audit F3: a live room the GM has never been shown (the takeover's
+    // development camp, a scene live on load) opens before time moves past it.
+    const unseen = sceneLedgerRef.current.unseen(fresh)
+    if (unseen) {
+      sceneLedgerRef.current.markShown(unseen.key)
+      navigate(unseen.screen, unseen.params ?? {})
+      return
+    }
+    // Normal day-advance: FM-style — pop the processing overlay that streams
+    // the day's incoming mail, a trending headline, and the month calendar
+    // WHILE the sim ticks, then leaves the GM where they were.
+    rollRef.current = 0
+    advanceWithOverlay({ before: fresh })
+  }, [client, dashboard, run, navigate, advanceWithOverlay])
 
   const actions = useMemo<ShellActions>(
     () => ({
       busy,
       continueGame: () => {
-        // ── THE BEAT-GATE LAW (Gap #1 / bar B2.2) ────────────────────────────
-        // One decision, taken by the pure `routeContinue` in engine/career/beatGates.ts:
-        // walk into a beat, or spend one, never neither. Deciding gate-by-gate
-        // here is what softlocked the game whenever two gates were live at once
-        // (each press bounced to the other's screen and the sim never ticked).
-        const decision = routeContinue({
-          dashboard,
-          screen: nav.screen,
-          lastRoute: lastGateRouteRef.current,
-        })
-        if (decision.kind !== 'advance') setProcessing(null)
-        switch (decision.kind) {
-          // Hard gates: the engine cannot sim past them, so the escape lives on
-          // the screen (auto-pick the draft; "let the coach name him").
-          case 'hardGate':
-            lastGateRouteRef.current = null
-            // PHASE 0: a hard gate that has a one-click fix offers it INLINE,
-            // once — no detour through a signposted screen unless you want it.
-            if (!decision.alreadyThere && decision.screen === 'leadership') {
-              if (window.confirm('No captain is named, and the season cannot open without one.\n\nOK — let the coach name him (the man the room follows).\nCancel — pick the C yourself.')) {
-                void run(() => client.nameCaptainByCoach())
-              } else navigate('leadership')
-              return
-            }
-            if (!decision.alreadyThere && decision.screen === 'squad') {
-              if (window.confirm(`${decision.message ?? 'You cannot dress a legal lineup.'}\n\nOK — let the AGM sign emergency cover.\nCancel — fix it yourself.`)) {
-                void run(() => client.signEmergencyCover())
-              } else navigate('squad')
-              return
-            }
-            if (!decision.alreadyThere) navigate(decision.screen)
-            else if (decision.screen === 'leadership')
-              toast('Name a captain to open the season — pick the C on this screen.')
-            else if (decision.message) toast(decision.message, 'error')
-            return
-          case 'route':
-            lastGateRouteRef.current = { screen: decision.gate.screen, label: dashboard?.continueLabel ?? '' }
-            navigate(decision.gate.screen, decision.gate.params ?? {})
-            return
-          // Attending (or bounced off) a beat: the press ADVANCES the sub-flow in
-          // place — no processing overlay, no calendar detour (that detour
-          // swallowed the advance and left camp stuck on Day 1).
-          case 'spend':
-            lastGateRouteRef.current = null
-            void (async () => {
-              const res = await run(() => client.continueGame())
-              if (res === null) return
-              // Spending one beat can bring the next (cut day → the boardroom):
-              // it opens itself too.
-              const after = await client.getDashboard().catch(() => null)
-              const scene = after && after.type === 'dashboard' ? sceneToOpen(after.dashboard, dashboard) : null
-              if (scene && scene.screen !== nav.screen) navigate(scene.screen, scene.params ?? {})
-            })()
-            return
-          default:
-            lastGateRouteRef.current = null
-        }
-        // Normal day-advance: FM-style — pop the processing overlay that streams
-        // the day's incoming mail, a trending headline, and the month calendar
-        // WHILE the sim ticks, then leaves the GM where they were.
-        rollRef.current = 0
-        advanceWithOverlay()
+        if (continuingRef.current || busyRef.current) return
+        continuingRef.current = true
+        void (async () => {
+          try {
+            await continueOnce()
+          } finally {
+            continuingRef.current = false
+          }
+        })()
       },
       advanceDays: (days: number) => {
         void run(() => client.advance(days))
@@ -645,7 +707,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         })()
       },
     }),
-    [busy, client, run, advanceWithOverlay, dashboard, nav.screen, navigate]
+    [busy, client, run, continueOnce]
   )
 
   // Spacebar advances the game (FM-style) — unless a match is open, the user is
@@ -764,6 +826,8 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         }
         resetNameIndex() // the loaded world may have different players
         resetPhoneSeen()
+        sceneLedgerRef.current.reset()
+        pregameShownRef.current = null
         setNav({ screen: 'dashboard', params: {} })
         setHistory([])
         setSavesOpen(false)
@@ -777,6 +841,12 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
       }
     })()
   }
+
+  // Loop audit F4: something already owns the screen — the processing overlay
+  // or a live scene's room — so the phone and the presser wait their turn.
+  const overlayHold =
+    processing !== null ||
+    liveBeatGates(dashboard).some((g) => g.key !== 'scoutDigest' && g.screen === nav.screen)
 
   return (
     <UserTeamContext.Provider value={props.team.teamId}>
@@ -813,10 +883,10 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
                 />
                 {nav.screen === 'dashboard' && <LeagueTicker />}
                 <CommandPalette />
-                <PhoneCallOverlay />
+                <PhoneCallOverlay hold={overlayHold || presserLive} onLive={setPhoneLive} />
                 {/* MEDIA-BEAT: pressers are back — rare (≤1 per 12 days), about
                   * a named situation, and one click to send the PR director. */}
-                <PressConference />
+                <PressConference hold={overlayHold || phoneLive} onLive={setPresserLive} />
                 <SubTabBar dashboard={dashboard} />
                 <div className="shell-main">
                   <MotionConfig reducedMotion="user">

@@ -109,9 +109,16 @@ function playPhoneRing(): () => void {
   }
 }
 
-export function PhoneCallOverlay(): JSX.Element | null {
+/**
+ * Loop audit F4: never more than one modal layer. `hold` is set by the shell
+ * while something else already owns the GM's attention (an open scene room,
+ * the processing overlay, a press conference): the call waits, it is not lost.
+ * `onLive` tells the shell when a call is on screen, so a presser waits too.
+ */
+export function PhoneCallOverlay(props: { hold?: boolean; onLive?: (live: boolean) => void } = {}): JSX.Element | null {
   const client = useClient()
   const nav = useNav()
+  const atTradeDesk = nav.screen === 'trades' || nav.screen === 'deadlineDay'
   const { data: inbox } = useScreenData<InboxView>(
     () => client.getInbox(),
     (r) => (r.type === 'inbox' ? r.inbox : null),
@@ -137,8 +144,15 @@ export function PhoneCallOverlay(): JSX.Element | null {
   const call = useMemo<PhoneCall | null>(() => {
     const seen = seenSet()
     for (const id of dismissed) seen.add(id)
-    return pickCall({ ownerReq: ownerReq ?? null, trades, inbox, staff, seen })
-  }, [inbox, ownerReq, staff, trades, dismissed])
+    return pickCall({ ownerReq: ownerReq ?? null, trades, inbox, staff, seen, atTradeDesk })
+  }, [inbox, ownerReq, staff, trades, dismissed, atTradeDesk])
+
+  // An offer the GM has read on the desk has been put to him: its call never
+  // rings afterwards either (that was the duplicate on top of the open scene).
+  useEffect(() => {
+    if (!atTradeDesk) return
+    for (const o of trades?.incoming ?? []) markSeen(`trade:${o.offerId}`)
+  }, [atTradeDesk, trades])
 
   // Hold the line for the cooldown after a hang-up, then re-check.
   const now = Date.now()
@@ -149,7 +163,10 @@ export function PhoneCallOverlay(): JSX.Element | null {
     return () => clearTimeout(t)
   }, [quiet])
 
-  const live = quiet ? null : call
+  const live = quiet || props.hold ? null : call
+  const onLive = props.onLive
+  const isLive = live !== null
+  useEffect(() => { onLive?.(isLive) }, [onLive, isLive])
 
   // A different caller means a different call: never leave the card sitting in
   // the "on the line" state showing a man who was never answered (and who would

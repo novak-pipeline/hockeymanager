@@ -299,6 +299,9 @@ export interface ScheduledReportArgs extends PressFactArgs {
   monthLabel?: string
   /** Playoff round label, e.g. "Conference Finals". */
   playoffRound?: string
+  /** Loop audit F10: did the club this sheet is about make the playoffs?
+   *  Undefined when there is no bracket yet. */
+  userInPlayoffs?: boolean
 }
 
 /** Extended fact sheet for scheduled reports. */
@@ -312,6 +315,7 @@ export interface ScheduledReportFactSheet extends PressFactSheet {
   topProspects: string[]
   monthLabel: string
   playoffRound: string
+  userInPlayoffs?: boolean
 }
 
 const MAX_RANKINGS = 10
@@ -335,6 +339,7 @@ function clampScheduled(args: ScheduledReportArgs): ScheduledReportFactSheet {
     topProspects: (args.topProspects ?? []).slice(0, MAX_PROSPECTS),
     monthLabel: args.monthLabel ?? '',
     playoffRound: args.playoffRound ?? '',
+    ...(args.userInPlayoffs !== undefined ? { userInPlayoffs: args.userInPlayoffs } : {}),
   }
 }
 

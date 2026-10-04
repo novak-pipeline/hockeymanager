@@ -1405,7 +1405,10 @@ const PLAYOFF_PREVIEW_BEAT: TentpoleTemplateFn[] = [
     const headline = s.playoffMatchups.length > 0
       ? `${roundStr} preview: seeds are set, matchups drawn`
       : `Playoff preview: everything is on the line`
-    const lede = `HARBOR CITY — ${roundStr} begins. The ${t.name} enter at ${recordStr(sheet)}.`
+    // Loop audit F10: a club that missed does not "enter" anything.
+    const lede = s.userInPlayoffs === false
+      ? `HARBOR CITY — ${roundStr} begins without the ${t.name}, who finished ${recordStr(sheet)}.`
+      : `HARBOR CITY — ${roundStr} begins. The ${t.name} enter at ${recordStr(sheet)}.`
     const matchupLines = s.playoffMatchups.slice(0, 4).map(
       // highSeed/lowSeed are team NAMES. They were run through ordinal(), which
       // printed "Florida Panthersth Florida Panthers vs. …" in every preview.
@@ -1433,7 +1436,9 @@ const PLAYOFF_PREVIEW_NATIONAL: TentpoleTemplateFn[] = [
       (m) => `${m.highSeed} vs. ${m.lowSeed}: watch this one.`
     )
     const matchupStr = matchupLines.length > 0 ? matchupLines.join(' ') : ''
-    const expLine = overPerforming(sheet)
+    const expLine = s.userInPlayoffs === false
+      ? `The ${t.name} (${recordStr(sheet)}) watch this one from home.`
+      : overPerforming(sheet)
       ? `The ${t.name} (${recordStr(sheet)}) are here ahead of schedule. The question now is whether they can match it under playoff pressure.`
       : underPerforming(sheet)
         ? `The ${t.name} (${recordStr(sheet)}) have ground to make up. Playoff hockey has a way of resetting the narrative.`
@@ -1451,6 +1456,16 @@ const PLAYOFF_PREVIEW_HOMER: TentpoleTemplateFn[] = [
     const s = asScheduled(sheet)
     const t = sheet.team
     const roundStr = s.playoffRound || 'Playoff hockey'
+    if (s.userInPlayoffs === false) {
+      return {
+        headline: `${roundStr} starts tonight, and we're not in it`,
+        body: [
+          `${roundStr} starts without the ${t.name}. ${recordStr(sheet)} wasn't good enough, and nobody in that room needs me to tell them so.`,
+          `The draft lottery is next. That's where this starts getting fixed.`,
+        ].join('\n\n'),
+        byline: `${PRESS_PERSONA_NAMES.homer.name} — ${PRESS_PERSONA_NAMES.homer.outlet}`,
+      }
+    }
     const headline = `${roundStr} — and folks, THIS IS WHAT WE PLAY FOR!`
     const lede = `${roundStr} is HERE. This is the moment the ${t.name} have been building toward all season. I am all in, and you should be too.`
     const moraleBlurbLine = moraleBlurb(sheet)

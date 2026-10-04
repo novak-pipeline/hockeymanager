@@ -37,6 +37,8 @@ import {
   type Position,
   type ScheduledGame,
   type DraftProspect,
+  type DraftClass,
+  type Lines,
   type SeasonStats,
   type SquadStatus,
   type TradeStatus,
@@ -755,7 +757,7 @@ import {
 } from '@engine/league/practice'
 import { deserializeLeagueData, serializeLeagueData, serializeMap } from './serialize'
 import { buildBoxScore } from './boxScore'
-import { buildDevelopmentCenter, type DevelopmentCenterView } from './developmentCenter'
+import { buildDevelopmentCenter, type DevelopmentCenterView, type DevelopmentRow } from './developmentCenter'
 import {
   CLUB_BEAT_CHECK_EVERY_DAYS,
   CLUB_BEAT_COOLDOWN_DAYS,
@@ -5521,13 +5523,19 @@ export class Career {
     const monthLabel = MONTH_FULL[monthNum - 1] ?? ''
 
     // Playoff round label.
+    // Loop audit F10: rounds not drawn yet have NO series, and `[].every()` is
+    // true — so on day one of round 1 every empty later round counted as
+    // "complete" and the preview was headlined "Stanley Cup Finals". Name the
+    // round actually in play (or the next one to start).
     let playoffRound = 'Playoffs'
+    let userInPlayoffs: boolean | undefined
     if (this.playoffs) {
-      const completedRounds = this.playoffs.rounds.filter((r) =>
-        r.series.every((s) => s.winnerTeamId !== null)
-      ).length
+      const rounds = this.playoffs.rounds
       const roundLabels = ['First Round', 'Second Round', 'Conference Finals', 'Stanley Cup Finals']
-      playoffRound = roundLabels[completedRounds] ?? 'Playoffs'
+      const live = rounds.findIndex((r) => r.series.length > 0 && r.series.some((s) => s.winnerTeamId === null))
+      const completedRounds = rounds.filter((r) => r.series.length > 0 && r.series.every((s) => s.winnerTeamId !== null)).length
+      playoffRound = roundLabels[live >= 0 ? live : completedRounds] ?? 'Playoffs'
+      userInPlayoffs = rounds.some((r) => r.series.some((s) => s.highSeedTeamId === this.userTeamId || s.lowSeedTeamId === this.userTeamId))
     }
 
     return {
@@ -5541,6 +5549,7 @@ export class Career {
       topProspects,
       monthLabel,
       playoffRound,
+      ...(userInPlayoffs !== undefined ? { userInPlayoffs } : {}),
     }
   }
 
@@ -20747,12 +20756,6 @@ export class Career {
     if (o.userGivesPlayerIds.length === 0 && o.userGivesPicks.length === 0) return true
     if (this.phase === 'regularSeason' && this.deadlineDay > 0 &&
         this.currentDay >= this.deadlineDay - 7 && this.currentDay <= this.deadlineDay) return true
-    for (const id of o.userGivesPlayerIds) {
-      const p = this.data.players.get(id)
-      if (!p) continue
-      if (p.squadStatus === 'keyPlayer' || p.squadStatus === 'coreStarter') return true
-      if (p.tradeStatus === 'untouchable' || p.tradeStatus === 'available' || p.tradeStatus === 'listed') return true
-    }
     const year = this.year
     const give =
       o.userGivesPlayerIds.reduce((s, id) => s + (this.data.players.get(id) ? playerValue(this.data.players.get(id)!) : 0), 0) +
@@ -20760,8 +20763,24 @@ export class Career {
     const get =
       o.userReceivesPlayerIds.reduce((s, id) => s + (this.data.players.get(id) ? playerValue(this.data.players.get(id)!) : 0), 0) +
       o.userReceivesPicks.reduce((s, pk) => s + pickValue(pk, { year }), 0)
+    for (const id of o.userGivesPlayerIds) {
+      const p = this.data.players.get(id)
+      if (!p) continue
+      // You are shopping him: every call is one you asked for.
+      if (p.tradeStatus === 'available' || p.tradeStatus === 'listed') return true
+      // Loop audit F4: a man you gave your word to only earns the GM's desk
+      // when the call is a serious one. "A 2nd-round pick for the starting
+      // goalie" touched a core player, so it interrupted; the AGM hangs up on
+      // that and logs it in the weekly digest.
+      if (p.squadStatus === 'keyPlayer' || p.squadStatus === 'coreStarter' || p.tradeStatus === 'untouchable') {
+        if (give > 0 && get >= give * Career.CORE_OFFER_FLOOR) return true
+      }
+    }
     return give > 0 && get >= give * Career.FAIR_OFFER_BAR
   }
+  /** Loop audit F4: the floor under a call about a core player. Below 0.8×
+   *  of his value on your own numbers it is a lowball, not a decision. */
+  static readonly CORE_OFFER_FLOOR = 0.8
   /** The AGM's forwarding bar: an offer returning at least this multiple of
    *  what it asks (on your own valuation) is a clear win and reaches the GM.
    *  Measured: AI pitches already price in a premium — most return 1.05–1.45×
@@ -20788,8 +20807,8 @@ export class Career {
         ? `Trade desk: ${topN} clubs called about ${topTarget}`
         : `Trade desk: ${log.length} calls, from ${log[0]!.club} to ${log[log.length - 1]!.club}`
     this.pushNews('trade', headline,
-      `${agm} fielded the routine calls and passed — none was a clear win on our numbers or touched a player you've made a promise to:\n\n${lines.join('\n')}\n\n` +
-      `Anything clearly in our favour, anything about your core, and every call in deadline week still comes straight to you.`,
+      `${agm} fielded the routine calls and passed. None was a clear win on our numbers, and none came near fair value for a player you've made a promise to:\n\n${lines.join('\n')}\n\n` +
+      `A clear win, a serious bid for your core, and every call in deadline week still come straight to you.`,
       { teamId: this.userTeamId as string })
   }
 
@@ -22651,6 +22670,10 @@ export class Career {
     let home = false
     let playoff = false
     if (this.phase === 'regularSeason') {
+      // Loop audit F6: while training camp runs, the next press is a camp day,
+      // not opening night. Framing the opener here also marked it "shown", so
+      // the real opener two weeks later was played with no frame at all.
+      if (this.trainingCamp && !this.trainingCamp.resolved) return null
       const nextDay = this.matchDays.find((d) => d > this.currentDay)
       if (nextDay === undefined) return null
       const g = this.data.league.schedule.find(
@@ -23433,12 +23456,21 @@ export class Career {
       // review used to be checked first, so the button read "end-of-season
       // review" on draft day while Continue routed to the draft — PHASE 0.)
       if (this.draftPending()) return 'Go to the entry draft'
-      if (this.devCampShowable()) return `Continue — development camp, day ${Math.min(3, (this.devCampState?.day ?? 0) + 1)}`
+      // Loop audit F14: every label names the beat the NEXT press lands on.
+      // Camp shows arrival (day 1) from the moment it opens; a press plays the
+      // scrimmage (day 2), the next files the final reads (day 3), and the one
+      // after that wraps camp and lands in the re-signing window.
+      const campShown = this.devCampState?.day ?? 1
+      if (this.devCampShowable() && campShown < 3) {
+        return campShown <= 1 ? 'Continue — development camp scrimmage' : 'Continue — development camp, final reads'
+      }
       const stage = this.offseason?.stage ?? 'awards'
       const beat = this.offseason?.summerBeat ?? 0
       const labels: Record<string, string> = {
         awards: ['Continue to the draft lottery', 'Continue to the combine', 'Continue to awards night', 'Continue to the entry draft'][Math.min(3, beat)]!,
-        draft: 'Continue — open free agency',
+        // The draft-night press opens development camp when the org has kids
+        // to skate, else the re-signing window — never July 1.
+        draft: this.devCampInvitees().invitees.length > 0 ? 'Continue to development camp' : 'Continue — re-signing window',
         resign:
           (this.offseason?.resignDay ?? 0) === RESIGN_WINDOW_DAYS - 1 && this.undecidedRfas().length > 0
             ? `Continue — the QO deadline passes (${this.undecidedRfas().length} undecided)`
@@ -23553,7 +23585,14 @@ export class Career {
               {
                 awards: 'Season awards',
                 draft: 'Entry draft',
-                resign: `Re-signing window — day ${(this.offseason.resignDay ?? 0) + 1}`,
+                // Loop audit F14: the chip follows the date. Dev camp runs
+                // Jun 22–24 inside this stage, and the window's last press
+                // sits on July 1 (it read "day 1" in camp and "day 5" then).
+                resign: this.devCampShowable()
+                  ? 'Development camp'
+                  : (this.offseason.resignDay ?? 0) >= RESIGN_WINDOW_DAYS
+                    ? 'Re-signing window — last day'
+                    : `Re-signing window — day ${(this.offseason.resignDay ?? 0) + 1}`,
                 freeAgency: `Free agency — day ${this.offseason.faDay + 1}`,
                 preseason: 'Training camp',
               } as Record<string, string>
@@ -29247,8 +29286,17 @@ export class Career {
       gmName: gm.name,
       ...(this.offerPitch(o, receive, give, gm) ?? {}),
       expiresOnDay: o.expiresOnDay,
+      expiryLabel: this.offerExpiryLabel(),
       ...(blocked ? { blockedReason: blocked } : {}),
     }
+  }
+
+  /** Loop audit F4: the truth about an offer's clock. In season the next
+   *  Continue hands every standing offer to the AGM, who passes
+   *  (declineAllTradeOffers), so that IS the expiry. Over the summer nothing
+   *  ticks offers down; they stand until the new season opens. */
+  private offerExpiryLabel(): string {
+    return this.phase === 'regularSeason' ? 'Answer before you Continue' : 'Open until the season opens'
   }
 
   /** The offer as the rival GM would put it to you on the phone: first person,
@@ -29287,9 +29335,13 @@ export class Career {
         ? `We're not in the business of collecting picks, so we'd rather spend them on a player.`
         : `We've watched him enough to know what he'd be for us.`
     const deadlineSoon = this.deadlineDay > 0 && o.expiresOnDay >= this.deadlineDay - 7
-    const urgency = deadlineSoon
-      ? `I need an answer before the deadline, not after it.`
-      : `Have a look and call me back — the offer's good for a few days.`
+    // Loop audit F4: say the real clock. In season the offer lapses on your
+    // next Continue; it used to promise "a few days" and then vanish overnight.
+    const urgency = this.phase !== 'regularSeason'
+      ? `No rush. It stands until the season opens.`
+      : deadlineSoon
+        ? `With the deadline this close, I need an answer today.`
+        : `I need an answer today. I've got other calls to make.`
     return { spoken: `${opener} ${pitch} We'll put up ${list}. ${urgency}` }
   }
 

@@ -143,6 +143,10 @@ export function pickCall(args: {
   staff: StaffView | null
   /** Call ids already rung (this career). */
   seen: ReadonlySet<string>
+  /** Loop audit F4: the GM is standing at the trade desk, with the offers in
+   *  front of him. A rival GM ringing about one of them is the same decision
+   *  twice — the card already carries his pitch. */
+  atTradeDesk?: boolean
 }): PhoneCall | null {
   const { ownerReq, trades, inbox, staff, seen } = args
 
@@ -162,7 +166,7 @@ export function pickCall(args: {
     }
   }
 
-  for (const o of trades?.incoming ?? []) {
+  for (const o of args.atTradeDesk ? [] : trades?.incoming ?? []) {
     const id = `trade:${o.offerId}`
     if (seen.has(id)) continue
     if (!o.spoken) continue // an offer with no pitch is paperwork, not a call

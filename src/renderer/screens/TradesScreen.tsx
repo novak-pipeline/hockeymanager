@@ -509,7 +509,9 @@ function OfferCard(props: {
   }
 
   const daysLeft = offer.expiresOnDay - props.currentDay
-  const expLabel = daysLeft <= 0 ? 'Expires today' : `Expires in ${daysLeft}d`
+  // Loop audit F4: the engine says when the offer really lapses (in season, on
+  // your next Continue). The day count read 56–137d off a hardcoded day 0.
+  const expLabel = offer.expiryLabel ?? (daysLeft <= 0 ? 'Expires today' : `Expires in ${daysLeft}d`)
 
   return (
     <Panel>
@@ -746,7 +748,7 @@ function EvalPanel(props: {
           Counter-offer from {counter.receive.teamName}
         </span>
         <span className="chip chip-warn" style={{ fontSize: 10, marginLeft: 'auto' }}>
-          {daysLeft <= 0 ? 'Expires today' : `Expires in ${daysLeft}d`}
+          {counter.expiryLabel ?? (daysLeft <= 0 ? 'Expires today' : `Expires in ${daysLeft}d`)}
         </span>
       </div>
 

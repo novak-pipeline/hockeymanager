@@ -134,6 +134,9 @@ export function liveBeatGates(d: GateFlags | null | undefined): BeatGate[] {
   return gates
 }
 
+/** What Continue says on the draft floor while picks are still owed. */
+export const DRAFT_WAITING = 'The draft is still on. Make your pick, or sim the rest of the draft.'
+
 /**
  * What one press of Continue should do, given the dashboard, where the GM is
  * standing, and the route the previous press issued.
@@ -166,7 +169,13 @@ export function routeContinue(args: {
   // Draft day parks the offseason on an unfinished draft; the preseason won't
   // open without a captain. Neither can be simmed past — route and let the
   // screen's own action (auto-pick / "let the coach name him") clear it.
-  if (d?.draftPending) return { kind: 'hardGate', screen: 'draft', alreadyThere: screen === 'draft' }
+  // A hard gate never no-ops in silence (loop audit F2): standing on the draft
+  // with picks still to make, the press says what the floor is waiting on.
+  if (d?.draftPending) {
+    return screen === 'draft'
+      ? { kind: 'hardGate', screen: 'draft', alreadyThere: true, message: DRAFT_WAITING }
+      : { kind: 'hardGate', screen: 'draft', alreadyThere: false }
+  }
   if (d?.captainsPending) return { kind: 'hardGate', screen: 'leadership', alreadyThere: screen === 'leadership' }
   // An illegal lineup outranks every beat: the engine will not play the game at
   // all, so no soft gate below can be reached, let alone spent.
@@ -211,4 +220,60 @@ export function sceneToOpen(
     if (!was.has(g.key)) return g
   }
   return null
+}
+
+/**
+ * Loop audit F3: scenes that were ALREADY live never opened. `sceneToOpen`
+ * only opens a gate that became live on the press, so a gate armed alongside
+ * another (the preseason board meeting is armed at the Sep 15 rollover, the
+ * same moment camp opens) or armed before the first press (the takeover's
+ * development camp) was delegated without the GM ever seeing it.
+ *
+ * The ledger remembers which rooms the GM has actually been shown. A gate is
+ * "walked away from" only if he was shown it. So after each press, the first
+ * live gate opens unless he has already seen it, and on a career's first press
+ * (start or load) a live gate he has never seen opens instead of the advance.
+ * A gate that stands down is forgotten, so the same beat re-armed later (next
+ * season's board meeting) opens again.
+ */
+export class SceneLedger {
+  private shown = new Set<string>()
+
+  /** Forget every remembered gate (a different career was loaded). */
+  reset(): void {
+    this.shown.clear()
+  }
+
+  /** The GM is in (or was sent into) this gate's room. */
+  markShown(key: string): void {
+    this.shown.add(key)
+  }
+
+  hasShown(key: string): boolean {
+    return this.shown.has(key)
+  }
+
+  /** Drop gates that are no longer live, so a re-armed beat opens again. */
+  sync(d: GateFlags | null | undefined): void {
+    const live = new Set(liveBeatGates(d).map((g) => g.key))
+    for (const k of [...this.shown]) if (!live.has(k)) this.shown.delete(k)
+  }
+
+  /** The top live scene the GM has never been shown, or null. Only the FIRST
+   *  live gate qualifies: one queued behind another waits its turn (the
+   *  boardroom waits for camp to break). */
+  unseen(d: GateFlags | null | undefined): BeatGate | null {
+    this.sync(d)
+    const first = liveBeatGates(d).find((g) => g.key !== 'scoutDigest')
+    return first && !this.shown.has(first.key) ? first : null
+  }
+
+  /** After a press: the scene to open (a moment that arrived, else the top
+   *  live gate the GM has not seen yet). Marks it shown. */
+  afterPress(after: GateFlags | null | undefined, before: GateFlags | null | undefined): BeatGate | null {
+    this.sync(after)
+    const g = sceneToOpen(after, before) ?? this.unseen(after)
+    if (g) this.shown.add(g.key)
+    return g
+  }
 }

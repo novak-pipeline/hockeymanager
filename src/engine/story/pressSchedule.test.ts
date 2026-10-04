@@ -227,6 +227,9 @@ describe('pressSchedule — integration: season produces scheduled reports', () 
     const items = pressItems(runFullSeason(42))
     const pprev = items.filter((n) => n.press?.kind === 'playoffPreview')
     expect(pprev.length, 'expected exactly one playoffPreview').toBe(1)
+    // Loop audit F10: it fires as round 1 opens, and names round 1 (undrawn
+    // later rounds used to count as finished, so it said "Stanley Cup Finals").
+    expect(`${pprev[0]!.headline} ${pprev[0]!.body}`).not.toMatch(/Stanley Cup Finals|Conference Finals|Second Round/)
   })
 
   it('produces an awardsNight in the offseason', () => {
@@ -373,5 +376,23 @@ describe('pressSchedule — unit: scheduled report fact sheets render correctly'
 
     expect(article.body).toContain('Hart Trophy')
     expect(article.body).toContain('A. Johansson')
+  })
+
+  it('loop audit F10: a club that missed the playoffs never "enters" them, in any voice', () => {
+    for (const personaId of ['beat', 'national', 'homer'] as const) {
+      const sheet = buildScheduledReportFactSheet('playoffPreview', {
+        ...BASE_FACTS,
+        day: 170,
+        team: { ...BASE_FACTS.team, wins: 29, losses: 42, otLosses: 11, points: 69, rank: 26 },
+        playoffRound: 'First Round',
+        userInPlayoffs: false,
+        playoffMatchups: [{ highSeed: 'Boston Bears', lowSeed: 'Nordale Knights', highSeedWins: 0, lowSeedWins: 0, round: 1 }],
+      })
+      const article = renderFallback({ id: `pj-po-${personaId}`, kind: 'playoffPreview' as const, personaId, factSheet: sheet })
+      const text = `${article.headline}
+${article.body}`
+      expect(text, personaId).toContain('First Round')
+      expect(text, personaId).not.toMatch(/ enter at | are here | arrive right on| THIS IS WHAT WE PLAY FOR/)
+    }
   })
 })

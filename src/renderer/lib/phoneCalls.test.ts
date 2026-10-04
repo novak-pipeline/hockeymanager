@@ -221,6 +221,12 @@ describe('pickCall', () => {
     expect(pickCall({ ...base, trades: small })).toBeNull()
   })
 
+  it('loop audit F4: no call about an offer already on the desk in front of him', () => {
+    expect(pickCall({ ...base, trades: tradesOf(), atTradeDesk: true })).toBeNull()
+    // …but the owner still gets through.
+    expect(pickCall({ ...base, ownerReq: OWNER, trades: tradesOf(), atTradeDesk: true })?.callerName).toBe('Ronald Burkle')
+  })
+
   it('a call already dealt with does not ring again', () => {
     const seen = new Set(['trade:o7'])
     expect(pickCall({ ...base, trades: tradesOf(), seen })).toBeNull()

@@ -8,6 +8,7 @@ import { computeComposites } from '@engine/ratings/composites'
 import { Rng } from '@engine/shared/rng'
 import { recordMeeting as chronRecordMeeting, type ChronicleState } from '@engine/story/chronicle'
 import { Career, buildTeamList } from './career'
+import { SceneLedger } from './beatGates'
 
 describe('buildTeamList', () => {
   it('lists every team with a strength rating and colors', () => {
@@ -319,9 +320,23 @@ describe('Career — full year cycle', () => {
     // cut day and the preseason board meeting are sequential beats (playtest #5).
     expect(career.getTrainingCamp()).not.toBeNull()
     expect(career.view().userTeam.standing.gamesPlayed).toBe(0)
+    // Loop audit F3: the boardroom is armed on the same press as camp, and
+    // waits behind it; once camp breaks, it opens itself (it is not "old").
+    const ledger = new SceneLedger()
+    let before = career.getDashboard()
+    expect(before.campPending && before.boardMeetingPending).toBe(true)
+    expect(ledger.unseen(before)?.key).toBe('trainingCamp')
+    ledger.markShown('trainingCamp')
     let campGuard = 0
     while (career.getTrainingCamp() && campGuard++ < 12) {
+      // Loop audit F6: a camp day is not opening night — no match-day frame.
+      expect(career.getMatchDayPreview()).toBeNull()
       expect(career.advanceDay()).toBe(true)
+      const after = career.getDashboard()
+      const scene = ledger.afterPress(after, before)
+      if (after.campPending) expect(scene).toBeNull()
+      else expect(scene?.key).toBe('boardMeeting')
+      before = after
     }
     expect(career.getTrainingCamp()).toBeNull() // camp resolved
     expect(career.view().userTeam.standing.gamesPlayed).toBe(0) // …but no game yet
