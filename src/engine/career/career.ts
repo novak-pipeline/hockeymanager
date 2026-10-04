@@ -18522,7 +18522,7 @@ export class Career {
             overall: badge(p, needFog).overall, ...(p.faceId !== undefined ? { faceId: p.faceId } : {}), hand: p.handedness,
             teamId: tid as string, teamAbbr: t.abbreviation,
             capHit: p.contract.salary, years: p.contract.yearsRemaining,
-            cost: `${stance}. ${Career.approxMoney(p.contract.salary)} × ${p.contract.yearsRemaining}; it would take ${tierOf(v).toLowerCase()} value to get him.`,
+            cost: `${stance}. Signed at ${Career.approxMoney(p.contract.salary)} for ${p.contract.yearsRemaining === 1 ? 'one more season' : `${p.contract.yearsRemaining} more seasons`}; it would take ${tierOf(v).toLowerCase()} value to get him.`,
             assetValue: Math.round(v), assetTier: tierOf(v),
           })
         })
