@@ -24,6 +24,10 @@ import { fmtMoney } from '../components/format'
 import { useClient, useScreenData } from '../hooks/useSim'
 import { useUserTeamId } from '../components/UserTeamContext'
 import { toast } from '../components/store'
+import {
+  DEFAULT_ASSET_FILTERS, activeAssetFilterCount, browseAssets,
+  type AssetFilters, type AssetGroup, type AssetRow, type AssetSort,
+} from '../lib/tradeAssets'
 
 // ─── asset chips ──────────────────────────────────────────────────────────────
 
@@ -188,19 +192,6 @@ function PickChip(props: { pick: PickAssetView }): JSX.Element {
 /** One selectable asset row in the builder. */
 type TradeAssetRow = TradePartnerView['players'][number]
 
-/**
- * A4: the big club first, then the farm. AHL skaters and rights-held juniors are
- * real trade assets — without them the GM can neither sell futures nor buy them.
- */
-function groupTradeAssets(players: TradeAssetRow[]): Array<{ label: string | null; rows: TradeAssetRow[] }> {
-  const nhl = players.filter((p) => (p.assetClass ?? 'nhl') === 'nhl')
-  const farm = players.filter((p) => (p.assetClass ?? 'nhl') !== 'nhl')
-  const groups: Array<{ label: string | null; rows: TradeAssetRow[] }> = []
-  if (nhl.length > 0) groups.push({ label: null, rows: nhl })
-  if (farm.length > 0) groups.push({ label: 'Farm & prospects', rows: farm })
-  return groups
-}
-
 /** "AHL · WBS" / "JR · LDN" — where a non-roster asset actually plays. */
 function FarmTag({ row }: { row: TradeAssetRow }): JSX.Element | null {
   const cls = row.assetClass ?? 'nhl'
@@ -214,6 +205,220 @@ function FarmTag({ row }: { row: TradeAssetRow }): JSX.Element | null {
     >
       {label}{row.clubAbbr ? ` · ${row.clubAbbr}` : ''}
     </span>
+  )
+}
+
+// ─── club asset browser (grouped, filterable, collapsible) ─────────────────────
+
+/** Row density, shared by both sides and kept across visits to the builder. */
+let assetDensity: 'comfortable' | 'compact' = 'comfortable'
+
+const ASSET_SORTS: Array<{ key: AssetSort; label: string }> = [
+  { key: 'value', label: 'Value' },
+  { key: 'rating', label: 'Rating' },
+  { key: 'age', label: 'Age' },
+  { key: 'cap', label: 'Cap hit' },
+  { key: 'years', label: 'Years left' },
+]
+
+function AssetToggle(props: { on: boolean; label: string; title?: string; onClick: () => void }): JSX.Element {
+  return (
+    <button type="button" title={props.title} className={`chip${props.on ? ' chip-accent' : ''}`}
+      style={{ cursor: 'pointer', border: 'none', fontSize: 11 }} onClick={props.onClick}>{props.label}</button>
+  )
+}
+
+/**
+ * One club's tradeable organisation as a few short groups: the big club by
+ * position, then the AHL and the unsigned rights (collapsed, with counts), then
+ * the picks as chips. Search, filter and sort sit on top. Clicking a row adds
+ * it to the deal exactly as before.
+ */
+function TradeAssetBrowser(props: {
+  rows: AssetRow[]
+  picks: PickAssetView[]
+  selectedPlayers: Set<string>
+  selectedPicks: Set<string>
+  onTogglePlayer: (id: string) => void
+  onTogglePick: (id: string) => void
+  /** Show our scouts' star read on each row (the other club's men). */
+  showRead?: boolean
+}): JSX.Element {
+  const [f, setF] = useState<AssetFilters>(DEFAULT_ASSET_FILTERS)
+  const [showFilters, setShowFilters] = useState(false)
+  const [open, setOpen] = useState<Record<string, boolean>>({})
+  const [density, setDensity] = useState(assetDensity)
+  const compact = density === 'compact'
+  const groups = useMemo(() => browseAssets(props.rows, f, props.selectedPlayers), [props.rows, f, props.selectedPlayers])
+  const shown = groups.reduce((n, g) => n + g.rows.length, 0)
+  const active = activeAssetFilterCount(f)
+  const set = (patch: Partial<AssetFilters>): void => setF((x) => ({ ...x, ...patch }))
+  const isOpen = (g: AssetGroup): boolean =>
+    // A search or filter opens every group it matched in: the point is to see the hits.
+    open[g.id] ?? (active > 0 || g.rows.some((r) => props.selectedPlayers.has(r.playerId)) ? true : !g.collapsedByDefault)
+  const inputStyle: React.CSSProperties = { padding: '3px 6px', fontSize: 12, background: 'var(--bg0)', color: 'var(--text)', border: '1px solid var(--line)', borderRadius: 4 }
+
+  return (
+    <div className="stack" style={{ gap: 8 }}>
+      {/* controls */}
+      <div className="row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input value={f.search} onChange={(e) => set({ search: e.target.value })} placeholder="Find a player…"
+          style={{ ...inputStyle, flex: '1 1 120px', minWidth: 100 }} />
+        <span className="row" style={{ gap: 2 }}>
+          {(['all', 'F', 'D', 'G'] as const).map((p) => (
+            <AssetToggle key={p} on={f.pos === p} label={p === 'all' ? 'All' : p} onClick={() => set({ pos: p })} />
+          ))}
+        </span>
+        <select className="select" value={f.sort} onChange={(e) => set({ sort: e.target.value as AssetSort })} style={{ fontSize: 12, width: 'auto', padding: '3px 6px' }} aria-label="Sort by" title="Sort by">
+          {ASSET_SORTS.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
+        </select>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => set({ desc: !f.desc })} title="Flip the order">{f.desc ? '▼' : '▲'}</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowFilters((v) => !v)} aria-expanded={showFilters}>
+          Filters{active - (f.search.trim() ? 1 : 0) - (f.pos !== 'all' ? 1 : 0) > 0 ? ` (${active - (f.search.trim() ? 1 : 0) - (f.pos !== 'all' ? 1 : 0)})` : ''}
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" title={compact ? 'Roomier rows, with faces' : 'One tight line per player'}
+          onClick={() => { const d = compact ? 'comfortable' : 'compact'; assetDensity = d; setDensity(d) }}>
+          {compact ? 'Comfortable' : 'Compact'}
+        </button>
+      </div>
+      {showFilters && (
+        <div className="row" style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <AssetToggle on={f.tradeableOnly} label="Tradeable only" title="Hide players with a no-trade clause" onClick={() => set({ tradeableOnly: !f.tradeableOnly })} />
+          <AssetToggle on={f.prospectsOnly} label="Prospects" title="Unsigned rights, young AHLers, anyone 21 or under" onClick={() => set({ prospectsOnly: !f.prospectsOnly })} />
+          <AssetToggle on={f.expiring} label="Expiring" title="Signed through this season or next" onClick={() => set({ expiring: !f.expiring })} />
+          <label className="small muted" style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+            Min ★ <input value={f.minRating} onChange={(e) => set({ minRating: e.target.value })} placeholder="any" inputMode="decimal" style={{ ...inputStyle, width: 40 }} />
+          </label>
+          <label className="small muted" style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+            Cap hit ≤ $<input value={f.maxCap} onChange={(e) => set({ maxCap: e.target.value })} placeholder="any" inputMode="decimal" style={{ ...inputStyle, width: 40 }} />M
+          </label>
+          {active > 0 && <button type="button" className="btn btn-ghost btn-sm" onClick={() => setF({ ...DEFAULT_ASSET_FILTERS, sort: f.sort, desc: f.desc })}>Clear</button>}
+        </div>
+      )}
+
+      {/* groups */}
+      {shown === 0 && <div className="muted small">No player matches. Loosen a filter.</div>}
+      {groups.map((g) => {
+        const expanded = isOpen(g)
+        const picked = g.rows.filter((r) => props.selectedPlayers.has(r.playerId)).length
+        return (
+          <div key={g.id}>
+            <button type="button" onClick={() => setOpen((o) => ({ ...o, [g.id]: !expanded }))} aria-expanded={expanded}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', background: 'none', border: 'none', padding: '2px 0', cursor: 'pointer', color: 'var(--text)' }}>
+              <span style={{ width: 10, color: 'var(--muted)', fontSize: 10 }}>{expanded ? '▾' : '▸'}</span>
+              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase' }}>{g.label}</span>
+              <span className="muted small">{g.rows.length}</span>
+              {picked > 0 && <span className="chip chip-accent" style={{ fontSize: 9 }}>{picked} in deal</span>}
+            </button>
+            {expanded && (
+              <div className="stack" style={{ gap: compact ? 2 : 4, marginTop: 4 }}>
+                {g.rows.map((p) => (
+                  <AssetRowButton key={p.playerId} p={p} selected={props.selectedPlayers.has(p.playerId)} compact={compact}
+                    showRead={props.showRead === true} onToggle={() => props.onTogglePlayer(p.playerId)} />
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+
+      {props.picks.length > 0 && (
+        <div>
+          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase', margin: '4px 0 6px 16px' }}>
+            Draft picks <span className="muted small" style={{ fontWeight: 400, letterSpacing: 0 }}>{props.picks.length}</span>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {props.picks.map((pk) => {
+              const sel = props.selectedPicks.has(pk.id)
+              return (
+                <button
+                  key={pk.id}
+                  type="button"
+                  onClick={() => props.onTogglePick(pk.id)}
+                  style={{
+                    padding: '3px 10px',
+                    background: sel ? 'rgba(var(--accent-rgb),0.20)' : 'rgba(var(--accent-rgb),0.08)',
+                    border: sel ? '1px solid rgba(var(--accent-rgb),0.6)' : '1px solid rgba(var(--accent-rgb),0.28)',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    color: 'var(--accent)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span title={pk.viaAbbr ? `Originally ${pk.viaAbbr}'s pick` : undefined}>
+                    {pk.label}
+                    {pk.viaAbbr && <span style={{ opacity: 0.7, fontSize: 10 }}> (via {pk.viaAbbr})</span>}
+                    <span style={{ marginLeft: 5, display: 'inline-flex', verticalAlign: 'middle' }}>
+                      <ValueMeter value={pk.value} compact />
+                    </span>
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** One player in the browser: click to put him in (or take him out of) the deal. */
+function AssetRowButton(props: { p: AssetRow; selected: boolean; compact: boolean; showRead: boolean; onToggle: () => void }): JSX.Element {
+  const { p, selected, compact } = props
+  const ntc = p.noTradeClause
+  return (
+    <button
+      type="button"
+      disabled={ntc}
+      onClick={() => !ntc && props.onToggle()}
+      title={ntc ? 'No-trade clause' : undefined}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        width: '100%',
+        padding: compact ? '2px 8px' : '5px 8px',
+        background: selected ? 'rgba(var(--accent-rgb),0.14)' : 'var(--bg0)',
+        border: selected ? '1px solid rgba(var(--accent-rgb),0.5)' : '1px solid var(--line)',
+        borderRadius: 6,
+        cursor: ntc ? 'not-allowed' : 'pointer',
+        opacity: ntc ? 0.5 : 1,
+        fontSize: compact ? 12 : 13,
+        color: 'var(--text)',
+        textAlign: 'left',
+        gap: 8,
+      }}
+    >
+      <span className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
+        {!compact && <PlayerFace faceId={p.faceId} name={p.name} size={24} />}
+        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <PlayerLink playerId={p.playerId} name={p.name} />
+          <span style={{ color: 'var(--muted)', marginLeft: 8, fontSize: 12 }}>
+            {p.position} · {p.age}
+          </span>
+          <FarmTag row={p} />
+          {props.showRead && p.scouted && !compact && (
+            <span className="chip" style={{ marginLeft: 6, fontSize: 10 }}>
+              {p.scouted.exact
+                ? <OverallStars value={p.overall} />
+                : <OverallStars value={p.overall} lo={p.scouted.overallLo} hi={p.scouted.overallHi} />}
+            </span>
+          )}
+        </span>
+      </span>
+      <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+        <span style={{ color: 'var(--muted)', fontSize: 12 }}>
+          {p.salary > 0 ? `${fmtMoney(p.salary)} / ${p.yearsRemaining}yr` : 'unsigned'}
+        </span>
+        <ValueMeter
+          value={p.tradeValue}
+          estimated={p.valueEstimated}
+          compact={compact}
+          title={p.valueEstimated ? 'Your scouts’ estimate' : undefined}
+        />
+        {ntc && <span className="chip chip-danger" style={{ fontSize: 10 }}>NTC</span>}
+      </span>
+    </button>
   )
 }
 
@@ -898,64 +1103,14 @@ function ProposeTab(props: {
           {/* my assets */}
           <Panel title="My assets">
             <div style={{ marginBottom: 10 }}>
-              <div className="panel-title" style={{ marginBottom: 6 }}>Players</div>
-              <div className="stack" style={{ gap: 4 }}>
-                {groupTradeAssets(data.myPlayers).flatMap((grp) => [
-                  ...(grp.label !== null
-                    ? [<div key={`h-${grp.label}`} className="panel-title" style={{ marginTop: 6, marginBottom: 2, opacity: 0.7 }}>{grp.label}</div>]
-                    : []),
-                  ...grp.rows.map((p) => {
-                    const selected = myPlayerIds.has(p.playerId)
-                    const ntc = p.noTradeClause
-                    return (
-                      <button
-                        key={p.playerId}
-                        type="button"
-                        disabled={ntc}
-                        onClick={() => !ntc && setMyPlayerIds(toggleSet(myPlayerIds, p.playerId))}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          width: '100%',
-                          padding: '5px 8px',
-                          background: selected ? 'rgba(var(--accent-rgb),0.14)' : 'var(--bg0)',
-                          border: selected ? '1px solid rgba(var(--accent-rgb),0.5)' : '1px solid var(--line)',
-                          borderRadius: 6,
-                          cursor: ntc ? 'not-allowed' : 'pointer',
-                          opacity: ntc ? 0.5 : 1,
-                          fontSize: 13,
-                          color: 'var(--text)',
-                          textAlign: 'left',
-                          gap: 8,
-                        }}
-                      >
-                        <span className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
-                          <PlayerFace faceId={p.faceId} name={p.name} size={24} />
-                          <span>
-                            <PlayerLink playerId={p.playerId} name={p.name} />
-                            <span style={{ color: 'var(--muted)', marginLeft: 8, fontSize: 12 }}>
-                              {p.position} · {p.age}
-                            </span>
-                            <FarmTag row={p} />
-                          </span>
-                        </span>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                          <span style={{ color: 'var(--muted)', fontSize: 12 }}>
-                            {p.salary > 0 ? `${fmtMoney(p.salary)} / ${p.yearsRemaining}yr` : 'unsigned'}
-                          </span>
-                          <ValueMeter
-                            value={p.tradeValue}
-                            estimated={p.valueEstimated}
-                            title={p.valueEstimated ? 'Your scouts’ estimate' : undefined}
-                          />
-                          {ntc && <span className="chip chip-danger" style={{ fontSize: 10 }}>NTC</span>}
-                        </span>
-                      </button>
-                    )
-                  }),
-                ])}
-              </div>
+              <TradeAssetBrowser
+                rows={data.myPlayers}
+                picks={data.myPicks}
+                selectedPlayers={myPlayerIds}
+                selectedPicks={myPickIds}
+                onTogglePlayer={(id) => setMyPlayerIds(toggleSet(myPlayerIds, id))}
+                onTogglePick={(id) => setMyPickIds(toggleSet(myPickIds, id))}
+              />
               {/* DEPTH 3: shop the one selected player around the whole league */}
               {myPlayerIds.size === 1 && (() => {
                 const shopId = [...myPlayerIds][0]!
@@ -977,147 +1132,20 @@ function ProposeTab(props: {
                 )
               })()}
             </div>
-            {data.myPicks.length > 0 && (
-              <div>
-                <div className="panel-title" style={{ marginBottom: 6 }}>Picks</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {data.myPicks.map((pk) => {
-                    const sel = myPickIds.has(pk.id)
-                    return (
-                      <button
-                        key={pk.id}
-                        type="button"
-                        onClick={() => setMyPickIds(toggleSet(myPickIds, pk.id))}
-                        style={{
-                          padding: '3px 10px',
-                          background: sel ? 'rgba(var(--accent-rgb),0.20)' : 'rgba(var(--accent-rgb),0.08)',
-                          border: sel ? '1px solid rgba(var(--accent-rgb),0.6)' : '1px solid rgba(var(--accent-rgb),0.28)',
-                          borderRadius: 6,
-                          fontSize: 12,
-                          color: 'var(--accent)',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <span title={pk.viaAbbr ? `Originally ${pk.viaAbbr}'s pick` : undefined}>
-                          {pk.label}
-                          {pk.viaAbbr && <span style={{ opacity: 0.7, fontSize: 10 }}> (via {pk.viaAbbr})</span>}
-                          <span style={{ marginLeft: 5, display: 'inline-flex', verticalAlign: 'middle' }}>
-                            <ValueMeter value={pk.value} compact />
-                          </span>
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
           </Panel>
 
           {/* partner assets */}
           <Panel title={`${partner.teamName} assets`}>
-            <div style={{ marginBottom: 10 }}>
-              <div className="panel-title" style={{ marginBottom: 6 }}>Players</div>
-              <div className="stack" style={{ gap: 4 }}>
-                {groupTradeAssets(partner.players).flatMap((grp) => [
-                  ...(grp.label !== null
-                    ? [<div key={`h-${grp.label}`} className="panel-title" style={{ marginTop: 6, marginBottom: 2, opacity: 0.7 }}>{grp.label}</div>]
-                    : []),
-                    ...grp.rows.map((p) => {
-                    const selected = theirPlayerIds.has(p.playerId)
-                    const ntc = p.noTradeClause
-                    return (
-                      <button
-                        key={p.playerId}
-                        type="button"
-                        disabled={ntc}
-                        onClick={() => !ntc && setTheirPlayerIds(toggleSet(theirPlayerIds, p.playerId))}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          width: '100%',
-                          padding: '5px 8px',
-                          background: selected ? 'rgba(var(--accent-rgb),0.14)' : 'var(--bg0)',
-                          border: selected ? '1px solid rgba(var(--accent-rgb),0.5)' : '1px solid var(--line)',
-                          borderRadius: 6,
-                          cursor: ntc ? 'not-allowed' : 'pointer',
-                          opacity: ntc ? 0.5 : 1,
-                          fontSize: 13,
-                          color: 'var(--text)',
-                          textAlign: 'left',
-                          gap: 8,
-                        }}
-                      >
-                        <span className="row" style={{ gap: 8, alignItems: 'center', minWidth: 0 }}>
-                          <PlayerFace faceId={p.faceId} name={p.name} size={24} />
-                          <span>
-                          <PlayerLink playerId={p.playerId} name={p.name} />
-                          <span style={{ color: 'var(--muted)', marginLeft: 8, fontSize: 12 }}>
-                            {p.position} · {p.age}
-                          </span>
-                          <FarmTag row={p} />
-                          {p.scouted && (
-                            <span className="chip" style={{ marginLeft: 6, fontSize: 10 }}>
-                              {p.scouted.exact
-                                ? <OverallStars value={p.overall} />
-                                : (
-                                  <OverallStars value={p.overall} lo={p.scouted.overallLo} hi={p.scouted.overallHi} />
-                                )}
-                            </span>
-                          )}
-                          </span>
-                        </span>
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                          <span style={{ color: 'var(--muted)', fontSize: 12 }}>
-                            {p.salary > 0 ? `${fmtMoney(p.salary)} / ${p.yearsRemaining}yr` : 'unsigned'}
-                          </span>
-                          <ValueMeter
-                            value={p.tradeValue}
-                            estimated={p.valueEstimated}
-                            title={p.valueEstimated ? 'Your scouts’ estimate' : undefined}
-                          />
-                          {ntc && <span className="chip chip-danger" style={{ fontSize: 10 }}>NTC</span>}
-                        </span>
-                      </button>
-                    )
-                  }),
-                ])}
-              </div>
-            </div>
-            {partner.picks.length > 0 && (
-              <div>
-                <div className="panel-title" style={{ marginBottom: 6 }}>Picks</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {partner.picks.map((pk) => {
-                    const sel = theirPickIds.has(pk.id)
-                    return (
-                      <button
-                        key={pk.id}
-                        type="button"
-                        onClick={() => setTheirPickIds(toggleSet(theirPickIds, pk.id))}
-                        style={{
-                          padding: '3px 10px',
-                          background: sel ? 'rgba(var(--accent-rgb),0.20)' : 'rgba(var(--accent-rgb),0.08)',
-                          border: sel ? '1px solid rgba(var(--accent-rgb),0.6)' : '1px solid rgba(var(--accent-rgb),0.28)',
-                          borderRadius: 6,
-                          fontSize: 12,
-                          color: 'var(--accent)',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <span title={pk.viaAbbr ? `Originally ${pk.viaAbbr}'s pick` : undefined}>
-                          {pk.label}
-                          {pk.viaAbbr && <span style={{ opacity: 0.7, fontSize: 10 }}> (via {pk.viaAbbr})</span>}
-                          <span style={{ marginLeft: 5, display: 'inline-flex', verticalAlign: 'middle' }}>
-                            <ValueMeter value={pk.value} compact />
-                          </span>
-                        </span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
+            <TradeAssetBrowser
+              key={partner.teamId}
+              rows={partner.players}
+              picks={partner.picks}
+              selectedPlayers={theirPlayerIds}
+              selectedPicks={theirPickIds}
+              onTogglePlayer={(id) => setTheirPlayerIds(toggleSet(theirPlayerIds, id))}
+              onTogglePick={(id) => setTheirPickIds(toggleSet(theirPickIds, id))}
+              showRead
+            />
           </Panel>
         </div>
       )}

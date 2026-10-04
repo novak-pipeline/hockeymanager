@@ -13,6 +13,7 @@
  * (dropdown) → overlays their radar via client.compareRadar() and shows
  * key-stat lines side by side.
  */
+import { to20 } from '../../engine/career/profileAttributes'
 import { useState, useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import type { PlayerProfileView, CompareRadarView } from '../../worker/protocol'
 import type { SquadStatus, TradeStatus } from '../../domain/player'
@@ -376,9 +377,6 @@ function ConditionHeart({ value, size = 18 }: { value: number; size?: number }):
  *   8–13  → amber (--accent2)
  *   1–7   → red (--danger)
  */
-function to20(v: number): number {
-  return Math.max(1, Math.min(20, Math.round(v / 5)))
-}
 
 function attrColor20(v20: number): string {
   if (v20 >= 17) return 'var(--success)'

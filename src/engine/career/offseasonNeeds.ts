@@ -15,6 +15,7 @@
  * candidate pools; this decides what is a need and who answers it.
  */
 import type { NeedCandidateView, OffseasonNeedView } from './views'
+import { overallToStars } from '@engine/ratings/composites'
 
 export type NeedGroup = 'F' | 'D' | 'G'
 
@@ -45,6 +46,26 @@ export interface NeedsInput {
   pool: NeedsCandidate[]
   /** Your own contracts that could be moved to clear money. */
   moveable: NeedsCandidate[]
+}
+
+/**
+ * Would a club move this man? The Trade Centre's rule for who is "available":
+ * a rebuilder sells its veterans and spare parts, a retooler the middle of its
+ * lineup down, anyone its spare parts — and a contender its backup goalie, at
+ * a price. Never a no-trade clause or an expiring deal. `depth` is his 0-based
+ * rank by overall in his group (F/D/G) on his club.
+ */
+export function clubWouldMove(
+  posture: string,
+  group: NeedGroup,
+  depth: number,
+  p: { age: number; contract: { noTradeClause?: boolean; yearsRemaining: number } },
+): boolean {
+  if (p.contract.noTradeClause || p.contract.yearsRemaining <= 0) return false
+  const dressed = DRESSED[group]
+  const spare = depth >= dressed
+  const backupG = group === 'G' && depth === 1
+  return posture === 'rebuild' ? p.age >= 26 || spare : posture === 'retool' ? depth >= Math.ceil(dressed / 3) : spare || backupG
 }
 
 /** How many regulars a club dresses per group. */
@@ -305,6 +326,14 @@ export function buildNeeds(input: NeedsInput): { needs: OffseasonNeedView[]; hea
       severity: g.score >= 12 ? 3 : g.score >= 6 ? 2 : 1,
       group: g.role.group,
       candidates,
+      criteria: {
+        group: g.role.group,
+        ...(g.role.position ? { position: g.role.position } : {}),
+        ...(g.role.hand ? { hand: g.role.hand } : {}),
+        // A hand need is about the shot: a man at the pair's level will do.
+        // Any other need asks for what a normal club dresses there.
+        minStars: overallToStars(handOnly && g.weakest ? g.weakest.ovr - 1 : g.bench),
+      },
     })
   }
   // The cap: can the club afford its own answers?

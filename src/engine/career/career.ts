@@ -152,7 +152,7 @@ import { seasonSpans, devCampDateISO, resignDateISO, faDateISO, campDateISO, boa
 import { pickHitter, playerSafetyFine, lineNickname, connSmythe, handshakeLine, beardsLine, dayWithTheCup, ebugVignette, NICKNAME_MIN_GP, NICKNAME_MIN_PPG, type HitterCandidate, type PlayoffLine } from '@engine/story/hockeySoul'
 import { createGmReputation, callsThisWeek, recordContact, adjustStanding, driftStanding, standingTilt, standingLabel, FREE_PER_WEEK, type GmReputationState, type ContactKind } from '@engine/career/gmReputation'
 import { WEEK_LOADS, WEEK_LOAD_ORDER, staffWeekLoad, countBackToBacks, raceNumbers, buildStaffRead, pickStoryline, type WeekLoad, type StorylineCandidate } from '@engine/career/theWeek'
-import { buildNeeds, leagueBenchmark, type DepthEntry, type NeedsCandidate, type NeedGroup } from '@engine/career/offseasonNeeds'
+import { buildNeeds, leagueBenchmark, clubWouldMove, type DepthEntry, type NeedsCandidate, type NeedGroup } from '@engine/career/offseasonNeeds'
 import { buildOppositionReport } from '@engine/career/oppositionReport'
 import { buildDraftClassArticle } from '@engine/career/draftClassArticle'
 import { projectProspect, hashSigned, type ProspectProjection } from '@engine/career/prospectModel'
@@ -18481,12 +18481,10 @@ export class Career {
         const sorted = byGrp[g].sort((a, b) => ratedOverall(b) - ratedOverall(a))
         const dressed = g === 'F' ? 12 : g === 'D' ? 6 : 2
         sorted.forEach((p, i) => {
-          if (p.contract.noTradeClause || p.contract.yearsRemaining <= 0) return
+          if (!clubWouldMove(posture, g, i, p)) return
           const spare = i >= dressed
           // A contender's backup goalie can be pried loose — at a price.
           const backupG = g === 'G' && i === 1
-          const willing = posture === 'rebuild' ? p.age >= 26 || spare : posture === 'retool' ? i >= Math.ceil(dressed / 3) : spare || backupG
-          if (!willing) return
           const v = playerValue(p)
           const stance = posture === 'rebuild'
             ? `${t.abbreviation} are rebuilding and would sell`
@@ -27349,7 +27347,37 @@ export class Career {
       draftProspectIds: this.allDraftProspectIds(),
       ownIds: this.ownOrgIds(),
       liveLine,
+      ...(query.tradeAvailable ? { tradeAvailableIds: this.tradeAvailableIds() } : {}),
+      careerKey: `${this.seed}-${this.userTeamId as string}`,
     }, query)
+  }
+
+  /** Every man another NHL club would move today: the trade block's names plus
+   *  each club's surplus by its stance (the same rule as the needs board's
+   *  trade targets). For the search's "Trade available" filter. */
+  private tradeAvailableIds(): Set<string> {
+    const out = new Set<string>()
+    const nhl = new Set(this.data.league.teams.map((t) => t as string))
+    for (const r of this.tentpoles.rumors) if (nhl.has(r.teamId as string)) out.add(r.playerId as string)
+    const ranks = this.strengthRanks()
+    const grp = (p: Player): NeedGroup => (p.position === 'G' ? 'G' : p.position === 'D' ? 'D' : 'F')
+    for (const tid of this.data.league.teams) {
+      if (tid === this.userTeamId) continue
+      const t = this.data.teams.get(tid)
+      if (!t) continue
+      const posture = this.clubPostureFor(tid, ranks).posture
+      const byGrp: Record<NeedGroup, Player[]> = { F: [], D: [], G: [] }
+      for (const id of t.roster) {
+        const p = this.data.players.get(id)
+        if (p) byGrp[grp(p)].push(p)
+      }
+      for (const g of ['F', 'D', 'G'] as const) {
+        byGrp[g].sort((a, b) => ratedOverall(b) - ratedOverall(a)).forEach((p, i) => {
+          if (clubWouldMove(posture, g, i, p)) out.add(p.id as string)
+        })
+      }
+    }
+    return out
   }
 
   /* ─────────────────── The GM's watch list (C1) ─────────────────── */

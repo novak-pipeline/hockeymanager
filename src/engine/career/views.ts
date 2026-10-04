@@ -2090,6 +2090,22 @@ export interface OffseasonNeedView {
   /** Cap need: dollars to clear. */
   amount?: number
   candidates: NeedCandidateView[]
+  /** Slot need: the hole as search criteria, so "See more" can run a player
+   *  search for it. Additive — absent on cap needs. */
+  criteria?: NeedCriteriaView
+}
+
+/** What a slot need asks for, in search terms. */
+export interface NeedCriteriaView {
+  group: 'F' | 'D' | 'G'
+  /** A top six short of centres wants a natural centre. */
+  position?: 'C'
+  /** Defense: the shot the pair is missing. */
+  hand?: 'L' | 'R'
+  /** The tier an answer must reach, in the stars the UI shows (current
+   *  ability): what a normal club dresses there, or the pair's level for a
+   *  hand-only need. Never the hidden overall. */
+  minStars: number
 }
 
 export interface OffseasonNeedsView {
@@ -3364,6 +3380,36 @@ export interface PlayerSearchQuery {
   draftEligibleOnly?: boolean
   /** Drop our own org from the results. */
   excludeOwn?: boolean
+  /** This season's games played / points, inclusive bounds. */
+  gpMin?: number
+  gpMax?: number
+  pointsMin?: number
+  pointsMax?: number
+  /** Archetype keys (see engine/league/archetypes). Read-gated like the badge:
+   *  only players we know well enough to classify can pass. */
+  archetypes?: string[]
+  /** Contract years left, at most N (0 = expiring this season). */
+  yearsLeftMax?: number
+  /** Only men his club would move: on the trade block, or surplus to a
+   *  seller / retooler / anyone's depth. */
+  tradeAvailable?: boolean
+  /** Injury status. */
+  health?: 'injured' | 'healthy'
+  /** Only players who can be sent down without waivers. */
+  waiverExemptOnly?: boolean
+  /** His status when the current deal runs out. */
+  expiryStatus?: 'RFA' | 'UFA'
+  /** Height in cm / weight in kg, inclusive. Players without the field fail. */
+  heightMin?: number
+  heightMax?: number
+  weightMin?: number
+  weightMax?: number
+  /** Attribute floors/ceilings on the profile's 1–20 scale, on OUR read (the
+   *  number the profile shows, starred estimate included). A player we have
+   *  not seen (below the scouted threshold) never passes. */
+  attributes?: PlayerSearchAttrFilter[]
+  /** Keep players matching ANY of these (the "fills a need" toggle). */
+  anyOf?: Array<{ positions?: string[]; handedness?: string; minCurrentStars?: number }>
   sort?: 'name' | 'age' | 'current' | 'potential' | 'knowledge' | 'salary' | 'points'
   /** Descending by default; pass false for ascending. */
   desc?: boolean
@@ -3403,6 +3449,19 @@ export interface PlayerSearchRow {
   watched: boolean
   /** Asset value once we have a read; null otherwise. */
   value: number | null
+  /** Our read (1–20, as the profile shows it) of each attribute the query
+   *  filtered on, keyed by attribute. */
+  attrs?: Record<string, number>
+  /** Archetype label, when we know him well enough to classify. */
+  archetype?: string
+}
+
+/** One attribute condition on a profile attribute (wristShot, speed,
+ *  checking, reflexes…; see profileAttributes.ts), value on the 1–20 scale. */
+export interface PlayerSearchAttrFilter {
+  key: string
+  op: 'gte' | 'lte'
+  value: number
 }
 
 /** Filter options derived from the live database (so the UI offers real values). */
@@ -3422,6 +3481,11 @@ export interface PlayerSearchView {
   fogNote: string
   offset: number
   limit: number
+  /** Players dropped only because we have no read for an attribute filter. */
+  attrUnread?: number
+  /** Stable id of this career (seed + club), for per-save UI storage such as
+   *  saved searches. */
+  careerKey?: string
 }
 
 /* ── the GM's watch list (C1) ── */

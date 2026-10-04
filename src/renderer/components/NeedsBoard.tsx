@@ -12,6 +12,7 @@
 import { useState } from 'react'
 import type { NeedCandidateView, OffseasonNeedsView } from '../../engine/career/views'
 import { needsFor, type NeedInContext, type NeedsContext } from '../../engine/career/offseasonNeeds'
+import { presetForNeed } from '../lib/playerSearchFilters'
 import { PlayerLink, useNav } from './NavContext'
 import { PlayerFace } from './PlayerFace'
 import { OverallStars } from './Stars'
@@ -68,7 +69,7 @@ export function NeedsBoard(props: { context: NeedsContext; onBrowse?: () => void
       {data.needs.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: 'var(--sp-3)' }}>
           {needsFor(data.needs, props.context).map((n) => (
-            <NeedCard key={n.id} need={n} marketOpen={data.marketOpen} grouped={props.context === 'all'} compact={props.compact === true} onChanged={refetch} />
+            <NeedCard key={n.id} need={n} context={props.context} capRoom={room} marketOpen={data.marketOpen} grouped={props.context === 'all'} compact={props.compact === true} onChanged={refetch} />
           ))}
         </div>
       )}
@@ -81,7 +82,7 @@ export function NeedsBoard(props: { context: NeedsContext; onBrowse?: () => void
   )
 }
 
-function NeedCard(props: { need: NeedInContext; marketOpen: boolean; grouped: boolean; compact: boolean; onChanged: () => void }): JSX.Element {
+function NeedCard(props: { need: NeedInContext; context: NeedsContext; capRoom: number; marketOpen: boolean; grouped: boolean; compact: boolean; onChanged: () => void }): JSX.Element {
   const { need } = props
   const nav = useNav()
   const sev = SEVERITY[need.severity]
@@ -113,6 +114,20 @@ function NeedCard(props: { need: NeedInContext; marketOpen: boolean; grouped: bo
             style={{ background: 'none', border: 'none', padding: 0, textAlign: 'left', cursor: 'pointer', color: 'var(--muted)', fontStyle: 'italic', display: 'inline-flex', gap: 4, alignItems: 'center' }}
           >
             {need.elsewhere.text} <Icon size={14} color="var(--accent)"><Icons.ChevronRight /></Icon>
+          </button>
+        )}
+        {need.criteria && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            style={{ alignSelf: 'flex-start', display: 'inline-flex', gap: 4, alignItems: 'center' }}
+            title={`Search the whole database for ${need.label}, with the filters set from this need`}
+            onClick={() => {
+              const preset = presetForNeed(need, props.context, props.capRoom, Date.now())
+              if (preset) nav.navigate('scoutingPlayers', { searchPreset: preset })
+            }}
+          >
+            <Icon size={14}><Icons.Search /></Icon> See more
           </button>
         )}
       </div>
