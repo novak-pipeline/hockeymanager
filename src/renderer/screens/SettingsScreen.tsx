@@ -26,8 +26,6 @@ import {
   type VoiceQuality,
 } from '../lib/kokoroVoice'
 import { castFor } from '../lib/voiceCast'
-import { getMatchEngine, setMatchEngine, type MatchEngine } from '../lib/matchEngine'
-import { useClient } from '../hooks/useSim'
 import {
   isAutoNeuralEnabled, setAutoNeuralEnabled,
   isVoiceEnabled, setVoiceEnabled,
@@ -155,7 +153,6 @@ export function SettingsScreen(): JSX.Element {
       </Panel>
 
       {/* ── MATCH ENGINE ── */}
-      <MatchEnginePanel />
 
       {/* ── PRESS PASS ── */}
       <Panel>
@@ -592,34 +589,3 @@ function ToggleRow(props: {
   )
 }
 
-const ENGINE_OPTIONS: Array<{ v: MatchEngine; label: string; note: string }> = [
-  { v: 'classic', label: 'Classic', note: 'The calibrated engine the game has shipped with.' },
-  { v: 'agent', label: 'New engine (beta)', note: 'Players read the play and decide: real body contact, hits along the boards, offside and icing judged from where players are, sticks and pucks under physics. Totals stay NHL-calibrated; still being tuned.' },
-]
-
-/** Settings → Match engine: which engine plays your games (takes effect from the next game). */
-function MatchEnginePanel(): JSX.Element {
-  const client = useClient()
-  const [engine, setEngine] = useState<MatchEngine>(getMatchEngine())
-  const choose = (v: MatchEngine): void => {
-    setMatchEngine(v)
-    setEngine(v)
-    void client.setMatchEngine(v)
-  }
-  return (
-    <Panel title="Match engine">
-      <div className="muted small" style={{ marginBottom: 'var(--sp-3)' }}>
-        Which engine plays your club's games — watched or not. Takes effect from the next game.
-      </div>
-      {ENGINE_OPTIONS.map((o) => (
-        <label key={o.v} className="row" style={{ gap: 8, alignItems: 'flex-start', marginBottom: 8, cursor: 'pointer', fontSize: 12.5 }}>
-          <input type="radio" name="match-engine" checked={engine === o.v} onChange={() => choose(o.v)} style={{ marginTop: 3 }} />
-          <span>
-            <span style={{ fontWeight: 600 }}>{o.label}</span>
-            <span className="muted" style={{ display: 'block' }}>{o.note}</span>
-          </span>
-        </label>
-      ))}
-    </Panel>
-  )
-}

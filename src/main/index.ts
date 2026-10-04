@@ -87,6 +87,10 @@ function createWindow(): void {
   if (offscreen) {
     const right = Math.max(...screen.getAllDisplays().map((d) => d.bounds.x + d.bounds.width))
     win.setBounds({ x: right + 80, y: 40, width: 1600, height: 900 })
+    // invisible and click-through even if a display change drags it on screen
+    win.setOpacity(0)
+    win.setIgnoreMouseEvents(true)
+    win.setSkipTaskbar(true)
     win.once('ready-to-show', () => win.showInactive())
   } else {
     win.once('ready-to-show', () => win.show())

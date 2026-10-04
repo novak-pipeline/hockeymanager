@@ -2,17 +2,19 @@ import { describe, expect, it } from 'vitest'
 import { generateLeague } from '@data/generate'
 import { Career } from './career'
 
-// Settings → Match engine: the user's games can be played by the agent engine (beta).
-describe('match engine preference', () => {
-  it('defaults to classic and plays the user\'s games on the agent engine when chosen', () => {
+// W2 (docs/gameplan-2026-09-28): the user's games always play on the agent engine.
+describe('watched-game engine', () => {
+  it("plays the user's games on the agent engine", () => {
     const data = generateLeague({ seed: 91 })
     const career = new Career(data, 91, data.league.teams[0]!)
-    expect(career.getMatchEngine()).toBe('classic')
-    career.setMatchEngine('agent')
-    expect(career.getMatchEngine()).toBe('agent')
-    // play until the user has a game on the books — it must complete on the agent engine
     const gp = (): number => career.getStandings().overall.find((r) => r.teamId === (data.league.teams[0] as string))?.gamesPlayed ?? 0
-    for (let i = 0; i < 30 && gp() === 0; i++) career.step()
+    let game = null
+    for (let i = 0; i < 40 && !game; i++) {
+      game = career.watchNext()
+      if (!game) career.step()
+    }
     expect(gp()).toBeGreaterThan(0)
+    // agent-engine fingerprints: additive fields only it emits
+    expect(game!.stream.some((e) => e.type === 'missedShot' || (e.type === 'lineChange' && e.onTheFly !== undefined))).toBe(true)
   })
 })

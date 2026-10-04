@@ -23,12 +23,9 @@ let pendingData: LeagueData | null = null
 let pendingSeed = 0
 let career: Career | null = null
 
-// App preference (Settings → Match engine): applied to whichever career is loaded.
-let matchEngine: 'classic' | 'agent' = 'classic'
 
 function must(): Career {
   if (!career) throw new Error('no career in progress; call startCareer first')
-  if (career.getMatchEngine() !== matchEngine) career.setMatchEngine(matchEngine)
   return career
 }
 
@@ -202,8 +199,7 @@ function handle(req: WorkerRequest): WorkerResponse {
       must().deleteLineSetup(req.name)
       return { id: req.id, type: 'tactics', tactics: must().getTactics() }
     case 'setMatchEngine':
-      matchEngine = req.engine
-      career?.setMatchEngine(req.engine)
+      // retired (W2): the user's games always play on the agent engine
       return { id: req.id, type: 'ok' }
     case 'setLineManagementMode':
       must().setLineManagementMode(req.mode)
