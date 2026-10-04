@@ -8,6 +8,8 @@ import { contextBridge, ipcRenderer } from 'electron'
  */
 const api = {
   version: '0.0.1',
+  /** DEV ONLY: true when the main process enabled the viewer-truth probe (never packaged). */
+  devViewerProbe: ipcRenderer.sendSync('dev:viewerProbe') === true,
   saves: {
     write: (slot: string, json: string): Promise<void> =>
       ipcRenderer.invoke('saves:write', slot, json),

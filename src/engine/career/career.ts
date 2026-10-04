@@ -10767,6 +10767,30 @@ export class Career {
     return null
   }
 
+  /**
+   * DEV ONLY (viewer-truth reel, docs/gameplan-2026-09-28 W1): sim one game
+   * between two clubs on the chosen watch engine with a PINNED seed, and
+   * return it as a watched game WITHOUT applying the result — no standings,
+   * stats, injuries or calendar change. The same (save, pair, seed, engine)
+   * always yields the same stream, which is what pins a golden scenario.
+   * Reached only through the dev-gated `devWatchFixture` request.
+   */
+  devExhibition(homeId: string, awayId: string, seed: number, engine: 'classic' | 'agent'): WatchedGame {
+    const home = this.data.teams.get(asTeamId(homeId))
+    const away = this.data.teams.get(asTeamId(awayId))
+    if (!home || !away) throw new Error(`devExhibition: unknown team ${home ? awayId : homeId}`)
+    this.lastBroadcast = this.buildBroadcastContext(home.id, away.id, this.currentDay, false)
+    const sim = engine === 'agent' ? agentSimGame : fullSimGame
+    const res = sim(home, away, this.storyResolve(), { seed })
+    return this.buildWatched(home.id, away.id, res.stream)
+  }
+
+  /** DEV ONLY: the user club and every other NHL club id (golden-scenario search). */
+  devClubIds(): { user: string; others: string[] } {
+    const user = this.userTeamId as string
+    return { user, others: this.data.league.teams.map((t) => t as string).filter((t) => t !== user) }
+  }
+
   private buildWatched(home: TeamId, away: TeamId, stream: GameStream): WatchedGame {
     const h = this.data.teams.get(home)!
     const a = this.data.teams.get(away)!

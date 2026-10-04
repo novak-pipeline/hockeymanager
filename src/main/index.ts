@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, screen } from 'electron'
 import electronUpdater from 'electron-updater'
 import { registerSaveIpc } from './saves'
 import { registerPressIpc } from './press'
@@ -47,6 +47,16 @@ app.on('child-process-gone', (_e, details) => {
   app.exit(0)
 })
 
+/**
+ * DEV ONLY viewer-truth probe (docs/gameplan-2026-09-28 W1): never in a
+ * packaged build. HOCKEY_VIEWER_PROBE=1 lets the renderer expose
+ * window.__viewerProbe (what is DRAWN, per frame) to the Playwright runner;
+ * HOCKEY_OFFSCREEN=1 keeps the window off every display and unfocused.
+ */
+const viewerProbe = !app.isPackaged && process.env.HOCKEY_VIEWER_PROBE === '1'
+const offscreen = !app.isPackaged && process.env.HOCKEY_OFFSCREEN === '1'
+ipcMain.on('dev:viewerProbe', (e) => { e.returnValue = viewerProbe })
+
 function createWindow(): void {
   const win = new BrowserWindow({
     title: 'The Show: Franchise Hockey Manager',
@@ -72,7 +82,15 @@ function createWindow(): void {
     }
   })
 
-  win.once('ready-to-show', () => win.show())
+  // Dev viewer-truth runs (W1): park the window off the owner's screens and
+  // never take focus from whatever he is doing — set before the first show.
+  if (offscreen) {
+    const right = Math.max(...screen.getAllDisplays().map((d) => d.bounds.x + d.bounds.width))
+    win.setBounds({ x: right + 80, y: 40, width: 1600, height: 900 })
+    win.once('ready-to-show', () => win.showInactive())
+  } else {
+    win.once('ready-to-show', () => win.show())
+  }
   // Fallback: never leave the window invisible. On some Windows GPU drivers a
   // GPU-process hiccup delays or drops first paint, so `ready-to-show` may not
   // fire and the app "runs" with no visible window. Show it anyway after a beat.

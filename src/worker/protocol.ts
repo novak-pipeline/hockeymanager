@@ -16,6 +16,7 @@ export type { BoardMeetingScene, MeetingAgendaItem, MeetingLine, MeetingOption, 
 import type { BoardMeetingScene } from '@engine/career/boardMeeting'
 import type { WorldHistoryView } from '@engine/career/worldHistoryView'
 import type { ManagerView, TeamInfo, WatchedGame } from '@engine/career/career'
+import type { PinnedScenario } from '@engine/analysis/goldenScenarios'
 export type { BroadcastContext } from '@engine/story/broadcastStorylines'
 import type { BroadcastContext } from '@engine/story/broadcastStorylines'
 export type { PressJob, PressConferenceState, PressTone } from '@engine/story/factSheet'
@@ -273,6 +274,14 @@ export type WorkerRequestBody =
   | { type: 'continue' }
   /** Play the user's next fixture with the full engine and return its stream. */
   | { type: 'watch' }
+  /**
+   * DEV ONLY (viewer-truth runner, W1): sim one pinned exhibition on the
+   * chosen engine WITHOUT applying it, and return it as a watched game; and
+   * search pinned seeds for the ten golden scenarios. The renderer only sends
+   * these when the main process enabled the dev probe (never when packaged).
+   */
+  | { type: 'devWatchFixture'; homeId: string; awayId: string; seed: number; engine: 'classic' | 'agent' }
+  | { type: 'devFindScenarios'; engine: 'classic' | 'agent'; seeds: number[]; opponents?: string[] }
   /* ── screens ── */
   | { type: 'getDashboard' }
   | { type: 'getSquad' }
@@ -630,6 +639,8 @@ export type WorkerResponse = { id: number } & (
   /** Legacy v1 view — kept while the old hub still exists. */
   | { type: 'view'; view: ManagerView }
   | { type: 'watch'; view: ManagerView; game: WatchedGame | null }
+  /** DEV ONLY: golden scenarios found by devFindScenarios. */
+  | { type: 'devScenarios'; scenarios: PinnedScenario[]; games: number; missing: string[] }
   /* ── v2 screens ── */
   | { type: 'dashboard'; dashboard: DashboardView }
   | { type: 'squad'; squad: SquadView }

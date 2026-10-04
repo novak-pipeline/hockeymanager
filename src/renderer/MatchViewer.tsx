@@ -8,6 +8,9 @@ import {
 import type { MatchRenderer, RinkColors, PlayerLabels } from '@render2d'
 import { RinkRenderer } from '@render2d'
 import { Rink3dRenderer, type CameraPreset } from '@render3d'
+import { viewerProbeEnabled, type ProbeFrame, type ProbeGeometry, type ProbeViewerState } from '@render3d/viewerProbe'
+import { runViewerTruth, type VTCue, type VTEvent, type VTGoal, type VTTimer } from '@render3d/viewerTruth'
+import { periodBases } from '@render2d/timeline'
 import type { WatchedGame } from '../worker/protocol'
 import { MatchSfx } from './lib/sfx'
 import { planFor, currentSpeed, nextActiveJump, estimateWallSeconds, SKIP_SPEED } from '../render2d/playbackDirector'
@@ -213,6 +216,15 @@ export function MatchViewer(props: {
   // DOM refs
   const hostRef     = useRef<HTMLDivElement>(null)
   const tickerRef   = useRef<HTMLDivElement>(null)
+
+  // DEV viewer-truth probe (W1): what the screen DREW, for the Playwright runner.
+  // Null unless the main process enabled it — never in a packaged build.
+  const probeRef = useRef<ProbeStore | null>(null)
+  if (probeRef.current === null && viewerProbeEnabled()) probeRef.current = newProbeStore()
+  const probeTimer = (name: string, ms: number): void => {
+    const p = probeRef.current
+    if (p) p.timers.push({ wall: performance.now() / 1000, clock: lastAbsTRef.current, name, ms })
+  }
 
   // Renderer refs
   const rendererRef   = useRef<MatchRenderer | null>(null)
@@ -466,7 +478,13 @@ export function MatchViewer(props: {
     const run = (): void => {
       switch (cue.channel) {
         case 'overlay': showOverlay(cue); break
-        case 'commentary': if (commentaryOnRef.current) schedulerRef.current?.trigger(cue as CommentaryCue); break
+        case 'commentary':
+          if (commentaryOnRef.current) schedulerRef.current?.trigger(cue as CommentaryCue)
+          if (probeRef.current && cue.clock === 'game') {
+            const c = cue as CommentaryCue
+            probeRef.current.cues.push({ wall: performance.now() / 1000, at: c.at, moment: c.moment, text: c.text, ...(c.name ? { playerId: c.name.playerId } : {}) })
+          }
+          break
         case 'shot': shotConsumerOf(rendererRef.current)?.requestShot(cue); break
         case 'moment': shotConsumerOf(rendererRef.current)?.playMoment?.(cue); break
       }
@@ -551,6 +569,11 @@ export function MatchViewer(props: {
         if (r instanceof Rink3dRenderer) {
           renderer3dRef.current = r
           r.setEventStream(game.stream)
+          const probe = probeRef.current
+          if (probe) {
+            probe.geometry = r.probeGeometry()
+            r.setProbeSink((f) => probe.push(f, probeViewerRef.current()))
+          }
           // club branding (mod logo pack; none = league roundel / plain boards): the home logo
           // around the building, both on the video board's matchup
           void Promise.all([teamLogoUrl(game.homeName), teamLogoUrl(game.awayName)]).then(([home, away]) => {
@@ -726,10 +749,12 @@ export function MatchViewer(props: {
         // are on). With the broadcast package on, the on-ice tag + lower third
         // ARE the goal graphics and this banner isn't drawn.
         setGoalBanner({ text: bannerText, goalAbsT: currentAbsT })
+        probeRef.current?.goals.push({ wall: performance.now() / 1000, goalAbsT: currentAbsT })
         if (goalBannerTimerRef.current) clearTimeout(goalBannerTimerRef.current)
         const wantReplay = !replaySkipRef.current && replaysOn(replayPrefRef.current, pendingModeRef.current)
         if (!wantReplay && !replaySkipRef.current) {
           goalBannerTimerRef.current = setTimeout(() => setGoalBanner(null), 4500)
+          probeTimer('goal banner', 4500)
         }
 
         // Watch the on-ice celebration FIRST, then cut to the instant replay.
@@ -741,6 +766,7 @@ export function MatchViewer(props: {
           const seq = ++replaySeqRef.current
           const replayStart = Math.max(0, (currentAbsT - 8) / dur)
           const CELEBRATION_WALL_MS = 4500
+          probeTimer('celebration → replay cut', CELEBRATION_WALL_MS)
           setTimeout(() => {
             if (!replaySkipRef.current || seq !== replaySeqRef.current) return // superseded / left
             heldViewRef.current = viewRef.current
@@ -755,6 +781,7 @@ export function MatchViewer(props: {
             r.setSpeed(0.6)
             r.play()
             // End the replay after ~8s wall time.
+            probeTimer('replay length', 8000)
             setTimeout(() => {
               if (replaySkipRef.current && seq === replaySeqRef.current) _endReplay()
             }, 8000)
@@ -1027,6 +1054,69 @@ export function MatchViewer(props: {
     return () => window.removeEventListener('keydown', onKey)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase])
+
+  // ── DEV viewer-truth probe API (window.__viewerProbe) ────────────────────────
+  const phaseRef = useRef(phase)
+  phaseRef.current = phase
+  const probeViewerRef = useRef<() => ProbeViewerState>(() => ({ phase: 'hero', mode: 'full', replay: false, replayPending: false, ff: false, nudge: 1, shownScore: '' }))
+  probeViewerRef.current = () => {
+    const sv = (replayActiveRef.current ? heldViewRef.current : null) ?? viewRef.current
+    return {
+      phase: phaseRef.current,
+      mode: pendingModeRef.current,
+      replay: replayActiveRef.current,
+      replayPending: replaySkipRef.current && !replayActiveRef.current,
+      ff: ffActiveRef.current,
+      nudge: nudgeRef.current,
+      shownScore: sv ? `${sv.homeScore}-${sv.awayScore}` : '',
+    }
+  }
+  const probeCtlRef = useRef({ handleDropPuck, skipPregame, handleSeek, endReplay: _endReplay })
+  probeCtlRef.current = { handleDropPuck, skipPregame, handleSeek, endReplay: _endReplay }
+  useEffect(() => {
+    const probe = probeRef.current
+    if (!probe) return
+    const homeIds = new Set(game.homePlayerIds)
+    const events = probeEventsOf(game.stream)
+    const api = {
+      reset: (): void => probe.reset(),
+      drain: (): ProbeFrame[] => probe.drain(),
+      events: (): VTEvent[] => events,
+      state: () => ({
+        ...probeViewerRef.current(), clock: lastAbsTRef.current, duration: gameDurationRef.current,
+        home: game.homeAbbr, away: game.awayAbbr, frames: probe.frames.length, goalsSeen: probe.goals.length,
+        playing: viewRef.current?.playing ?? false,
+      }),
+      dropPuck: (mode: PlaybackMode = 'full'): void => probeCtlRef.current.handleDropPuck(mode),
+      skipPregame: (): void => probeCtlRef.current.skipPregame(),
+      /** Cut to an absolute game second (as a scrub), keeping the score graphics honest. */
+      jumpTo: (absT: number): void => {
+        const dur = gameDurationRef.current
+        if (dur <= 0) return
+        if (replaySkipRef.current) probeCtlRef.current.endReplay()
+        let h = 0
+        let a = 0
+        for (const e of events) if (e.type === 'goal' && e.absT <= absT && e.scorer) { if (homeIds.has(e.scorer)) h++; else a++ }
+        prevScoreRef.current = { home: h, away: a }
+        probeCtlRef.current.handleSeek(Math.max(0, Math.min(1, absT / dur)))
+        rendererRef.current?.play()
+      },
+      report: () => runViewerTruth({
+        frames: probe.frames, geometry: probe.geometry ?? FALLBACK_GEOMETRY, events, cues: probe.cues, timers: probe.timers,
+        // a detected score change → the stream goal it belongs to
+        goals: probe.goals.map((g) => {
+          const ev = [...events].reverse().find((e) => e.type === 'goal' && e.absT <= g.goalAbsT + 0.5)
+          return ev ? { ...g, goalAbsT: ev.absT } : g
+        }),
+      }),
+    }
+    ;(window as unknown as { __viewerProbe?: unknown }).__viewerProbe = api
+    return () => {
+      const w = window as unknown as { __viewerProbe?: unknown }
+      if (w.__viewerProbe === api) delete w.__viewerProbe
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game])
 
   // ── Controls ──────────────────────────────────────────────────────────────────
   function handleToggleRenderer(): void {
@@ -1558,6 +1648,63 @@ const goalBannerStyle: CSSProperties = {
   textShadow: '0 2px 6px rgba(0,0,0,0.5)',
   animation: 'fadeIn 0.18s ease',
   minWidth: 240,
+}
+
+/* ── DEV viewer-truth probe store (see render3d/viewerProbe.ts) ─────────────── */
+interface ProbeStore {
+  frames: ProbeFrame[]
+  timers: VTTimer[]
+  goals: VTGoal[]
+  cues: VTCue[]
+  geometry: ProbeGeometry | null
+  push(f: ProbeFrame, viewer: ProbeViewerState): void
+  drain(): ProbeFrame[]
+  reset(): void
+}
+/** ~8 minutes of 60 fps — a reel run resets between clips. */
+const PROBE_FRAME_CAP = 30000
+const FALLBACK_GEOMETRY: ProbeGeometry = { rinkHalfL: 100, rinkHalfW: 42.5, benchGates: { home: { x: -26, z: 41 }, away: { x: 26, z: 41 } } }
+function newProbeStore(): ProbeStore {
+  const st: ProbeStore = {
+    frames: [], timers: [], goals: [], cues: [], geometry: null,
+    push(f, viewer) {
+      st.frames.push({ ...f, viewer })
+      if (st.frames.length > PROBE_FRAME_CAP) st.frames.splice(0, st.frames.length - PROBE_FRAME_CAP)
+    },
+    drain() {
+      const out = st.frames
+      st.frames = []
+      return out
+    },
+    reset() {
+      st.frames = []
+      st.timers = []
+      st.goals = []
+      st.cues = []
+    },
+  }
+  return st
+}
+/** The stream's non-frame events on the viewer's absolute clock, positions in world feet. */
+function probeEventsOf(stream: WatchedGame['stream']): VTEvent[] {
+  const bases = periodBases(stream)
+  const out: VTEvent[] = []
+  for (const ev of stream) {
+    if (ev.type === 'frame') continue
+    const absT = (bases.get(ev.period) ?? (ev.period - 1) * 1200) + ev.t
+    const e: VTEvent = { type: ev.type, absT }
+    switch (ev.type) {
+      case 'shot': e.actor = ev.shooter; e.x = ev.from.x * 100; e.z = ev.from.y * 42.5; if (ev.shotType) e.shotType = ev.shotType; break
+      case 'missedShot': e.actor = ev.shooter; if (ev.shotType) e.shotType = ev.shotType; break
+      case 'goal': e.actor = ev.scorer; e.scorer = ev.scorer; break
+      case 'save': e.actor = ev.goalie; e.rebound = ev.rebound; break
+      case 'faceoff': e.actor = ev.winner; e.x = ev.pos.x * 100; e.z = ev.pos.y * 42.5; break
+      case 'hit': e.actor = ev.by; break
+      case 'penalty': e.actor = ev.player; break
+    }
+    out.push(e)
+  }
+  return out.sort((a, b) => a.absT - b.absT)
 }
 
 const replayBadgeStyle: CSSProperties = {

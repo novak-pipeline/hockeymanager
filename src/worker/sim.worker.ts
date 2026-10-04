@@ -11,6 +11,10 @@ import { Career, buildTeamList } from '@engine/career/career'
 import { validateSnapshot } from '@engine/career/serialize'
 import { asTeamId } from '@domain'
 import type { WorkerRequest, WorkerResponse } from './protocol'
+import {
+  SCENARIO_KINDS, SCENARIO_META, bestPerKind, findScenarios, streamFingerprint,
+  type PinnedScenario, type ScenarioKind,
+} from '@engine/analysis/goldenScenarios'
 
 const ENGINE_VERSION = '0.2.0'
 
@@ -26,6 +30,41 @@ function must(): Career {
   if (!career) throw new Error('no career in progress; call startCareer first')
   if (career.getMatchEngine() !== matchEngine) career.setMatchEngine(matchEngine)
   return career
+}
+
+/**
+ * DEV ONLY (viewer-truth reel): sim the user club against opponents over
+ * pinned seeds until every golden scenario has a clean instance. The user club
+ * is always home (the owner watches his own team); its moments rank first.
+ */
+function devFindScenarios(
+  c: Career, engine: 'classic' | 'agent', seeds: number[], opponents?: string[],
+): { type: 'devScenarios'; scenarios: PinnedScenario[]; games: number; missing: string[] } {
+  const { user, others } = c.devClubIds()
+  const opps = opponents && opponents.length > 0 ? opponents : others
+  const best = new Map<ScenarioKind, PinnedScenario>()
+  let games = 0
+  for (const [i, seed] of seeds.entries()) {
+    const opp = opps[i % opps.length]!
+    const g = c.devExhibition(user, opp, seed, engine)
+    games++
+    const home = new Set(g.homePlayerIds)
+    const isHome = (id: string): boolean => home.has(id)
+    const fp = streamFingerprint(g.stream, isHome)
+    for (const [kind, hit] of bestPerKind(findScenarios(g.stream, isHome, 'home', user))) {
+      const cur = best.get(kind)
+      if (cur && cur.quality >= hit.quality) continue
+      const meta = SCENARIO_META[kind]
+      best.set(kind, {
+        ...hit, label: meta.label, engine, homeId: user, awayId: opp, homeAbbr: g.homeAbbr, awayAbbr: g.awayAbbr,
+        seed, fingerprint: fp, clipFrom: Math.max(0, hit.absT - meta.lead), clipTo: hit.absT + meta.tail,
+      })
+    }
+    // stop once every kind has a user-side instance
+    if (SCENARIO_KINDS.every((k) => best.get(k)?.side === 'home')) break
+  }
+  const scenarios = SCENARIO_KINDS.flatMap((k) => (best.has(k) ? [best.get(k)!] : []))
+  return { type: 'devScenarios', scenarios, games, missing: SCENARIO_KINDS.filter((k) => !best.has(k)) }
 }
 
 function dashboard(id: number): WorkerResponse {
@@ -77,6 +116,12 @@ function handle(req: WorkerRequest): WorkerResponse {
       const game = c.watchNext()
       return { id: req.id, type: 'watch', view: c.view(), game }
     }
+    case 'devWatchFixture': {
+      const c = must()
+      return { id: req.id, type: 'watch', view: c.view(), game: c.devExhibition(req.homeId, req.awayId, req.seed, req.engine) }
+    }
+    case 'devFindScenarios':
+      return { id: req.id, ...devFindScenarios(must(), req.engine, req.seeds, req.opponents) }
 
     /* ── screens ── */
     case 'getDashboard':

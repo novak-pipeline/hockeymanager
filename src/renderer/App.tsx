@@ -70,6 +70,7 @@ import { SaveManager } from './components/SaveManager'
 import { WrappedHost } from './components/WrappedOverlay'
 import { YearbookScreen } from './screens/YearbookScreen'
 import { getMatchEngine } from './lib/matchEngine'
+import { viewerProbeEnabled } from '@render3d/viewerProbe'
 
 /** The pre-career flow (F6): title → new career → club picker → the game. */
 type AppPhase = 'title' | 'setup' | 'picking' | 'settings' | 'shell'
@@ -689,6 +690,30 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
     setHistory([])
     bumpRefresh()
   }, [])
+
+  // DEV viewer-truth runner (W1, never packaged): open a PINNED exhibition in
+  // the real match screen, and search pinned seeds for the golden scenarios.
+  useEffect(() => {
+    if (!viewerProbeEnabled()) return
+    const api = {
+      watch: async (homeId: string, awayId: string, seed: number, engine: 'classic' | 'agent'): Promise<string> => {
+        setWatched(null)
+        const res = await client.devWatchFixture(homeId, awayId, seed, engine)
+        if (res.type !== 'watch' || !res.game) return res.type === 'error' ? `error: ${res.message}` : 'no game'
+        setWatchMode('rink')
+        setIceStart(null)
+        setWatched(res.game)
+        return `${res.game.awayAbbr}@${res.game.homeAbbr} · ${res.game.stream.length} events`
+      },
+      find: async (engine: 'classic' | 'agent', seeds: number[], opponents?: string[]): Promise<unknown> => {
+        const res = await client.devFindScenarios(engine, seeds, opponents)
+        return res.type === 'devScenarios' ? res : { error: res.type === 'error' ? res.message : res.type }
+      },
+      close: (): void => closeViewer(),
+    }
+    ;(window as unknown as { __reel?: unknown }).__reel = api
+    return () => { delete (window as unknown as { __reel?: unknown }).__reel }
+  }, [client, closeViewer])
 
   /** Default name for a manual save — the club and the season you're in. */
   const suggestedSaveName = dashboard
