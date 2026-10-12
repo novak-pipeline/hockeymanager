@@ -6,6 +6,7 @@ import type {
   BoxScoreView,
   DashboardView,
   InboxView,
+  OffseasonView,
   StandingRowView,
 } from '../../worker/protocol'
 import { useShellActions } from '../components/ActionsContext'
@@ -761,6 +762,10 @@ function SummerDesk({ onOpen }: { onOpen: () => void }): JSX.Element {
       {os?.stage === 'preseason' && (
         <span className="muted small">Camp is underway — the roster battles resolve before the opener.</span>
       )}
+      {/* Loop audit F16: awards and draft weeks used to render an empty desk
+          (a dashboard law breach). They show the summer's settled facts and
+          the contracts waiting on July 1 instead. */}
+      {(os?.stage === 'awards' || os?.stage === 'draft') && <SummerRunUp os={os} />}
       </div>
 
       <div className="row" style={{ marginTop: 'var(--sp-2)', flexShrink: 0 }}>
@@ -773,6 +778,41 @@ function SummerDesk({ onOpen }: { onOpen: () => void }): JSX.Element {
         </button>
       </div>
     </Panel>
+  )
+}
+
+/** The weeks between the Cup and July 1: what is settled, and what is next. */
+function SummerRunUp({ os }: { os: OffseasonView }): JSX.Element {
+  const expiring = os.expiring.length
+  return (
+    <div className="stack" style={{ gap: 'var(--sp-2)' }}>
+      <div className="muted small" style={{ textTransform: 'uppercase', letterSpacing: 1, fontSize: 10 }}>
+        {os.stageLabel}
+      </div>
+      {os.championTeamName && (
+        <span className="small">The {os.championTeamName} won the Cup.</span>
+      )}
+      {os.awards && os.awards.length > 0 ? (
+        <div className="list">
+          {os.awards.slice(0, 4).map((a) => (
+            <div key={a.award} className="row-between small">
+              <span className="muted">{a.award}</span>
+              <span className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+                <PlayerLink playerId={a.winner.playerId} name={a.winner.name} />
+                <span className="muted">{a.winner.teamAbbr}</span>
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <span className="muted small">The trophies are handed out on awards night, before the draft.</span>
+      )}
+      <span className="muted small">
+        {expiring === 0
+          ? 'None of your contracts expire this summer.'
+          : `${expiring} of your contracts expire this summer. Re-signing opens after the draft; free agency opens July 1.`}
+      </span>
+    </div>
   )
 }
 
