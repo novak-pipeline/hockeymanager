@@ -102,6 +102,7 @@ import {
   emptyWorldHistory,
   type Competition,
   type IntlEventKind,
+  type IntlEventRecord,
   type IntlPlayerLine,
   type WorldHistory,
   type WorldPlayerRef,
@@ -131,6 +132,7 @@ import {
   selectSquads,
   seniorEventFor,
 } from '@engine/world/international'
+import { INTL_LENGTH_DAYS, intlStageBeats, type IntlBeat } from '@engine/world/intlStages'
 import type { WorldStatLine } from '@engine/league/worldSim'
 import { buildWorldHistoryView, type WorldHistoryView } from '@engine/career/worldHistoryView'
 import { applyConsistency } from '@engine/league/consistency'
@@ -10360,6 +10362,21 @@ export class Career {
   /** Tournaments already attempted this session — a world too thin to ice a
    *  field is not re-tried every match day. Transient by design. */
   private intlAttempted = new Set<string>()
+  /**
+   * A tournament in progress (loop audit F18): simulated the day it opens,
+   * told round by round over its real window (intlStages.ts), and applied —
+   * medals, awards, stats, scouting — on the day of the final.
+   */
+  private intlPending: {
+    kind: IntlEventKind
+    year: number
+    finalDay: number
+    eventLabel: string
+    record: IntlEventRecord
+    lines: IntlPlayerLine[]
+    injured: Array<{ playerId: string; nation: string; games: number }>
+    beats: IntlBeat[]
+  } | null = null
 
   private worldHist(): WorldHistory {
     const lg = this.data.league
@@ -10863,22 +10880,43 @@ export class Career {
   /* ── international: World Juniors, Olympics, Nations Cup ── */
 
   private tickInternational(day: number): void {
+    this.tickIntlPending(day)
     const comps = this.data.league.competitions
     if (!comps || comps.length === 0) return
     const hist = this.worldHist()
-    const has = (k: IntlEventKind): boolean => hist.international.some((e) => e.kind === k && e.year === this.year)
+    const has = (k: IntlEventKind): boolean =>
+      hist.international.some((e) => e.kind === k && e.year === this.year) ||
+      (this.intlPending?.kind === k && this.intlPending.year === this.year)
     if (day >= WJC_DAY && !has('worldJuniors') && !this.intlAttempted.has(`worldJuniors-${this.year}`)) {
       this.intlAttempted.add(`worldJuniors-${this.year}`)
-      this.runIntlEvent('worldJuniors')
+      this.runIntlEvent('worldJuniors', day)
     }
     const senior = seniorEventFor(this.year)
     if (senior && day >= SENIOR_EVENT_DAY && !has(senior) && !this.intlAttempted.has(`${senior}-${this.year}`)) {
       this.intlAttempted.add(`${senior}-${this.year}`)
-      this.runIntlEvent(senior)
+      this.runIntlEvent(senior, day)
     }
   }
 
-  private runIntlEvent(kind: IntlEventKind): void {
+  private intlEventLabel(kind: IntlEventKind): string {
+    return kind === 'worldJuniors' ? `${this.year + 1} World Juniors` : kind === 'olympics' ? `${this.year + 1} Winter Olympics` : `${this.year + 1} Nations Cup`
+  }
+
+  /** Publish the rounds that are due; on the day of the final, apply the result. */
+  private tickIntlPending(day: number): void {
+    const p = this.intlPending
+    if (!p) return
+    const due = p.beats.filter((b) => b.day <= day)
+    p.beats = p.beats.filter((b) => b.day > day)
+    for (const b of due) this.pushNews('league', b.headline, b.body, { salience: 45 })
+    if (day >= p.finalDay || p.year !== this.year) {
+      this.intlPending = null
+      for (const b of p.beats) this.pushNews('league', b.headline, b.body, { salience: 45 })
+      this.applyIntlResult(p.kind, p.record, p.lines, p.injured, p.eventLabel)
+    }
+  }
+
+  private runIntlEvent(kind: IntlEventKind, day: number): void {
     const nhl = new Set<string>()
     for (const tid of this.data.league.teams) for (const pid of this.data.teams.get(tid)?.roster ?? []) nhl.add(pid as string)
     const rostered = new Set<string>()
@@ -10904,9 +10942,62 @@ export class Career {
       : kind === 'olympics' ? runOlympics({ squads, players: this.data.players, year: this.year, seed })
         : runNationsCup({ squads, players: this.data.players, year: this.year, seed })
     if (!res) return
-    const rec = res.record
+    const eventLabel = this.intlEventLabel(kind)
+    // The world learns it round by round; the GM's own men are named in each.
+    const mine = this.yourProspectIds()
+    for (const pid of this.userTeam.roster) mine.add(pid as string)
+    const yours = res.lines.filter((l) => mine.has(l.playerId))
+    this.intlPending = {
+      kind, year: this.year, finalDay: day + INTL_LENGTH_DAYS[kind], eventLabel,
+      record: res.record, lines: [...res.lines], injured: [...res.injured],
+      beats: intlStageBeats({ kind, record: res.record, eventLabel, startDay: day, yours }),
+    }
+    // Selection is news the day the squads are named, not after the final.
+    if (u20 === false) this.intlSelectionBeats(res.record, eventLabel)
+    this.tickIntlPending(day)
+  }
+
+  /** Senior events: your men picked for their country, or left at home. */
+  private intlSelectionBeats(rec: IntlEventRecord, eventLabel: string): void {
+    const selected = new Set<string>(rec.rosters.flatMap(([, ids]) => ids))
+    const picked: Player[] = []
+    const snubbed: Player[] = []
+    for (const pid of this.userTeam.roster) {
+      const p = this.data.players.get(pid)
+      if (!p) continue
+      if (selected.has(pid as string)) { picked.push(p); p.morale = Math.min(100, p.morale + 4); continue }
+      const nat = p.nationality
+      const squad = rec.rosters.find(([n]) => n === nat)
+      if (!squad) continue
+      // A snub: good enough to be in the conversation (within 3 of the
+      // squad's weakest pick at his position group), and left home.
+      const grp = (x: Player): string => (x.position === 'G' ? 'G' : x.position === 'D' ? 'D' : 'F')
+      const same = squad[1].map((id) => this.data.players.get(asPlayerId(id))).filter((x): x is Player => !!x && grp(x) === grp(p))
+      const floor = Math.min(...same.map((x) => ratedOverall(x)))
+      if (same.length > 0 && ratedOverall(p) >= floor - 3) { snubbed.push(p); p.morale = Math.max(0, p.morale - 4) }
+    }
+    if (picked.length > 0) {
+      this.pushNews('league', `${picked.length === 1 ? picked[0]!.name : `${picked.length} of your players`} named for the ${eventLabel}`,
+        `${picked.map((p) => `${p.name} (${p.nationality})`).join(', ')} ${picked.length === 1 ? 'has' : 'have'} been selected. The NHL pauses for the tournament; the room is proud of them.`,
+        { playerId: picked[0]!.id as string, salience: 55 })
+    }
+    for (const p of snubbed.slice(0, 2)) {
+      this.pushNews('league', `${p.name} left off ${p.nationality}'s roster`,
+        `${p.name} was in the conversation for the ${eventLabel} and did not make the cut. He is taking it hard — expect a quiet week in the room.`,
+        { playerId: p.id as string, salience: 50 })
+    }
+  }
+
+  /** The final is played: medals, awards, lines, scouting, injuries, the story. */
+  private applyIntlResult(
+    kind: IntlEventKind,
+    rec: IntlEventRecord,
+    resLines: IntlPlayerLine[],
+    injured: Array<{ playerId: string; nation: string; games: number }>,
+    eventLabel: string,
+  ): void {
+    const u20 = kind === 'worldJuniors'
     this.worldHist().international.push(rec)
-    const eventLabel = kind === 'worldJuniors' ? `${this.year + 1} World Juniors` : kind === 'olympics' ? `${this.year + 1} Winter Olympics` : `${this.year + 1} Nations Cup`
 
     // Per-player tournament lines → the international columns on his record.
     const lineOf = new Map<string, IntlPlayerLine>()
@@ -10914,7 +11005,7 @@ export class Career {
       const p = this.data.players.get(asPlayerId(id))
       if (p) p.intlApps = (p.intlApps ?? 0) + 1
     }
-    for (const l of [...res.lines]) {
+    for (const l of [...resLines]) {
       lineOf.set(l.playerId, l)
       const p = this.data.players.get(asPlayerId(l.playerId))
       if (!p) continue
@@ -10966,39 +11057,8 @@ export class Career {
       this.draftRankCache = null
     }
 
-    // Selection beats for your own men (senior events): picked, or snubbed.
-    if (!u20) {
-      const selected = new Set<string>(rec.rosters.flatMap(([, ids]) => ids))
-      const picked: Player[] = []
-      const snubbed: Player[] = []
-      for (const pid of this.userTeam.roster) {
-        const p = this.data.players.get(pid)
-        if (!p) continue
-        if (selected.has(pid as string)) { picked.push(p); p.morale = Math.min(100, p.morale + 4); continue }
-        const nat = p.nationality
-        const squad = rec.rosters.find(([n]) => n === nat)
-        if (!squad) continue
-        // A snub: good enough to be in the conversation (within 3 of the
-        // squad's weakest pick at his position group), and left home.
-        const grp = (x: Player): string => (x.position === 'G' ? 'G' : x.position === 'D' ? 'D' : 'F')
-        const same = squad[1].map((id) => this.data.players.get(asPlayerId(id))).filter((x): x is Player => !!x && grp(x) === grp(p))
-        const floor = Math.min(...same.map((x) => ratedOverall(x)))
-        if (same.length > 0 && ratedOverall(p) >= floor - 3) { snubbed.push(p); p.morale = Math.max(0, p.morale - 4) }
-      }
-      if (picked.length > 0) {
-        this.pushNews('league', `${picked.length === 1 ? picked[0]!.name : `${picked.length} of your players`} named for the ${eventLabel}`,
-          `${picked.map((p) => `${p.name} (${p.nationality})`).join(', ')} ${picked.length === 1 ? 'has' : 'have'} been selected. The NHL pauses for the tournament; the room is proud of them.`,
-          { playerId: picked[0]!.id as string, salience: 55 })
-      }
-      for (const p of snubbed.slice(0, 2)) {
-        this.pushNews('league', `${p.name} left off ${p.nationality}'s roster`,
-          `${p.name} was in the conversation for the ${eventLabel} and did not make the cut. He is taking it hard — expect a quiet week in the room.`,
-          { playerId: p.id as string, salience: 50 })
-      }
-    }
-
     // Injuries suffered at the tournament that land on your club.
-    for (const inj of res.injured) {
+    for (const inj of injured) {
       if (!mine.has(inj.playerId)) continue
       const p = this.data.players.get(asPlayerId(inj.playerId))
       if (!p) continue
@@ -31718,6 +31778,7 @@ export class Career {
       gmJobMarket: this.gmJobMarket ? this.gmJobMarket.map((o) => ({ ...o })) : undefined,
       ownerRequest: this.ownerRequest ? { ...this.ownerRequest } : undefined,
       feudState: structuredClone(this.feud),
+      ...(this.intlPending ? { intlPending: structuredClone(this.intlPending) } : {}),
       gmRelationships: [...this.gmRelationships.entries()],
       gmReputation: structuredClone(this.gmRep),
       hockeySoul: {
@@ -31923,6 +31984,7 @@ export class Career {
     career.gmJobMarket = snapshot.gmJobMarket ? snapshot.gmJobMarket.map((o) => ({ ...o })) : null
     career.ownerRequest = snapshot.ownerRequest ? { ...snapshot.ownerRequest } : null
     if (snapshot.feudState) career.feud = structuredClone(snapshot.feudState)
+    if (snapshot.intlPending) career.intlPending = structuredClone(snapshot.intlPending)
     career.gmRelationships = new Map(snapshot.gmRelationships ?? [])
     career.gmRep = snapshot.gmReputation ? structuredClone(snapshot.gmReputation) : createGmReputation()
     {

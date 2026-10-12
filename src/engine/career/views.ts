@@ -2876,6 +2876,17 @@ export interface CareerSnapshot {
   ownerRequest?: import('@engine/league/ownerMeddling').OwnerRequest
   /** Feud arcs (story audit 2026-10 §4). Optional/additive. */
   feudState?: import('@engine/league/feudArc').FeudState
+  /** An international tournament in progress (loop audit F18). Optional/additive. */
+  intlPending?: {
+    kind: import('@domain').IntlEventKind
+    year: number
+    finalDay: number
+    eventLabel: string
+    record: import('@domain').IntlEventRecord
+    lines: import('@domain').IntlPlayerLine[]
+    injured: Array<{ playerId: string; nation: string; games: number }>
+    beats: import('@engine/world/intlStages').IntlBeat[]
+  }
   /** User GM's standing with each rival club (teamId → 0–100). Additive; absent → neutral. */
   gmRelationships?: Array<[string, number]>
   /** Veteran→rookie mentorships (menteeId → mentorId). Additive; absent → none. */
