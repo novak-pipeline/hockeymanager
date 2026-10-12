@@ -94,6 +94,13 @@ export interface NewsItem {
    */
   reach?: 'ambient' | 'ownClub'
   /**
+   * Routine league churn (another club's retirement, a development note on
+   * someone else's player): when two or more land on one day the inbox folds
+   * them into a single "Around the league" digest (engine/career/inboxHygiene).
+   * Tagged at the write site, never inferred from the prose. Optional/additive.
+   */
+  digest?: true
+  /**
    * A beat writer's link post: the article in the News reader it points at
    * (docs/MEDIA-BEAT.md). Additive/optional for save compat.
    */

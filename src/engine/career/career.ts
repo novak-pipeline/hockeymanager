@@ -50,6 +50,7 @@ import {
   type MoraleMemoryKind,
 } from '@domain'
 import { rememberMorale, easeMoraleMemory, MEMORY_NOTES } from '@engine/league/moraleMemory'
+import { DIGEST_PREFIX, digestMembers, fileStaleMail, foldDigests, inboxPriority } from './inboxHygiene'
 import { computeComposites, overall, ratedOverall, ratedPotential, overallToStars, agedPotential } from '@engine/ratings/composites'
 import { quickSimGame } from '@engine/quick/quickSim'
 import { fullSimGame } from '@engine/full/fullSim'
@@ -2356,6 +2357,7 @@ export class Career {
       rare?: boolean
       prospects?: DigestProspectRef[]
       reach?: 'ambient' | 'ownClub'
+      digest?: true
     } = {}
   ): NewsItem {
     // Off the match-day clock (summer stages, camp week, the preseason board
@@ -2384,6 +2386,7 @@ export class Career {
       ...(refs.rare !== undefined ? { rare: refs.rare } : {}),
       ...(refs.prospects !== undefined ? { prospects: refs.prospects } : {}),
       ...(refs.reach !== undefined ? { reach: refs.reach } : {}),
+      ...(refs.digest ? { digest: true as const } : {}),
     }
     this.news.unshift(item)
     if (this.news.length > NEWS_LIMIT) this.news.length = NEWS_LIMIT
@@ -11859,7 +11862,9 @@ export class Career {
             ],
           }
           const [cat, headline, body] = texts[seed.kind]
-          this.pushNews(cat, headline, body, { playerId: seed.playerId as string })
+          // Another club's man: league churn, folded into the day's digest.
+          const ours = this.ownOrgIds().has(seed.playerId as string)
+          this.pushNews(cat, headline, body, { playerId: seed.playerId as string, ...(ours ? {} : { digest: true as const }) })
         }
 
         /* ── E2: extensions signed in-season start paying now. developPlayers
@@ -11926,6 +11931,7 @@ export class Career {
           } else {
             this.pushNews('league', `${p.name} retires`, `${p.name} hangs up the skates at ${p.age}.`, {
               playerId: id as string,
+              ...(this.ownOrgIds().has(id as string) ? {} : { digest: true as const }),
             })
           }
         }
@@ -12542,7 +12548,8 @@ export class Career {
             `You lose ${p.name} to ${t.abbreviation}`,
             `${p.name} was on your board, but he signs with ${t.name} ` +
             `($${(s.salary / 1e6).toFixed(2)}M × ${s.years}). His agent's read: it came down to ${reason}.`,
-            { playerId: pid, teamId: s.teamId as string }
+            // Your debrief, whoever signed him: it is mail to YOUR desk.
+            { playerId: pid, teamId: this.userTeamId as string }
           )
           this.faShortlist.delete(pid)
           if (session && session.status !== 'signed') session.status = 'walked'
@@ -14200,6 +14207,13 @@ export class Career {
 
   markNewsRead(ids: string[]): void {
     const set = new Set(ids)
+    // A digest stands for its day's folded items: reading it reads them all.
+    const digests = ids.filter((id) => id.startsWith(DIGEST_PREFIX))
+    if (digests.length > 0) {
+      const raw = this.curatedInboxRaw()
+      const involvesUser = this.newsInvolvesUser()
+      for (const d of digests) for (const id of digestMembers(d, raw, involvesUser)) set.add(id)
+    }
     for (const n of this.news) if (set.has(n.id)) n.read = true
   }
 
@@ -16793,6 +16807,11 @@ export class Career {
       if (!rng.chance(0.5)) continue // not every eligible club, every week
       this.waiverWire.push({ playerId: cand.id as string, fromTeamId: tid as string, placedDay: day })
       placed++
+      // Loop audit F11: another club's sub-replacement body is not mail — it
+      // held the Continue overlay on its own five times a season. It lives on
+      // the Waiver Wire screen (and the ticker). Only a man who would make
+      // YOUR lineup at his position is a decision worth a stop.
+      const worthAClaim = ratedOverall(cand) >= this.orgNhlBar(this.userTeam, this.posGroup(cand.position))
       this.pushNews(
         'contract',
         `${cand.name} placed on waivers by ${team.abbreviation}`,
@@ -16800,7 +16819,9 @@ export class Career {
           (cand.contract.yearsRemaining > 1
             ? `A claim takes on all ${cand.contract.yearsRemaining} years of the deal. Claims go through the Waiver Wire.`
             : `A claim takes on the contract, which ends this season. Claims go through the Waiver Wire.`),
-        { playerId: cand.id as string, teamId: tid as string }
+        worthAClaim
+          ? { playerId: cand.id as string, teamId: tid as string, salience: 56 }
+          : { playerId: cand.id as string, teamId: tid as string, reach: 'ambient' }
       )
     }
   }
@@ -29185,11 +29206,29 @@ export class Career {
    *  standings takes, trade-rumour chatter about other clubs, and feed posts).
    *  Anything touching your club or a player of yours always stays. Shared by
    *  {@link getInbox} and the dashboard unread badge so the two never disagree. */
-  private curatedInboxNews(): NewsItem[] {
+  /** Does this item concern the user's club (team or a rostered man)? */
+  private newsInvolvesUser(): (n: NewsItem) => boolean {
     const userTid = this.userTeamId as string
     const userRoster = new Set(this.userTeam.roster.map((id) => id as string))
-    const involvesUser = (n: NewsItem): boolean =>
+    return (n: NewsItem): boolean =>
       n.teamId === userTid || (n.playerId !== undefined && userRoster.has(n.playerId))
+  }
+
+  /**
+   * The inbox as the GM sees it (loop audit 3 F16): the curated mail, with
+   * stale unread mail filed away by its shelf life and each day's other-club
+   * routine news folded into one "Around the league" digest (inboxHygiene.ts).
+   */
+  private curatedInboxNews(): NewsItem[] {
+    const raw = this.curatedInboxRaw()
+    const involvesUser = this.newsInvolvesUser()
+    fileStaleMail(raw, this.todayISO(), involvesUser)
+    return foldDigests(raw, involvesUser)
+  }
+
+  /** The curation pass alone: which stories reach the desk at all. */
+  private curatedInboxRaw(): NewsItem[] {
+    const involvesUser = this.newsInvolvesUser()
     const AMBIENT_NOISE =
       /point streak|point drought|heater hits|\bon fire\b|streak snapped|What went wrong|gap widens|struggling to meet|lagging|Trade talk heats up/i
     // League-wide roster churn that has nothing to do with your club: prospects
@@ -29228,6 +29267,11 @@ export class Career {
   getInbox(): InboxView {
     const items = this.curatedInboxNews()
     const unread = items.filter((n) => !n.read).length
+    // Prominence: unread mail that is a decision on your club, or a big story.
+    const involvesUser = this.newsInvolvesUser()
+    const important = items
+      .filter((n) => !n.read && !n.id.startsWith(DIGEST_PREFIX) && inboxPriority(n, involvesUser(n)) === 'high')
+      .map((n) => n.id)
 
     // Collect unique player/team ids referenced by news items.
     const playerIds = new Set<string>()
@@ -29288,6 +29332,7 @@ export class Career {
     return {
       items,
       unread,
+      ...(important.length > 0 ? { important } : {}),
       playerInfo,
       teamInfo,
       ...(interactions.length > 0 ? { interactions } : {}),

@@ -2787,6 +2787,9 @@ export interface DataAnalystView {
 export interface InboxView {
   items: NewsItem[]
   unread: number
+  /** Ids of unread HIGH-priority mail (a decision on your club, a big story),
+   *  listed first by the inbox. Optional/additive. */
+  important?: string[]
   /**
    * Open player→GM concerns awaiting a response. Optional/additive for save
    * compat (absent = no interactions surfaced).
