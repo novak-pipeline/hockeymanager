@@ -1010,6 +1010,12 @@ export interface PlayerProfileView extends PlayerBadge {
    */
   mindset?: import('@engine/career/playerMindset').MindsetView
   /**
+   * What's on his mind: the dated things he remembers about how the club has
+   * treated him (a benching, a broken promise, a new deal), strongest first,
+   * each with how raw it still is. Own players only. Absent when nothing is.
+   */
+  moodFactors?: import('@engine/league/moraleMemory').MoodFactorView[]
+  /**
    * Headline personality archetype (e.g. "Born Leader"). Present for own players
    * always; for opponents only once personality knowledge is reliable (≥50).
    * Absent (omitted) otherwise.

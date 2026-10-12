@@ -19,6 +19,7 @@
  * All numeric coefficients are first-pass estimates for the calibration
  * harness (build step #5) to refine.
  */
+import { moraleBaseline, fadeMoraleMemory, rememberMorale, easeMoraleMemory, MEMORY_NOTES } from './moraleMemory'
 import type { CompositeRatings, Injury, InjuryKind, Player, PlayerId, Team } from '@domain'
 import type { GamePlayerStat } from '@engine/shared/outcome'
 import { overall } from '@engine/ratings/composites'
@@ -214,7 +215,6 @@ export function injureNow(player: Player, rng: Rng, medical?: number): Injury {
 const FATIGUE_PER_GAME = 8
 const FATIGUE_NOISE = 2
 const REST_RECOVERY = 12
-const MORALE_BASELINE = 60
 const MORALE_DRIFT = 0.05
 const FORM_DECAY = 0.9
 
@@ -292,7 +292,10 @@ export function tickRecovery(args: {
       p.fatigue = clamp(p.fatigue - REST_RECOVERY * fitFactor, 0, 100)
     }
 
-    p.morale = clamp(p.morale + (MORALE_BASELINE - p.morale) * MORALE_DRIFT, 0, 100)
+    // Morale drifts toward the level he SETTLES at: 60, moved by what he
+    // remembers (a benching, a broken promise, a new deal — moraleMemory.ts).
+    p.morale = clamp(p.morale + (moraleBaseline(p) - p.morale) * MORALE_DRIFT, 0, 100)
+    fadeMoraleMemory(p)
     p.form = clamp((p.form + rng.float(-1, 1)) * FORM_DECAY, -5, 5)
   }
 
@@ -351,8 +354,25 @@ export function applyDeploymentMorale(args: {
   resolve: (id: PlayerId) => Player
   /** Whether the player took the ice tonight (toi > 0). */
   played: (id: PlayerId) => boolean
+  /**
+   * When given (the user's club only), a benching he will REMEMBER — but only
+   * one the GM made: a healthy scratch the GM ordered (or a lineup the GM is
+   * running himself) of top-six / top-four talent, or a run buried two tiers
+   * down on GM-run lines, writes a dated morale memory; playing him where he
+   * belongs eases it. The coach's own lineup calls (and every AI club) still
+   * sting on the night but write nothing: normal play is never penalised.
+   */
+  memory?: {
+    year: number
+    day: number
+    date: string
+    /** The GM ordered this man scratched (the Team screen toggle). */
+    scratchedByGm: (id: PlayerId) => boolean
+    /** The GM runs the lines himself ('fillGaps' line management). */
+    linesByGm: boolean
+  }
 }): void {
-  const { team, resolve, played } = args
+  const { team, resolve, played, memory } = args
   const lines = team.lines
   if (!lines || !Array.isArray(lines.forwards) || !Array.isArray(lines.defensePairs)) return
 
@@ -386,14 +406,32 @@ export function applyDeploymentMorale(args: {
         // top six / top four — depth guys rotate in and out all season.
         if (expected <= 2 && !sheltered) {
           p.morale = clamp(p.morale - SCRATCH_STING * ambitionScale(p), 0, 100)
+          if (memory && (memory.linesByGm || memory.scratchedByGm(p.id))) {
+            rememberMorale(p, {
+              kind: 'scratched', year: memory.year, day: memory.day, date: memory.date,
+              note: MEMORY_NOTES.scratched, scale: ambitionScale(p),
+            })
+          }
         }
         return
       }
       const gap = deployed - expected
+      // Dressed again: the scratch starts to fade whatever line he is on.
+      if (memory) easeMoraleMemory(p, ['scratched'], 0.85)
       if (gap > DEPLOY_TIER_TOLERANCE && !sheltered) {
         p.morale = clamp(p.morale - UNDERUSE_STING_PER_TIER * (gap - DEPLOY_TIER_TOLERANCE) * ambitionScale(p), 0, 100)
-      } else if (gap < -DEPLOY_TIER_TOLERANCE) {
-        p.morale = clamp(p.morale + PROMOTION_LIFT, 0, 100)
+        if (memory?.linesByGm) {
+          rememberMorale(p, {
+            kind: 'buried', year: memory.year, day: memory.day, date: memory.date,
+            note: MEMORY_NOTES.buried(deployed, p.position === 'D'),
+            scale: (gap - DEPLOY_TIER_TOLERANCE) * ambitionScale(p),
+          })
+        }
+      } else {
+        if (gap < -DEPLOY_TIER_TOLERANCE) p.morale = clamp(p.morale + PROMOTION_LIFT, 0, 100)
+        // Playing where he belongs is how a demotion is forgiven: each game in
+        // his slot takes a real bite out of the memory.
+        if (memory) easeMoraleMemory(p, ['buried'], 0.85)
       }
     })
   }

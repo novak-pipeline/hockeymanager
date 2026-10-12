@@ -100,6 +100,15 @@ export interface Player {
   /** 0–100, both intra-game and season-long. */
   fatigue: number
   morale: number
+  /**
+   * What he remembers: the big things the club did to him (a benching, a
+   * broken promise, a contract snub, an ignored trade request — or a promise
+   * kept, a new deal). Each entry shifts the level his morale settles at and
+   * fades slowly, so a decision is still felt weeks later instead of being
+   * washed out by the daily drift. Engine: `engine/league/moraleMemory.ts`.
+   * Optional/additive; absent = nothing on his mind.
+   */
+  moraleMemory?: MoraleMemory[]
   injuryStatus: Injury | null
   /** #157 (CBA): placed on Long-Term Injured Reserve. While true AND injured, his
    *  cap hit is relieved from the club's cap so a replacement can be signed over
@@ -308,6 +317,39 @@ export interface Player {
    * players and on pre-existing saves (treated as "still active"). Additive.
    */
   retiredYear?: number
+}
+
+/** What kind of thing a player remembers (see `Player.moraleMemory`). */
+export type MoraleMemoryKind =
+  | 'scratched'          // healthy-scratched with top-six / top-four talent
+  | 'buried'             // dressed well below where his game belongs
+  | 'brokenPromise'
+  | 'keptPromise'
+  | 'contractSnub'       // contract talks broke off
+  | 'newDeal'            // signed a new deal with the club
+  | 'ignored'            // asked for a conversation and never got one
+  | 'dismissed'          // raised something and was waved off
+  | 'tradeRequestIgnored'
+  | 'backed'             // the GM took his side (feud)
+  | 'grievance'          // the GM took the other man's side (feud)
+
+/** One remembered event. JSON-safe; lives in the save with the player. */
+export interface MoraleMemory {
+  kind: MoraleMemoryKind
+  /** Current pull on the level his morale settles at, in morale points
+   *  (negative = sore). Fades every match day; dropped once it is small. */
+  weight: number
+  /** The pull when it was fresh — the profile reads weight/peak as
+   *  "still raw" … "almost forgotten". */
+  peak: number
+  /** When it (last) happened: season year + match day, and the ISO date. */
+  year: number
+  day: number
+  date: string
+  /** How many times it has happened (a third scratch compounds). */
+  count: number
+  /** Player-facing, dated, specific: "Healthy-scratched twice since Nov 12". */
+  note: string
 }
 
 /** #188: the GM's declared role for a player (EHM "squad status"). */

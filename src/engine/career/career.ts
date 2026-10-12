@@ -47,7 +47,9 @@ import {
   type Team,
   type TeamId,
   type TeamTactics,
+  type MoraleMemoryKind,
 } from '@domain'
+import { rememberMorale, easeMoraleMemory, MEMORY_NOTES } from '@engine/league/moraleMemory'
 import { computeComposites, overall, ratedOverall, ratedPotential, overallToStars, agedPotential } from '@engine/ratings/composites'
 import { quickSimGame } from '@engine/quick/quickSim'
 import { fullSimGame } from '@engine/full/fullSim'
@@ -4268,6 +4270,21 @@ export class Career {
     })
   }
 
+  /** Write a dated morale memory on one of the user's men (moraleMemory.ts):
+   *  the event moves the level his morale settles at, shows on his profile,
+   *  and fades slowly instead of being washed out in two weeks. */
+  private rememberFor(
+    p: Player,
+    kind: MoraleMemoryKind,
+    note: (count: number, since: string) => string,
+    scale?: number,
+  ): void {
+    rememberMorale(p, {
+      kind, year: this.year, day: this.currentDay, date: this.todayISO(), note,
+      ...(scale !== undefined ? { scale } : {}),
+    })
+  }
+
   /** A concern left unanswered this many days lapses — and lapsing is itself
    *  an answer. */
   static readonly CONCERN_EXPIRY_DAYS = 8
@@ -4299,6 +4316,8 @@ export class Career {
         if (lr) lr.roomMorale = Math.max(0, lr.roomMorale - 1)
       }
       this.flagDismissed(i, true)
+      if (i.kind === 'tradeRequest') this.rememberFor(p, 'tradeRequestIgnored', MEMORY_NOTES.tradeRequestIgnored)
+      else this.rememberFor(p, 'ignored', MEMORY_NOTES.ignored, i.severity === 'serious' ? 1.5 : 1)
       const last = p.name.split(' ').slice(-1)[0] ?? p.name
       i.outcome = `You never answered. ${last} stopped waiting — and he noticed.`
       this.pushNews('contract', `${last}'s agent: "Nobody called him back"`,
@@ -4367,6 +4386,16 @@ export class Career {
     // Waved off to his face: he remembers (the decision library's
     // `formerlyDismissed` trigger and the agent's grudge at the table read it).
     if (option.tone === 'dismissive') this.flagDismissed(interaction, true)
+    // What he carries out of the room (moraleMemory.ts). A trade request met
+    // with "you're going nowhere" is remembered for months; being waved off,
+    // for weeks. A real hearing softens the old hurt of being ignored.
+    if (interaction.kind === 'tradeRequest' && (option.tone === 'firm' || option.tone === 'dismissive')) {
+      this.rememberFor(player, 'tradeRequestIgnored', MEMORY_NOTES.tradeRequestIgnored)
+    } else if (option.tone === 'dismissive') {
+      this.rememberFor(player, 'dismissed', MEMORY_NOTES.dismissed)
+    } else if (option.tone === 'supportive' || option.tone === 'promise') {
+      easeMoraleMemory(player, ['ignored', 'dismissed'], 0.5)
+    }
 
     // E3 audit: "address the room" was a promise with no action behind it and
     // nothing that ever checked it. Choosing it IS addressing the room now: the
@@ -4940,6 +4969,16 @@ export class Career {
     // league-wide standing is the anti-cheese system, and a promise the season
     // made impossible to keep is not an exploit.
     if (pr.status === 'kept') this.creditStanding(1, `Kept your word to ${p?.name ?? 'a player'}.`)
+    // He remembers it either way (moraleMemory.ts). Only a man still in the
+    // organization carries it; one who has left took it to his new club's file.
+    if (p && this.ownOrgIds().has(pr.playerId)) {
+      if (pr.status === 'kept') {
+        this.rememberFor(p, 'keptPromise', MEMORY_NOTES.keptPromise(pr.text))
+        easeMoraleMemory(p, ['brokenPromise'], 0.5)
+      } else if (pr.status === 'broken') {
+        this.rememberFor(p, 'brokenPromise', MEMORY_NOTES.brokenPromise(pr.text))
+      }
+    }
     chronicleEvent(this.chronicle, {
       year: this.year,
       day,
@@ -8149,7 +8188,7 @@ export class Career {
     }
   }
 
-  private postGame(res: GameOutcome, dayRng: Rng): Set<PlayerId> {
+  private postGame(res: GameOutcome, dayRng: Rng, day?: number): Set<PlayerId> {
     const played = new Set<PlayerId>()
     const participants: Array<{ player: Player; toi: number; medical?: number }> = []
     // The two clubs' medical rooms (PHASE 0: the physio is part of the model).
@@ -8196,7 +8235,17 @@ export class Career {
     // Role vs. talent: a star buried down the lineup (or healthy-scratched)
     // sours; a depth player handed a big role gets a lift. Deterministic.
     for (const t of [home, away]) {
-      applyDeploymentMorale({ team: t, resolve: (id) => this.resolve(id), played: (id) => played.has(id) })
+      // The user's club also REMEMBERS a benching (moraleMemory.ts): dated, on
+      // his profile, fading slowly — and forgiven faster once he plays again.
+      const gmScratches = new Set(this.practiceState.scratched)
+      const memory = t.id === this.userTeamId && day !== undefined
+        ? {
+            year: this.year, day, date: dayToDateISO(this.year, day),
+            scratchedByGm: (id: PlayerId) => gmScratches.has(id as string),
+            linesByGm: this.lineManagementMode === 'fillGaps',
+          }
+        : undefined
+      applyDeploymentMorale({ team: t, resolve: (id) => this.resolve(id), played: (id) => played.has(id), ...(memory ? { memory } : {}) })
     }
     return played
   }
@@ -9704,7 +9753,7 @@ export class Career {
       })
       this.applyOutcome(game, res)
       outcomes.push(res)
-      for (const pid of this.postGame(res, this.rngFor(7003, nextDay, game.id.length))) {
+      for (const pid of this.postGame(res, this.rngFor(7003, nextDay, game.id.length), nextDay)) {
         played.add(pid)
       }
       if (game.homeTeamId === this.userTeamId || game.awayTeamId === this.userTeamId) {
@@ -10871,7 +10920,7 @@ export class Career {
       })
       this.applyOutcome(game, res)
       outcomes.push(res)
-      for (const pid of this.postGame(res, this.rngFor(7003, nextDay, game.id.length))) {
+      for (const pid of this.postGame(res, this.rngFor(7003, nextDay, game.id.length), nextDay)) {
         played.add(pid)
       }
       if (isUser) {
@@ -11125,7 +11174,7 @@ export class Career {
       this.creditPhysicalStats(res)
       applySeriesResult(po, g.seriesId, result)
       beatOutcomes.push(res)
-      for (const pid of this.postGame(res, this.rngFor(7004, day, g.gameNumber))) played.add(pid)
+      for (const pid of this.postGame(res, this.rngFor(7004, day, g.gameNumber), day)) played.add(pid)
 
       /* ── Wave 4: rivalry registration for playoff games ── */
       {
@@ -19013,6 +19062,12 @@ export class Career {
         this.year
       )
       this.commitNegotiatedContract(player, offer, kind)
+      // A new deal with the club he is already at: remembered warmly, and any
+      // earlier breakdown in talks is water under the bridge.
+      if (kind !== 'freeAgent') {
+        this.rememberFor(player, 'newDeal', MEMORY_NOTES.newDeal)
+        easeMoraleMemory(player, ['contractSnub'], 0.3)
+      }
       // E1: a role promised at the table is a debt from the day he signs. The
       // LW5 promise machinery already knows how to collect on ice time.
       if (state.rolePitch !== undefined && rolePitchValue(state.rolePitch, ratedOverall(player)) > 0) {
@@ -19042,6 +19097,11 @@ export class Career {
         signed: true,
         message: `${player.name} signs — $${(offer.salary / 1e6).toFixed(2)}M × ${offer.years} years.`,
       }
+    }
+    if ((result.status === 'walked' || result.status === 'paused') && kind !== 'freeAgent' && this.ownOrgIds().has(playerId)) {
+      // Talks with one of your own men broke down: he hears about it, and it
+      // sits with him (moraleMemory.ts) until a deal gets done.
+      this.rememberFor(player, 'contractSnub', MEMORY_NOTES.contractSnub)
     }
     if (result.status === 'walked') {
       applyDealOutcome(this.agentRapport, agentName, { kind: 'walked' }, this.year)
