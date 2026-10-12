@@ -2776,6 +2776,8 @@ export interface PlayerInteractionView {
   scene?: true
   /** Whose voice speaks the dialogue in a scene. Absent = the player. */
   speaker?: SceneSpeaker
+  /** Raised in person in the office: the phone never rings for it. */
+  inPerson?: true
   day: number
   year: number
   options: InteractionOptionView[]
@@ -2872,6 +2874,8 @@ export interface CareerSnapshot {
   gmJobMarket?: Array<import('@engine/league/gmCareer').GMJobOpening>
   /** Pending owner directive. Additive; absent → none. */
   ownerRequest?: import('@engine/league/ownerMeddling').OwnerRequest
+  /** Feud arcs (story audit 2026-10 §4). Optional/additive. */
+  feudState?: import('@engine/league/feudArc').FeudState
   /** User GM's standing with each rival club (teamId → 0–100). Additive; absent → neutral. */
   gmRelationships?: Array<[string, number]>
   /** Veteran→rookie mentorships (menteeId → mentorId). Additive; absent → none. */

@@ -163,6 +163,13 @@ describe('callFromInteraction', () => {
     expect(c?.spoken).not.toContain('hallway')
   })
 
+  it('never rings for a matter brought to the office in person (the coach about a feud)', () => {
+    expect(callFromInteraction(concern({
+      kind: 'feud', scene: true, inPerson: true,
+      message: `On Nov 3 Gus Forsling took Eeli Lundell's place on the first line. Paul Maurice shuts your door behind him. "Lundell thinks that spot was his, and Forsling thinks he earned it. It's on the bench now. I want your call before it costs us a game."`,
+    }), STAFF)).toBeNull()
+  })
+
   it('does not ring at all for a scene that is pure narration', () => {
     expect(callFromInteraction(concern({
       scene: true,

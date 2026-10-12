@@ -113,6 +113,8 @@ export function callFromInteraction(
   staff: StaffView | null,
 ): PhoneCall | null {
   const base = { id: it.id, actionLabel: 'Talk it out →', actionTarget: 'inbox' as const }
+  // Brought to your office in person (the coach about a feud): not a call.
+  if (it.inPerson) return null
   if (!it.scene) {
     return {
       ...base,

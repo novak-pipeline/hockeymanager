@@ -58,6 +58,9 @@ export interface PlayerInteraction {
   scene?: true
   /** Whose voice speaks the dialogue in a `scene`. Absent = the player. */
   speaker?: SceneSpeaker
+  /** Brought to the office in person (the head coach shutting your door):
+   *  never a phone call. Optional/additive. */
+  inPerson?: true
   options: InteractionOption[]
   status: 'open' | 'resolved'
   chosenOptionId?: string
@@ -310,8 +313,11 @@ export function maybeRaiseInteraction(args: {
   day: number
   rng: Rng
   nextId: string
+  /** Story audit 2026-10 §4: the user's club raises feuds as caused, dated
+   *  scenes (feudArc.ts), never as this generic call. */
+  noFeud?: boolean
 }): PlayerInteraction | null {
-  const chosen = chooseKind(args.player, args.lockerRoom)
+  const chosen = chooseKind(args.player, args.noFeud === true ? null : args.lockerRoom)
   if (!chosen) return null
   if (!args.rng.chance(SPEAK_CHANCE[chosen.kind])) return null
 
