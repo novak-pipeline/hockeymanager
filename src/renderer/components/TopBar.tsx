@@ -1,4 +1,5 @@
 import type { DashboardView } from '../../worker/protocol'
+import { managedSeasonLabel } from '../../engine/shared/seasonLabel'
 import { useShellActions } from './ActionsContext'
 import { fmtDate } from './format'
 
@@ -28,7 +29,7 @@ export function TopBar(props: { dashboard: DashboardView | null }): JSX.Element 
       <div className="topbar-date">
         <span className="topbar-date-main">{d ? fmtDate(d.date) : '—'}</span>
         <span className="topbar-date-sub">
-          {d && <span>{d.year} season</span>}
+          {d && <span>{managedSeasonLabel(d.year, d.phase)} season</span>}
           {d && <span className={PHASE_CHIP[d.phase]}>{PHASE_LABEL[d.phase]}</span>}
         </span>
       </div>

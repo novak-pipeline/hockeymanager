@@ -133,6 +133,7 @@ import {
   seniorEventFor,
 } from '@engine/world/international'
 import { INTL_LENGTH_DAYS, intlStageBeats, type IntlBeat } from '@engine/world/intlStages'
+import { managedSeasonLabel, seasonLabel } from '@engine/shared/seasonLabel'
 import type { WorldStatLine } from '@engine/league/worldSim'
 import { buildWorldHistoryView, type WorldHistoryView } from '@engine/career/worldHistoryView'
 import { applyConsistency } from '@engine/league/consistency'
@@ -1738,7 +1739,7 @@ export class Career {
       this.initLockerRooms()
       this.pushNews(
         'league',
-        `${data.league.name} ${this.year}–${this.year + 1} season begins`,
+        `${data.league.name} ${managedSeasonLabel(this.year, this.phase)} season begins`,
         `You are the new general manager of the ${this.userTeam.name}. Set your lines, watch the cap, and bring home the cup.`
       )
       this.appendSaga(`Y${this.year}: a new GM takes over the ${this.userTeam.name}.`)
@@ -1762,6 +1763,7 @@ export class Career {
         teams: this.teamDescriptors(),
         year: this.year,
         rng: this.rngFor(9101),
+        seasonLabel: managedSeasonLabel(this.year, this.phase),
       })
       this.expectationsState = odds.state
       this.pushSeeds(odds.newsSeeds)
@@ -1774,6 +1776,7 @@ export class Career {
         year: this.year,
         teamId: this.userTeamId as string,
         teamName: this.userTeam.name,
+        seasonLabel: managedSeasonLabel(this.year, this.phase),
       })
       this.boardState = boardResult.state
       this.pushSeeds([boardResult.newsSeed])
@@ -11838,7 +11841,7 @@ export class Career {
         day,
         kind: 'championship',
         teamIds: [po.championTeamId as string],
-        headline: `${champ.name} win the ${this.year} championship`,
+        headline: `${champ.name} win the ${seasonLabel(this.year)} championship`,
         userInvolved: po.championTeamId === this.userTeamId,
       })
       // Queue a champion tentpole press job.
