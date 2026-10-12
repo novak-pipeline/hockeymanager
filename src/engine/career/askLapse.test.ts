@@ -109,3 +109,15 @@ describe('summer scenes do not silence the next season', () => {
     expect(c.data.players.get(pid).moraleMemory?.[0]?.kind).toBe('ignored')
   })
 })
+
+describe('a stale press conference does not survive a load (loop audit F19)', () => {
+  it('a presser more than four days old is gone whenever it is asked for', () => {
+    const { career, c } = makeCareer(806)
+    c.pressConference = { id: 'pc-old', question: 'After a heavy defeat...', context: '', day: 12, year: c.year }
+    c.currentDay = 14
+    expect(career.getPressConference()?.id).toBe('pc-old')
+    const loaded = Career.fromSnapshot(career.exportSnapshot('t', '2026-11-11T00:00:00.000Z')) as any
+    loaded.currentDay = 42
+    expect(loaded.getPressConference()).toBeNull()
+  })
+})

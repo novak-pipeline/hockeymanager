@@ -6210,8 +6210,16 @@ export class Career {
 
   /** The pending press-conference question, if any. */
   getPressConference(): PressConferenceState | null {
+    // Loop audit F19: the four-day lapse ran only on an advance, so loading an
+    // old save showed a presser about a game from a month ago. A stale one is
+    // past its moment whenever it is asked for.
+    const pc = this.pressConference
+    if (pc && (pc.year !== this.year || this.currentDay - pc.day > Career.PRESSER_SHELF_DAYS)) this.pressConference = null
     return this.pressConference ? { ...this.pressConference } : null
   }
+
+  /** A presser left unanswered this many match days lapses. */
+  static readonly PRESSER_SHELF_DAYS = 4
 
   /**
    * Apply the user's press-conference answer. The tone is either LLM-graded
@@ -8064,7 +8072,7 @@ export class Career {
   private maybeQueuePresser(day: number, userGame: GameOutcome | undefined): void {
     const pc = this.pressConference
     if (pc) {
-      if (pc.year !== this.year || day - pc.day > 4) this.pressConference = null
+      if (pc.year !== this.year || day - pc.day > Career.PRESSER_SHELF_DAYS) this.pressConference = null
       else return
     }
     // Fewer, better: twelve days between pressers, and the stock questions
