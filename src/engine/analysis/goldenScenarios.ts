@@ -23,10 +23,12 @@ export type ScenarioKind =
   | 'bigHit'
   | 'saveRebound'
   | 'emptyNetLate'
+  | 'dZoneCoverage'
 
 export const SCENARIO_KINDS: readonly ScenarioKind[] = [
   'breakaway', 'twoOnOne', 'ozCycleShot', 'ppSetPlay', 'goalReplay',
   'lineChangeOnFly', 'faceoffWinPlay', 'bigHit', 'saveRebound', 'emptyNetLate',
+  'dZoneCoverage',
 ]
 
 /** Human label + how much game time to show around the moment (lead before, tail after).
@@ -43,6 +45,8 @@ export const SCENARIO_META: Record<ScenarioKind, { label: string; lead: number; 
   bigHit:          { label: 'Big hit',                        lead: 12,  tail: 8 },
   saveRebound:     { label: 'Goalie save + rebound',          lead: 10,  tail: 8 },
   emptyNetLate:    { label: 'Empty net / late game',          lead: 10,  tail: 20 },
+  // W3: a long spell in one zone ending in a shot, judged on the DEFENDING side's coverage
+  dZoneCoverage:   { label: 'Defensive-zone coverage',        lead: 20,  tail: 5 },
 }
 
 export interface ScenarioHit {
@@ -125,6 +129,23 @@ export function findScenarios(
     return 'no save/goal'
   }
 
+  // Puck position over live frames (for zone time): abs t and x in rink units.
+  const puckTrack: Array<{ abs: number; x: number }> = []
+  for (const ev of stream) if (ev.type === 'frame') puckTrack.push({ abs: (bases.get(ev.period) ?? (ev.period - 1) * REG) + ev.t, x: ev.puck.x })
+  /** Seconds the puck has spent continuously in the zone at sign `sign` before `t` (≤ 40). */
+  const zoneTime = (t: number, sign: number): number => {
+    let lo = 0
+    let hi = puckTrack.length - 1
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1
+      if (puckTrack[mid]!.abs <= t) lo = mid
+      else hi = mid - 1
+    }
+    let k = lo
+    while (k > 0 && puckTrack[k]!.x * sign > 0.25 && t - puckTrack[k]!.abs < 40) k--
+    return t - puckTrack[k]!.abs
+  }
+
   evs.forEach((x, i) => {
     const ev = x.ev
     const t = x.abs
@@ -143,6 +164,12 @@ export function findScenarios(
       const ozPasses = passesBy(side, t - 12, t, sign)
       if (!stopBetween(t - 12, t) && (ev.origin === 'cycle' || ozPasses >= 3)) {
         push({ kind: 'ozCycleShot', absT: t, period: ev.period, side, note: `OZ cycle (${ozPasses} passes${ev.origin ? `, origin ${ev.origin}` : ''}), ${res}`, quality: 0.6 + Math.min(ozPasses, 6) * 0.1 + (ev.origin === 'cycle' ? 0.3 : 0) })
+      }
+      // D-zone coverage: ≥ 12 s of the puck in this zone without a whistle, a
+      // shot at the end — the clip is about the DEFENDING side's coverage.
+      if (!onPP(side, t) && !stopBetween(t - 12, t)) {
+        const zt = zoneTime(t, sign)
+        if (zt >= 12) push({ kind: 'dZoneCoverage', absT: t, period: ev.period, side: side === 'home' ? 'away' : 'home', note: `${zt.toFixed(0)} s in the zone, then a shot, ${res}`, quality: 0.8 + Math.min(zt, 30) / 30 })
       }
       // PP set play: on the power play, ≥3 completed OZ passes in 15 s, no whistle.
       if (onPP(side, t)) {

@@ -55,10 +55,14 @@ const S = (
 // Fitted to the scorecard's textbook snapshots (src/engine/analysis/shapes.ts):
 // each spot reproduces the diagram at the snapshot's puck position and moves
 // sensibly with the puck elsewhere.
+// W3 S1: the low centre and the partner D move up with the puck (at the
+// retrieval, px′ ≈ −90, they stand where the fitted diagram has them; as the
+// carrier skates it up they come with him — no centre left standing in his
+// own slot with the puck at the blue line).
 export const BREAKOUT: RoleSpot[] = [
-  S('C_LOW', 'F', -70, 6, 0, 0, 0.85),
+  S('C_LOW', 'F', -16, 6, 0.6, 0, 0.85),
   S('W_STRONG', 'F', -56, 37, 0, 0, 0.85),
-  S('D_PARTNER', 'D', -84, -10, 0, 0, 0.6),
+  S('D_PARTNER', 'D', -57, -10, 0.3, 0, 0.6),
   S('W_WEAK', 'F', -38, -22, 0, 0, 0.85),
   S('D_HIGH', 'D', -60, -24, 0.2, 0, 0.45)
 ]
@@ -100,7 +104,7 @@ export const CYCLE_POINT: RoleSpot[] = [
 ]
 
 /** Power-play set-ups (absolute spots in the attack frame, y′ toward the strong side). */
-export function powerPlay(f: PowerPlayFormation): RoleSpot[] {
+function powerPlayRaw(f: PowerPlayFormation): RoleSpot[] {
   switch (f) {
     case 'umbrella':
       return [
@@ -162,7 +166,7 @@ export const FOUR_ATTACK: RoleSpot[] = [
  * Forecheck: the opponent is breaking out of ITS zone (puck at x′ > 25 in our
  * frame). F1 is the on-puck role.
  */
-export function forecheck(sys: ForecheckSystem): RoleSpot[] {
+function forecheckRaw(sys: ForecheckSystem): RoleSpot[] {
   switch (sys) {
     case '2-1-2':
       return [
@@ -190,26 +194,37 @@ export function forecheck(sys: ForecheckSystem): RoleSpot[] {
   }
 }
 
-/** Opponent carrying through the neutral zone: backcheck lanes + D gap (gap set by agents). */
+/**
+ * Opponent carrying through the neutral zone (rush defence): the strong-side D
+ * holds the gap on the puck side, the weak-side D the middle/far lane; F1
+ * backchecks through the middle, F2/F3 take the strong and weak lanes. The
+ * agents turn a lane into a mark when an attacker is in it (plans.ts claims).
+ */
 export const NZ_DEFENSE: RoleSpot[] = [
-  S('D_GAP_S', 'D', -40, 15, 0, 0, 0.8, -80, 20),
-  S('D_GAP_W', 'D', -41, -10, 0, 0, 0.8, -80, 20),
-  S('BC_STRONG', 'F', -16, 25, 0, 0, 0.85, -70, 60),
-  S('BC_WEAK', 'F', -16, -25, 0, 0, 0.85, -70, 60),
-  S('BC_MID', 'F', -14, 6, 0, 0, 0.85, -70, 60)
+  S('NZ_SD', 'D', -40, 15, 0, 0, 0.8, -80, 20),
+  S('NZ_WD', 'D', -41, -10, 0, 0, 0.8, -80, 20),
+  S('NZ_F2', 'F', -16, 25, 0, 0, 0.85, -70, 60),
+  S('NZ_F3', 'F', -16, -25, 0, 0, 0.85, -70, 60),
+  S('NZ_F1', 'F', -14, 6, 0, 0, 0.85, -70, 60)
 ]
 
-/** Defending our zone, zone coverage (box + 1). */
+/**
+ * Defending our zone, zone coverage (box + 1): the weak-side D owns the net
+ * front, F1 (centre) the low slot and the second man low, F2 the strong-side
+ * wall and point, F3 the weak-side high slot and point, and the strong-side D
+ * the puck along the wall below the dots. Whoever is on the puck vacates his
+ * role; the rest cover the attacker in their area (plans.ts).
+ */
 export const DZ_ZONE: RoleSpot[] = [
-  S('D_NET', 'D', -80, -2, 0, 0.1, 0.65),
-  S('C_LOW', 'F', -70, 0, 0, 0.4, 0.65),
-  S('W_STRONG', 'F', -42, 28, 0, 0, 0.6),
-  S('W_WEAK', 'F', -52, -10, 0, 0, 0.6),
-  S('D_STRONG', 'D', -80, 0, 0, 0.8, 0.65)
+  S('DZ_WD', 'D', -80, -2, 0, 0.1, 0.65),
+  S('DZ_F1', 'F', -70, 0, 0, 0.4, 0.65),
+  S('DZ_F2', 'F', -42, 28, 0, 0, 0.6),
+  S('DZ_F3', 'F', -52, -10, 0, 0, 0.6),
+  S('DZ_SD', 'D', -80, 0, 0, 0.8, 0.65)
 ]
 
 /** Penalty kill shapes (4 men; the 3-man kill takes the first three). */
-export function penaltyKill(f: PenaltyKillFormation): RoleSpot[] {
+function penaltyKillRaw(f: PenaltyKillFormation): RoleSpot[] {
   if (f === 'diamond') {
     return [
       S('PK_NET', 'D', -80, 0, 0, 0.1, 0.55),
@@ -261,3 +276,23 @@ export function spotTarget(s: RoleSpot, a: number, side: number, puckX: number, 
   if (s.maxX !== undefined && tx > s.maxX) tx = s.maxX
   return { x: a * tx, y: side * ty }
 }
+
+// The system tables are built once per system: the agents compare tables by
+// identity (a change of shape is a re-plan trigger, plans.ts).
+const memo = <K, V>(f: (k: K) => V): ((k: K) => V) => {
+  const m = new Map<K, V>()
+  return (k: K): V => {
+    let v = m.get(k)
+    if (v === undefined) {
+      v = f(k)
+      m.set(k, v)
+    }
+    return v
+  }
+}
+/** Power-play set-ups (absolute spots in the attack frame, y′ toward the strong side). */
+export const powerPlay: (f: PowerPlayFormation) => RoleSpot[] = memo(powerPlayRaw)
+/** Forecheck shapes by system (the opponent breaking out of its zone). */
+export const forecheck: (sys: ForecheckSystem) => RoleSpot[] = memo(forecheckRaw)
+/** Penalty kill shapes (4 men; the 3-man kill takes the first three). */
+export const penaltyKill: (f: PenaltyKillFormation) => RoleSpot[] = memo(penaltyKillRaw)

@@ -34,6 +34,7 @@ import type {
   ShotType,
   Player,
   PlayerId,
+  SkaterSnapshot,
   Team,
   XY
 } from '@domain'
@@ -74,6 +75,7 @@ import {
 import { BLUE_X, DOT_EZ_X, DOT_NZ_X, DOT_Y, GOAL_X, HALF_X, HALF_Y, NET_HALF_W, boardsClamp, distToBoards } from './rink'
 import { SHAPE_TUNING, DEKE, DEKE_LEVEL, REACH, blockChance, decideCarrier, dekeDefRead, dekeGoalieRead, dekeSkill, pressureOn, realPressure, thinkSide, xgAt, type ThinkOut } from './brain'
 import { decideHit, resolveHit, type HitIntent } from './physical'
+import { jobName, newTeamPlan, setJob } from './plans'
 import { emptyAgentTelemetry, type AgentTelemetry } from './telemetry'
 import { LEVEL, levelDefOffset, levelOffset, rDef, rLevel, type CarrierAction, type Side, type World } from './world'
 
@@ -249,6 +251,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     tactics: sim.team.tactics,
     roles: new Map(),
     presser: null,
+    plans: new Map(),
+    team: newTeamPlan(),
+    leaving: new Set(),
     entryAt: -99,
     shorthanded: false,
     powerPlay: false,
@@ -467,6 +472,17 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         s.skaters[idx] = nb
         s.sim.unit.skaters[idx] = { player: p, pos: { x: nb.x / HALF_X, y: nb.y / HALF_Y }, vel: { x: 0, y: 0 } }
         hitIntent.delete(b)
+        // The new man has a job from his first frame: the departing man's
+        // role, and the shape re-plans with him in it at the next think (the
+        // pool changed), where he engages the puck if he is the man closest.
+        const wasRole = s.plans.get(b)?.role || s.roles.get(b)
+        s.plans.delete(b)
+        s.leaving.delete(b)
+        if (wasRole) {
+          setJob(s.plans, nb, now, 'spot', null, wasRole)
+          s.roles.set(nb, wasRole)
+        }
+        s.team.force = true
         if (w.passTo === b) w.passTo = null
         ch.swaps.splice(i, 1)
         ch.swapped++
@@ -1525,6 +1541,20 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
 
     if (deferredDeploy.size > 0) runDeferredDeploys()
     // ---- Emit the frame for the state at `now`. ----
+    // (role/job: the skater's role in the shape and the job he is executing;
+    // additive snapshot fields read by the W3 detectors.)
+    const snapOf = (s: Side, b: Body): SkaterSnapshot => {
+      const plan = s.plans.get(b)
+      const role = plan?.role || s.roles.get(b)
+      const job = b === w.carrier ? 'carry' : s.leaving.has(b) ? 'change' : plan ? jobName(plan) : undefined
+      return {
+        player: b.player.id,
+        pos: { x: clamp(b.x / HALF_X, -1, 1), y: clamp(b.y / HALF_Y, -1, 1) },
+        facing: Math.round(Math.atan2(b.hy, b.hx) * 100) / 100,
+        ...(role !== undefined ? { role } : {}),
+        ...(job !== undefined ? { job } : {})
+      }
+    }
     if (now > lastFrameT + 1e-6) {
       for (const s of sides) {
         s.sim.unit.skaters.forEach((r, i) => {
@@ -1544,8 +1574,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         t: Math.round(now * 100) / 100,
         period,
         type: 'frame',
-        home: H.skaters.map((b) => ({ player: b.player.id, pos: { x: clamp(b.x / HALF_X, -1, 1), y: clamp(b.y / HALF_Y, -1, 1) }, facing: Math.round(Math.atan2(b.hy, b.hx) * 100) / 100 })),
-        away: A.skaters.map((b) => ({ player: b.player.id, pos: { x: clamp(b.x / HALF_X, -1, 1), y: clamp(b.y / HALF_Y, -1, 1) }, facing: Math.round(Math.atan2(b.hy, b.hx) * 100) / 100 })),
+        home: H.skaters.map((b) => snapOf(H, b)),
+        away: A.skaters.map((b) => snapOf(A, b)),
         homeGoalie: { player: H.goalie.player.id, pos: { x: H.goalie.x / HALF_X, y: H.goalie.y / HALF_Y } },
         awayGoalie: { player: A.goalie.player.id, pos: { x: A.goalie.x / HALF_X, y: A.goalie.y / HALF_Y } },
         puck: { x: clamp(pk.x / HALF_X, -1, 1), y: clamp(pk.y / HALF_Y, -1, 1) },
@@ -1582,6 +1612,11 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     } else if (pending) {
       faceoffTargets()
     } else {
+      // Men on their way to the bench are the change's, not the shape's.
+      for (const s of sides) {
+        s.leaving.clear()
+        for (const sw of changing.get(s)?.swaps ?? []) s.leaving.add(sw.out)
+      }
       for (const s of sides) thinkSide(w, s, out)
       if (w.carrier && w.control) {
         const c = w.carrier
@@ -1625,7 +1660,15 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       // The physical game: who is lining somebody up.
       for (const s of sides) {
         for (const b of s.skaters) {
+          if (s.leaving.has(b)) continue
           const tgt = w.carrier === b ? null : decideHit(w, s, b, hitIntent, ctx.intensity ?? 0)
+          // Claims: the carrier is the presser's job. A man covering somebody
+          // else does not leave him open to line up the carrier (W3 S1).
+          const plan = s.plans.get(b)
+          if (tgt && tgt === w.carrier && plan?.job === 'mark' && plan.mark !== tgt) {
+            hitIntent.delete(b)
+            continue
+          }
           if (tgt) {
             cmds.set(b, { tx: tgt.x + tgt.vx * 0.2, ty: tgt.y + tgt.vy * 0.2, speed: b.caps.top, arrive: false, urgency: 1, boardsOk: true })
           }

@@ -15,6 +15,10 @@ import { MAX_TOP_FT } from './physics'
 import { histPct } from './telemetry'
 import { passShape } from '@engine/full/passShape'
 import { analyzeGame } from '@engine/analysis'
+import { framesFromStream, judgeTeamPlay, SIM_GATES } from '@engine/analysis/teamPlay'
+
+/** W3 S1 design band for the stream gates (per 60 live minutes / per player-minute). */
+const TEAM_PLAY_BAND = { aimlessPer60: 30, coveragePer60: 5, flipsPerPlayerMin: 26 }
 
 const data = generateLeague({ seed: 99 })
 const resolve = (id: PlayerId): Player => {
@@ -92,6 +96,54 @@ describe('agent engine', () => {
     expect(vanish).toBe(0)
   }, 120000)
 
+  it('plays with intent (W3 S1): nobody idles in the house, one man per attacker, jobs persist', () => {
+    // The team-play detectors on the sim stream (src/engine/analysis/teamPlay.ts),
+    // per 60 live minutes. Limits are the design band (docs/gameplan-2026-09-28/W3-DESIGN.md
+    // item 2): the engine before S1 measured ~36 aimless, ~6 coverage cases and ~29 job
+    // changes per player-minute on the imported league.
+    let liveMin = 0
+    let aimless = 0
+    let coverage = 0
+    let flips = 0
+    let jobMin = 0
+    let jobsSeen = 0
+    let newMen = 0
+    let newMenWithJob = 0
+    for (let i = 0; i < 4; i++) {
+      const out = agentSimGame(team(i), team(i + 3), resolve, { seed: 900 + i })
+      const onIce = new Set<string>()
+      for (const e of out.stream) {
+        if (e.type !== 'frame') continue
+        const here = [...e.home, ...e.away]
+        for (const s of here) {
+          if (s.role !== undefined && s.job !== undefined) jobsSeen++
+          // A man fresh off the bench in live play has a role and a job on his first frame.
+          if (!onIce.has(s.player as string) && onIce.size > 0 && e.puckCarrier !== null) {
+            newMen++
+            if (s.role !== undefined && s.job !== undefined) newMenWithJob++
+          }
+        }
+        onIce.clear()
+        for (const s of here) onIce.add(s.player as string)
+      }
+      const r = judgeTeamPlay(framesFromStream(out.stream), { gates: SIM_GATES })
+      liveMin += r.liveMin
+      aimless += r.aimless.length
+      coverage += r.doubles.length + r.farSide.length + r.ignored.length
+      flips += r.jobFlips
+      jobMin += r.jobPlayerMin
+    }
+    const p60 = (n: number): number => (n / liveMin) * 60
+    // eslint-disable-next-line no-console
+    console.log(`team play /60 live min: aimless ${p60(aimless).toFixed(1)} coverage ${p60(coverage).toFixed(1)}; job flips ${(flips / jobMin).toFixed(1)}/player-min`)
+    expect(jobsSeen).toBeGreaterThan(10000)
+    expect(newMen).toBeGreaterThan(50)
+    expect(newMenWithJob / newMen).toBeGreaterThan(0.95)
+    expect(p60(aimless)).toBeLessThan(TEAM_PLAY_BAND.aimlessPer60)
+    expect(p60(coverage)).toBeLessThan(TEAM_PLAY_BAND.coveragePer60)
+    expect(flips / jobMin).toBeLessThan(TEAM_PLAY_BAND.flipsPerPlayerMin)
+  }, 120000)
+
   it('lands in the NHL band and keeps its play logic over many games', () => {
     const tm = emptyAgentTelemetry()
     const counts: Record<string, number> = {}
@@ -99,7 +151,12 @@ describe('agent engine', () => {
     let rushBack = 0
     let ozPasses = 0
     let ozBack = 0
-    const games = 16
+    // 96 games: the generated league scores ~2.5 goals per team-game against
+    // a lower bound of 2.30, and a 16-game sample swung +-0.4 with any
+    // reshuffle of the dice (the engine before W3 S1 read 3.00 on the old
+    // 16 seeds and 2.49 over 192 games). The bound is unchanged; the sample
+    // is big enough to measure the engine rather than the seeds.
+    const games = 96
     for (let i = 0; i < games; i++) {
       const out = agentSimGame(team(i), team(i + 1), resolve, { seed: 5000 + i, agentTelemetry: tm })
       for (const e of out.stream) {
@@ -141,5 +198,5 @@ describe('agent engine', () => {
     // Offensive-zone back passes stay in the NHL band (low-to-high in a
     // settled cycle is hockey; on the rush it isn't — see the scorecard).
     expect(ozBack / Math.max(1, ozPasses)).toBeLessThan(0.4)
-  }, 300000)
+  }, 900000)
 })

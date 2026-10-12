@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ProbeFrame, ProbeGeometry, ProbeRig } from './viewerProbe'
-import { runViewerTruth, vt1Bodies, vt5Replay, vt6Clocks, vt8Changes, type VTInput } from './viewerTruth'
+import { runViewerTruth, vt13Aimless, vt14Coverage, vt1Bodies, vt5Replay, vt6Clocks, vt8Changes, type VTInput } from './viewerTruth'
 
 const GEO: ProbeGeometry = { rinkHalfL: 100, rinkHalfW: 42.5, benchGates: { home: { x: -26, z: 41 }, away: { x: 26, z: 41 } } }
 
@@ -60,9 +60,38 @@ describe('viewer-truth detectors', () => {
     expect(r.value).toMatch(/^1 violations/)
   })
 
-  it('runs all ten and reports n/a with nothing to judge', () => {
+  // W3 team play: home defends the net at x = -89 (its goalie stands there).
+  const goalies = [rig('home', 'hg', -86, 0, { goalie: true }), rig('away', 'ag', 86, 0, { goalie: true })]
+  const fiveAt = (team: 'home' | 'away', pts: Array<[number, number]>): ProbeRig[] => pts.map(([x, z], k) => rig(team, `${team[0]}${k}`, x, z))
+  const awayAtk: Array<[number, number]> = [[-80, 30], [-75, 2], [-40, -20], [-35, 20], [-60, -30]]
+
+  it('VT13 flags a defender standing in the slot with nobody to cover, not one boxing out', () => {
+    // a0 carries in the corner; h1 stands alone in the high slot for 3 s
+    const homeIdle: Array<[number, number]> = [[-78, 26], [-62, 8], [-55, -30], [-30, 30], [-82, -14]]
+    const frames = Array.from({ length: 100 }, (_, i) => frame(i, [...goalies, ...fiveAt('home', homeIdle), ...fiveAt('away', awayAtk)], { carrier: 'a0', puck: { x: -80, y: 0, z: 30, sx: 0, sy: 0, onScreen: true, simX: -80, simZ: 30 } }))
+    expect(vt13Aimless(input(frames)).status).toBe('red')
+    // an attacker beside him and a D boxing out the man at the net: everyone engaged, green
+    const away2: Array<[number, number]> = [[-80, 30], [-75, 2], [-40, -20], [-35, 20], [-60, 6]]
+    const homeBox: Array<[number, number]> = [[-78, 26], [-62, 8], [-55, -30], [-30, 30], [-78, 4]]
+    const ok = frames.map((f) => ({ ...f, rigs: [...goalies, ...fiveAt('home', homeBox), ...fiveAt('away', away2)] }))
+    expect(vt13Aimless(input(ok)).status).toBe('green')
+  })
+
+  it('VT14 flags two men on the carrier while a man in the slot is open', () => {
+    const homeDbl: Array<[number, number]> = [[-78, 26], [-82, 32], [-50, -25], [-30, 30], [-30, -25]]
+    const frames = Array.from({ length: 100 }, (_, i) => frame(i, [...goalies, ...fiveAt('home', homeDbl), ...fiveAt('away', awayAtk)], { carrier: 'a0', puck: { x: -80, y: 0, z: 30, sx: 0, sy: 0, onScreen: true, simX: -80, simZ: 30 } }))
+    const r = vt14Coverage(input(frames))
+    expect(r.status).toBe('red')
+    expect(r.value).toMatch(/^doubles 1/)
+    // one man on the puck, one on the slot man: green
+    const homeOk: Array<[number, number]> = [[-78, 26], [-78, 2], [-50, -25], [-30, 30], [-30, -25]]
+    const ok = frames.map((f) => ({ ...f, rigs: [...goalies, ...fiveAt('home', homeOk), ...fiveAt('away', awayAtk)] }))
+    expect(vt14Coverage(input(ok)).status).toBe('green')
+  })
+
+  it('runs every detector and reports n/a with nothing to judge', () => {
     const res = runViewerTruth(input([]))
-    expect(res.map((r) => r.id)).toEqual(['VT1', 'VT2', 'VT3', 'VT4', 'VT5', 'VT6', 'VT7', 'VT8', 'VT9', 'VT10', 'VT11'])
+    expect(res.map((r) => r.id)).toEqual(['VT1', 'VT2', 'VT3', 'VT4', 'VT5', 'VT6', 'VT7', 'VT8', 'VT9', 'VT10', 'VT11', 'VT13', 'VT14', 'VT16'])
     expect(res.every((r) => r.status === 'n/a')).toBe(true)
   })
 })

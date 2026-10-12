@@ -13,10 +13,15 @@
  *               read of options behind him depends on vision, and his execution
  *               error on skill and pressure — so mistakes EMERGE.
  *   support   — holds his role spot relative to the puck, stays onside, and
- *               slides off it to open a passing lane.
+ *               picks the open ice around it with a lane from the carrier.
  *   defence   — one presser (forecheck F1 / DZ on-puck / NZ gap-control D),
- *               everyone else in the system's spots (zone or man coverage),
- *               the lane man steps into shooting lanes, loose pucks are raced.
+ *               everyone else in a role of the system's shape, covering the
+ *               attacker in his area (zone) or his man (man coverage) —
+ *               each attacker claimed by one man — the lane man steps into
+ *               shooting lanes, loose pucks are raced.
+ *
+ * W3 S1: roles and jobs persist between triggers (plans.ts); the 0.25 s think
+ * checks the triggers and executes the jobs.
  *
  * Only decides; the sim executes (physics, pass/shot resolution, rules).
  */
@@ -46,6 +51,7 @@ import {
   type RoleSpot
 } from './templates'
 import { other, rDef, rLevel, type CarrierAction, type Side, type World } from './world'
+import { PLAN, planOf, setJob, type JobKind, type Plan } from './plans'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
 const r01 = rLevel
@@ -75,10 +81,8 @@ export const VAL = { keepRoute: 3, minCarry: 4, oneTimerV: 1.8, otMinX: 50, otMi
  * race above the safety line before he steps up for it.
  */
 export const D_SAFETY = { look: 2, gap: 12, gapPerV: 0.5, stepUpMargin: 1.3, pinchMaxX: 55, gapLead: 0.5, looseGuard: 1 }
-/** Support-skater motion loops around a spot: radius (ft) and angular speed (rad/s). */
 /** Shape tuning: where the breakout hands over to the neutral-zone lanes (x in the attack frame), and the target-smoothing time constant (s). */
 export const SHAPE_TUNING = { breakoutX: -25, smooth: 0.45 }
-export const DRIFT = { rAtk: 12, rDef: 5, omAtk: 0.42, omDef: 0.38 }
 /**
  * In close: the radius (ft) around their net where a carrier may not dawdle,
  * the seconds he may hold it there before he must act, the per-second cost of
@@ -657,14 +661,12 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
 }
 
 // ---------------------------------------------------------------------------
-// Everyone else
+// Everyone else — W3 S1: plans, triggers and claims (plans.ts)
 // ---------------------------------------------------------------------------
 
-/** Pick the role table for a side in this situation. */
-function supportTable(w: World, me: Side, withPuck: boolean): RoleSpot[] {
+/** Pick the role table for a side with the puck at `px` (attack frame). */
+function supportTable(w: World, me: Side, withPuck: boolean, px: number): RoleSpot[] {
   const opp = other(w, me)
-  const a = me.a
-  const px = w.puck.x * a
   if (me.ot && !me.powerPlay) return withPuck ? OT_ATTACK : OT_DEFEND
   const n = me.skaters.length
   const m = opp.skaters.length
@@ -685,18 +687,43 @@ function supportTable(w: World, me: Side, withPuck: boolean): RoleSpot[] {
   return DZ_ZONE
 }
 
+/**
+ * The shape, sticky across its thresholds: the puck must be PLAN.lineHyst ft
+ * past a line (blue, red, the breakout handover, the top of the circles)
+ * before the team changes shape — a puck sitting on a line no longer flips
+ * five men between two tables every think.
+ */
+function pickTable(w: World, me: Side, withPuck: boolean): RoleSpot[] {
+  const px = w.puck.x * me.a
+  const t0 = supportTable(w, me, withPuck, px)
+  const prev = me.team.table
+  if (prev && t0 !== prev) {
+    if (supportTable(w, me, withPuck, px + PLAN.lineHyst) === prev || supportTable(w, me, withPuck, px - PLAN.lineHyst) === prev) return prev as RoleSpot[]
+  }
+  return t0
+}
+
+const TABLE_IDS = new WeakMap<object, number>()
+let tableSeq = 0
+function tableId(t: readonly RoleSpot[]): number {
+  const id = TABLE_IDS.get(t)
+  if (id !== undefined) return id
+  TABLE_IDS.set(t, ++tableSeq)
+  return tableSeq
+}
+
 /** Role assignment: hysteresis on a man's current role (ft of skating it is worth keeping), and whether to solve the whole shape at once. */
 export const ROLE_ASSIGN = { keep: 12, optimal: 1 }
 
-/** Assign roles greedily in priority order, with hysteresis on current roles. */
-function assignRoles(me: Side, pool: Body[], table: RoleSpot[], targets: Map<string, XY>): Map<Body, RoleSpot> {
+/** Assign roles (the least total skating), with hysteresis on current roles. */
+function assignRoles(me: Side, pool: Body[], table: readonly RoleSpot[], targets: Map<string, XY>): Map<Body, RoleSpot> {
   const out = new Map<Body, RoleSpot>()
   const free = new Set(pool)
   // Fewer men than roles (4-on-4, a shorthanded rush, the carrier is a D):
   // drop FORWARD roles first. The D roles are the safety valve — a table cut
   // from the end would otherwise send a defenceman to the net-front and
   // leave nobody back.
-  let used = table
+  let used: readonly RoleSpot[] = table
   if (pool.length < table.length) {
     const nD = pool.filter((b) => b.player.position === 'D').length
     let keepD = Math.min(nD, table.filter((s) => s.pos === 'D').length)
@@ -719,12 +746,12 @@ function assignRoles(me: Side, pool: Body[], table: RoleSpot[], targets: Map<str
     let cost = Math.hypot(b.x - tgt.x, b.y - tgt.y)
     if (spot.pos === 'F' && isD) cost += 30
     if (spot.pos === 'D' && !isD) cost += 30
-    if (me.roles.get(b) === spot.role) cost -= ROLE_ASSIGN.keep
+    if (me.plans.get(b)?.role === spot.role) cost -= ROLE_ASSIGN.keep
     return cost
   }
   // The shape as a whole: the assignment with the least total skating (all
   // permutations — five men at most), so nobody crosses the ice to take a
-  // spot a teammate is standing next to, and the roles don't churn.
+  // spot a teammate is standing next to.
   const men = [...free]
   if (ROLE_ASSIGN.optimal && men.length <= 5 && used.length <= 6 && men.length > 0 && men.length <= used.length) {
     const k = Math.min(men.length, used.length)
@@ -768,28 +795,75 @@ function assignRoles(me: Side, pool: Body[], table: RoleSpot[], targets: Map<str
       free.delete(best)
     }
   }
-  // Extra bodies (6 skaters vs a 5-role table) take the first role again, offset.
+  // Extra bodies (6 skaters vs a 5-role table) take the first role again.
   for (const b of free) out.set(b, table[0])
   return out
 }
 
-/**
- * Per-player, slowly varying positional error: a weak positional player finds
- * his spot less precisely (and wanders more). Deterministic from the clock.
- */
-function drift(b: Body, t: number, withPuck: boolean): XY {
-  const pos = rDef(b.player.ratings.mental.positioning)
-  const ph = b.mass * 0.37
-  // Hockey players never stand still: support skaters keep their feet moving
-  // in loops around their spot (getting open, timing their route), defenders
-  // shuffle and re-set. Weaker positional players also wander off the spot.
-  const R = withPuck ? DRIFT.rAtk : DRIFT.rDef
-  const om = withPuck ? DRIFT.omAtk : DRIFT.omDef
-  const err = (1 - pos) * 5
-  return {
-    x: Math.cos(t * om + ph) * R + Math.sin(t * 0.31 + ph) * err,
-    y: Math.sin(t * om + ph) * R * 0.8 + Math.cos(t * 0.23 + ph * 1.7) * err * 0.8
+/** Roles that own the net front (box out the man there when they cover nobody else). */
+const NET_ROLES = new Set(['DZ_WD', 'PK_NET', 'PK_LOW_W', 'PK3_LOW_W', 'B4_LOW_W', 'OT_SLOT'])
+
+/** Distance from p to the segment a→b. */
+function segDist(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax
+  const dy = by - ay
+  const L2 = dx * dx + dy * dy
+  const s = L2 > 1e-9 ? clamp(((px - ax) * dx + (py - ay) * dy) / L2, 0, 1) : 0
+  return Math.hypot(px - (ax + dx * s), py - (ay + dy * s))
+}
+
+/** Track where (and since when) a man has been standing: a move of more than 2.5 ft restarts it. */
+function noteStill(p: Plan, b: Body, t: number): void {
+  if (Math.hypot(b.x - p.stillX, b.y - p.stillY) > 2.5) {
+    p.stillX = b.x
+    p.stillY = b.y
+    p.stillSince = t
   }
+}
+
+/**
+ * Support: get open. Around his role spot a man picks the point with the most
+ * room and the clearest lane from the carrier, and skates to it; he holds the
+ * pick (PLAN.openHoldS) unless another is clearly better, and a man who has
+ * been standing PLAN.idleS seconds moves on to the next best (no idling in
+ * the slot). This replaces the old drift loops: motion with a purpose.
+ */
+function getOpen(w: World, me: Side, opps: readonly Body[], b: Body, base: XY, carrier: XY, lateralOnly: boolean): XY {
+  const p = planOf(me.plans, b, w.t)
+  const st = PLAN.openStep
+  const cands = lateralOnly
+    ? [{ dx: 0, dy: 0 }, { dx: 0, dy: 8 }, { dx: 0, dy: -8 }]
+    : [{ dx: 0, dy: 0 }, { dx: st, dy: 0 }, { dx: -st, dy: 0 }, { dx: 0, dy: st }, { dx: 0, dy: -st }]
+  const score = (c: { dx: number; dy: number }): number => {
+    const x = base.x + c.dx
+    const y = base.y + c.dy
+    let room = 14
+    let lane = 10
+    for (const o of opps) {
+      room = Math.min(room, Math.hypot(o.x - x, o.y - y))
+      lane = Math.min(lane, segDist(o.x, o.y, carrier.x, carrier.y, x, y))
+    }
+    return room + lane * 0.5 - 0.12 * Math.hypot(x - b.x, y - b.y)
+  }
+  noteStill(p, b, w.t)
+  const idle = w.t - p.stillSince > PLAN.supportIdleS
+  const cur = p.open
+  let best = cands[0]
+  let bs = -Infinity
+  for (const c of cands) {
+    // Idle: move on — to open ice a real stride away, not the spot he is on.
+    if (idle && Math.hypot(base.x + c.dx - b.x, base.y + c.dy - b.y) < 5) continue
+    const s = score(c)
+    if (s > bs) {
+      bs = s
+      best = c
+    }
+  }
+  if (!cur || idle || (bs > score(cur) + PLAN.openMargin && w.t - cur.at >= PLAN.openHoldS)) {
+    p.open = { dx: best.dx, dy: best.dy, at: w.t }
+    if (idle) p.stillSince = w.t
+  }
+  return { x: base.x + p.open!.dx, y: base.y + p.open!.dy }
 }
 
 export interface ThinkOut {
@@ -807,14 +881,23 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
   const a = me.a
   const puck = w.puck
   const carrier = w.carrier
+  const tp = me.team
+  const plans = me.plans
   const weHaveIt = w.control === me && carrier !== null
   const theyHaveIt = w.control === opp && carrier !== null
   const loose = carrier === null
   // Shape follows the last team in control while the puck is loose/in flight.
   const shapeWithPuck = weHaveIt || (loose && (w.flightSide ?? w.lastTouch) === me)
-  const side = Math.abs(puck.y) < 4 ? (me.roles.size > 0 ? 1 : 1) : puck.y > 0 ? 1 : -1
+  // The strong side is sticky: it flips only once the puck is well across the
+  // middle (a puck on the dot line used to mirror the whole shape every think).
+  if (Math.abs(puck.y) > PLAN.strongFlipFt) tp.strong = puck.y > 0 ? 1 : -1
+  const side = tp.strong
 
-  const pool = me.skaters.filter((b) => b !== carrier)
+  for (const b of [...plans.keys()]) if (!me.skaters.includes(b)) plans.delete(b)
+  for (const b of me.leaving) setJob(plans, b, w.t, 'change')
+  if (carrier && me.skaters.includes(carrier)) setJob(plans, carrier, w.t, 'carry')
+
+  const pool = me.skaters.filter((b) => b !== carrier && !me.leaving.has(b))
   const cmds = out.cmds
 
   // The D safety line (x in OUR attack frame): goal-side of every attacker's
@@ -836,8 +919,10 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
     if (loose && pIn < -8) safety = Math.min(safety, puck.x * a + pIn * D_SAFETY.look * 0.5 - D_SAFETY.gap)
   }
 
-  // --- Loose puck: the nearest man (two when it is deep in our end) races it.
+  // --- Loose puck: the man with the earliest intercept races it.
   const chasers = new Set<Body>()
+  /** Their pass we cannot beat to the puck: we play the man it is going to. */
+  let receiver: Body | null = null
   if (loose) {
     // Read the puck's path: every skater finds the earliest point on it he
     // can get to first (an intercept — cutting off a rim, stepping up to keep
@@ -876,9 +961,21 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
       // The intended receiver meets the pass.
       chasers.add(w.passTo)
     } else {
-      const first = sorted.find(mayChase)
+      let first = sorted.find(mayChase)
+      // The race is claimed: the man already going keeps it unless another is clearly first.
+      const prev = tp.chaser
+      if (first && prev && prev !== first && icpt.has(prev) && mayChase(prev) && icpt.get(prev)!.t <= icpt.get(first)!.t + PLAN.chaseKeepS) first = prev
+      // Their pass in flight: race it only when we get there about when their
+      // receiver does. Otherwise nobody chases a puck that is already his — we
+      // play the man (W3-LOG: a D skating off to the far boards after a pass
+      // that was never his).
+      if (first && w.passTo && opp.skaters.includes(w.passTo) && icpt.get(first)!.t >= intercept(w.passTo).t + PLAN.contestS) {
+        receiver = w.passTo
+        first = undefined
+      }
       if (first) chasers.add(first)
     }
+    tp.chaser = chasers.size > 0 ? [...chasers][0] : null
     for (const b of chasers) {
       const ip = icpt.get(b)?.p ?? { x: puck.x, y: puck.y }
       let tx = ip.x
@@ -897,148 +994,298 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
           ty = b.y + b.vy
         }
       }
-      const h = boardsClamp(tx, ty, 1.5)
+      let h: XY = boardsClamp(tx, ty, 1.5)
+      // A puck behind the net, a man in front of it: he goes round the post,
+      // not into the back of the cage (two chasers pushing on the net while
+      // the puck sits behind it, everybody else waiting, was a stall).
+      const gx = Math.sign(h.x) * GOAL_X
+      if (Math.abs(h.x) > GOAL_X - 0.5 && Math.abs(b.x) < GOAL_X + 0.5 && Math.sign(b.x) === Math.sign(h.x) && Math.abs(h.y) < 7 && Math.abs(b.y) < 9) {
+        const sy = Math.abs(b.y) > 1 ? Math.sign(b.y) : Math.sign(h.y || 1)
+        const wp = { x: gx + Math.sign(gx) * 1.5, y: sy * 7.5 }
+        if (Math.hypot(wp.x - b.x, wp.y - b.y) > 2) h = wp
+      }
       const far = Math.hypot(h.x - b.x, h.y - b.y) > 45
       cmds.set(b, { tx: h.x, ty: h.y, speed: b.caps.top * (far ? 1 : 0.9), arrive: false, urgency: 1 })
       me.roles.set(b, 'CHASE')
+      setJob(plans, b, w.t, 'chase', null, 'CHASE')
     }
-  }
+  } else tp.chaser = null
 
-  // --- The presser (defending).
+  // --- The threat: their carrier, or the man their pass is going to.
+  const threat: Body | null = theyHaveIt ? carrier : receiver
+  const ownNetX = -a * GOAL_X
   let presser: Body | null = null
-  if (theyHaveIt && carrier) {
-    const ownNetX = -a * GOAL_X
-    let bestT = Infinity
+  // An odd-man rush with one man back: he plays the pass, not the carrier.
+  let lone: Body | null = null
+  let second: Body | null = null
+  if (threat) {
+    const tx = threat.x * a
+    if (tx < 15 && tx > -70 && threat.vx * a < -4 && !me.shorthanded && !me.ot) {
+      const back = pool.filter((b) => !chasers.has(b) && b.x * a < tx - 3)
+      const rush = opp.skaters.filter((o) => o !== threat && o.x * a < tx + 12 && o.x * a > -82 && o.vx * a < 0)
+      if (back.length === 1 && rush.length >= 1) {
+        lone = back[0]
+        second = rush.reduce((p, q) => (q.x * a < p.x * a ? q : p))
+      }
+    }
+    // The man closest to him, right there, takes him (a man fresh off the
+    // bench included: he reads the puck before he looks for his spot).
+    let near: Body | null = null
+    let nd = Infinity
     for (const b of pool) {
-      if (chasers.has(b)) continue
-      let tt = reachTime(b, carrier.x, carrier.y)
-      // Men already between the carrier and our net are better pressers; a
-      // man chasing from behind can't stop him (he backchecks instead).
-      if ((b.x - carrier.x) * -a > 0) tt -= 0.3
-      else tt += 0.9
-      // Deep in their end the forwards forecheck (F1) and the D hold the line.
-      // A D may pinch down the wall to the top of the circles, never below
-      // it (a D chasing into their corner leaves nobody back).
-      if (b.player.position === 'D' && carrier.x * a > 10) tt += 0.7
-      if (b.player.position === 'D' && carrier.x * a > D_SAFETY.pinchMaxX && pool.some((q) => q.player.position !== 'D' && !chasers.has(q))) continue
-      if (b === me.presser) tt -= 0.4
-      if (tt < bestT) {
-        bestT = tt
-        presser = b
+      if (chasers.has(b) || b === lone) continue
+      const d = Math.hypot(b.x - threat.x, b.y - threat.y)
+      if (d < nd) {
+        nd = d
+        near = b
       }
     }
-    me.presser = presser
-    if (presser) {
-      const cx = carrier.x
-      const cy = carrier.y
-      const dNet = Math.hypot(ownNetX - cx, -cy)
-      const ux = (ownNetX - cx) / Math.max(dNet, 1)
-      const uy = -cy / Math.max(dNet, 1)
-      const cAdvForUs = cx * a // carrier position in OUR attack frame
-      const pp = me.tactics.puckPressure ?? 0.5
-      const gc = me.tactics.gapControl ?? 0.5
-      const isD = presser.player.position === 'D'
-      if (cAdvForUs < BLUE_X && cAdvForUs > -BLUE_X - 5 && isD && !me.shorthanded) {
-        // Neutral-ice gap control: back off at a gap that shrinks with the
-        // system's gap setting, facing the carrier (backward skating).
-        const csp = speedOf(carrier)
-        const gap = clamp((10 + csp * 0.55) * (1.25 - gc * 0.5), 8, 30)
-        // Hold the gap on where he is GOING (his speed carries him half a
-        // second on while you react), and only read him backward while you
-        // can still match his speed that way — a carrier coming faster than a
-        // D can backpedal is met by a D who has pivoted and is skating.
-        const lead = D_SAFETY.gapLead
-        const backOk = csp < presser.caps.topBack * 0.85
-        cmds.set(presser, {
-          tx: cx + carrier.vx * lead + ux * gap,
-          ty: (cy + carrier.vy * lead) * 0.8 + uy * gap,
-          speed: presser.caps.top,
-          arrive: true,
-          urgency: 1,
-          ...((Math.hypot(presser.x - cx, presser.y - cy) > 16 && backOk) || csp < 10 ? { faceX: cx, faceY: cy } : {})
-        })
-      } else {
-        // On the puck: take the inside (between him and the net). CONTAIN at a
-        // stick-and-a-half gap, and only close to engage when the carrier is
-        // vulnerable — pinned on the wall, slow, or turned away from our net
-        // (the moment to strip him or finish him).
-        const onWall = distToBoards(cx, cy) < 5
-        const csp = speedOf(carrier)
-        const turnedAway = carrier.hx * ux + carrier.hy * uy < -0.2
-        // Inside the house (near our net) there is no containing: the man on
-        // the puck closes and takes the body/stick before the carrier can
-        // walk in or circle the net for seconds.
-        const inHouse = Math.hypot(ownNetX - cx, cy) < DZ.engageFt
-        const vulnerable = onWall || csp < 7 || turnedAway || inHouse
-        // A carrier standing still gets no respect: the man on him steps INTO
-        // him (body and stick) instead of waiting a stick-length away.
-        const inside = vulnerable ? 3.2 : clamp(10 - pp * 4, 6, 10)
-        cmds.set(presser, {
-          tx: cx + ux * inside + carrier.vx * 0.25,
-          ty: cy + uy * inside + carrier.vy * 0.25,
-          speed: presser.caps.top * (0.75 + pp * 0.25),
-          arrive: !vulnerable,
-          urgency: 0.75 + pp * 0.25,
-          // Face him while he's slow or still coming; once he has speed on
-          // you, skate WITH him (angling him to the wall), not backward.
-          ...(csp < 12 || Math.hypot(presser.x - cx, presser.y - cy) > 16 ? { faceX: cx, faceY: cy } : {})
-        })
+    if (near && nd < PLAN.engageFt) presser = near
+    else if (!lone) {
+      let bestT = Infinity
+      for (const b of pool) {
+        if (chasers.has(b) || b === lone) continue
+        let tt = reachTime(b, threat.x, threat.y)
+        // Men already between the carrier and our net are better pressers; a
+        // man chasing from behind can't stop him (he backchecks instead).
+        if ((b.x - threat.x) * -a > 0) tt -= 0.3
+        else tt += 0.9
+        // Deep in their end the forwards forecheck (F1) and the D hold the line.
+        // A D may pinch down the wall to the top of the circles, never below
+        // it (a D chasing into their corner leaves nobody back).
+        if (b.player.position === 'D' && threat.x * a > 10) tt += 0.7
+        if (b.player.position === 'D' && threat.x * a > D_SAFETY.pinchMaxX && pool.some((q) => q.player.position !== 'D' && !chasers.has(q))) continue
+        if (b === me.presser) tt -= 0.4
+        if (tt < bestT) {
+          bestT = tt
+          presser = b
+        }
       }
-      me.roles.set(presser, 'ONPUCK')
-      // Stick check when the puck is on a blade within reach.
-      const dp = Math.hypot(presser.x - puck.x, presser.y - puck.y)
-      if (dp < REACH) out.pokes.push(presser)
     }
-  } else {
-    me.presser = null
+  }
+  me.presser = presser
+  if (presser && threat) {
+    const cx = threat.x
+    const cy = threat.y
+    const dNet = Math.hypot(ownNetX - cx, -cy)
+    const ux = (ownNetX - cx) / Math.max(dNet, 1)
+    const uy = -cy / Math.max(dNet, 1)
+    const cAdvForUs = cx * a // carrier position in OUR attack frame
+    const pp = me.tactics.puckPressure ?? 0.5
+    const gc = me.tactics.gapControl ?? 0.5
+    const isD = presser.player.position === 'D'
+    const behind = (presser.x - cx) * a > 2
+    const dP = Math.hypot(presser.x - cx, presser.y - cy)
+    if (behind && dP < 16 && cAdvForUs < BLUE_X) {
+      // On him from behind (the backcheck on the puck): skate onto his hip,
+      // stick on the puck — don't circle round to get in front.
+      cmds.set(presser, { tx: cx + threat.vx * 0.35, ty: cy + threat.vy * 0.35, speed: presser.caps.top, arrive: false, urgency: 1 })
+    } else if (cAdvForUs < BLUE_X && cAdvForUs > -BLUE_X - 5 && isD && !me.shorthanded) {
+      // Neutral-ice gap control: back off at a gap that shrinks with the
+      // system's gap setting, facing the carrier (backward skating).
+      const csp = speedOf(threat)
+      const gap = clamp((10 + csp * 0.55) * (1.25 - gc * 0.5), 8, 30)
+      // Hold the gap on where he is GOING (his speed carries him half a
+      // second on while you react), and only read him backward while you
+      // can still match his speed that way — a carrier coming faster than a
+      // D can backpedal is met by a D who has pivoted and is skating.
+      const lead = D_SAFETY.gapLead
+      const backOk = csp < presser.caps.topBack * 0.85
+      cmds.set(presser, {
+        tx: cx + threat.vx * lead + ux * gap,
+        ty: (cy + threat.vy * lead) * 0.8 + uy * gap,
+        speed: presser.caps.top,
+        arrive: true,
+        urgency: 1,
+        ...((dP > 16 && backOk) || csp < 10 ? { faceX: cx, faceY: cy } : {})
+      })
+    } else {
+      // On the puck: take the inside (between him and the net). CONTAIN at a
+      // stick-and-a-half gap, and only close to engage when the carrier is
+      // vulnerable — pinned on the wall, slow, or turned away from our net
+      // (the moment to strip him or finish him).
+      const onWall = distToBoards(cx, cy) < 5
+      const csp = speedOf(threat)
+      const turnedAway = threat.hx * ux + threat.hy * uy < -0.2
+      // Inside the house (near our net) there is no containing: the man on
+      // the puck closes and takes the body/stick before the carrier can
+      // walk in or circle the net for seconds.
+      const inHouse = Math.hypot(ownNetX - cx, cy) < DZ.engageFt
+      const vulnerable = onWall || csp < 7 || turnedAway || inHouse
+      // A carrier standing still gets no respect: the man on him steps INTO
+      // him (body and stick) instead of waiting a stick-length away.
+      const inside = vulnerable ? 3.2 : clamp(10 - pp * 4, 6, 10)
+      cmds.set(presser, {
+        tx: cx + ux * inside + threat.vx * 0.25,
+        ty: cy + uy * inside + threat.vy * 0.25,
+        speed: presser.caps.top * (0.75 + pp * 0.25),
+        arrive: !vulnerable,
+        urgency: 0.75 + pp * 0.25,
+        // Face him while he's slow or still coming; once he has speed on
+        // you, skate WITH him (angling him to the wall), not backward.
+        ...(csp < 12 || dP > 16 ? { faceX: cx, faceY: cy } : {})
+      })
+    }
+    me.roles.set(presser, 'ONPUCK')
+    setJob(plans, presser, w.t, 'puck', null, 'ONPUCK')
+    // Stick check when the puck is on a blade within reach.
+    if (theyHaveIt && Math.hypot(presser.x - puck.x, presser.y - puck.y) < REACH) out.pokes.push(presser)
+  }
+  if (lone && second && threat) {
+    // The one man back on a 2-on-1: take away the pass and give the shooter
+    // the outside — goal-side, between the two, shaded to the pass lane.
+    const gap = clamp(10 + speedOf(threat) * 0.4, 10, 22)
+    const mx = Math.max(Math.min(threat.x * a, second.x * a) - gap, -84)
+    const my = clamp(threat.y * 0.4 + second.y * 0.6, -30, 30)
+    cmds.set(lone, { tx: a * mx, ty: my, speed: lone.caps.top, arrive: true, urgency: 1, faceX: threat.x, faceY: threat.y })
+    me.roles.set(lone, 'ODD_D')
+    setJob(plans, lone, w.t, 'twoOnOne', null, 'ODD_D')
   }
 
-  // --- Everyone else: role spots.
-  const rest = pool.filter((b) => !chasers.has(b) && b !== presser)
+  // --- Everyone else: a role in the shape, a job in the role.
+  const rest = pool.filter((b) => !chasers.has(b) && b !== presser && b !== lone)
   if (rest.length === 0) return
-  const table = supportTable(w, me, shapeWithPuck)
+  const table = pickTable(w, me, shapeWithPuck)
   const targets = new Map<string, XY>()
   for (const s of table) targets.set(s.role, spotTarget(s, a, side, puck.x, puck.y))
-  const roles = assignRoles(me, rest, table, targets)
-  const inZone = puck.x * a >= BLUE_X
-  const ownNetX = -a * GOAL_X
+  // The man on the puck (and the man back on an odd-man rush) vacate the
+  // role nearest them, so the others keep the jobs that are left.
+  let used: readonly RoleSpot[] = table
+  if (!shapeWithPuck) {
+    for (const m of [presser, lone]) {
+      if (!m || used.length <= rest.length) continue
+      const at = m === presser && threat ? threat : m
+      let bi = -1
+      let bd = Infinity
+      used.forEach((s, i) => {
+        const tg = targets.get(s.role)!
+        const d = Math.hypot(tg.x - at.x, tg.y - at.y)
+        if (d < bd) {
+          bd = d
+          bi = i
+        }
+      })
+      if (bi >= 0) used = used.filter((_, i) => i !== bi)
+    }
+  }
+  // Re-plan only on a trigger: possession, the shape, the carrier (or their
+  // receiver), the men in the pool, a man lost far from his job, a man with
+  // no role in this shape (fresh off the bench).
+  const key = `${shapeWithPuck ? 'A' : 'D'}|${tableId(table)}|${(w.passTo ?? carrier)?.player.id ?? '-'}|${rest.map((b) => b.player.id).sort().join(',')}`
+  const replan = tp.force || key !== tp.key || rest.some((b) => !used.some((s) => s.role === plans.get(b)?.role))
+  let roles: Map<Body, RoleSpot>
+  if (replan) {
+    roles = assignRoles(me, rest, used, targets)
+    tp.key = key
+    tp.at = w.t
+    tp.force = false
+    tp.table = table
+    for (const [b, s] of roles) planOf(plans, b, w.t).role = s.role
+  } else {
+    roles = new Map(rest.map((b) => [b, used.find((s) => s.role === plans.get(b)!.role)!] as [Body, RoleSpot]))
+  }
 
-  // Man coverage in our zone: mark the most dangerous attackers goal-side.
-  const man =
-    !shapeWithPuck &&
-    puck.x * a < -BLUE_X &&
-    !me.shorthanded &&
-    (me.tactics.dZoneCoverage === 'man' || me.tactics.dZoneCoverage === 'hybrid')
+  // --- Coverage claims: every attacker is covered by at most one man.
   const marks = new Map<Body, Body>()
-  if (man) {
-    const threats = opp.skaters
-      .filter((o) => o !== carrier)
-      .map((o) => ({ o, xg: xgAt(o.x, o.y, opp.a) }))
-      .sort((p, q) => q.xg - p.xg)
-    // Man-on-man still keeps a man home: whoever holds the net-front/slot
-    // role stays in it, and nobody is dragged out to shadow a point man at the
-    // blue line (the winger's zone spot covers his lane) — otherwise the
-    // house empties and the other team walks in.
-    const freeD = new Set(rest.filter((b) => roles.get(b)?.role !== 'D_NET' && roles.get(b)?.role !== 'B4_LOW_W'))
-    const reach = me.tactics.dZoneCoverage === 'hybrid' ? 30 : 42
-    for (const th of threats) {
-      if (Math.hypot(th.o.x - ownNetX, th.o.y) > reach) continue
-      const n = nearestTo([...freeD], th.o.x, th.o.y)
-      if (!n.b) break
-      marks.set(n.b, th.o)
-      freeD.delete(n.b)
+  const covering = !shapeWithPuck && !me.shorthanded && (table === DZ_ZONE || table === NZ_DEFENSE || table === FOUR_DEFEND)
+  if (covering) {
+    const rush = table === NZ_DEFENSE
+    const mode = me.tactics.dZoneCoverage ?? 'zone'
+    const atts = opp.skaters.filter((o) => o !== threat && !opp.leaving.has(o) && (rush ? o.x * a < 30 : o.x * a < -BLUE_X + 10))
+    const danger = (o: Body): number => (rush ? -o.x * a : xgAt(o.x, o.y, opp.a) * 100)
+    const anchorOf = (b: Body): XY => targets.get(roles.get(b)!.role) ?? b
+    const feasible = (b: Body, o: Body): boolean => {
+      // (a man already on him keeps him a little longer: exit radius > entry radius)
+      const p0 = plans.get(b)
+      const ex = p0?.job === 'mark' && p0.mark === o ? PLAN.areaExitFt : 0
+      if (rush) return Math.hypot(b.x - o.x, b.y - o.y) < 45 + ex && (b.x - o.x) * a < 20 + ex
+      const dNet = Math.hypot(o.x - ownNetX, o.y)
+      const an = anchorOf(b)
+      const dAn = Math.hypot(an.x - o.x, an.y - o.y)
+      // Man coverage still keeps a man home: the net-front role only takes a man in the house.
+      if (NET_ROLES.has(roles.get(b)!.role)) return dAn < PLAN.netArea + ex
+      if (mode === 'man' || (mode === 'hybrid' && dNet < 30)) return dNet < (mode === 'man' ? 42 : 30) + ex
+      // His area — or a man he is already on (a pick-up stays his).
+      return dAn < PLAN.zoneArea + ex || Math.hypot(b.x - o.x, b.y - o.y) < PLAN.onManFt + ex
+    }
+    const cost = (b: Body, o: Body): number => {
+      const an = rush || mode === 'man' ? b : anchorOf(b)
+      const p = plans.get(b)
+      return Math.hypot(an.x - o.x, an.y - o.y) - (p?.job === 'mark' && p.mark === o ? PLAN.markMargin : 0)
+    }
+    // A mark held for less than markHoldS stays (no flip-flopping).
+    for (const b of rest) {
+      const p = plans.get(b)
+      if (p?.job === 'mark' && p.mark && atts.includes(p.mark) && feasible(b, p.mark) && w.t - p.since < PLAN.markHoldS) marks.set(b, p.mark)
+    }
+    const taken = new Set(marks.values())
+    for (const o of atts.filter((q) => !taken.has(q)).sort((p, q) => danger(q) - danger(p))) {
+      let best: Body | null = null
+      let bc = Infinity
+      for (const b of rest) {
+        if (marks.has(b) || !feasible(b, o)) continue
+        const c = cost(b, o)
+        if (c < bc) {
+          bc = c
+          best = b
+        }
+      }
+      if (best) marks.set(best, o)
+    }
+  }
+  // A coverage man in our end with nobody in his area is the SPARE: he plays
+  // the puck — the low support goal-side of the carrier (the designed second
+  // man; never while a man is open, since an open man is somebody's mark), or
+  // the support on a loose puck. Exit test "idle in a dangerous area"
+  // (W3-DESIGN item 2): a spare who has stood PLAN.idleS seconds picks up the
+  // nearest attacker nobody has. The net-front role keeps the net front.
+  const spare = new Set<Body>()
+  for (const b of rest) noteStill(planOf(plans, b, w.t), b, w.t)
+  if (covering && table !== NZ_DEFENSE) {
+    const taken = new Set(marks.values())
+    for (const b of rest) {
+      if (marks.has(b) || NET_ROLES.has(roles.get(b)!.role)) continue
+      if (Math.hypot(b.x - ownNetX, b.y) > 40 || opp.skaters.some((o) => o !== threat && Math.hypot(o.x - b.x, o.y - b.y) < 8)) continue
+      const p = plans.get(b)!
+      if (w.t - p.stillSince >= PLAN.idleS) {
+        let pick: Body | null = null
+        let pd = PLAN.pickUpFt
+        for (const o of opp.skaters) {
+          if (o === threat || taken.has(o) || opp.leaving.has(o)) continue
+          const d = Math.hypot(o.x - b.x, o.y - b.y)
+          if (d < pd) {
+            pd = d
+            pick = o
+          }
+        }
+        p.stillSince = w.t
+        if (pick) {
+          marks.set(b, pick)
+          taken.add(pick)
+          continue
+        }
+      }
+      spare.add(b)
     }
   }
 
-  // The shooting-lane man: when their carrier can shoot, one of ours steps in.
+  // The shooting-lane man: when their carrier can shoot, a man covering nobody steps into the lane.
   let laneMan: Body | null = null
   if (theyHaveIt && carrier && carrier.x * opp.a > BLUE_X + 5) {
     const xg = xgAt(carrier.x, carrier.y, opp.a)
     if (xg > 0.025) {
       const lx = carrier.x + (ownNetX - carrier.x) * 0.3
       const ly = carrier.y * 0.7
-      const n = nearestTo(rest, lx, ly)
-      if (n.b && n.d < 25) laneMan = n.b
+      // (the man already in the lane keeps it unless another is clearly nearer)
+      let bd = 25
+      for (const b of rest) {
+        if (marks.has(b)) continue
+        const d = Math.hypot(b.x - lx, b.y - ly) - (plans.get(b)?.job === 'lane' ? 8 : 0)
+        if (d < bd) {
+          bd = d
+          laneMan = b
+        }
+      }
     }
   }
 
@@ -1047,7 +1294,7 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
   {
     let bd = 18
     for (const o of opp.skaters) {
-      if (o === carrier) continue
+      if (o === carrier || opp.leaving.has(o)) continue
       const d = Math.hypot(o.x - ownNetX, o.y)
       if (d < bd) {
         bd = d
@@ -1055,6 +1302,7 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
       }
     }
   }
+  const inZone = puck.x * a >= BLUE_X
 
   for (const b of rest) {
     const spot = roles.get(b)!
@@ -1063,14 +1311,29 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
     let urgency = spot.urgency
     let faceX: number | undefined
     let faceY: number | undefined
-    const mk = marks.get(b)
+    let job: JobKind = 'spot'
+    let mk: Body | null = marks.get(b) ?? null
     if (mk) {
-      const d = Math.hypot(ownNetX - mk.x, -mk.y)
-      t = { x: mk.x + ((ownNetX - mk.x) / Math.max(d, 1)) * 3.5, y: mk.y + (-mk.y / Math.max(d, 1)) * 3.5 }
-      urgency = 0.7
+      job = 'mark'
+      if (table === NZ_DEFENSE) {
+        // Rush defence: goal-side and inside of the man, a gap that grows
+        // with his speed at us — never out wide of him on the far boards.
+        const gap = clamp(6 + Math.max(0, -mk.vx * a) * 0.4, 6, 16)
+        t = { x: mk.x - a * gap, y: mk.y * 0.88 }
+        urgency = 0.9
+      } else {
+        // In our zone: goal-side of him, tight in the house; a man further
+        // out (the points) is covered from the slot side of his lane — the
+        // winger stays between him and the house, he does not chase him to
+        // the blue line and leave the slot empty.
+        const d = Math.hypot(ownNetX - mk.x, mk.y)
+        const gap = d < 18 ? 2.6 : clamp(3 + (d - 30) * PLAN.laneGapK, 3, 24)
+        t = { x: mk.x + ((ownNetX - mk.x) / Math.max(d, 1)) * gap, y: mk.y + (-mk.y / Math.max(d, 1)) * gap }
+        urgency = d < 25 ? 0.85 : 0.7
+      }
       faceX = puck.x
       faceY = puck.y
-    } else if (!shapeWithPuck && (spot.role === 'D_NET' || spot.role === 'PK_NET' || spot.role === 'PK_LOW_W' || spot.role === 'PK3_LOW_W' || spot.role === 'B4_LOW_W' || spot.role === 'OT_SLOT') && netFront) {
+    } else if (!shapeWithPuck && NET_ROLES.has(spot.role) && netFront && ![...marks.values()].includes(netFront)) {
       // Box out the net-front man: goal-side of him, between him and the crease.
       const dx = ownNetX - netFront.x
       const dy = -netFront.y
@@ -1079,21 +1342,47 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
       urgency = 0.8
       faceX = puck.x
       faceY = puck.y
+      job = 'mark'
+      mk = netFront
     } else if (b === laneMan && carrier) {
-      // Take away the lane — and inside 35 ft, collapse ONTO the carrier:
-      // a body goal-side of him, a stride in front, the second man on the puck.
+      // Take away the lane — and inside 35 ft, when every man in the slot is
+      // covered, collapse ONTO the carrier (the shell: a body goal-side of
+      // him, the designed second man on the puck). With a man open in the
+      // slot he stays in the lane a third of the way in: two on the carrier
+      // and nobody on the open man is the double-team the owner saw.
       const dN = Math.hypot(ownNetX - carrier.x, carrier.y)
-      const f = dN < 35 ? clamp(5 / Math.max(dN, 1), 0.1, 0.5) : 0.3
+      const covered = [...marks.values()]
+      const slotOpen = opp.skaters.some((o) => o !== carrier && Math.hypot(o.x - ownNetX, o.y) < 30 && !covered.includes(o))
+      const f = dN < 35 && !slotOpen ? clamp(5 / Math.max(dN, 1), 0.1, 0.5) : 0.3
       t = { x: carrier.x + (ownNetX - carrier.x) * f, y: carrier.y + (0 - carrier.y) * f }
       urgency = dN < 35 ? 1 : 0.85
       faceX = carrier.x
       faceY = carrier.y
-    } else {
-      const dr = drift(b, w.t, shapeWithPuck)
-      // A point man walks the LINE (lateral drift), holding the blue line
-      // from inside the zone: he is the outlet and the shooter up top.
-      const onPoint = shapeWithPuck && inZone && b.player.position === 'D' && t.x * a < 45
-      t = { x: t.x + (onPoint ? 0 : dr.x), y: t.y + dr.y }
+      job = 'lane'
+    } else if (spare.has(b) && (threat || loose)) {
+      // The spare man: low support on the puck, goal-side of it.
+      const q = threat ?? puck
+      const dN = Math.max(Math.hypot(ownNetX - q.x, q.y), 1)
+      const k = threat ? 7 : 10
+      t = { x: q.x + ((ownNetX - q.x) / dN) * k, y: q.y + (-q.y / dN) * k }
+      urgency = 0.85
+      faceX = q.x
+      faceY = q.y
+      job = 'lane'
+    } else if (shapeWithPuck) {
+      job = 'support'
+      // A point man walks the LINE, holding the blue line from inside the
+      // zone: he is the outlet and the shooter up top.
+      const onPoint = inZone && b.player.position === 'D' && t.x * a < 45
+      // (The net-front man holds the net front: a designed screen on the
+      // shot line is the carrier's and the rush's business, slices S4/S5.)
+      if (!(spot.role === 'NET_FRONT' && inZone)) {
+        // (a loose puck of ours: open ice relative to the puck)
+        t = getOpen(w, me, opp.skaters, b, t, carrier ?? puck, onPoint)
+        // He skates to his open ice with intent and stops on it — not a
+        // creep that never quite arrives (the "standing" look).
+        if (Math.hypot(t.x - b.x, t.y - b.y) > 3) urgency = Math.max(urgency, PLAN.supportUrgency)
+      }
       if (onPoint && t.x * a < BLUE_X + 3) t = { x: a * (BLUE_X + 3), y: t.y }
       // Late to the line after the entry: get up there (the puck can come back).
       if (onPoint && b.x * a < BLUE_X + 2) urgency = Math.max(urgency, 0.95)
@@ -1107,17 +1396,6 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
     // (or get back) onside — the tag-up.
     if (shapeWithPuck && !inZone && t.x * a > BLUE_X - 3) t = { x: a * (BLUE_X - 4), y: t.y }
     if (shapeWithPuck && !inZone && b.x * a + Math.max(0, b.vx * a) * 0.6 > BLUE_X - 1) urgency = Math.max(urgency, 0.95)
-    // Get open: slide off a spot a defender is sitting in / on the lane.
-    if (weHaveIt && carrier) {
-      const n = nearestTo(opp.skaters, t.x, t.y)
-      if (n.b && n.d < 7) {
-        const ox = t.x - n.b.x
-        const oy = t.y - n.b.y
-        const o = Math.max(Math.hypot(ox, oy), 0.1)
-        t = { x: t.x + (ox / o) * (8 - n.d), y: t.y + (oy / o) * (8 - n.d) }
-      }
-    }
-    if (shapeWithPuck && !inZone && t.x * a > BLUE_X - 3) t = { x: a * (BLUE_X - 4), y: t.y }
     // Defenders read the play facing the puck in their own half — but when a
     // carrier is coming with speed they pivot and skate (backward is slow).
     const rushing = theyHaveIt && carrier !== null && speedOf(carrier) > 15 && Math.hypot(carrier.x - b.x, carrier.y - b.y) < 40
@@ -1127,9 +1405,7 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
     }
     // D never let a man behind them: when they have it (or it's loose off
     // their stick), a defenceman stays goal-side of their deepest attacker —
-    // where that attacker WILL be, not where he is. A D who waits for the
-    // winger to go by is beaten wide along the wall; he reads the breakout
-    // and starts back as it starts.
+    // where that attacker WILL be, not where he is.
     if (guard && b.player.position === 'D' && !mk && safety < Infinity) {
       if (t.x * a > safety) {
         const back = t.x * a - safety
@@ -1148,16 +1424,26 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
     if (theyHaveIt && carrier && speedOf(carrier) < 7 && Math.hypot(b.x - puck.x, b.y - puck.y) < REACH && out.pokes.length < 2) out.pokes.push(b)
     const h = boardsClamp(t.x, t.y, 2)
     const dist = Math.hypot(h.x - b.x, h.y - b.y)
-    // Far from the spot → skate; close → drift calmly into it.
+    // Exit test: a man who cannot get near his job for a while re-plans.
+    const plan = setJob(plans, b, w.t, job, mk, spot.role)
+    if (dist > PLAN.lostFt) {
+      if (plan.lostSince < 0) plan.lostSince = w.t
+      else if (w.t - plan.lostSince > PLAN.lostS) {
+        tp.force = true
+        plan.lostSince = -1
+      }
+    } else plan.lostSince = -1
+    // Far from the target → skate; close → settle into it.
     const speed = b.caps.top * (backcheck ? 0.97 : clamp(0.5 + urgency * 0.5 + dist / 120, 0.4, 0.96))
     cmds.set(b, {
       tx: h.x,
       ty: h.y,
       speed,
       arrive: true,
-      urgency: clamp(urgency * (dist > 25 ? 1.1 : 0.8), 0.2, 1),
+      // (support skating to new open ice keeps its intent: below 0.85 the
+      // legs only glide — the creep that reads as a man standing still)
+      urgency: job === 'support' && dist > 3 && urgency >= PLAN.supportUrgency ? urgency : clamp(urgency * (dist > 25 ? 1.1 : 0.8), 0.2, 1),
       ...(faceX !== undefined ? { faceX, faceY } : {})
     })
   }
-  void distToBoards
 }

@@ -251,6 +251,18 @@ export interface SkaterSnapshot {
    * backward or a player pivots — renderers may use it to orient the rig.
    */
   facing?: number
+  /**
+   * Additive (agent engine, W3): the skater's role in his team's current shape
+   * (e.g. "DZ_SD" strong-side D in the defensive zone). For detectors and a
+   * future coaching overlay; renderers may ignore it.
+   */
+  role?: string
+  /**
+   * Additive (agent engine, W3): the job he is executing in that role, as a
+   * short name ("puck", "chase", "mark:<player id>", "spot", "change"…). A
+   * change of job is a re-plan; detectors count them (target flips).
+   */
+  job?: string
 }
 
 /**

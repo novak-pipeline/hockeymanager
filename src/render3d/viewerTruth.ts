@@ -1,5 +1,6 @@
 /**
- * Viewer-truth detectors VT1–VT10 (docs/gameplan-2026-09-28/ROOT-CAUSES.md §2.1).
+ * Viewer-truth detectors VT1–VT11 (docs/gameplan-2026-09-28/ROOT-CAUSES.md §2.1)
+ * and the W3 team-play detectors VT13, VT14, VT16 (W3-DESIGN.md §2).
  *
  * Each detector judges what the real match screen DREW (viewerProbe frames,
  * recorded from the built app at the owner's settings), not the sim stream.
@@ -7,6 +8,7 @@
  * A new visible bug class earns a detector here BEFORE its fix is written.
  */
 import type { ProbeFrame, ProbeGeometry, ProbeRig } from './viewerProbe'
+import { judgeTeamPlay, TP, type TPFrame, type TPReport } from '@engine/analysis/teamPlay'
 
 /** A non-frame stream event on the absolute clock, positions in world feet. */
 export interface VTEvent {
@@ -533,7 +535,83 @@ export function vt11Hits(inp: VTInput): VTResult {
   }
 }
 
-export const DETECTORS = [vt1Bodies, vt2Divergence, vt3Shots, vt4Motion, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt9Framing, vt10Commentary, vt11Hits] as const
+/* ── W3 team play: VT13 aimless, VT14 coverage, VT16 crease camping ──────── */
+// The rules live in @engine/analysis/teamPlay (the same geometry judges the
+// sim stream in the vitest gates); here they read what the screen DREW.
+
+/** Drawn frames → the neutral team-play snapshot (world feet: x along the rink, z across). */
+export function teamPlayFrames(inp: VTInput): TPFrame[] {
+  const out: TPFrame[] = []
+  let homeNetX = 0
+  for (const f of inp.frames) {
+    const hg = f.rigs.find((r) => r.goalie && r.team === 'home' && r.visible)
+    if (hg && Math.abs(hg.x) > 60) homeNetX = hg.x > 0 ? 89 : -89
+    const on = (r: ProbeRig): boolean => !r.goalie && r.id !== null && r.visible && Math.abs(r.x) <= inp.geometry.rinkHalfL && Math.abs(r.z) <= inp.geometry.rinkHalfW
+    const sk = (team: 'home' | 'away') => f.rigs.filter((r) => r.team === team && on(r)).map((r) => ({ id: r.id!, x: r.x, y: r.z }))
+    out.push({
+      t: f.clock,
+      live: isLive(f) && !inReplay(f) && !f.dead && f.goalSeq === null,
+      home: sk('home'),
+      away: sk('away'),
+      homeNetX,
+      puck: { x: f.puck.x, y: f.puck.z },
+      carrier: f.carrier,
+    })
+  }
+  return out
+}
+
+const tpCache = new WeakMap<VTInput, TPReport>()
+function teamPlayOf(inp: VTInput): TPReport {
+  let r = tpCache.get(inp)
+  if (!r) {
+    const g = inp.geometry.benchGates
+    r = judgeTeamPlay(teamPlayFrames(inp), { gates: [{ x: g.home.x, y: g.home.z }, { x: g.away.x, y: g.away.z }] })
+    tpCache.set(inp, r)
+  }
+  return r
+}
+
+/** Per-clip limits (cases per live minute on screen); design confidence, set from the W3 S1 stream runs. */
+export const VT_TEAMPLAY = { aimlessPerMin: 0.5, coveragePerMin: 0.1, campingPerMin: 0 }
+
+export function vt13Aimless(inp: VTInput): VTResult {
+  const r = teamPlayOf(inp)
+  const rate = r.liveMin > 0 ? r.aimless.length / r.liveMin : 0
+  return {
+    id: 'VT13', name: 'Aimless: standing still in a dangerous area',
+    status: r.liveMin < 1 / 60 ? 'n/a' : rate <= VT_TEAMPLAY.aimlessPerMin ? 'green' : 'red',
+    rule: `live 5v5: a non-carrier standing (within ${TP.stillR} ft) ≥ ${TP.stillS} s inside a home plate, no opponent within ${TP.engagedFt} ft, the puck ≥ ${TP.puckNearFt} ft away, not screening, not the net-front guard (a defender within ${TP.netGuardFt} ft of his own net), not a defender in the lane of an attacker within ${TP.laneManFt} ft — ≤ ${VT_TEAMPLAY.aimlessPerMin} per live minute`,
+    value: `${r.aimless.length} cases in ${f1(r.liveMin * 60)} live s (${f2(rate)}/min; ${r.aimlessOwn} in front of his own net)`,
+    evidence: r.aimless.slice(0, 5).map((c) => c.what),
+  }
+}
+
+export function vt14Coverage(inp: VTInput): VTResult {
+  const r = teamPlayOf(inp)
+  const n = r.doubles.length + r.farSide.length + r.ignored.length
+  const rate = r.liveMin > 0 ? n / r.liveMin : 0
+  return {
+    id: 'VT14', name: 'Coverage: one man per attacker, nobody out of the play',
+    status: r.liveMin < 1 / 60 ? 'n/a' : rate <= VT_TEAMPLAY.coveragePerMin ? 'green' : 'red',
+    rule: `defending, sustained: two men within ${TP.doubleFt} ft of the carrier while a slot attacker is open (≥ ${TP.sustainS} s); a defender on the far boards ≥ ${TP.farPuckFt} ft from the puck with nobody to cover (≥ 1 s); the closest man within ${TP.ignoreFt} ft of the carrier, not goal-side of him and not closing (≥ ${TP.ignoreS} s) — ≤ ${VT_TEAMPLAY.coveragePerMin} per live minute`,
+    value: `doubles ${r.doubles.length} · far side ${r.farSide.length} · ignored carrier ${r.ignored.length} in ${f1(r.liveMin * 60)} live s`,
+    evidence: [...r.doubles, ...r.farSide, ...r.ignored].slice(0, 5).map((c) => c.what),
+  }
+}
+
+export function vt16Camping(inp: VTInput): VTResult {
+  const r = teamPlayOf(inp)
+  return {
+    id: 'VT16', name: 'Crease camping (carrier)',
+    status: r.liveMin < 1 / 60 ? 'n/a' : r.camping.length <= VT_TEAMPLAY.campingPerMin * r.liveMin ? 'green' : 'red',
+    rule: `no carrier holds the puck inside the inner home plate (out to the dots) for more than ${TP.creaseCampS} s`,
+    value: `${r.camping.length} cases in ${f1(r.liveMin * 60)} live s`,
+    evidence: r.camping.slice(0, 5).map((c) => c.what),
+  }
+}
+
+export const DETECTORS = [vt1Bodies, vt2Divergence, vt3Shots, vt4Motion, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt9Framing, vt10Commentary, vt11Hits, vt13Aimless, vt14Coverage, vt16Camping] as const
 
 export function runViewerTruth(inp: VTInput): VTResult[] {
   return DETECTORS.map((d) => d(inp))
