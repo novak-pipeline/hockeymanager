@@ -2,7 +2,8 @@
  * W3 team-play detectors (docs/gameplan-2026-09-28/W3-DESIGN.md, slice S1):
  *
  *   VT13 aimless       — a non-carrier standing still in a home-plate area with
- *                        nobody to cover and no screen to set.
+ *                        nobody to cover: no opponent near him, not screening,
+ *                        not the net-front guard, not in an attacker's lane.
  *   VT14 coverage      — defending: two men on the carrier while a man in the
  *                        slot is open; a defender out of the play on the far
  *                        side; the closest man ignoring a carrier next to him.
@@ -52,6 +53,11 @@ export const TP = {
   engagedFt: 8,
   /** VT13: a puck this close is a puck battle, not idling. */
   puckNearFt: 15,
+  /** VT13: a defender this close to his own net (in front of the line) is the net-front guard. */
+  netGuardFt: 10,
+  /** VT13: a defender within this distance (ft) of the line from an attacker (≤ laneManFt away) to his net is covering that lane. */
+  laneFt: 4,
+  laneManFt: 30,
   /** VT14: stick reach of the carrier (two of them inside it = a double). */
   doubleFt: 7,
   /** VT14: a slot attacker with no defender this close is open. */
@@ -64,7 +70,8 @@ export const TP = {
   farManFt: 25,
   /** VT14 ignored carrier: the closest defender inside this range… */
   ignoreFt: 12,
-  /** …not closing on him for this long. */
+  /** …not skating at him (ft/s toward the carrier) for this long. */
+  ignoreTowardFtS: 1,
   ignoreS: 1,
   /** VT16: inner home plate (out to the dots), and the hold that counts as camping. */
   creaseCampS: 2.5,
@@ -89,6 +96,15 @@ const fiveOnFive = (f: TPFrame): boolean => f.home.length === 5 && f.away.length
 
 const dist = (a: { x: number; y: number }, b: { x: number; y: number }): number => Math.hypot(a.x - b.x, a.y - b.y)
 
+/** Distance from p to the segment a→b. */
+function segDist(p: { x: number; y: number }, a: { x: number; y: number }, b: { x: number; y: number }): number {
+  const dx = b.x - a.x
+  const dy = b.y - a.y
+  const L2 = dx * dx + dy * dy
+  const t = L2 > 1e-9 ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2)) : 0
+  return Math.hypot(p.x - (a.x + dx * t), p.y - (a.y + dy * t))
+}
+
 function nearGate(p: { x: number; y: number }, opt: TPOptions): boolean {
   for (const g of opt.gates ?? []) if (Math.abs(p.x - g.x) < TP.benchFt && Math.abs(p.y - g.y) < TP.benchFt) return true
   return false
@@ -103,6 +119,8 @@ const clk = (t: number): string => {
 export interface TPCase {
   t: number
   what: string
+  /** The man the case is about (VT13 / far side / ignored: the defender; doubles / camping: the carrier). */
+  id?: string
 }
 
 export interface TPReport {
@@ -132,23 +150,24 @@ export function judgeTeamPlay(frames: readonly TPFrame[], opt: TPOptions = {}): 
   const anchor = new Map<string, { x: number; y: number; t: number; flagged: boolean }>()
   const lastJob = new Map<string, string>()
   // Per-team rolling case spells: key → since, flagged.
-  const spell = new Map<string, { since: number; flagged: boolean; d0?: number }>()
+  const spell = new Map<string, { since: number; flagged: boolean }>()
   const touch = new Set<string>()
-  const hold = (key: string, on: boolean, t: number, need: number, d?: number): { fire: boolean; since: number; d0: number | undefined } => {
-    if (!on) return { fire: false, since: t, d0: undefined }
+  const hold = (key: string, on: boolean, t: number, need: number): { fire: boolean; since: number } => {
+    if (!on) return { fire: false, since: t }
     touch.add(key)
     let s = spell.get(key)
     if (!s) {
-      s = { since: t, flagged: false, ...(d !== undefined ? { d0: d } : {}) }
+      s = { since: t, flagged: false }
       spell.set(key, s)
     }
     if (!s.flagged && t - s.since >= need) {
       s.flagged = true
-      return { fire: true, since: s.since, d0: s.d0 }
+      return { fire: true, since: s.since }
     }
-    return { fire: false, since: s.since, d0: s.d0 }
+    return { fire: false, since: s.since }
   }
   let prevT = -1
+  const prevPos = new Map<string, { x: number; y: number; t: number }>()
   let carrySpell: { id: string; since: number; flagged: boolean } | null = null
   for (const f of frames) {
     const dt = prevT >= 0 && f.t > prevT && f.t - prevT < 1 ? f.t - prevT : 0
@@ -157,6 +176,7 @@ export function judgeTeamPlay(frames: readonly TPFrame[], opt: TPOptions = {}): 
       anchor.clear()
       spell.clear()
       lastJob.clear()
+      prevPos.clear()
       carrySpell = null
       continue
     }
@@ -192,6 +212,17 @@ export function judgeTeamPlay(frames: readonly TPFrame[], opt: TPOptions = {}): 
         if (!inDanger) continue
         if (dist(s, f.puck) < TP.puckNearFt) continue
         if (tm.opp.some((o) => dist(o, s) < TP.engagedFt)) continue
+        // The net-front guard: a defender on his own crease (within
+        // TP.netGuardFt of the net, in front of the goal line) is holding
+        // the net front, the job every coverage system gives one man.
+        if (dist(s, { x: tm.netX, y: 0 }) < TP.netGuardFt && outFromLine(s.x, tm.netX) >= 0) continue
+        // A defender in a lane: on the line from an attacker near him to our
+        // net, goal-side of the attacker (zone coverage from the slot side).
+        if (inHomePlate(s.x, s.y, tm.netX)) {
+          const net = { x: tm.netX, y: 0 }
+          const dS = dist(s, net)
+          if (tm.opp.some((o) => dist(o, s) < TP.laneManFt && dist(o, net) > dS && segDist(s, o, net) < TP.laneFt)) continue
+        }
         // A screen: in front of the net he attacks, on the puck's line to it.
         const atkNet = -tm.netX
         if (dist(f.puck, { x: atkNet, y: 0 }) > 30 && dist(s, { x: atkNet, y: 0 }) < 15) {
@@ -204,7 +235,7 @@ export function judgeTeamPlay(frames: readonly TPFrame[], opt: TPOptions = {}): 
         a.flagged = true
         const own = inHomePlate(s.x, s.y, tm.netX)
         if (own) rep.aimlessOwn++
-        rep.aimless.push({ t: f.t, what: `${clk(f.t)} ${s.id} still ${(f.t - a.t).toFixed(1)} s in the home plate ${own ? 'of his own net' : 'he attacks'} at (${s.x.toFixed(0)}, ${s.y.toFixed(0)}), nobody within ${TP.engagedFt} ft, puck ${dist(s, f.puck).toFixed(0)} ft away` })
+        rep.aimless.push({ t: f.t, id: s.id, what: `${clk(f.t)} ${s.id} still ${(f.t - a.t).toFixed(1)} s in the home plate ${own ? 'of his own net' : 'he attacks'} at (${s.x.toFixed(0)}, ${s.y.toFixed(0)}), nobody within ${TP.engagedFt} ft, puck ${dist(s, f.puck).toFixed(0)} ft away` })
       }
     }
 
@@ -214,13 +245,14 @@ export function judgeTeamPlay(frames: readonly TPFrame[], opt: TPOptions = {}): 
       const atk = teams.find((tm) => tm.key === carrierTeam)!
       const ownSide = def.netX > 0 ? 1 : -1
       const puckIn = f.puck.x * ownSide
-      const defSkaters = def.mine.filter((s) => !nearGate(s, opt))
+      // (men on their way to the bench are the change's, not the coverage's)
+      const defSkaters = def.mine.filter((s) => !nearGate(s, opt) && s.job !== 'change')
       // (a) two on the carrier, a man open in the slot.
       if (puckIn > 25 && fiveOnFive(f)) {
         const onC = defSkaters.filter((s) => dist(s, carrier) < TP.doubleFt).length
         const open = atk.mine.find((o) => o.id !== carrier.id && inHomePlate(o.x, o.y, def.netX, 30) && !defSkaters.some((d) => dist(d, o) < TP.openFt))
         const r = hold(`dbl${def.key}`, onC >= 2 && !!open, f.t, TP.sustainS)
-        if (r.fire) rep.doubles.push({ t: r.since, what: `${clk(r.since)} ${onC} defenders on carrier ${carrier.id} while ${open!.id} is open in the slot` })
+        if (r.fire) rep.doubles.push({ t: r.since, id: carrier.id, what: `${clk(r.since)} ${onC} defenders on carrier ${carrier.id} while ${open!.id} is open in the slot` })
       }
       // (b) a defender out of the play on the far side, in his own half.
       if (puckIn > 0 && Math.abs(f.puck.y) > 10) {
@@ -232,10 +264,12 @@ export function judgeTeamPlay(frames: readonly TPFrame[], opt: TPOptions = {}): 
             dist(d, f.puck) > TP.farPuckFt &&
             !atk.mine.some((o) => dist(o, d) < TP.farManFt)
           const r = hold(`far${d.id}`, far, f.t, 1)
-          if (r.fire) rep.farSide.push({ t: r.since, what: `${clk(r.since)} ${d.id} on the far boards at (${d.x.toFixed(0)}, ${d.y.toFixed(0)}), ${dist(d, f.puck).toFixed(0)} ft from the puck, nobody to cover` })
+          if (r.fire) rep.farSide.push({ t: r.since, id: d.id, what: `${clk(r.since)} ${d.id} on the far boards at (${d.x.toFixed(0)}, ${d.y.toFixed(0)}), ${dist(d, f.puck).toFixed(0)} ft from the puck, nobody to cover` })
         }
       }
-      // (c) the closest defender next to the carrier, not goal-side, not closing.
+      // (c) the closest defender next to the carrier, not goal-side of him,
+      // not skating at him (standing, drifting away or alongside), nobody on
+      // the puck: he is ignoring the man with the puck in front of him.
       {
         let near: TPSkater | null = null
         let nd = Infinity
@@ -246,18 +280,21 @@ export function judgeTeamPlay(frames: readonly TPFrame[], opt: TPOptions = {}): 
             near = d
           }
         }
-        const goalSide = near ? (near.x - carrier.x) * ownSide > 1 : false
+        // goal-side: nearer our net than the carrier (behind the goal line too)
+        const net = { x: def.netX, y: 0 }
+        const goalSide = near ? dist(near, net) < dist(carrier, net) - 1 : false
         const anyOn = defSkaters.some((d) => dist(d, carrier) < TP.doubleFt)
-        const cand = !!near && nd < TP.ignoreFt && !goalSide && !anyOn
-        const key = near ? `ign${def.key}${near.id}` : `ign${def.key}`
-        const s = cand ? spell.get(key) : undefined
-        // closing: he got at least 2 ft nearer since the spell began
-        const closing = s?.d0 !== undefined && nd < s.d0 - 2
-        if (closing) spell.delete(key)
-        else {
-          const r = hold(key, cand, f.t, TP.ignoreS, nd)
-          if (r.fire) rep.ignored.push({ t: r.since, what: `${clk(r.since)} ${near!.id} ${nd.toFixed(0)} ft from carrier ${carrier.id}, behind him and not closing for ${TP.ignoreS} s; nobody on the puck` })
+        let toward = 0
+        const pv = near ? prevPos.get(near.id) : undefined
+        if (near && pv && f.t > pv.t) {
+          const ux = (carrier.x - near.x) / Math.max(nd, 0.1)
+          const uy = (carrier.y - near.y) / Math.max(nd, 0.1)
+          toward = (((near.x - pv.x) * ux + (near.y - pv.y) * uy) / (f.t - pv.t))
         }
+        const cand = !!near && nd < TP.ignoreFt && !goalSide && !anyOn && toward < TP.ignoreTowardFtS
+        const key = near ? `ign${def.key}${near.id}` : `ign${def.key}`
+        const r = hold(key, cand, f.t, TP.ignoreS)
+        if (r.fire) rep.ignored.push({ t: r.since, id: near!.id, what: `${clk(r.since)} ${near!.id} ${nd.toFixed(0)} ft from carrier ${carrier.id}, not goal-side and not skating at him for ${TP.ignoreS} s; nobody on the puck` })
       }
     }
 
@@ -268,10 +305,11 @@ export function judgeTeamPlay(frames: readonly TPFrame[], opt: TPOptions = {}): 
       if (!inside || !carrySpell || carrySpell.id !== carrier.id) carrySpell = inside ? { id: carrier.id, since: f.t, flagged: false } : null
       else if (!carrySpell.flagged && f.t - carrySpell.since > TP.creaseCampS) {
         carrySpell.flagged = true
-        rep.camping.push({ t: carrySpell.since, what: `${clk(carrySpell.since)} ${carrier.id} held it inside the dots for over ${TP.creaseCampS} s` })
+        rep.camping.push({ t: carrySpell.since, id: carrier.id, what: `${clk(carrySpell.since)} ${carrier.id} held it inside the dots for over ${TP.creaseCampS} s` })
       }
     } else carrySpell = null
 
+    for (const sk of [...f.home, ...f.away]) prevPos.set(sk.id, { x: sk.x, y: sk.y, t: f.t })
     // spells not refreshed this frame are over
     for (const k of [...spell.keys()]) if (!touch.has(k)) spell.delete(k)
   }

@@ -6,6 +6,10 @@
  * numbers a slice must not move the wrong way (goals, shots, PP).
  *
  *   TP_MEASURE=1 TP_GAMES=30 npx vitest run src/engine/agent/teamPlay.measure.test.ts
+ *
+ * TP_SEED0 offsets the seeds (run chunks in parallel), TP_VANILLA=1 uses the
+ * generated league, TP_PAIR=band the pairing of agentSim.test's NHL-band
+ * sample, TP_TAG names the output (.cache/tp-measure-<tag>.txt).
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
@@ -41,6 +45,12 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
   let shGoals = 0
   let pens = 0
   let hits = 0
+  let rebounds = 0
+  let saves = 0
+  let atkNear = 0
+  let defNear = 0
+  let blocked = 0
+  let missed = 0
   let liveMin = 0
   let aimless = 0
   let aimOwn = 0
@@ -52,10 +62,34 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
   let jobMin = 0
   const ex: string[] = []
   for (let i = 0; i < games; i++) {
-    const home = data.teams.get(teams[(i * 7) % teams.length])!
-    const away = data.teams.get(teams[(i * 7 + 3 + (i % 5)) % teams.length])!
-    const out = agentSimGame(home, away, res, { seed: 7000 + i })
+    const k = i + Number(process.env.TP_SEED0 ?? 7000) - 7000
+    // TP_PAIR=band: the pairing of agentSim.test's NHL-band sample (team k v k+1, seed 5000+k)
+    const band = process.env.TP_PAIR === 'band'
+    const home = data.teams.get(teams[(band ? k : k * 7) % teams.length])!
+    const away = data.teams.get(teams[(band ? k + 1 : k * 7 + 3 + (k % 5)) % teams.length])!
+    const out = agentSimGame(home, away, res, { seed: (process.env.TP_PAIR === 'band' ? 5000 + k : Number(process.env.TP_SEED0 ?? 7000) + i) })
+    let lastShotT = -99
+    let lastPer = 0
+    let lastFrame: (typeof out.stream)[number] | null = null
     for (const e of out.stream) {
+      if (e.type === 'frame') lastFrame = e
+      if (e.type === 'save' && lastFrame && lastFrame.type === 'frame') {
+        // who is around the net at the save (within 20 ft of the goalie's net)
+        const homeG = lastFrame.homeGoalie.player === e.goalie
+        const gx = (homeG ? lastFrame.homeGoalie : lastFrame.awayGoalie).pos.x * 100
+        const nx = gx > 0 ? 89 : -89
+        const near = (s2: { pos: { x: number; y: number } }): boolean => Math.hypot(s2.pos.x * 100 - nx, s2.pos.y * 42.5) < 20
+        saves++
+        defNear += (homeG ? lastFrame.home : lastFrame.away).filter(near).length
+        atkNear += (homeG ? lastFrame.away : lastFrame.home).filter(near).length
+      }
+      if (e.type === 'shot') {
+        if (e.period === lastPer && e.t - lastShotT <= 3) rebounds++
+        lastShotT = e.t
+        lastPer = e.period
+      } else if (e.type === 'blockedShot') blocked++
+      else if (e.type === 'missedShot') missed++
+      else if (e.type === 'whistle' || e.type === 'faceoff') lastShotT = -99
       if (e.type === 'goal') {
         goals++
         if (e.strength === 'pp') ppGoals++
@@ -79,7 +113,7 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
   const tg = games * 2
   const lines = [
     `league: ${dbPath ? 'imported' : 'generated'} - ${games} games (seeds 7000-${7000 + games - 1})`,
-    `calibration/team-game: goals ${(goals / tg).toFixed(2)} shots ${(shots / tg).toFixed(1)} ppGoals ${(ppGoals / tg).toFixed(2)} shGoals ${(shGoals / tg).toFixed(2)} penalties ${(pens / tg).toFixed(2)} hits ${(hits / tg).toFixed(1)} PP% ${(pens ? (ppGoals / pens) * 100 : 0).toFixed(1)}`,
+    `calibration/team-game: goals ${(goals / tg).toFixed(2)} shots ${(shots / tg).toFixed(1)} ppGoals ${(ppGoals / tg).toFixed(2)} shGoals ${(shGoals / tg).toFixed(2)} penalties ${(pens / tg).toFixed(2)} hits ${(hits / tg).toFixed(1)} PP% ${(pens ? (ppGoals / pens) * 100 : 0).toFixed(1)} rebound-share ${(rebounds / Math.max(1, shots)).toFixed(3)} blocked-share ${(blocked / Math.max(1, shots + blocked + missed)).toFixed(3)} at-save near-net atk ${(atkNear / Math.max(1, saves)).toFixed(2)} def ${(defNear / Math.max(1, saves)).toFixed(2)}`,
     `team play per 60 live min: VT13 aimless ${per60(aimless, liveMin).toFixed(2)} (own net ${per60(aimOwn, liveMin).toFixed(2)}) - VT14 doubles ${per60(doubles, liveMin).toFixed(2)} farSide ${per60(farSide, liveMin).toFixed(2)} ignored ${per60(ignored, liveMin).toFixed(2)} - VT16 camping ${per60(camping, liveMin).toFixed(2)} - job flips ${(flips / Math.max(jobMin, 1e-9)).toFixed(2)}/player-min (live ${liveMin.toFixed(0)} min)`,
     ...ex
   ]

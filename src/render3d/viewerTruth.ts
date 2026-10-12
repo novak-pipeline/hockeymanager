@@ -573,7 +573,7 @@ function teamPlayOf(inp: VTInput): TPReport {
 }
 
 /** Per-clip limits (cases per live minute on screen); design confidence, set from the W3 S1 stream runs. */
-export const VT_TEAMPLAY = { aimlessPerMin: 0.5, coveragePerMin: 0.25, campingPerMin: 0 }
+export const VT_TEAMPLAY = { aimlessPerMin: 0.5, coveragePerMin: 0.1, campingPerMin: 0 }
 
 export function vt13Aimless(inp: VTInput): VTResult {
   const r = teamPlayOf(inp)
@@ -581,7 +581,7 @@ export function vt13Aimless(inp: VTInput): VTResult {
   return {
     id: 'VT13', name: 'Aimless: standing still in a dangerous area',
     status: r.liveMin < 1 / 60 ? 'n/a' : rate <= VT_TEAMPLAY.aimlessPerMin ? 'green' : 'red',
-    rule: `live 5v5: a non-carrier standing (within ${TP.stillR} ft) ≥ ${TP.stillS} s inside a home plate, no opponent within ${TP.engagedFt} ft, the puck ≥ ${TP.puckNearFt} ft away and not screening — ≤ ${VT_TEAMPLAY.aimlessPerMin} per live minute`,
+    rule: `live 5v5: a non-carrier standing (within ${TP.stillR} ft) ≥ ${TP.stillS} s inside a home plate, no opponent within ${TP.engagedFt} ft, the puck ≥ ${TP.puckNearFt} ft away, not screening, not the net-front guard (a defender within ${TP.netGuardFt} ft of his own net), not a defender in the lane of an attacker within ${TP.laneManFt} ft — ≤ ${VT_TEAMPLAY.aimlessPerMin} per live minute`,
     value: `${r.aimless.length} cases in ${f1(r.liveMin * 60)} live s (${f2(rate)}/min; ${r.aimlessOwn} in front of his own net)`,
     evidence: r.aimless.slice(0, 5).map((c) => c.what),
   }
@@ -594,7 +594,7 @@ export function vt14Coverage(inp: VTInput): VTResult {
   return {
     id: 'VT14', name: 'Coverage: one man per attacker, nobody out of the play',
     status: r.liveMin < 1 / 60 ? 'n/a' : rate <= VT_TEAMPLAY.coveragePerMin ? 'green' : 'red',
-    rule: `defending, sustained: two men within ${TP.doubleFt} ft of the carrier while a slot attacker is open (≥ ${TP.sustainS} s); a defender on the far boards ≥ ${TP.farPuckFt} ft from the puck with nobody to cover (≥ 1 s); the closest man within ${TP.ignoreFt} ft behind the carrier not closing (≥ ${TP.ignoreS} s) — ≤ ${VT_TEAMPLAY.coveragePerMin} per live minute`,
+    rule: `defending, sustained: two men within ${TP.doubleFt} ft of the carrier while a slot attacker is open (≥ ${TP.sustainS} s); a defender on the far boards ≥ ${TP.farPuckFt} ft from the puck with nobody to cover (≥ 1 s); the closest man within ${TP.ignoreFt} ft of the carrier, not goal-side of him and not closing (≥ ${TP.ignoreS} s) — ≤ ${VT_TEAMPLAY.coveragePerMin} per live minute`,
     value: `doubles ${r.doubles.length} · far side ${r.farSide.length} · ignored carrier ${r.ignored.length} in ${f1(r.liveMin * 60)} live s`,
     evidence: [...r.doubles, ...r.farSide, ...r.ignored].slice(0, 5).map((c) => c.what),
   }

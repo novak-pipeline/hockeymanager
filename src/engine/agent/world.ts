@@ -7,6 +7,7 @@ import type { DekeKind, TeamTactics, XY } from '@domain'
 import type { Rng } from '@engine/shared/rng'
 import type { TeamSim } from '@engine/full/fullSim'
 import type { Body, MoveCmd, Puck } from './physics'
+import type { Plan, TeamPlan } from './plans'
 
 export interface Side {
   sim: TeamSim
@@ -22,6 +23,12 @@ export interface Side {
   roles: Map<Body, string>
   /** The skater assigned to pressure the carrier (defending), if any. */
   presser: Body | null
+  /** Each skater's plan: role, job, mark (plans.ts). */
+  plans: Map<Body, Plan>
+  /** The side's shape state and sticky decisions (plans.ts). */
+  team: TeamPlan
+  /** Men skating to the bench in an on-the-fly change (the sim drives them). */
+  leaving: Set<Body>
   /** Clock time of this side's last zone entry. */
   entryAt: number
   shorthanded: boolean
