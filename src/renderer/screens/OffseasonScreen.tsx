@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { askChoice } from '../components/ChoiceDialog'
 import type { OffseasonView, CampInvitesView } from '../../worker/protocol'
 import type { OfferSheetRowView, ResignRowView, CampInviteRow, SquadRowView } from '../../engine/career/views'
 import { PlayerLink, useNav } from '../components/NavContext'
@@ -103,7 +104,11 @@ function ArbitrationPanel({ view, onRefetch }: { view: OffseasonView; onRefetch:
   if (cases.length === 0) return null
 
   const act = async (kind: 'accept' | 'walk' | 'settle1' | 'settle2', playerId: string, name: string): Promise<void> => {
-    if (kind === 'walk' && !window.confirm(`Walk away from ${name}'s award? He becomes an unrestricted free agent immediately.`)) return
+    if (kind === 'walk' && !(await askChoice({
+      title: `Walk away from ${name}?`,
+      body: `Walking away from the arbitrator's award makes ${name} an unrestricted free agent today.`,
+      confirmLabel: 'Walk away', cancelLabel: 'Keep talking', danger: true,
+    }))) return
     setBusy(true)
     const res = kind === 'accept' ? await client.acceptArbitration(playerId)
       : kind === 'walk' ? await client.walkArbitration(playerId)
@@ -190,7 +195,11 @@ function BuyoutPanel({ onRefetch }: { onRefetch: () => void }): JSX.Element | nu
   if (candidates.length === 0) return null
 
   const doBuyout = async (playerId: string, name: string, charge: number): Promise<void> => {
-    if (!window.confirm(`Buy out ${name}? He becomes a free agent and $${(charge / 1e6).toFixed(2)}M dead cap stays on next season's books. This cannot be undone.`)) return
+    if (!(await askChoice({
+      title: `Buy out ${name}?`,
+      body: `He becomes a free agent, and $${(charge / 1e6).toFixed(2)}M of dead cap stays on next season's books. A buyout cannot be undone.`,
+      confirmLabel: 'Buy him out', cancelLabel: 'Keep him', danger: true,
+    }))) return
     setBusy(true)
     const res = await client.buyoutPlayer(playerId)
     setBusy(false)

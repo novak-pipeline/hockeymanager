@@ -68,6 +68,7 @@ import { NewCareerScreen, randomSeed } from './screens/NewCareerScreen'
 import { ClubPickerScreen } from './screens/ClubPickerScreen'
 import { SaveManager } from './components/SaveManager'
 import { WrappedHost } from './components/WrappedOverlay'
+import { ChoiceDialogHost, askChoice } from './components/ChoiceDialog'
 import { YearbookScreen } from './screens/YearbookScreen'
 import { viewerProbeEnabled } from '@render3d/viewerProbe'
 
@@ -625,15 +626,22 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
         // PHASE 0: a hard gate that has a one-click fix offers it INLINE,
         // once — no detour through a signposted screen unless you want it.
         if (!decision.alreadyThere && decision.screen === 'leadership') {
-          if (window.confirm('No captain is named, and the season cannot open without one.\n\nOK — let the coach name him (the man the room follows).\nCancel — pick the C yourself.')) {
-            void run(() => client.nameCaptainByCoach())
-          } else navigate('leadership')
+          // Loop audit F13: the game's own dialog, both answers named, not an OS box.
+          void askChoice({
+            title: 'No captain named',
+            body: 'The season cannot open without a captain.\nThe coach can name the man the room already follows, or you can pick the C yourself.',
+            confirmLabel: 'Let the coach name him',
+            cancelLabel: 'Pick the C myself',
+          }).then((ok) => { if (ok) void run(() => client.nameCaptainByCoach()); else navigate('leadership') })
           return
         }
         if (!decision.alreadyThere && decision.screen === 'squad') {
-          if (window.confirm(`${decision.message ?? 'You cannot dress a legal lineup.'}\n\nOK — let the AGM sign emergency cover.\nCancel — fix it yourself.`)) {
-            void run(() => client.signEmergencyCover())
-          } else navigate('squad')
+          void askChoice({
+            title: 'No legal lineup',
+            body: decision.message ?? 'You cannot dress a legal lineup.',
+            confirmLabel: 'Let the AGM sign emergency cover',
+            cancelLabel: 'Fix it myself',
+          }).then((ok) => { if (ok) void run(() => client.signEmergencyCover()); else navigate('squad') })
           return
         }
         if (!decision.alreadyThere) navigate(decision.screen)
@@ -918,6 +926,7 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
           </div>
         )}
         <PlayerActionMenu />
+        <ChoiceDialogHost />
         {/* Season Wrapped: plays the year the draft just closed as an event,
           * and any yearbook page on request. Held while a match is on screen. */}
         <WrappedHost suppressed={!!watched} onOpenYearbook={() => navigate('yearbook')} />
