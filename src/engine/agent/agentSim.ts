@@ -34,6 +34,7 @@ import type {
   ShotType,
   Player,
   PlayerId,
+  SkaterSnapshot,
   Team,
   XY
 } from '@domain'
@@ -1525,6 +1526,19 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
 
     if (deferredDeploy.size > 0) runDeferredDeploys()
     // ---- Emit the frame for the state at `now`. ----
+    // (role/job: the skater's role in the shape and what he is doing in it;
+    // additive snapshot fields read by the W3 detectors.)
+    const snapOf = (s: Side, b: Body): SkaterSnapshot => {
+      const role = s.roles.get(b)
+      const job = b === w.carrier ? 'carry' : role
+      return {
+        player: b.player.id,
+        pos: { x: clamp(b.x / HALF_X, -1, 1), y: clamp(b.y / HALF_Y, -1, 1) },
+        facing: Math.round(Math.atan2(b.hy, b.hx) * 100) / 100,
+        ...(role !== undefined ? { role } : {}),
+        ...(job !== undefined ? { job } : {})
+      }
+    }
     if (now > lastFrameT + 1e-6) {
       for (const s of sides) {
         s.sim.unit.skaters.forEach((r, i) => {
@@ -1544,8 +1558,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         t: Math.round(now * 100) / 100,
         period,
         type: 'frame',
-        home: H.skaters.map((b) => ({ player: b.player.id, pos: { x: clamp(b.x / HALF_X, -1, 1), y: clamp(b.y / HALF_Y, -1, 1) }, facing: Math.round(Math.atan2(b.hy, b.hx) * 100) / 100 })),
-        away: A.skaters.map((b) => ({ player: b.player.id, pos: { x: clamp(b.x / HALF_X, -1, 1), y: clamp(b.y / HALF_Y, -1, 1) }, facing: Math.round(Math.atan2(b.hy, b.hx) * 100) / 100 })),
+        home: H.skaters.map((b) => snapOf(H, b)),
+        away: A.skaters.map((b) => snapOf(A, b)),
         homeGoalie: { player: H.goalie.player.id, pos: { x: H.goalie.x / HALF_X, y: H.goalie.y / HALF_Y } },
         awayGoalie: { player: A.goalie.player.id, pos: { x: A.goalie.x / HALF_X, y: A.goalie.y / HALF_Y } },
         puck: { x: clamp(pk.x / HALF_X, -1, 1), y: clamp(pk.y / HALF_Y, -1, 1) },

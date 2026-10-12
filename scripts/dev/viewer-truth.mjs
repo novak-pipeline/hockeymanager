@@ -65,6 +65,7 @@ export const CHECKLIST = {
   bigHit: ['Wind-up / approach visible?', 'Contact reads?', 'Reaction and puck consequence?'],
   saveRebound: ['Save reads?', 'Rebound visible?', 'Second chance plausible?'],
   emptyNetLate: ['Goalie to the bench?', 'Extra attacker from the gate?', 'A long-range attempt?'],
+  dZoneCoverage: ['Every defender has a job (a man, the net front, a lane)?', 'Nobody standing still in the slot doing nothing?', 'One man on the puck, not two?', 'Nobody skating off to the far boards?'],
 }
 
 const sha1 = (file) => createHash('sha1').update(readFileSync(file)).digest('hex')
