@@ -1010,6 +1010,12 @@ export interface PlayerProfileView extends PlayerBadge {
    */
   mindset?: import('@engine/career/playerMindset').MindsetView
   /**
+   * What's on his mind: the dated things he remembers about how the club has
+   * treated him (a benching, a broken promise, a new deal), strongest first,
+   * each with how raw it still is. Own players only. Absent when nothing is.
+   */
+  moodFactors?: import('@engine/league/moraleMemory').MoodFactorView[]
+  /**
    * Headline personality archetype (e.g. "Born Leader"). Present for own players
    * always; for opponents only once personality knowledge is reliable (≥50).
    * Absent (omitted) otherwise.
@@ -2333,6 +2339,9 @@ export interface OwnerRequestView {
   /** Human hint for the accept choice incl. the board-confidence consequence. */
   acceptHint: string
   declineHint: string
+  /** ISO date after which the owner stops asking (an unanswered ask lapses
+   *  with a small confidence nick). Optional/additive. */
+  answerBy?: string
 }
 
 /** Club sponsorship deals + total annual revenue. Response to 'getSponsors'. */
@@ -2767,6 +2776,8 @@ export interface PlayerInteractionView {
   scene?: true
   /** Whose voice speaks the dialogue in a scene. Absent = the player. */
   speaker?: SceneSpeaker
+  /** Raised in person in the office: the phone never rings for it. */
+  inPerson?: true
   day: number
   year: number
   options: InteractionOptionView[]
@@ -2781,6 +2792,9 @@ export interface DataAnalystView {
 export interface InboxView {
   items: NewsItem[]
   unread: number
+  /** Ids of unread HIGH-priority mail (a decision on your club, a big story),
+   *  listed first by the inbox. Optional/additive. */
+  important?: string[]
   /**
    * Open player→GM concerns awaiting a response. Optional/additive for save
    * compat (absent = no interactions surfaced).
@@ -2860,6 +2874,19 @@ export interface CareerSnapshot {
   gmJobMarket?: Array<import('@engine/league/gmCareer').GMJobOpening>
   /** Pending owner directive. Additive; absent → none. */
   ownerRequest?: import('@engine/league/ownerMeddling').OwnerRequest
+  /** Feud arcs (story audit 2026-10 §4). Optional/additive. */
+  feudState?: import('@engine/league/feudArc').FeudState
+  /** An international tournament in progress (loop audit F18). Optional/additive. */
+  intlPending?: {
+    kind: import('@domain').IntlEventKind
+    year: number
+    finalDay: number
+    eventLabel: string
+    record: import('@domain').IntlEventRecord
+    lines: import('@domain').IntlPlayerLine[]
+    injured: Array<{ playerId: string; nation: string; games: number }>
+    beats: import('@engine/world/intlStages').IntlBeat[]
+  }
   /** User GM's standing with each rival club (teamId → 0–100). Additive; absent → neutral. */
   gmRelationships?: Array<[string, number]>
   /** Veteran→rookie mentorships (menteeId → mentorId). Additive; absent → none. */

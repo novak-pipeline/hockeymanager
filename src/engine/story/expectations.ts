@@ -12,6 +12,7 @@
  *     any ruleset-specific facts as arguments.
  */
 
+import { seasonLabel } from '@engine/shared/seasonLabel'
 import type { Rng } from '@engine/shared/rng'
 import type { NewsCategory } from '@domain/news'
 
@@ -122,6 +123,8 @@ export function buildPreseasonOdds(args: {
   teams: TeamDescriptor[]
   year: number
   rng: Rng
+  /** How the season is named in the copy ("2026–27"); defaults to `year`'s. */
+  seasonLabel?: string
 }): { state: ExpectationsState; newsSeeds: NewsSeed[] } {
   const { teams, year, rng } = args
   const n = teams.length
@@ -188,7 +191,7 @@ export function buildPreseasonOdds(args: {
   const darkHorseName = darkHorseTeam?.name ?? darkHorse?.teamId ?? 'an unnamed club'
   const basementName = basementTeam?.name ?? basement.teamId
 
-  const headline = `${year} Power Rankings: ${projectedChampionName} top the preseason projections`
+  const headline = `${args.seasonLabel ?? seasonLabel(year)} Power Rankings: ${projectedChampionName} top the preseason projections`
 
   const darkHorseLine =
     darkHorse !== null

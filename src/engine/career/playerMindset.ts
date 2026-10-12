@@ -19,7 +19,7 @@
  * the same underlying data.
  */
 
-import type { Player } from '@domain'
+import type { MoraleMemoryKind, Player } from '@domain'
 import type { LockerRoomState } from '@engine/league/lockerRoom'
 import { knowledgeOf } from '@engine/league/scouting'
 import type { ScoutingState } from '@domain/scouting'
@@ -109,6 +109,31 @@ function moraleThought(p: Player, clarity: 'clear' | 'partial' | 'vague'): Thoug
   }
 
   return null
+}
+
+/** What he still carries (moraleMemory.ts): the strongest dated memory, as
+ *  the staff would put it. Own players only — nobody else's staff knows. */
+const MEMORY_TAIL: Record<MoraleMemoryKind, string> = {
+  scratched: 'He wants his spot back.',
+  buried: 'He wants his spot back.',
+  brokenPromise: 'He has not forgotten what you told him.',
+  keptPromise: 'It bought you some trust.',
+  contractSnub: 'It still comes up when his agent calls.',
+  newDeal: 'He is settled.',
+  ignored: 'He noticed.',
+  dismissed: 'He noticed.',
+  tradeRequestIgnored: 'He still wants out.',
+  backed: 'He knows you went to bat for him.',
+  grievance: 'He thinks you picked a side.',
+}
+
+function memoryThought(p: Player): Thought | null {
+  const mem = p.moraleMemory
+  if (!mem || mem.length === 0) return null
+  let top = mem[0]!
+  for (const m of mem) if (Math.abs(m.weight) > Math.abs(top.weight)) top = m
+  if (Math.abs(top.weight) < 2) return null
+  return { tone: top.weight < 0 ? 'negative' : 'positive', line: `${top.note}. ${MEMORY_TAIL[top.kind]}` }
 }
 
 /**
@@ -523,6 +548,7 @@ export function buildMindset(p: Player, ctx: MindsetCtx): MindsetView {
     if (t) candidates.push(t)
   }
 
+  if (ctx.isOwn) maybeAdd(memoryThought(p))
   maybeAdd(moraleThought(p, clarity))
   maybeAdd(formThought(p, clarity))
   maybeAdd(roleThought(p, clarity))

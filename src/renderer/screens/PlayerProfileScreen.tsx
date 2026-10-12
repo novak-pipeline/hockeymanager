@@ -696,6 +696,33 @@ function MindsetPanel({ mindset }: { mindset: MindsetView }): JSX.Element {
   )
 }
 
+/* ── What he remembers (morale memory) ── */
+function MoodFactorsPanel({ factors }: { factors: NonNullable<PlayerProfileView['moodFactors']> }): JSX.Element {
+  return (
+    <Panel title="What's on his mind">
+      <div className="stack" style={{ gap: 'var(--sp-2)' }}>
+        {factors.map((f, i) => (
+          <div
+            key={`${f.kind}-${i}`}
+            className="row"
+            style={{
+              gap: 'var(--sp-2)',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              paddingLeft: 10,
+              borderLeft: `2px solid ${f.tone === 'negative' ? 'var(--danger)' : 'var(--success)'}`,
+            }}
+          >
+            <span style={{ fontSize: 13, lineHeight: 1.5 }}>{f.note}</span>
+            <span className="muted small" style={{ whiteSpace: 'nowrap' }}>{f.strength}</span>
+          </div>
+        ))}
+        <span className="muted small">These hold his mood where it is. They fade with time, and faster once you fix the cause.</span>
+      </div>
+    </Panel>
+  )
+}
+
 /* ── Interview as a scheduled GM action (request → calendar → inbox report) ── */
 function InterviewPanel({
   interview,
@@ -1309,6 +1336,7 @@ function TabProfile({
           })()}
 
           {d.mindset && <MindsetPanel mindset={d.mindset} />}
+          {d.moodFactors && d.moodFactors.length > 0 && <MoodFactorsPanel factors={d.moodFactors} />}
 
           {/* Interview as a scheduled GM action */}
           {d.interview && (

@@ -3,6 +3,7 @@
  * the slice of Career state it needs — and assembles a frozen view-model from
  * views.ts. No mutation, no simulation, no randomness.
  */
+import { moodFactorsView } from '@engine/league/moraleMemory'
 import { PROFILE_ATTRIBUTE_GROUPS } from './profileAttributes'
 import type {
   Conference,
@@ -946,6 +947,7 @@ export function buildPlayerProfile(
     role: p.role,
     condition: conditionOf(p),
     morale: Math.round(p.morale),
+    ...(mindsetCtx?.isOwn && p.moraleMemory?.length ? { moodFactors: moodFactorsView(p) } : {}),
     form: Math.round(p.form),
     injury: p.injuryStatus,
     contract: teamId ? contractView(p) : null,

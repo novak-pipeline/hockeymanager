@@ -1,4 +1,5 @@
 import { Fragment, useState, useRef, useEffect, useCallback } from 'react'
+import { askText } from '../components/ChoiceDialog'
 import { OverallStars } from '../components/Stars'
 import type { TacticsView, LinesUpdate } from '../../worker/protocol'
 import type { SquadView, StaffMeetingSummaryView } from '../../worker/protocol'
@@ -1003,7 +1004,10 @@ export function TacticsScreen(): JSX.Element {
   }, [client, refetch])
 
   async function handleSaveSetup(): Promise<void> {
-    const name = window.prompt('Save this line board as:')?.trim()
+    const name = await askText({
+      title: 'Save line setup', body: 'Name this line board so you can load it again.',
+      confirmLabel: 'Save', cancelLabel: 'Cancel', input: { placeholder: 'e.g. Road lines' },
+    })
     if (!name) return
     const res = await client.saveLineSetup(name)
     if (res.type === 'error') { toast(res.message, 'error'); return }

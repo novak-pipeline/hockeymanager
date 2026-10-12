@@ -15,6 +15,7 @@
  *     hardcoded.
  */
 
+import { seasonLabel } from '@engine/shared/seasonLabel'
 import type { Rng } from '@engine/shared/rng'
 import type { NewsCategory } from '@domain/news'
 
@@ -197,6 +198,8 @@ export interface SetSeasonMandateArgs {
    *  Absent on a fresh hire — a new GM starts with a clean sheet, which is
    *  exactly what makes changing clubs worth something. */
   carryMissStreak?: number
+  /** How the season is named in the copy ("2026–27"); defaults to `year`'s. */
+  seasonLabel?: string
 }
 
 export interface SetSeasonMandateResult {
@@ -278,8 +281,9 @@ export function setSeasonMandate(args: SetSeasonMandateArgs): SetSeasonMandateRe
   }
 
   // Preseason board announcement.
-  const headline = `Owner sets the ${year} mandate for ${teamName}: ${MANDATE_LABEL[mandate]}`
-  const body = buildMandateBody(text, mandate, targetRank, n, teamName, year)
+  const label = args.seasonLabel ?? seasonLabel(year)
+  const headline = `Owner sets the ${label} mandate for ${teamName}: ${MANDATE_LABEL[mandate]}`
+  const body = buildMandateBody(text, mandate, targetRank, n, teamName, label)
 
   const newsSeed: NewsSeed = {
     category: 'league',
@@ -297,7 +301,7 @@ function buildMandateBody(
   targetRank: number,
   n: number,
   teamName: string,
-  year: number,
+  year: string,
 ): string {
   const expectation = mandate === 'cupOrBust'
     ? 'only a championship will do'

@@ -47,7 +47,16 @@ import {
   type Team,
   type TeamId,
   type TeamTactics,
+  type MoraleMemoryKind,
 } from '@domain'
+import { rememberMorale, easeMoraleMemory, MEMORY_NOTES, shortDate } from '@engine/league/moraleMemory'
+import { DIGEST_PREFIX, digestMembers, fileStaleMail, foldDigests, inboxPriority } from './inboxHygiene'
+import {
+  CAUSE_CHANCE, CAUSE_SHELF_DAYS, ESCALATION_SHELF_DAYS, FEUD_COOL_GAMES, FEUD_SETTLE_GAMES,
+  aScore, detectRoleTaken, feudDate, feudHeadline, feudOptions, feudOutcome, feudSceneText, freshFeudState,
+  mayRaiseFeud, pairKey, takesItPersonally,
+  type FeudArc, type FeudCause, type FeudChoice, type FeudNames, type FeudState,
+} from '@engine/league/feudArc'
 import { computeComposites, overall, ratedOverall, ratedPotential, overallToStars, agedPotential } from '@engine/ratings/composites'
 import { quickSimGame } from '@engine/quick/quickSim'
 import { fullSimGame } from '@engine/full/fullSim'
@@ -93,6 +102,7 @@ import {
   emptyWorldHistory,
   type Competition,
   type IntlEventKind,
+  type IntlEventRecord,
   type IntlPlayerLine,
   type WorldHistory,
   type WorldPlayerRef,
@@ -122,6 +132,8 @@ import {
   selectSquads,
   seniorEventFor,
 } from '@engine/world/international'
+import { INTL_LENGTH_DAYS, intlStageBeats, type IntlBeat } from '@engine/world/intlStages'
+import { managedSeasonLabel, seasonLabel } from '@engine/shared/seasonLabel'
 import type { WorldStatLine } from '@engine/league/worldSim'
 import { buildWorldHistoryView, type WorldHistoryView } from '@engine/career/worldHistoryView'
 import { applyConsistency } from '@engine/league/consistency'
@@ -1631,6 +1643,8 @@ export class Career {
 
   /** Pending owner directive awaiting the GM's response. Null = none. Serialized. */
   private ownerRequest: OwnerRequest | null = null
+  /** Feud arcs on the user's club (story audit 2026-10 §4; feudArc.ts). */
+  private feud: FeudState = freshFeudState()
 
   /** The user GM's standing with each rival club (teamId → 0–100, 50 = neutral).
    *  Warms on completed trades, cools when you poach their RFA. Nudges how willing
@@ -1725,7 +1739,7 @@ export class Career {
       this.initLockerRooms()
       this.pushNews(
         'league',
-        `${data.league.name} ${this.year}–${this.year + 1} season begins`,
+        `${data.league.name} ${managedSeasonLabel(this.year, this.phase)} season begins`,
         `You are the new general manager of the ${this.userTeam.name}. Set your lines, watch the cap, and bring home the cup.`
       )
       this.appendSaga(`Y${this.year}: a new GM takes over the ${this.userTeam.name}.`)
@@ -1749,6 +1763,7 @@ export class Career {
         teams: this.teamDescriptors(),
         year: this.year,
         rng: this.rngFor(9101),
+        seasonLabel: managedSeasonLabel(this.year, this.phase),
       })
       this.expectationsState = odds.state
       this.pushSeeds(odds.newsSeeds)
@@ -1761,6 +1776,7 @@ export class Career {
         year: this.year,
         teamId: this.userTeamId as string,
         teamName: this.userTeam.name,
+        seasonLabel: managedSeasonLabel(this.year, this.phase),
       })
       this.boardState = boardResult.state
       this.pushSeeds([boardResult.newsSeed])
@@ -2354,6 +2370,7 @@ export class Career {
       rare?: boolean
       prospects?: DigestProspectRef[]
       reach?: 'ambient' | 'ownClub'
+      digest?: true
     } = {}
   ): NewsItem {
     // Off the match-day clock (summer stages, camp week, the preseason board
@@ -2382,6 +2399,7 @@ export class Career {
       ...(refs.rare !== undefined ? { rare: refs.rare } : {}),
       ...(refs.prospects !== undefined ? { prospects: refs.prospects } : {}),
       ...(refs.reach !== undefined ? { reach: refs.reach } : {}),
+      ...(refs.digest ? { digest: true as const } : {}),
     }
     this.news.unshift(item)
     if (this.news.length > NEWS_LIMIT) this.news.length = NEWS_LIMIT
@@ -4214,6 +4232,7 @@ export class Career {
         player: p,
         lockerRoom: lr,
         feudName,
+        noFeud: true,
         year: this.year,
         day,
         rng: this.rngFor(Career.INTERACTION_NS, day, Career.pidNum(pidStr)),
@@ -4268,6 +4287,21 @@ export class Career {
     })
   }
 
+  /** Write a dated morale memory on one of the user's men (moraleMemory.ts):
+   *  the event moves the level his morale settles at, shows on his profile,
+   *  and fades slowly instead of being washed out in two weeks. */
+  private rememberFor(
+    p: Player,
+    kind: MoraleMemoryKind,
+    note: (count: number, since: string) => string,
+    scale?: number,
+  ): void {
+    rememberMorale(p, {
+      kind, year: this.year, day: this.currentDay, date: this.todayISO(), note,
+      ...(scale !== undefined ? { scale } : {}),
+    })
+  }
+
   /** A concern left unanswered this many days lapses — and lapsing is itself
    *  an answer. */
   static readonly CONCERN_EXPIRY_DAYS = 8
@@ -4282,6 +4316,9 @@ export class Career {
    * for a serious one, and a note from his agent — and it frees the slot.
    */
   private expireStaleInteractions(day: number): void {
+    // Anything still open from an earlier season (a summer scene) is long past
+    // its window: close it first, so it cannot hold the desk (story audit F4).
+    this.closeLastSeasonsConversations()
     for (const i of this.interactions) {
       if (i.status !== 'open' || i.teamId !== (this.userTeamId as string)) continue
       if (i.year !== this.year || day - i.day < Career.CONCERN_EXPIRY_DAYS) continue
@@ -4290,6 +4327,15 @@ export class Career {
       i.chosenOptionId = 'ignored'
       i.resolvedDay = day
       this.decisionEventFor.delete(i.id)
+      // The coach's feud question, never answered: it stays between the two of
+      // them (the friction is still on the lines), no agent, no cost to you.
+      const feudArc = this.feud.arcs.find((a) => a.interactionId === i.id && a.status === 'raised')
+      if (feudArc) {
+        feudArc.status = 'lapsed'
+        const n = this.feudNames(feudArc)
+        i.outcome = `You never gave ${n.coach} an answer. ${n.a} and ${n.b} are still at odds.`
+        continue
+      }
       if (!p) { i.outcome = 'The conversation never happened.'; continue }
       const pro = p.personality.professionalism
       const hit = (i.severity === 'serious' ? 6 : 3) + Math.max(0, 10 - pro) * 0.3
@@ -4299,6 +4345,8 @@ export class Career {
         if (lr) lr.roomMorale = Math.max(0, lr.roomMorale - 1)
       }
       this.flagDismissed(i, true)
+      if (i.kind === 'tradeRequest') this.rememberFor(p, 'tradeRequestIgnored', MEMORY_NOTES.tradeRequestIgnored)
+      else this.rememberFor(p, 'ignored', MEMORY_NOTES.ignored, i.severity === 'serious' ? 1.5 : 1)
       const last = p.name.split(' ').slice(-1)[0] ?? p.name
       i.outcome = `You never answered. ${last} stopped waiting — and he noticed.`
       this.pushNews('contract', `${last}'s agent: "Nobody called him back"`,
@@ -4308,6 +4356,456 @@ export class Career {
         // already paid — morale, residue, the agent's memory) without a stop.
         { playerId: i.playerId, teamId: this.userTeamId as string, reach: 'ownClub' })
     }
+  }
+
+  /**
+   * Story audit 2026-10 F4: the lapse above only looked at THIS season's
+   * conversations, so a scene summoned in the summer (the call to the kid you
+   * drafted, the affiliate's playoff run) and never answered stayed open for
+   * ever after the rollover. Two of them fill the open-conversation cap, which
+   * silenced every concern and dilemma of the new season until answered.
+   *
+   * Called at the rollover (camp opens) and on every match day. A summer SCENE
+   * was a moment, and the moment has passed: it closes quietly, no cost (the
+   * draft is over; the affiliate's season is over). A real CONCERN a player
+   * raised and you never answered still lapses as an ignored concern, with
+   * the usual small, dated cost.
+   */
+  private closeLastSeasonsConversations(): void {
+    for (const i of this.interactions) {
+      if (i.status !== 'open' || i.year >= this.year) continue
+      if (i.teamId !== undefined && i.teamId !== (this.userTeamId as string)) continue
+      i.status = 'resolved'
+      i.chosenOptionId = 'ignored'
+      i.resolvedDay = this.currentDay
+      this.decisionEventFor.delete(i.id)
+      if (i.scene) {
+        i.outcome = 'You never took the call, and the moment passed over the summer.'
+        continue
+      }
+      const p = this.data.players.get(asPlayerId(i.playerId))
+      i.outcome = 'You never answered, and the summer went by.'
+      if (!p || !this.ownOrgIds().has(i.playerId)) continue
+      p.morale = Math.max(0, Math.round(p.morale - 3))
+      this.flagDismissed(i, true)
+      this.rememberFor(p, 'ignored', MEMORY_NOTES.ignored)
+    }
+  }
+
+  /* ───────────── feud arcs (story audit 2026-10 §4; feudArc.ts) ───────────── */
+
+  /** Names the feud scene speaks with. */
+  private feudNames(arc: Pick<FeudArc, 'aId' | 'bId'>): FeudNames {
+    const a = this.data.players.get(asPlayerId(arc.aId))?.name ?? 'He'
+    const b = this.data.players.get(asPlayerId(arc.bId))?.name ?? 'his teammate'
+    const coach = this.getTeamStaff(this.userTeamId as string).headCoach.name
+    const capId = this.lockerRooms.get(this.userTeamId)?.captainId ?? (this.userTeam.captainId as string | undefined) ?? null
+    const captain = capId && capId !== arc.aId && capId !== arc.bId
+      ? this.data.players.get(asPlayerId(capId))?.name
+      : undefined
+    return { a, b, coach, ...(captain ? { captain } : {}) }
+  }
+
+  /** EV tier per healthy user skater: forward line / defence pair index (1-based). */
+  private userEvTiers(): Map<string, number> {
+    const tiers = new Map<string, number>()
+    const lines = this.userTeam.lines
+    if (!lines) return tiers
+    const healthy = (id: string): boolean => {
+      const p = this.data.players.get(asPlayerId(id))
+      return !!p && p.injuryStatus === null && p.resting !== true && !(p.rustGames ?? 0)
+    }
+    lines.forwards.forEach((line, i) => line.forEach((id) => { if (healthy(id as string)) tiers.set(id as string, i + 1) }))
+    lines.defensePairs.forEach((pair, i) => pair.forEach((id) => { if (healthy(id as string)) tiers.set(id as string, i + 1) }))
+    return tiers
+  }
+
+  private shareUserEvLine(a: string, b: string): boolean {
+    const lines = this.userTeam.lines
+    if (!lines) return false
+    return lines.forwards.some((l) => l.some((x) => (x as string) === a) && l.some((x) => (x as string) === b)) ||
+      lines.defensePairs.some((l) => l.some((x) => (x as string) === a) && l.some((x) => (x as string) === b))
+  }
+
+  private queueFeudCause(cause: FeudCause): void {
+    if (cause.aId === cause.bId) return
+    const a = this.data.players.get(asPlayerId(cause.aId))
+    if (!a || (!cause.escalation && !takesItPersonally(a))) return
+    // One live grievance per man: the newest replaces an older one.
+    this.feud.pending = this.feud.pending.filter((c) => c.aId !== cause.aId)
+    this.feud.pending.push(cause)
+  }
+
+  /** The C went to someone else: the senior man who wanted it. */
+  private noteCaptaincySnub(newCaptain: Player, previousId: string | null): void {
+    const alts = new Set((this.userTeam.alternateCaptainIds ?? []).map((id) => id as string))
+    const rivals = this.userTeam.roster
+      .map((id) => this.data.players.get(id))
+      .filter((p): p is Player => !!p && p.position !== 'G' && p.id !== newCaptain.id && p.age >= 25)
+      .sort((x, y) =>
+        ((y.id as string) === previousId ? 1 : 0) - ((x.id as string) === previousId ? 1 : 0) ||
+        (alts.has(y.id as string) ? 1 : 0) - (alts.has(x.id as string) ? 1 : 0) ||
+        leadershipScore(y) - leadershipScore(x))
+    const a = rivals[0]
+    if (!a) return
+    this.queueFeudCause({
+      kind: 'captaincy', aId: a.id as string, bId: newCaptain.id as string,
+      year: this.year, day: this.currentDay, date: this.todayISO(),
+      aWasAlternate: alts.has(a.id as string) || (a.id as string) === previousId,
+    })
+  }
+
+  /** Points for the envy comparison: this season once games are played, else last season. */
+  private envyPoints(p: Player): number {
+    const gp = this.gp.get(p.id) ?? 0
+    if (gp > 0) {
+      const t = this.totals.get(p.id)
+      return (t?.goals ?? 0) + (t?.assists ?? 0)
+    }
+    const s = p.stats[p.stats.length - 1]
+    return s ? s.ev.goals + s.ev.assists + s.pp.goals + s.pp.assists + s.pk.goals + s.pk.assists : 0
+  }
+
+  /** You paid one man more than a teammate who out-produces him at his spot. */
+  private noteContractEnvy(signed: Player): void {
+    if (signed.position === 'G' || !this.userTeam.roster.includes(signed.id)) return
+    const grp = this.posGroup(signed.position)
+    const money = (n: number): string => `$${(n / 1e6).toFixed(1).replace(/\.0$/, '')} million`
+    const bPts = this.envyPoints(signed)
+    const a = this.userTeam.roster
+      .map((id) => this.data.players.get(id))
+      .filter((p): p is Player =>
+        !!p && p.id !== signed.id && this.posGroup(p.position) === grp &&
+        p.contract.salary * 1.25 <= signed.contract.salary && this.envyPoints(p) > bPts && this.envyPoints(p) >= 10)
+      .sort((x, y) => this.envyPoints(y) - this.envyPoints(x))[0]
+    if (!a) return
+    this.queueFeudCause({
+      kind: 'contractEnvy', aId: a.id as string, bId: signed.id as string,
+      year: this.year, day: this.currentDay, date: this.todayISO(),
+      bMoney: money(signed.contract.salary), aMoney: money(a.contract.salary),
+      aPoints: this.envyPoints(a), bPoints: bPts,
+    })
+  }
+
+  /** You praised one man by name at the podium: the teammate at his spot heard it. */
+  private notePublicComment(subjectId: string, quote: string): void {
+    const b = this.data.players.get(asPlayerId(subjectId))
+    if (!b || b.position === 'G' || !this.userTeam.roster.includes(b.id)) return
+    const tiers = this.userEvTiers()
+    const bTier = tiers.get(subjectId)
+    if (bTier === undefined) return
+    const grp = this.posGroup(b.position)
+    // The man one tier below him at his position: the one competing for it.
+    const a = this.userTeam.roster
+      .map((id) => this.data.players.get(id))
+      .filter((p): p is Player => !!p && p.id !== b.id && this.posGroup(p.position) === grp && tiers.get(p.id as string) === bTier + 1)
+      .sort((x, y) => ratedOverall(y) - ratedOverall(x))[0]
+    if (!a) return
+    this.queueFeudCause({
+      kind: 'publicComment', aId: a.id as string, bId: subjectId,
+      year: this.year, day: this.currentDay, date: this.todayISO(), quote: quote.slice(0, 120),
+    })
+  }
+
+  /**
+   * A bad night together: after a loss by three or more, two men from the same
+   * line who were both on for the damage (minus-2 or worse each). The one with
+   * the shorter fuse blames the other.
+   */
+  private noteBadNight(day: number, outcomes: readonly GameOutcome[]): void {
+    const uid = this.userTeamId as string
+    const res = outcomes.find((o) => (o.homeTeamId as string) === uid || (o.awayTeamId as string) === uid)
+    if (!res) return
+    const home = (res.homeTeamId as string) === uid
+    const us = home ? res.homeGoals : res.awayGoals
+    const them = home ? res.awayGoals : res.homeGoals
+    if (them - us < 3) return
+    const opp = this.data.teams.get(home ? res.awayTeamId : res.homeTeamId)
+    const lines = this.userTeam.lines
+    if (!lines) return
+    const pmOf = (id: string): number => res.playerStats.get(asPlayerId(id))?.plusMinus ?? 0
+    let worst: { a: Player; b: Player; sum: number; unit: 'line' | 'pair' } | null = null
+    const units = [
+      ...(lines.forwards as unknown as string[][]).map((u) => ({ u, kind: 'line' as const })),
+      ...(lines.defensePairs as unknown as string[][]).map((u) => ({ u, kind: 'pair' as const })),
+    ]
+    for (const { u: unit, kind } of units) {
+      for (let i = 0; i < unit.length; i++) {
+        for (let j = i + 1; j < unit.length; j++) {
+          const x = unit[i]!, y = unit[j]!
+          if (pmOf(x) > -2 || pmOf(y) > -2) continue
+          const px = this.data.players.get(asPlayerId(x)), py = this.data.players.get(asPlayerId(y))
+          if (!px || !py) continue
+          // The shorter fuse does the blaming.
+          const [a, b] = px.personality.temperament <= py.personality.temperament ? [px, py] : [py, px]
+          const sum = pmOf(x) + pmOf(y)
+          if (!worst || sum < worst.sum) worst = { a, b, sum, unit: kind }
+        }
+      }
+    }
+    if (!worst) return
+    this.queueFeudCause({
+      kind: 'badNight', aId: worst.a.id as string, bId: worst.b.id as string,
+      year: this.year, day, date: dayToDateISO(this.year, day),
+      aPlusMinus: pmOf(worst.a.id as string), bPlusMinus: pmOf(worst.b.id as string),
+      score: `${them}–${us}`, opponent: opp?.name ?? 'the opposition', unit: worst.unit,
+    })
+  }
+
+  /** One match day of feuds: watch the lines, play out the arcs, maybe raise one. */
+  private tickFeuds(day: number, userPlayed: boolean, outcomes: readonly GameOutcome[] = []): void {
+    const st = this.feud
+    this.noteBadNight(day, outcomes)
+    // 1. Causes from the lines: did someone take a man's spot today?
+    const now = this.userEvTiers()
+    if (st.prevTiers.length > 0) {
+      const prev = new Map(st.prevTiers)
+      const groupOf = (id: string): 'F' | 'D' | null => {
+        const p = this.data.players.get(asPlayerId(id))
+        if (!p || p.position === 'G') return null
+        return p.position === 'D' ? 'D' : 'F'
+      }
+      for (const t of detectRoleTaken(prev, now, groupOf)) {
+        this.queueFeudCause({ kind: 'roleTaken', aId: t.aId, bId: t.bId, year: this.year, day, date: dayToDateISO(this.year, day), slot: t.slot })
+      }
+    }
+    st.prevTiers = [...now]
+
+    // 2. Arcs already answered play out over the weeks.
+    const roster = new Set(this.userTeam.roster.map((id) => id as string))
+    for (const arc of st.arcs) {
+      if (arc.status !== 'cooling') continue
+      const n = this.feudNames(arc)
+      if (!roster.has(arc.aId) || !roster.has(arc.bId)) {
+        const gone = roster.has(arc.aId) ? n.b : n.a
+        const stayed = roster.has(arc.aId) ? n.a : n.b
+        this.endFeud(arc, 'resolved', `${gone} is gone, and the trouble with ${stayed} left with him.`, day)
+        continue
+      }
+      if (arc.choice === 'split' && this.shareUserEvLine(arc.aId, arc.bId)) {
+        // Put back together before it cooled: it flares again, and the coach
+        // will be back — quoting the first time.
+        arc.status = 'escalated'
+        arc.escalations++
+        arc.escalatedDate = dayToDateISO(this.year, day)
+        this.strengthenFeud(arc.aId, arc.bId, 15)
+        this.pushNews('league', `${n.a} and ${n.b} are on the same line again`,
+          `You split them on ${feudDate(arc.decidedDate ?? arc.raisedDate)}. They were back together on ${feudDate(arc.escalatedDate)}, ` +
+            `${arc.gamesApart} games short of it settling, and it flared again.`,
+          { playerId: arc.aId, teamId: this.userTeamId as string })
+        this.chronicleFeudState(arc, `flares again after they are put back on the same line`, day)
+        this.queueFeudCause({ ...arc.cause, date: arc.escalatedDate, year: this.year, day, escalation: true })
+        continue
+      }
+      if (userPlayed) arc.gamesApart++
+      if (arc.gamesApart >= arc.gamesNeeded) {
+        this.endFeud(arc, 'resolved',
+          arc.choice === 'split'
+            ? `${arc.gamesApart} games on different lines since you split them on ${feudDate(arc.decidedDate ?? arc.raisedDate)}. ${n.coach} says the trouble between them is over.`
+            : `${arc.gamesApart} games since you settled it on ${feudDate(arc.decidedDate ?? arc.raisedDate)}. ${n.coach} says the trouble between them is over.`,
+          day)
+      }
+    }
+
+    // 3. Maybe raise one: a cause still fresh, a pair the rules allow, a free desk.
+    const today = dayToDateISO(this.year, day)
+    st.pending = st.pending.filter((c) =>
+      roster.has(c.aId) && roster.has(c.bId) &&
+      (Date.parse(today) - Date.parse(c.date)) / 86_400_000 <= (c.escalation ? ESCALATION_SHELF_DAYS : CAUSE_SHELF_DAYS[c.kind]))
+    if (this.interactions.some((i) => i.status === 'open')) return
+    const cause = [...st.pending].reverse().find((c) => mayRaiseFeud(st, c.aId, c.bId, this.year, day))
+    if (!cause) return
+    st.pending = st.pending.filter((c) => c !== cause)
+    const previous = [...st.arcs].reverse().find((a) => pairKey(a.aId, a.bId) === pairKey(cause.aId, cause.bId))
+    const escalated = previous?.status === 'escalated'
+    if (!escalated && !this.rngFor(9411, day, Career.pidNum(cause.aId)).chance(CAUSE_CHANCE[cause.kind])) return
+    this.raiseFeud(cause, day, escalated ? previous : undefined)
+  }
+
+  private strengthenFeud(a: string, b: string, by: number): void {
+    const lr = this.lockerRooms.get(this.userTeamId)
+    if (!lr) return
+    const rel = lr.relationships.find((r) => (r.a === a && r.b === b) || (r.a === b && r.b === a))
+    if (rel && rel.kind === 'feud') rel.strength = Math.min(100, rel.strength + by)
+    else if (!rel) lr.relationships.push({ a, b, kind: 'feud', strength: Math.min(100, 20 + by), sinceYear: this.year })
+  }
+
+  private raiseFeud(cause: FeudCause, day: number, previous?: FeudArc): void {
+    const st = this.feud
+    const id = `fa${st.counter++}`
+    const interactionId = `i${this.interactionCounter++}`
+    const arc: FeudArc = {
+      id, interactionId, aId: cause.aId, bId: cause.bId, cause,
+      status: 'raised', raisedYear: this.year, raisedDay: day, raisedDate: dayToDateISO(this.year, day),
+      gamesApart: 0, gamesNeeded: FEUD_COOL_GAMES, escalations: previous ? previous.escalations : 0,
+      ...(previous?.escalatedDate ? { escalatedDate: previous.escalatedDate } : {}),
+      ...(previous ? { previousArcId: previous.id } : {}),
+    }
+    // The friction is real from today: on the lines (chemistry) and in Dynamics.
+    this.strengthenFeud(cause.aId, cause.bId, 20)
+    const n = this.feudNames(arc)
+    const message = feudSceneText(arc, n, previous)
+    const captainAvailable = n.captain !== undefined
+    this.interactions.unshift({
+      id: interactionId,
+      playerId: cause.aId,
+      teamId: this.userTeamId as string,
+      year: this.year,
+      day,
+      kind: 'feud',
+      severity: 'mild',
+      message,
+      scene: true,
+      inPerson: true,
+      options: feudOptions(n, captainAvailable).map((o) => ({
+        id: o.id, label: o.label,
+        tone: o.id === 'split' || o.id === 'captain' ? 'supportive' as const : o.id === 'shop' ? 'dismissive' as const : 'firm' as const,
+      })),
+      status: 'open',
+    })
+    st.arcs.push(arc)
+    if (st.arcs.length > 30) st.arcs = st.arcs.filter((a) => a.status === 'raised' || a.status === 'cooling').concat(st.arcs.slice(-20))
+    this.pushNews('contract', feudHeadline(n, !!previous), message, {
+      playerId: cause.aId, teamId: this.userTeamId as string, salience: 60,
+    })
+    this.chronicleFeudState(arc, this.feudCauseClause(arc.cause, n), day)
+  }
+
+  /** The cause as a chronicle clause: "after Lundell took his place on the first line (Nov 3)". */
+  private feudCauseClause(c: FeudCause, n: FeudNames): string {
+    const when = feudDate(c.date)
+    switch (c.kind) {
+      case 'roleTaken': return `after ${n.b} took his place on the ${c.slot ?? 'top six'} (${when})`
+      case 'contractEnvy': return `after ${n.b} signed for ${c.bMoney ?? 'more'} (${when})`
+      case 'captaincy': return `after ${n.b} was given the C (${when})`
+      case 'publicComment': return `after the GM singled out ${n.b} at the podium (${when})`
+      case 'badNight': return `after ${aScore(c.score ?? '')} loss to ${c.opponent ?? 'the opposition'} on the same ${c.unit ?? 'line'} (${when})`
+    }
+  }
+
+  private chronicleFeudState(arc: FeudArc, clause: string, day: number): void {
+    const n = this.feudNames(arc)
+    chronicleEvent(this.chronicle, {
+      year: this.year, day: this.phase === 'regularSeason' ? day : 0, kind: 'feud',
+      teamIds: [this.userTeamId as string], playerIds: [arc.aId, arc.bId],
+      headline: `${n.a} and ${n.b}: ${clause}`, userInvolved: true,
+    })
+  }
+
+  private endFeud(arc: FeudArc, status: 'resolved', body: string, day: number): void {
+    arc.status = status
+    const lr = this.lockerRooms.get(this.userTeamId)
+    if (lr) {
+      lr.relationships = lr.relationships.filter((r) =>
+        !(r.kind === 'feud' && ((r.a === arc.aId && r.b === arc.bId) || (r.a === arc.bId && r.b === arc.aId))))
+    }
+    const n = this.feudNames(arc)
+    this.pushNews('league', `${n.a} and ${n.b}: it's settled`, body, { playerId: arc.aId, teamId: this.userTeamId as string })
+    this.chronicleFeudState(arc, 'settled', day)
+  }
+
+  /** The GM's answer to the coach, done for real. Returns the receipt. */
+  private applyFeudChoice(arc: FeudArc, interaction: PlayerInteraction, choice: FeudChoice): string {
+    const n = this.feudNames(arc)
+    const a = this.data.players.get(asPlayerId(arc.aId))
+    const b = this.data.players.get(asPlayerId(arc.bId))
+    const lr = this.lockerRooms.get(this.userTeamId)
+    arc.choice = choice
+    arc.decidedDate = this.todayISO()
+    arc.status = 'cooling'
+    arc.gamesApart = 0
+    arc.gamesNeeded = choice === 'split' ? FEUD_COOL_GAMES : FEUD_SETTLE_GAMES
+    let captainWorked: boolean | undefined
+    switch (choice) {
+      case 'split':
+        this.keepFeudApart(arc)
+        break
+      case 'backA':
+      case 'backB': {
+        const backed = choice === 'backA' ? a : b
+        const other = choice === 'backA' ? b : a
+        if (backed && other) {
+          this.rememberFor(backed, 'backed', MEMORY_NOTES.backed(other.name))
+          this.rememberFor(other, 'grievance', MEMORY_NOTES.grievance(backed.name))
+          // His agent will bring it up at the table.
+          this.residueFlags.push({ playerId: other.id as string, kind: 'wasDismissed', year: this.year, day: this.currentDay, actionId: arc.id, known: true })
+        }
+        const rel = lr?.relationships.find((r) => r.kind === 'feud' && pairKey(r.a, r.b) === pairKey(arc.aId, arc.bId))
+        if (rel) rel.strength = Math.round(rel.strength / 2)
+        break
+      }
+      case 'captain': {
+        const capId = lr?.captainId ?? null
+        const cap = capId ? this.data.players.get(asPlayerId(capId)) : undefined
+        const lead = cap ? leadershipScore(cap) : 0
+        // A real leader (score ~30+) settles most of these; a figurehead rarely.
+        const odds = Math.max(0.2, Math.min(0.85, (lead - 15) / 25))
+        captainWorked = this.rngFor(9412, this.currentDay, Career.pidNum(arc.aId)).chance(odds)
+        if (captainWorked) {
+          arc.gamesNeeded = 4
+          if (cap) cap.morale = Math.min(100, cap.morale + 4)
+          if (lr && cap) {
+            const inf = lr.influence.find(([id]) => id === (cap.id as string))
+            if (inf) inf[1] = Math.min(100, inf[1] + 5)
+          }
+        } else {
+          this.strengthenFeud(arc.aId, arc.bId, 10)
+        }
+        break
+      }
+      case 'shop':
+        if (a) {
+          a.tradeStatus = 'listed'
+          this.recordWorldAction('shopped', arc.aId, 'open')
+        }
+        // It ends when he is moved (or when it cools while he waits).
+        arc.gamesNeeded = FEUD_SETTLE_GAMES * 2
+        break
+    }
+    const outcome = feudOutcome(choice, n, captainWorked)
+    interaction.status = 'resolved'
+    interaction.chosenOptionId = choice
+    interaction.outcome = outcome
+    interaction.resolvedDay = this.currentDay
+    const verb: Record<FeudChoice, string> = {
+      split: 'the GM splits them up',
+      backA: `the GM backs ${n.a}`,
+      backB: `the GM backs ${n.b}`,
+      captain: captainWorked ? `the captain sorts it out` : `the captain's talk does not take`,
+      shop: `the GM puts ${n.a} on the trade block`,
+    }
+    this.chronicleFeudState(arc, verb[choice], this.currentDay)
+    return outcome
+  }
+
+  /**
+   * Split the pair: move the rival off the aggrieved man's line, trading
+   * places with the best man of his group on an adjacent line. Called when
+   * the GM chooses it and before every game day while the split is cooling
+   * and the coach runs the lines (a GM running his own lines keeps his own
+   * call — and if he puts them back together, it flares).
+   */
+  private keepFeudApart(arc: FeudArc): boolean {
+    const lines = this.userTeam.lines
+    if (!lines || !this.shareUserEvLine(arc.aId, arc.bId)) return false
+    const groups: Array<Array<Array<PlayerId>>> = [lines.forwards as unknown as PlayerId[][], lines.defensePairs as unknown as PlayerId[][]]
+    for (const g of groups) {
+      const li = g.findIndex((l) => l.some((x) => (x as string) === arc.aId) && l.some((x) => (x as string) === arc.bId))
+      if (li < 0) continue
+      const target = li + 1 < g.length ? li + 1 : li - 1
+      if (target < 0) return false
+      const bi = g[li]!.findIndex((x) => (x as string) === arc.bId)
+      const other = g[target]!
+      // Swap with the same slot on the other line (keeps C/W and L/R shape).
+      const oi = Math.min(bi, other.length - 1)
+      const tmp = other[oi]!
+      other[oi] = g[li]![bi]!
+      g[li]![bi] = tmp
+      // Our own swap is not somebody taking somebody's spot.
+      this.feud.prevTiers = [...this.userEvTiers()]
+      return true
+    }
+    return false
   }
 
   /** GM responds to an open concern; applies morale/room effects deterministically. */
@@ -4323,6 +4821,13 @@ export class Career {
 
     const player = this.data.players.get(asPlayerId(interaction.playerId))
     if (!player) return { ok: false, message: 'Player not found.' }
+
+    // A feud scene: the coach's question, answered with a real act.
+    const feudArc = this.feud.arcs.find((a) => a.interactionId === interactionId && a.status === 'raised')
+    if (feudArc) {
+      const message = this.applyFeudChoice(feudArc, interaction, optionId as FeudChoice)
+      return { ok: true, message }
+    }
 
     // Authored dilemma? Its options carry hand-written effects and a receipt,
     // so they bypass the generic tone model entirely (Narrative Engine L2).
@@ -4367,6 +4872,16 @@ export class Career {
     // Waved off to his face: he remembers (the decision library's
     // `formerlyDismissed` trigger and the agent's grudge at the table read it).
     if (option.tone === 'dismissive') this.flagDismissed(interaction, true)
+    // What he carries out of the room (moraleMemory.ts). A trade request met
+    // with "you're going nowhere" is remembered for months; being waved off,
+    // for weeks. A real hearing softens the old hurt of being ignored.
+    if (interaction.kind === 'tradeRequest' && (option.tone === 'firm' || option.tone === 'dismissive')) {
+      this.rememberFor(player, 'tradeRequestIgnored', MEMORY_NOTES.tradeRequestIgnored)
+    } else if (option.tone === 'dismissive') {
+      this.rememberFor(player, 'dismissed', MEMORY_NOTES.dismissed)
+    } else if (option.tone === 'supportive' || option.tone === 'promise') {
+      easeMoraleMemory(player, ['ignored', 'dismissed'], 0.5)
+    }
 
     // E3 audit: "address the room" was a promise with no action behind it and
     // nothing that ever checked it. Choosing it IS addressing the room now: the
@@ -4940,6 +5455,16 @@ export class Career {
     // league-wide standing is the anti-cheese system, and a promise the season
     // made impossible to keep is not an exploit.
     if (pr.status === 'kept') this.creditStanding(1, `Kept your word to ${p?.name ?? 'a player'}.`)
+    // He remembers it either way (moraleMemory.ts). Only a man still in the
+    // organization carries it; one who has left took it to his new club's file.
+    if (p && this.ownOrgIds().has(pr.playerId)) {
+      if (pr.status === 'kept') {
+        this.rememberFor(p, 'keptPromise', MEMORY_NOTES.keptPromise(pr.text))
+        easeMoraleMemory(p, ['brokenPromise'], 0.5)
+      } else if (pr.status === 'broken') {
+        this.rememberFor(p, 'brokenPromise', MEMORY_NOTES.brokenPromise(pr.text))
+      }
+    }
     chronicleEvent(this.chronicle, {
       year: this.year,
       day,
@@ -5184,6 +5709,7 @@ export class Career {
     /* ── player→GM concerns for the user club (story-first core) ── */
     this.expireStaleInteractions(day)
     this.maybeRaiseInteractions(day)
+    this.tickFeuds(day, wonByTeam.has(this.userTeamId as string), outcomes)
     this.maybeRaiseDecisionEvent(day)
     // E1: the farm and the juniors get onto the GM's desk — at most one story a
     // month, five a season, and never the same one twice.
@@ -5684,8 +6210,16 @@ export class Career {
 
   /** The pending press-conference question, if any. */
   getPressConference(): PressConferenceState | null {
+    // Loop audit F19: the four-day lapse ran only on an advance, so loading an
+    // old save showed a presser about a game from a month ago. A stale one is
+    // past its moment whenever it is asked for.
+    const pc = this.pressConference
+    if (pc && (pc.year !== this.year || this.currentDay - pc.day > Career.PRESSER_SHELF_DAYS)) this.pressConference = null
     return this.pressConference ? { ...this.pressConference } : null
   }
+
+  /** A presser left unanswered this many match days lapses. */
+  static readonly PRESSER_SHELF_DAYS = 4
 
   /**
    * Apply the user's press-conference answer. The tone is either LLM-graded
@@ -5707,32 +6241,14 @@ export class Career {
       if (classicFiery) lr.roomMorale = Math.min(100, lr.roomMorale + 2)
       if (tone === 'praise' && !option) lr.roomMorale = Math.min(100, lr.roomMorale + 1)
     }
-    if (classicFiery) {
-      const rng = this.rngFor(7301, this.currentDay, this.pressCounter)
-      if (rng.next() < 0.3) {
-        const skaters = this.userTeam.roster
-          .map((id) => this.resolve(id))
-          .filter((p) => p.position !== 'G')
-        if (skaters.length >= 2) {
-          const a = skaters[Math.floor(rng.next() * skaters.length)]
-          let b = skaters[Math.floor(rng.next() * skaters.length)]
-          if (b.id === a.id) b = skaters[(skaters.indexOf(a) + 1) % skaters.length]
-          createOrEscalateRelationshipArc(
-            this.arcsState,
-            'feud',
-            [a.id as string, b.id as string],
-            [this.userTeamId as string],
-            `Tempers simmer between ${a.name} and ${b.name} after the GM's fiery press conference.`,
-            this.currentDay,
-            this.year
-          )
-          this.chronicleFeud(a.id as string, b.id as string, "after the GM's fiery press conference")
-        }
-      }
-    }
     // An option's words are the GM's words; typed text is quoted as typed.
     const optionQuote = option ? option.label.replace(/^["“]|["”]$/g, '') : ''
     const quote = option ? optionQuote : answer.trim().length > 0 ? answer.trim().slice(0, 240) : 'No comment.'
+    // Story audit 2026-10 §4: the fiery presser used to start a feud between two
+    // RANDOM skaters. A public comment now causes friction only when it singles
+    // out one of your men by name, and the man it lands on is the teammate
+    // who plays his spot.
+    if (pc.subjectId && tone === 'praise') this.notePublicComment(pc.subjectId, quote)
     if (option && pc.topic) this.applyPresserOption(pc, option.id, optionQuote)
     const toneLabel: Record<PressTone, string> = {
       measured: 'a measured',
@@ -7556,7 +8072,7 @@ export class Career {
   private maybeQueuePresser(day: number, userGame: GameOutcome | undefined): void {
     const pc = this.pressConference
     if (pc) {
-      if (pc.year !== this.year || day - pc.day > 4) this.pressConference = null
+      if (pc.year !== this.year || day - pc.day > Career.PRESSER_SHELF_DAYS) this.pressConference = null
       else return
     }
     // Fewer, better: twelve days between pressers, and the stock questions
@@ -8149,7 +8665,7 @@ export class Career {
     }
   }
 
-  private postGame(res: GameOutcome, dayRng: Rng): Set<PlayerId> {
+  private postGame(res: GameOutcome, dayRng: Rng, day?: number): Set<PlayerId> {
     const played = new Set<PlayerId>()
     const participants: Array<{ player: Player; toi: number; medical?: number }> = []
     // The two clubs' medical rooms (PHASE 0: the physio is part of the model).
@@ -8196,7 +8712,17 @@ export class Career {
     // Role vs. talent: a star buried down the lineup (or healthy-scratched)
     // sours; a depth player handed a big role gets a lift. Deterministic.
     for (const t of [home, away]) {
-      applyDeploymentMorale({ team: t, resolve: (id) => this.resolve(id), played: (id) => played.has(id) })
+      // The user's club also REMEMBERS a benching (moraleMemory.ts): dated, on
+      // his profile, fading slowly — and forgiven faster once he plays again.
+      const gmScratches = new Set(this.practiceState.scratched)
+      const memory = t.id === this.userTeamId && day !== undefined
+        ? {
+            year: this.year, day, date: dayToDateISO(this.year, day),
+            scratchedByGm: (id: PlayerId) => gmScratches.has(id as string),
+            linesByGm: this.lineManagementMode === 'fillGaps',
+          }
+        : undefined
+      applyDeploymentMorale({ team: t, resolve: (id) => this.resolve(id), played: (id) => played.has(id), ...(memory ? { memory } : {}) })
     }
     return played
   }
@@ -8774,6 +9300,11 @@ export class Career {
     // played the game. A control that visibly does nothing is the exact defect
     // this audit exists to kill, so the scratch is now enforced on the ice.
     this.enforceUserScratches()
+    // A feud the GM split stays split while the coach runs the lines (a GM
+    // running his own lines keeps his own call; feudArc.ts).
+    if (this.lineManagementMode === 'coach') {
+      for (const arc of this.feud.arcs) if (arc.status === 'cooling' && arc.choice === 'split') this.keepFeudApart(arc)
+    }
     this.refreshCoachFit()
   }
 
@@ -9704,7 +10235,7 @@ export class Career {
       })
       this.applyOutcome(game, res)
       outcomes.push(res)
-      for (const pid of this.postGame(res, this.rngFor(7003, nextDay, game.id.length))) {
+      for (const pid of this.postGame(res, this.rngFor(7003, nextDay, game.id.length), nextDay)) {
         played.add(pid)
       }
       if (game.homeTeamId === this.userTeamId || game.awayTeamId === this.userTeamId) {
@@ -9759,6 +10290,7 @@ export class Career {
     //    leans on the GM — kept infrequent so it's flavour, not a nag. ──────
     // What the GM told the owner is judged on its due day (E3 audit).
     this.judgeOwnerCommitmentIfDue(nextDay)
+    this.lapseIgnoredOwnerRequest(nextDay)
     if (Math.floor(nextDay / 45) > Math.floor(this.currentDay / 45)) {
       this.maybeGenerateOwnerRequest(nextDay)
     }
@@ -9841,6 +10373,21 @@ export class Career {
   /** Tournaments already attempted this session — a world too thin to ice a
    *  field is not re-tried every match day. Transient by design. */
   private intlAttempted = new Set<string>()
+  /**
+   * A tournament in progress (loop audit F18): simulated the day it opens,
+   * told round by round over its real window (intlStages.ts), and applied —
+   * medals, awards, stats, scouting — on the day of the final.
+   */
+  private intlPending: {
+    kind: IntlEventKind
+    year: number
+    finalDay: number
+    eventLabel: string
+    record: IntlEventRecord
+    lines: IntlPlayerLine[]
+    injured: Array<{ playerId: string; nation: string; games: number }>
+    beats: IntlBeat[]
+  } | null = null
 
   private worldHist(): WorldHistory {
     const lg = this.data.league
@@ -10344,22 +10891,43 @@ export class Career {
   /* ── international: World Juniors, Olympics, Nations Cup ── */
 
   private tickInternational(day: number): void {
+    this.tickIntlPending(day)
     const comps = this.data.league.competitions
     if (!comps || comps.length === 0) return
     const hist = this.worldHist()
-    const has = (k: IntlEventKind): boolean => hist.international.some((e) => e.kind === k && e.year === this.year)
+    const has = (k: IntlEventKind): boolean =>
+      hist.international.some((e) => e.kind === k && e.year === this.year) ||
+      (this.intlPending?.kind === k && this.intlPending.year === this.year)
     if (day >= WJC_DAY && !has('worldJuniors') && !this.intlAttempted.has(`worldJuniors-${this.year}`)) {
       this.intlAttempted.add(`worldJuniors-${this.year}`)
-      this.runIntlEvent('worldJuniors')
+      this.runIntlEvent('worldJuniors', day)
     }
     const senior = seniorEventFor(this.year)
     if (senior && day >= SENIOR_EVENT_DAY && !has(senior) && !this.intlAttempted.has(`${senior}-${this.year}`)) {
       this.intlAttempted.add(`${senior}-${this.year}`)
-      this.runIntlEvent(senior)
+      this.runIntlEvent(senior, day)
     }
   }
 
-  private runIntlEvent(kind: IntlEventKind): void {
+  private intlEventLabel(kind: IntlEventKind): string {
+    return kind === 'worldJuniors' ? `${this.year + 1} World Juniors` : kind === 'olympics' ? `${this.year + 1} Winter Olympics` : `${this.year + 1} Nations Cup`
+  }
+
+  /** Publish the rounds that are due; on the day of the final, apply the result. */
+  private tickIntlPending(day: number): void {
+    const p = this.intlPending
+    if (!p) return
+    const due = p.beats.filter((b) => b.day <= day)
+    p.beats = p.beats.filter((b) => b.day > day)
+    for (const b of due) this.pushNews('league', b.headline, b.body, { salience: 45 })
+    if (day >= p.finalDay || p.year !== this.year) {
+      this.intlPending = null
+      for (const b of p.beats) this.pushNews('league', b.headline, b.body, { salience: 45 })
+      this.applyIntlResult(p.kind, p.record, p.lines, p.injured, p.eventLabel)
+    }
+  }
+
+  private runIntlEvent(kind: IntlEventKind, day: number): void {
     const nhl = new Set<string>()
     for (const tid of this.data.league.teams) for (const pid of this.data.teams.get(tid)?.roster ?? []) nhl.add(pid as string)
     const rostered = new Set<string>()
@@ -10385,9 +10953,62 @@ export class Career {
       : kind === 'olympics' ? runOlympics({ squads, players: this.data.players, year: this.year, seed })
         : runNationsCup({ squads, players: this.data.players, year: this.year, seed })
     if (!res) return
-    const rec = res.record
+    const eventLabel = this.intlEventLabel(kind)
+    // The world learns it round by round; the GM's own men are named in each.
+    const mine = this.yourProspectIds()
+    for (const pid of this.userTeam.roster) mine.add(pid as string)
+    const yours = res.lines.filter((l) => mine.has(l.playerId))
+    this.intlPending = {
+      kind, year: this.year, finalDay: day + INTL_LENGTH_DAYS[kind], eventLabel,
+      record: res.record, lines: [...res.lines], injured: [...res.injured],
+      beats: intlStageBeats({ kind, record: res.record, eventLabel, startDay: day, yours }),
+    }
+    // Selection is news the day the squads are named, not after the final.
+    if (u20 === false) this.intlSelectionBeats(res.record, eventLabel)
+    this.tickIntlPending(day)
+  }
+
+  /** Senior events: your men picked for their country, or left at home. */
+  private intlSelectionBeats(rec: IntlEventRecord, eventLabel: string): void {
+    const selected = new Set<string>(rec.rosters.flatMap(([, ids]) => ids))
+    const picked: Player[] = []
+    const snubbed: Player[] = []
+    for (const pid of this.userTeam.roster) {
+      const p = this.data.players.get(pid)
+      if (!p) continue
+      if (selected.has(pid as string)) { picked.push(p); p.morale = Math.min(100, p.morale + 4); continue }
+      const nat = p.nationality
+      const squad = rec.rosters.find(([n]) => n === nat)
+      if (!squad) continue
+      // A snub: good enough to be in the conversation (within 3 of the
+      // squad's weakest pick at his position group), and left home.
+      const grp = (x: Player): string => (x.position === 'G' ? 'G' : x.position === 'D' ? 'D' : 'F')
+      const same = squad[1].map((id) => this.data.players.get(asPlayerId(id))).filter((x): x is Player => !!x && grp(x) === grp(p))
+      const floor = Math.min(...same.map((x) => ratedOverall(x)))
+      if (same.length > 0 && ratedOverall(p) >= floor - 3) { snubbed.push(p); p.morale = Math.max(0, p.morale - 4) }
+    }
+    if (picked.length > 0) {
+      this.pushNews('league', `${picked.length === 1 ? picked[0]!.name : `${picked.length} of your players`} named for the ${eventLabel}`,
+        `${picked.map((p) => `${p.name} (${p.nationality})`).join(', ')} ${picked.length === 1 ? 'has' : 'have'} been selected. The NHL pauses for the tournament; the room is proud of them.`,
+        { playerId: picked[0]!.id as string, salience: 55 })
+    }
+    for (const p of snubbed.slice(0, 2)) {
+      this.pushNews('league', `${p.name} left off ${p.nationality}'s roster`,
+        `${p.name} was in the conversation for the ${eventLabel} and did not make the cut. He is taking it hard — expect a quiet week in the room.`,
+        { playerId: p.id as string, salience: 50 })
+    }
+  }
+
+  /** The final is played: medals, awards, lines, scouting, injuries, the story. */
+  private applyIntlResult(
+    kind: IntlEventKind,
+    rec: IntlEventRecord,
+    resLines: IntlPlayerLine[],
+    injured: Array<{ playerId: string; nation: string; games: number }>,
+    eventLabel: string,
+  ): void {
+    const u20 = kind === 'worldJuniors'
     this.worldHist().international.push(rec)
-    const eventLabel = kind === 'worldJuniors' ? `${this.year + 1} World Juniors` : kind === 'olympics' ? `${this.year + 1} Winter Olympics` : `${this.year + 1} Nations Cup`
 
     // Per-player tournament lines → the international columns on his record.
     const lineOf = new Map<string, IntlPlayerLine>()
@@ -10395,7 +11016,7 @@ export class Career {
       const p = this.data.players.get(asPlayerId(id))
       if (p) p.intlApps = (p.intlApps ?? 0) + 1
     }
-    for (const l of [...res.lines]) {
+    for (const l of [...resLines]) {
       lineOf.set(l.playerId, l)
       const p = this.data.players.get(asPlayerId(l.playerId))
       if (!p) continue
@@ -10447,39 +11068,8 @@ export class Career {
       this.draftRankCache = null
     }
 
-    // Selection beats for your own men (senior events): picked, or snubbed.
-    if (!u20) {
-      const selected = new Set<string>(rec.rosters.flatMap(([, ids]) => ids))
-      const picked: Player[] = []
-      const snubbed: Player[] = []
-      for (const pid of this.userTeam.roster) {
-        const p = this.data.players.get(pid)
-        if (!p) continue
-        if (selected.has(pid as string)) { picked.push(p); p.morale = Math.min(100, p.morale + 4); continue }
-        const nat = p.nationality
-        const squad = rec.rosters.find(([n]) => n === nat)
-        if (!squad) continue
-        // A snub: good enough to be in the conversation (within 3 of the
-        // squad's weakest pick at his position group), and left home.
-        const grp = (x: Player): string => (x.position === 'G' ? 'G' : x.position === 'D' ? 'D' : 'F')
-        const same = squad[1].map((id) => this.data.players.get(asPlayerId(id))).filter((x): x is Player => !!x && grp(x) === grp(p))
-        const floor = Math.min(...same.map((x) => ratedOverall(x)))
-        if (same.length > 0 && ratedOverall(p) >= floor - 3) { snubbed.push(p); p.morale = Math.max(0, p.morale - 4) }
-      }
-      if (picked.length > 0) {
-        this.pushNews('league', `${picked.length === 1 ? picked[0]!.name : `${picked.length} of your players`} named for the ${eventLabel}`,
-          `${picked.map((p) => `${p.name} (${p.nationality})`).join(', ')} ${picked.length === 1 ? 'has' : 'have'} been selected. The NHL pauses for the tournament; the room is proud of them.`,
-          { playerId: picked[0]!.id as string, salience: 55 })
-      }
-      for (const p of snubbed.slice(0, 2)) {
-        this.pushNews('league', `${p.name} left off ${p.nationality}'s roster`,
-          `${p.name} was in the conversation for the ${eventLabel} and did not make the cut. He is taking it hard — expect a quiet week in the room.`,
-          { playerId: p.id as string, salience: 50 })
-      }
-    }
-
     // Injuries suffered at the tournament that land on your club.
-    for (const inj of res.injured) {
+    for (const inj of injured) {
       if (!mine.has(inj.playerId)) continue
       const p = this.data.players.get(asPlayerId(inj.playerId))
       if (!p) continue
@@ -10871,7 +11461,7 @@ export class Career {
       })
       this.applyOutcome(game, res)
       outcomes.push(res)
-      for (const pid of this.postGame(res, this.rngFor(7003, nextDay, game.id.length))) {
+      for (const pid of this.postGame(res, this.rngFor(7003, nextDay, game.id.length), nextDay)) {
         played.add(pid)
       }
       if (isUser) {
@@ -11125,7 +11715,7 @@ export class Career {
       this.creditPhysicalStats(res)
       applySeriesResult(po, g.seriesId, result)
       beatOutcomes.push(res)
-      for (const pid of this.postGame(res, this.rngFor(7004, day, g.gameNumber))) played.add(pid)
+      for (const pid of this.postGame(res, this.rngFor(7004, day, g.gameNumber), day)) played.add(pid)
 
       /* ── Wave 4: rivalry registration for playoff games ── */
       {
@@ -11259,7 +11849,7 @@ export class Career {
         day,
         kind: 'championship',
         teamIds: [po.championTeamId as string],
-        headline: `${champ.name} win the ${this.year} championship`,
+        headline: `${champ.name} win the ${seasonLabel(this.year)} championship`,
         userInvolved: po.championTeamId === this.userTeamId,
       })
       // Queue a champion tentpole press job.
@@ -11810,7 +12400,9 @@ export class Career {
             ],
           }
           const [cat, headline, body] = texts[seed.kind]
-          this.pushNews(cat, headline, body, { playerId: seed.playerId as string })
+          // Another club's man: league churn, folded into the day's digest.
+          const ours = this.ownOrgIds().has(seed.playerId as string)
+          this.pushNews(cat, headline, body, { playerId: seed.playerId as string, ...(ours ? {} : { digest: true as const }) })
         }
 
         /* ── E2: extensions signed in-season start paying now. developPlayers
@@ -11877,6 +12469,7 @@ export class Career {
           } else {
             this.pushNews('league', `${p.name} retires`, `${p.name} hangs up the skates at ${p.age}.`, {
               playerId: id as string,
+              ...(this.ownOrgIds().has(id as string) ? {} : { digest: true as const }),
             })
           }
         }
@@ -12493,7 +13086,8 @@ export class Career {
             `You lose ${p.name} to ${t.abbreviation}`,
             `${p.name} was on your board, but he signs with ${t.name} ` +
             `($${(s.salary / 1e6).toFixed(2)}M × ${s.years}). His agent's read: it came down to ${reason}.`,
-            { playerId: pid, teamId: s.teamId as string }
+            // Your debrief, whoever signed him: it is mail to YOUR desk.
+            { playerId: pid, teamId: this.userTeamId as string }
           )
           this.faShortlist.delete(pid)
           if (session && session.status !== 'signed') session.status = 'walked'
@@ -14023,6 +14617,9 @@ export class Career {
       }
       // Only the settled history of the past year matters; drop older entries.
       this.playerPromises = this.playerPromises.filter((pr) => pr.year >= this.year)
+      // Camp opens with a clear desk: last season's unanswered conversations
+      // (summer scenes included) close now, not on some October match day.
+      this.closeLastSeasonsConversations()
 
       // Buyout dead cap follows the CBA tail: the slice for the season now
       // beginning stays on the books; past-season slices drop off. (The tail
@@ -14151,6 +14748,13 @@ export class Career {
 
   markNewsRead(ids: string[]): void {
     const set = new Set(ids)
+    // A digest stands for its day's folded items: reading it reads them all.
+    const digests = ids.filter((id) => id.startsWith(DIGEST_PREFIX))
+    if (digests.length > 0) {
+      const raw = this.curatedInboxRaw()
+      const involvesUser = this.newsInvolvesUser()
+      for (const d of digests) for (const id of digestMembers(d, raw, involvesUser)) set.add(id)
+    }
     for (const n of this.news) if (set.has(n.id)) n.read = true
   }
 
@@ -16744,6 +17348,11 @@ export class Career {
       if (!rng.chance(0.5)) continue // not every eligible club, every week
       this.waiverWire.push({ playerId: cand.id as string, fromTeamId: tid as string, placedDay: day })
       placed++
+      // Loop audit F11: another club's sub-replacement body is not mail — it
+      // held the Continue overlay on its own five times a season. It lives on
+      // the Waiver Wire screen (and the ticker). Only a man who would make
+      // YOUR lineup at his position is a decision worth a stop.
+      const worthAClaim = ratedOverall(cand) >= this.orgNhlBar(this.userTeam, this.posGroup(cand.position))
       this.pushNews(
         'contract',
         `${cand.name} placed on waivers by ${team.abbreviation}`,
@@ -16751,7 +17360,9 @@ export class Career {
           (cand.contract.yearsRemaining > 1
             ? `A claim takes on all ${cand.contract.yearsRemaining} years of the deal. Claims go through the Waiver Wire.`
             : `A claim takes on the contract, which ends this season. Claims go through the Waiver Wire.`),
-        { playerId: cand.id as string, teamId: tid as string }
+        worthAClaim
+          ? { playerId: cand.id as string, teamId: tid as string, salience: 56 }
+          : { playerId: cand.id as string, teamId: tid as string, reach: 'ambient' }
       )
     }
   }
@@ -19013,6 +19624,13 @@ export class Career {
         this.year
       )
       this.commitNegotiatedContract(player, offer, kind)
+      this.noteContractEnvy(player)
+      // A new deal with the club he is already at: remembered warmly, and any
+      // earlier breakdown in talks is water under the bridge.
+      if (kind !== 'freeAgent') {
+        this.rememberFor(player, 'newDeal', MEMORY_NOTES.newDeal)
+        easeMoraleMemory(player, ['contractSnub'], 0.3)
+      }
       // E1: a role promised at the table is a debt from the day he signs. The
       // LW5 promise machinery already knows how to collect on ice time.
       if (state.rolePitch !== undefined && rolePitchValue(state.rolePitch, ratedOverall(player)) > 0) {
@@ -19042,6 +19660,11 @@ export class Career {
         signed: true,
         message: `${player.name} signs — $${(offer.salary / 1e6).toFixed(2)}M × ${offer.years} years.`,
       }
+    }
+    if ((result.status === 'walked' || result.status === 'paused') && kind !== 'freeAgent' && this.ownOrgIds().has(playerId)) {
+      // Talks with one of your own men broke down: he hears about it, and it
+      // sits with him (moraleMemory.ts) until a deal gets done.
+      this.rememberFor(player, 'contractSnub', MEMORY_NOTES.contractSnub)
     }
     if (result.status === 'walked') {
       applyDealOutcome(this.agentRapport, agentName, { kind: 'walked' }, this.year)
@@ -26084,7 +26707,8 @@ export class Career {
       req.body = `${vet.name} — a beloved veteran — is up for a new deal, and the owner does not want to read the backlash if he walks: "${last} stays, figure it out." Keeping him is good PR; letting him go is a fight with the boss.`
     }
     this.ownerRequest = req
-    this.pushNews('league', req.title, `${req.body}\n\nHead to Club Vision to respond to the owner.`, {
+    this.pushNews('league', req.title,
+      `${req.body}\n\nHe wants an answer by ${shortDate(dayToDateISO(this.year, day + Career.OWNER_ASK_EXPIRY_DAYS))}. Respond in Club Vision.`, {
       teamId: this.userTeamId as string,
     })
   }
@@ -26097,6 +26721,34 @@ export class Career {
       .map((id) => this.resolve(id))
       .filter((p) => p.age >= 30 && p.contract.yearsRemaining <= 1 && ratedOverall(p) >= 68)
       .sort((a, b) => b.age + ratedOverall(b) - (a.age + ratedOverall(a)))[0]
+  }
+
+  /** Days the owner waits for an answer before he stops asking. */
+  static readonly OWNER_ASK_EXPIRY_DAYS = 10
+
+  /**
+   * Story audit 2026-10 F5 / §2: an UNANSWERED owner ask never expired and
+   * cost nothing — the day-45 "win-now push" sat on the desk for 163 of 206
+   * steps, and while it sat there no other ask could come. Now the owner waits
+   * {@link OWNER_ASK_EXPIRY_DAYS} days (the card says the date), then stops
+   * asking: a small, dated confidence nick, smaller than pushing back to his
+   * face would have cost, and the desk is clear for the next ask. An ask left
+   * over from last season lapses the same way on the first day of the new one.
+   */
+  private lapseIgnoredOwnerRequest(day: number): void {
+    const r = this.ownerRequest
+    if (!r || r.commitment) return
+    const sameSeason = r.year === this.year
+    if (sameSeason && day - r.day < Career.OWNER_ASK_EXPIRY_DAYS) return
+    this.ownerRequest = null
+    const hit = Math.max(1, Math.min(3, Math.round(Math.abs(r.declineConfidence) / 2)))
+    this.boardState.confidence = Math.max(0, this.boardState.confidence - hit)
+    this.boardState.patience = Math.max(0, this.boardState.patience - 1)
+    const asked = sameSeason ? `on ${shortDate(dayToDateISO(r.year, r.day))}` : 'last season'
+    this.pushNews('league', 'The owner stopped asking',
+      `He asked you ${asked}: "${r.title}". No answer came, so he has stopped waiting for one. ` +
+        `It is a small mark against you upstairs, and the next time he asks, he will expect a reply.`,
+      { teamId: this.userTeamId as string })
   }
 
   /** The pending owner directive, if any. */
@@ -26114,6 +26766,7 @@ export class Career {
       ...(r.spoken ? { spoken: r.spoken } : {}),
       acceptHint: `Go along with it (board confidence ${sign(r.acceptConfidence)})`,
       declineHint: `Push back (board confidence ${sign(r.declineConfidence)})`,
+      answerBy: dayToDateISO(r.year, r.day + Career.OWNER_ASK_EXPIRY_DAYS),
     }
   }
 
@@ -29125,11 +29778,29 @@ export class Career {
    *  standings takes, trade-rumour chatter about other clubs, and feed posts).
    *  Anything touching your club or a player of yours always stays. Shared by
    *  {@link getInbox} and the dashboard unread badge so the two never disagree. */
-  private curatedInboxNews(): NewsItem[] {
+  /** Does this item concern the user's club (team or a rostered man)? */
+  private newsInvolvesUser(): (n: NewsItem) => boolean {
     const userTid = this.userTeamId as string
     const userRoster = new Set(this.userTeam.roster.map((id) => id as string))
-    const involvesUser = (n: NewsItem): boolean =>
+    return (n: NewsItem): boolean =>
       n.teamId === userTid || (n.playerId !== undefined && userRoster.has(n.playerId))
+  }
+
+  /**
+   * The inbox as the GM sees it (loop audit 3 F16): the curated mail, with
+   * stale unread mail filed away by its shelf life and each day's other-club
+   * routine news folded into one "Around the league" digest (inboxHygiene.ts).
+   */
+  private curatedInboxNews(): NewsItem[] {
+    const raw = this.curatedInboxRaw()
+    const involvesUser = this.newsInvolvesUser()
+    fileStaleMail(raw, this.todayISO(), involvesUser)
+    return foldDigests(raw, involvesUser)
+  }
+
+  /** The curation pass alone: which stories reach the desk at all. */
+  private curatedInboxRaw(): NewsItem[] {
+    const involvesUser = this.newsInvolvesUser()
     const AMBIENT_NOISE =
       /point streak|point drought|heater hits|\bon fire\b|streak snapped|What went wrong|gap widens|struggling to meet|lagging|Trade talk heats up/i
     // League-wide roster churn that has nothing to do with your club: prospects
@@ -29168,6 +29839,11 @@ export class Career {
   getInbox(): InboxView {
     const items = this.curatedInboxNews()
     const unread = items.filter((n) => !n.read).length
+    // Prominence: unread mail that is a decision on your club, or a big story.
+    const involvesUser = this.newsInvolvesUser()
+    const important = items
+      .filter((n) => !n.read && !n.id.startsWith(DIGEST_PREFIX) && inboxPriority(n, involvesUser(n)) === 'high')
+      .map((n) => n.id)
 
     // Collect unique player/team ids referenced by news items.
     const playerIds = new Set<string>()
@@ -29211,6 +29887,7 @@ export class Career {
         message: i.message,
         ...(i.scene ? { scene: true as const } : {}),
         ...(i.speaker ? { speaker: i.speaker } : {}),
+        ...(i.inPerson ? { inPerson: true as const } : {}),
         day: i.day,
         year: i.year,
         options: i.options.map((o) => ({ id: o.id, label: o.label })),
@@ -29228,6 +29905,7 @@ export class Career {
     return {
       items,
       unread,
+      ...(important.length > 0 ? { important } : {}),
       playerInfo,
       teamInfo,
       ...(interactions.length > 0 ? { interactions } : {}),
@@ -30200,7 +30878,10 @@ export class Career {
       .slice(0, 2)
     this.syncCaptainOverride(this.userTeamId)
     p.morale = Math.max(0, Math.min(100, p.morale + 5))
-    if (previous !== playerId) this.chronicleCaptaincy(playerId, previous)
+    if (previous !== playerId) {
+      this.chronicleCaptaincy(playerId, previous)
+      this.noteCaptaincySnub(p, previous)
+    }
     this.pushNews('league', `${p.name} named captain`,
       `${p.name} will wear the C for the ${team.name}. A vote of confidence from the front office.`,
       { playerId, teamId: this.userTeamId as string })
@@ -31107,6 +31788,8 @@ export class Career {
       gmState: this.gmStateInternal ? structuredClone(this.gmStateInternal) : undefined,
       gmJobMarket: this.gmJobMarket ? this.gmJobMarket.map((o) => ({ ...o })) : undefined,
       ownerRequest: this.ownerRequest ? { ...this.ownerRequest } : undefined,
+      feudState: structuredClone(this.feud),
+      ...(this.intlPending ? { intlPending: structuredClone(this.intlPending) } : {}),
       gmRelationships: [...this.gmRelationships.entries()],
       gmReputation: structuredClone(this.gmRep),
       hockeySoul: {
@@ -31311,6 +31994,8 @@ export class Career {
     career.gmStateInternal = snapshot.gmState ? structuredClone(snapshot.gmState) : null
     career.gmJobMarket = snapshot.gmJobMarket ? snapshot.gmJobMarket.map((o) => ({ ...o })) : null
     career.ownerRequest = snapshot.ownerRequest ? { ...snapshot.ownerRequest } : null
+    if (snapshot.feudState) career.feud = structuredClone(snapshot.feudState)
+    if (snapshot.intlPending) career.intlPending = structuredClone(snapshot.intlPending)
     career.gmRelationships = new Map(snapshot.gmRelationships ?? [])
     career.gmRep = snapshot.gmReputation ? structuredClone(snapshot.gmReputation) : createGmReputation()
     {

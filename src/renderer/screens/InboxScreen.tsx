@@ -267,8 +267,12 @@ export function InboxScreen(): JSX.Element {
 
   // Unread first, then newest first. Read messages fall to the bottom (greyed
   // out) — the same order drives Space-to-advance through the feed.
+  // Within the unread pile, the mail that needs the GM (a decision on his
+  // club, a big story) comes first; the rest is newest first.
+  const important = new Set(data.important ?? [])
   const ordered = [...visible].sort((a, b) => {
     if (a.read !== b.read) return a.read ? 1 : -1
+    if (!a.read && important.has(a.id) !== important.has(b.id)) return important.has(a.id) ? -1 : 1
     if (b.day !== a.day) return b.day - a.day
     return b.id.localeCompare(a.id)
   })
