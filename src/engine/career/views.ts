@@ -2339,6 +2339,9 @@ export interface OwnerRequestView {
   /** Human hint for the accept choice incl. the board-confidence consequence. */
   acceptHint: string
   declineHint: string
+  /** ISO date after which the owner stops asking (an unanswered ask lapses
+   *  with a small confidence nick). Optional/additive. */
+  answerBy?: string
 }
 
 /** Club sponsorship deals + total annual revenue. Response to 'getSponsors'. */

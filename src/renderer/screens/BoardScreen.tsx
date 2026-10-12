@@ -202,6 +202,11 @@ function OwnerDeskPanel(props: { request: OwnerRequestView; onDone: () => void }
   return (
     <Panel title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon size={16}><Icons.Phone /></Icon> Owner's Desk — {request.title}</span>}>
       <div style={{ marginBottom: 10 }}>{request.body}</div>
+      {request.answerBy && (
+        <div className="muted small" style={{ marginBottom: 10 }}>
+          He wants an answer by {new Date(`${request.answerBy}T12:00:00Z`).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}. After that he stops asking, and it counts a little against you.
+        </div>
+      )}
       <div className="row" style={{ gap: 10 }}>
         <button className="btn btn-primary" disabled={busy} onClick={() => respond(true)}>{request.acceptHint}</button>
         <button className="btn" disabled={busy} onClick={() => respond(false)}>{request.declineHint}</button>

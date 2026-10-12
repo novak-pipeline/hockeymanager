@@ -49,7 +49,7 @@ import {
   type TeamTactics,
   type MoraleMemoryKind,
 } from '@domain'
-import { rememberMorale, easeMoraleMemory, MEMORY_NOTES } from '@engine/league/moraleMemory'
+import { rememberMorale, easeMoraleMemory, MEMORY_NOTES, shortDate } from '@engine/league/moraleMemory'
 import { DIGEST_PREFIX, digestMembers, fileStaleMail, foldDigests, inboxPriority } from './inboxHygiene'
 import { computeComposites, overall, ratedOverall, ratedPotential, overallToStars, agedPotential } from '@engine/ratings/composites'
 import { quickSimGame } from '@engine/quick/quickSim'
@@ -4302,6 +4302,9 @@ export class Career {
    * for a serious one, and a note from his agent — and it frees the slot.
    */
   private expireStaleInteractions(day: number): void {
+    // Anything still open from an earlier season (a summer scene) is long past
+    // its window: close it first, so it cannot hold the desk (story audit F4).
+    this.closeLastSeasonsConversations()
     for (const i of this.interactions) {
       if (i.status !== 'open' || i.teamId !== (this.userTeamId as string)) continue
       if (i.year !== this.year || day - i.day < Career.CONCERN_EXPIRY_DAYS) continue
@@ -4329,6 +4332,40 @@ export class Career {
         // A receipt, not a decision: it streams into the inbox (the cost is
         // already paid — morale, residue, the agent's memory) without a stop.
         { playerId: i.playerId, teamId: this.userTeamId as string, reach: 'ownClub' })
+    }
+  }
+
+  /**
+   * Story audit 2026-10 F4: the lapse above only looked at THIS season's
+   * conversations, so a scene summoned in the summer (the call to the kid you
+   * drafted, the affiliate's playoff run) and never answered stayed open for
+   * ever after the rollover. Two of them fill the open-conversation cap, which
+   * silenced every concern and dilemma of the new season until answered.
+   *
+   * Called at the rollover (camp opens) and on every match day. A summer SCENE
+   * was a moment, and the moment has passed: it closes quietly, no cost (the
+   * draft is over; the affiliate's season is over). A real CONCERN a player
+   * raised and you never answered still lapses as an ignored concern, with
+   * the usual small, dated cost.
+   */
+  private closeLastSeasonsConversations(): void {
+    for (const i of this.interactions) {
+      if (i.status !== 'open' || i.year >= this.year) continue
+      if (i.teamId !== undefined && i.teamId !== (this.userTeamId as string)) continue
+      i.status = 'resolved'
+      i.chosenOptionId = 'ignored'
+      i.resolvedDay = this.currentDay
+      this.decisionEventFor.delete(i.id)
+      if (i.scene) {
+        i.outcome = 'You never took the call, and the moment passed over the summer.'
+        continue
+      }
+      const p = this.data.players.get(asPlayerId(i.playerId))
+      i.outcome = 'You never answered, and the summer went by.'
+      if (!p || !this.ownOrgIds().has(i.playerId)) continue
+      p.morale = Math.max(0, Math.round(p.morale - 3))
+      this.flagDismissed(i, true)
+      this.rememberFor(p, 'ignored', MEMORY_NOTES.ignored)
     }
   }
 
@@ -9811,6 +9848,7 @@ export class Career {
     //    leans on the GM — kept infrequent so it's flavour, not a nag. ──────
     // What the GM told the owner is judged on its due day (E3 audit).
     this.judgeOwnerCommitmentIfDue(nextDay)
+    this.lapseIgnoredOwnerRequest(nextDay)
     if (Math.floor(nextDay / 45) > Math.floor(this.currentDay / 45)) {
       this.maybeGenerateOwnerRequest(nextDay)
     }
@@ -14079,6 +14117,9 @@ export class Career {
       }
       // Only the settled history of the past year matters; drop older entries.
       this.playerPromises = this.playerPromises.filter((pr) => pr.year >= this.year)
+      // Camp opens with a clear desk: last season's unanswered conversations
+      // (summer scenes included) close now, not on some October match day.
+      this.closeLastSeasonsConversations()
 
       // Buyout dead cap follows the CBA tail: the slice for the season now
       // beginning stays on the books; past-season slices drop off. (The tail
@@ -26165,7 +26206,8 @@ export class Career {
       req.body = `${vet.name} — a beloved veteran — is up for a new deal, and the owner does not want to read the backlash if he walks: "${last} stays, figure it out." Keeping him is good PR; letting him go is a fight with the boss.`
     }
     this.ownerRequest = req
-    this.pushNews('league', req.title, `${req.body}\n\nHead to Club Vision to respond to the owner.`, {
+    this.pushNews('league', req.title,
+      `${req.body}\n\nHe wants an answer by ${shortDate(dayToDateISO(this.year, day + Career.OWNER_ASK_EXPIRY_DAYS))}. Respond in Club Vision.`, {
       teamId: this.userTeamId as string,
     })
   }
@@ -26178,6 +26220,34 @@ export class Career {
       .map((id) => this.resolve(id))
       .filter((p) => p.age >= 30 && p.contract.yearsRemaining <= 1 && ratedOverall(p) >= 68)
       .sort((a, b) => b.age + ratedOverall(b) - (a.age + ratedOverall(a)))[0]
+  }
+
+  /** Days the owner waits for an answer before he stops asking. */
+  static readonly OWNER_ASK_EXPIRY_DAYS = 10
+
+  /**
+   * Story audit 2026-10 F5 / §2: an UNANSWERED owner ask never expired and
+   * cost nothing — the day-45 "win-now push" sat on the desk for 163 of 206
+   * steps, and while it sat there no other ask could come. Now the owner waits
+   * {@link OWNER_ASK_EXPIRY_DAYS} days (the card says the date), then stops
+   * asking: a small, dated confidence nick, smaller than pushing back to his
+   * face would have cost, and the desk is clear for the next ask. An ask left
+   * over from last season lapses the same way on the first day of the new one.
+   */
+  private lapseIgnoredOwnerRequest(day: number): void {
+    const r = this.ownerRequest
+    if (!r || r.commitment) return
+    const sameSeason = r.year === this.year
+    if (sameSeason && day - r.day < Career.OWNER_ASK_EXPIRY_DAYS) return
+    this.ownerRequest = null
+    const hit = Math.max(1, Math.min(3, Math.round(Math.abs(r.declineConfidence) / 2)))
+    this.boardState.confidence = Math.max(0, this.boardState.confidence - hit)
+    this.boardState.patience = Math.max(0, this.boardState.patience - 1)
+    const asked = sameSeason ? `on ${shortDate(dayToDateISO(r.year, r.day))}` : 'last season'
+    this.pushNews('league', 'The owner stopped asking',
+      `He asked you ${asked}: "${r.title}". No answer came, so he has stopped waiting for one. ` +
+        `It is a small mark against you upstairs, and the next time he asks, he will expect a reply.`,
+      { teamId: this.userTeamId as string })
   }
 
   /** The pending owner directive, if any. */
@@ -26195,6 +26265,7 @@ export class Career {
       ...(r.spoken ? { spoken: r.spoken } : {}),
       acceptHint: `Go along with it (board confidence ${sign(r.acceptConfidence)})`,
       declineHint: `Push back (board confidence ${sign(r.declineConfidence)})`,
+      answerBy: dayToDateISO(r.year, r.day + Career.OWNER_ASK_EXPIRY_DAYS),
     }
   }
 
