@@ -72,6 +72,10 @@ export type PassEvent = GameEventBase & {
   kind?: PassKind
   /** Additive (agent engine): the opponent who picked it off, when not completed. */
   interceptedBy?: PlayerRef
+  /** Additive (agent engine, W3 S2): seconds the passer was committed to the release before the puck left (its event time). */
+  releaseS?: number
+  /** Additive (agent engine, W3 S2): seconds the receiver needs to settle it (not his to use until then; one-timers 0). */
+  settleS?: number
 }
 
 /** How a shot was released (additive; agent engine). */
@@ -126,6 +130,8 @@ export type BattleEvent = GameEventBase & {
   players: PlayerRef[]
   winner: PlayerRef | null
   durationS: number
+  /** Additive (agent engine, W3 S2): a tie-up's hold — both men committed this long before somebody won it. */
+  holdS?: number
 }
 
 /** The move a puck carrier puts on a defender or the goalie. */
@@ -193,6 +199,8 @@ export type HitEvent = GameEventBase & {
   knockdown?: boolean
   /** Additive (agent engine): the target was pinned against the boards after the hit. */
   pinned?: boolean
+  /** Additive (agent engine, W3 S2): seconds the man hit is committed (stagger, fall and get-up, or pinned). */
+  receiverS?: number
 }
 
 export type PenaltyEvent = GameEventBase & {
@@ -263,6 +271,15 @@ export interface SkaterSnapshot {
    * change of job is a re-plan; detectors count them (target flips).
    */
   job?: string
+  /**
+   * Additive (agent engine, W3 S2): the action he is committed to on this
+   * frame (src/engine/agent/constraints.ts ActName: "windup", "release",
+   * "pass", "receive", "deke", "poke", "lifted", "hit", "stagger",
+   * "down", "pin", "pinned", "tieUp", "set", "save"), and ctT the
+   * seconds into it. Absent = skating / free. Renderers may time clips to it.
+   */
+  act?: string
+  actT?: number
 }
 
 /**

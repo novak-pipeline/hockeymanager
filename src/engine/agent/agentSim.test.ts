@@ -17,6 +17,8 @@ import { passShape } from '@engine/full/passShape'
 import { analyzeGame } from '@engine/analysis'
 import { framesFromStream, judgeTeamPlay, SIM_GATES } from '@engine/analysis/teamPlay'
 import { judgeOffsideStream } from '@engine/analysis/offside'
+import { judgeActionFloor, judgeContacts } from '@engine/analysis/actions'
+import { ACTION_FLOOR } from './constraints'
 
 /** W3 S1 design band for the stream gates (per 60 live minutes / per player-minute). */
 const TEAM_PLAY_BAND = { aimlessPer60: 30, coveragePer60: 5, flipsPerPlayerMin: 26 }
@@ -171,6 +173,50 @@ describe('agent engine', () => {
     expect(offsideEntries).toBeGreaterThan(20)
     expect(whistles).toBeGreaterThan(5)
     expect(missed).toEqual([])
+  }, 120000)
+
+  it('holds every action to its floor and every contact to a pair in range (W3 S2, VT12)', () => {
+    // constraints.ts: no shot, pass, check, tie-up, stick or goalie action
+    // completes faster than its row, and a hit or a tie-up only happens with
+    // both bodies in reach. Judged on the stream by @engine/analysis/actions.
+    const short: string[] = []
+    const apart: string[] = []
+    const byAct: Record<string, number> = {}
+    let shots = 0
+    let passes = 0
+    let hits = 0
+    let tieUps = 0
+    let hitsWithReceiver = 0
+    let streamHits = 0
+    let passesTimed = 0
+    for (let i = 0; i < 4; i++) {
+      const out = agentSimGame(team(i), team(i + 6), resolve, { seed: 970 + i })
+      const fl = judgeActionFloor(out.stream)
+      const ct = judgeContacts(out.stream)
+      shots += fl.shots
+      passes += fl.passes
+      hits += ct.hits
+      tieUps += ct.tieUps
+      for (const [k, v] of Object.entries(fl.byAct)) byAct[k] = (byAct[k] ?? 0) + v
+      for (const c of fl.short) short.push(`g${i} ${c.what}`)
+      for (const c of ct.apart) apart.push(`g${i} ${c.what}`)
+      for (const e of out.stream) {
+        if (e.type === 'hit') streamHits++
+        if (e.type === 'hit' && e.receiverS !== undefined && e.receiverS > 0) hitsWithReceiver++
+        if (e.type === 'pass' && e.releaseS !== undefined && e.releaseS >= ACTION_FLOOR.pass.release.drop - 0.06) passesTimed++
+      }
+    }
+    // eslint-disable-next-line no-console
+    console.log(`action floor: ${shots} shots, ${passes} passes, acts ${JSON.stringify(byAct)}; contact pairs: ${hits} hits, ${tieUps} tie-ups`)
+    expect(shots).toBeGreaterThan(100)
+    expect(passes).toBeGreaterThan(1000)
+    expect(passesTimed).toBe(passes)
+    for (const a of ['windup', 'release', 'receive', 'tieUp', 'hit', 'stagger', 'save', 'set', 'deke', 'lifted']) expect(byAct[a] ?? 0).toBeGreaterThan(0)
+    expect(hits).toBeGreaterThan(100)
+    expect(hitsWithReceiver).toBe(streamHits)
+    expect(tieUps).toBeGreaterThan(50)
+    expect(short).toEqual([])
+    expect(apart).toEqual([])
   }, 120000)
 
   it('lands in the NHL band and keeps its play logic over many games', () => {

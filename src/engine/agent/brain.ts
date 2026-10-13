@@ -52,6 +52,7 @@ import {
 } from './templates'
 import { other, rDef, rLevel, type CarrierAction, type Side, type World } from './world'
 import { PLAN, planOf, setJob, type JobKind, type Plan } from './plans'
+import { ACTION_FLOOR } from './constraints'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
 const r01 = rLevel
@@ -297,7 +298,7 @@ export function shotValue(me: Side, opps: readonly Body[], c: Body, x: number, y
  * a move is to the carrier (the frequency lever); `beatG` is the finish
  * multiplier on a goalie who bit.
  */
-export const DEKE = { base: -2.8, baseG: -1.6, k: 7, lunge: 0.02, belief: 0.25, valueS: 1.1, valueG: 0.35, goalieRoom: 10, beatG: 1.6, minS: 0.4, maxS: 0.7, creaseRet: 0.6, tightShot: 0.85 }
+export const DEKE = { base: -2.8, baseG: -1.6, k: 7, lunge: 0.02, belief: 0.25, valueS: 1.1, valueG: 0.35, goalieRoom: 10, beatG: 1.6, minS: ACTION_FLOOR.stick.deke.min, maxS: ACTION_FLOOR.stick.deke.max, creaseRet: 0.6, tightShot: 0.85 }
 
 /** The carrier's hands for a 1-on-1 move (0..1): stickhandling first, then feet and hockey sense. */
 export function dekeSkill(c: Body): number {

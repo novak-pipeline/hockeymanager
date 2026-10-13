@@ -5,6 +5,7 @@
  *
  *   OFFSIDE_REPRO=<save copy>  OR_GAMES=12  npx vitest run src/engine/agent/offside.repro.test.ts
  *     exhibitions on a COPY of a save (user club vs the others, seeds 1000+)
+ *   OFFSIDE_REPRO=gen  OR_GAMES=6     the agentSim.test gate's generated-league games
  *   OFFSIDE_REPRO=mod  OR_GAMES=120  [OR_ONLY=<game index>]
  *     the measurement harness's imported-league games (teamPlay.measure.test.ts pairing, seeds 7000+)
  */
@@ -14,6 +15,7 @@ import { gunzipSync } from 'node:zlib'
 import { it } from 'vitest'
 import type { GameStream, Player, PlayerId } from '@domain'
 import { loadModDatabase, validateModDatabase } from '@data'
+import { generateLeague } from '@data/generate'
 import { Career } from '@engine/career/career'
 import { framesFromStream, type TPSkater } from '@engine/analysis/teamPlay'
 import { judgeOffside, touchesFromStream, whistlesFromStream } from '@engine/analysis/offside'
@@ -33,7 +35,13 @@ it.skipIf(!process.env.OFFSIDE_REPRO)('offside repro', () => {
   const n = Number(process.env.OR_GAMES ?? 3)
   const only = process.env.OR_ONLY ? Number(process.env.OR_ONLY) : null
   const games: Array<() => GameStream> = []
-  if (process.env.OFFSIDE_REPRO === 'mod') {
+  if (process.env.OFFSIDE_REPRO === 'gen') {
+    // agentSim.test's offside gate: generated league, team k v k+5, seed 940+k
+    const data = generateLeague({ seed: 99 })
+    const res = (id: PlayerId): Player => data.players.get(id)!
+    const teams = data.league.teams
+    for (let k = 0; k < n; k++) games.push(() => agentSimGame(data.teams.get(teams[k % teams.length])!, data.teams.get(teams[(k + 5) % teams.length])!, res, { seed: 940 + k }).stream)
+  } else if (process.env.OFFSIDE_REPRO === 'mod') {
     const data = loadModDatabase(validateModDatabase(JSON.parse(readFileSync(modDb(), 'utf8'))), { seed: 2029 })
     const res = (id: PlayerId): Player => data.players.get(id)!
     const teams = data.league.teams

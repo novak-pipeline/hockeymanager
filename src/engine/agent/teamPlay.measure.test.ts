@@ -19,6 +19,7 @@ import { generateLeague } from '@data/generate'
 import { loadModDatabase, validateModDatabase } from '@data'
 import { framesFromStream, judgeTeamPlay, per60, SIM_GATES } from '@engine/analysis/teamPlay'
 import { judgeOffsideStream } from '@engine/analysis/offside'
+import { judgeActionFloor, judgeContacts } from '@engine/analysis/actions'
 import { agentSimGame } from './agentSim'
 
 function findModDb(): string | null {
@@ -68,6 +69,11 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
   let offMissedCarried = 0
   let entries = 0
   const offEx: string[] = []
+  let floorRuns = 0
+  let floorShort = 0
+  let contactPairs = 0
+  let contactApart = 0
+  let tieUpEvents = 0
   for (let i = 0; i < games; i++) {
     const k = i + Number(process.env.TP_SEED0 ?? 7000) - 7000
     // TP_PAIR=band: the pairing of agentSim.test's NHL-band sample (team k v k+1, seed 5000+k)
@@ -105,6 +111,13 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
       else if (e.type === 'penalty') pens++
       else if (e.type === 'hit') hits++
     }
+    const fl = judgeActionFloor(out.stream)
+    floorRuns += fl.runs + fl.shots + fl.passes
+    floorShort += fl.short.length
+    const ctc = judgeContacts(out.stream)
+    contactPairs += ctc.hits + ctc.tieUps
+    contactApart += ctc.apart.length
+    tieUpEvents += ctc.tieUps
     const off = judgeOffsideStream(out.stream)
     entries += off.entries
     offEntries += off.offsideEntries
@@ -130,6 +143,7 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
     `calibration/team-game: goals ${(goals / tg).toFixed(2)} shots ${(shots / tg).toFixed(1)} ppGoals ${(ppGoals / tg).toFixed(2)} shGoals ${(shGoals / tg).toFixed(2)} penalties ${(pens / tg).toFixed(2)} hits ${(hits / tg).toFixed(1)} PP% ${(pens ? (ppGoals / pens) * 100 : 0).toFixed(1)} rebound-share ${(rebounds / Math.max(1, shots)).toFixed(3)} blocked-share ${(blocked / Math.max(1, shots + blocked + missed)).toFixed(3)} at-save near-net atk ${(atkNear / Math.max(1, saves)).toFixed(2)} def ${(defNear / Math.max(1, saves)).toFixed(2)}`,
     `team play per 60 live min: VT13 aimless ${per60(aimless, liveMin).toFixed(2)} (own net ${per60(aimOwn, liveMin).toFixed(2)}) - VT14 doubles ${per60(doubles, liveMin).toFixed(2)} farSide ${per60(farSide, liveMin).toFixed(2)} ignored ${per60(ignored, liveMin).toFixed(2)} - VT16 camping ${per60(camping, liveMin).toFixed(2)} - job flips ${(flips / Math.max(jobMin, 1e-9)).toFixed(2)}/player-min (live ${liveMin.toFixed(0)} min)`,
     `offside: entries ${entries} offside-entries ${offEntries} whistles ${offCalls} (${(offCalls / tg).toFixed(2)}/team-game) MISSED ${offMissed} (carried ${offMissedCarried}, delayed touch ${offMissed - offMissedCarried})`,
+    `VT12 action floor: ${floorShort} short in ${floorRuns} acts/shots/passes - contact pairs: ${contactApart} apart in ${contactPairs} (tie-ups ${(tieUpEvents / tg).toFixed(1)}/team-game)`,
     ...offEx,
     ...ex
   ]

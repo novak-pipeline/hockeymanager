@@ -23,6 +23,8 @@ export interface TPSkater {
   x: number
   y: number
   job?: string | undefined
+  /** W3 S2: the action he is committed to (SkaterSnapshot.act), sim stream only. */
+  act?: string | undefined
 }
 
 export interface TPFrame {
@@ -346,7 +348,7 @@ export function framesFromStream(stream: GameStream): TPFrame[] {
     else if (e.type === 'frame') {
       const g = gsum.get(e.period) ?? 0
       const homeNetX = g > 0 ? 89 : g < 0 ? -89 : 0
-      const sk = (s: { player: string; pos: { x: number; y: number }; job?: string | undefined }): TPSkater => ({ id: s.player as string, x: s.pos.x * 100, y: s.pos.y * 42.5, job: s.job })
+      const sk = (s: { player: string; pos: { x: number; y: number }; job?: string | undefined; act?: string | undefined }): TPSkater => ({ id: s.player as string, x: s.pos.x * 100, y: s.pos.y * 42.5, job: s.job, ...(s.act !== undefined ? { act: s.act } : {}) })
       out.push({
         t: (base.get(e.period) ?? 0) + e.t,
         live,

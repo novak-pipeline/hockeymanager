@@ -10,6 +10,7 @@
 import type { ProbeFrame, ProbeGeometry, ProbeRig } from './viewerProbe'
 import { judgeTeamPlay, TP, type TPFrame, type TPReport } from '@engine/analysis/teamPlay'
 import { judgeOffside, OFFSIDE } from '@engine/analysis/offside'
+import { ACTION_FLOOR } from '@engine/agent/constraints'
 
 /** A non-frame stream event on the absolute clock, positions in world feet. */
 export interface VTEvent {
@@ -32,6 +33,8 @@ export interface VTEvent {
   reason?: string
   /** poke checks: it took the puck. */
   success?: boolean
+  /** shots: seconds the sim's shooter wound up (W2/W3 S2). */
+  windupS?: number
 }
 
 /** A spoken / captioned booth line as fired (channel 'commentary'). */
@@ -616,6 +619,45 @@ export function vt16Camping(inp: VTInput): VTResult {
   }
 }
 
+/* ── VT12 action floor: the drawn wind-up is the sim's (W3 S2) ───────────── */
+// Every shot the sim wound up (windupS, constraints.ts) is drawn winding up for
+// at least its shot type's row of GAME time - the renderer may not shorten the
+// set the defence had to close on. (The stream half of VT12 - every act on the
+// frames held to its floor, every contact pair in range - is gated in
+// agentSim.test via @engine/analysis/actions.)
+export function vt12ActionFloor(inp: VTInput): VTResult {
+  const frames = inp.frames
+  const ev: string[] = []
+  let judged = 0
+  let bad = 0
+  const drawn: number[] = []
+  for (const s of inp.events) {
+    if ((s.type !== 'shot' && s.type !== 'missedShot') || s.windupS === undefined || !s.actor) continue
+    const type = (s.shotType ?? 'wrist') as keyof typeof ACTION_FLOOR.shot.windup
+    const need = ACTION_FLOOR.shot.windup[type] ?? 0
+    if (need <= 0) continue
+    const near = frames.filter((f) => f.clock >= s.absT - 1.5 && f.clock <= s.absT + 0.05 && isLive(f) && !inReplay(f))
+    // only shots the recording played through live from before the wind-up
+    if (near.length < 10 || near[0]!.clock > s.absT - need - 0.2) continue
+    let game = 0
+    for (const f of near) if (f.clock <= s.absT + 1e-6 && f.windup === s.actor) game += f.dt * f.speed
+    judged++
+    drawn.push(game)
+    // one drawn frame of slack at the playback speed
+    if (game < need - 0.05) {
+      bad++
+      if (ev.length < 6) ev.push(`${clk(s.absT)} ${s.shotType ?? 'shot'} by ${s.actor}: drawn wind-up ${f2(game)} game-s, the sim wound up ${f2(s.windupS)} s (row ${need} s)`)
+    }
+  }
+  return {
+    id: 'VT12', name: 'Action floor (drawn wind-up)',
+    status: judged === 0 ? 'n/a' : bad === 0 ? 'green' : 'red',
+    rule: 'every shot the sim wound up is drawn winding up (puck on the blade, the set) for at least the row for its shot type in constraints.ts, in game time',
+    value: `${judged - bad}/${judged} wind-ups drawn in full; median ${f2(pct(drawn, 0.5))} game-s`,
+    evidence: ev,
+  }
+}
+
 /* ── VT18 offside: an attacker over the line ahead of the puck, no whistle ── */
 // Owner, reel S1 ozCycleShot: "he was offside". Judged on the DRAWN blue line
 // (1 ft wide on ±25 ft), drawn bodies and the drawn puck; the rules live in
@@ -641,7 +683,7 @@ export function vt18Offside(inp: VTInput): VTResult {
   }
 }
 
-export const DETECTORS = [vt1Bodies, vt2Divergence, vt3Shots, vt4Motion, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt9Framing, vt10Commentary, vt11Hits, vt13Aimless, vt14Coverage, vt16Camping, vt18Offside] as const
+export const DETECTORS = [vt1Bodies, vt2Divergence, vt3Shots, vt4Motion, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt9Framing, vt10Commentary, vt11Hits, vt12ActionFloor, vt13Aimless, vt14Coverage, vt16Camping, vt18Offside] as const
 
 export function runViewerTruth(inp: VTInput): VTResult[] {
   return DETECTORS.map((d) => d(inp))

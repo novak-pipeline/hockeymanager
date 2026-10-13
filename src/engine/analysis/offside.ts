@@ -86,7 +86,15 @@ export interface OffsideTouch {
   id?: string
 }
 
-export function judgeOffside(frames: readonly TPFrame[], whistles: readonly OffsideWhistle[], touches: readonly OffsideTouch[] = []): OffsideReport {
+export function judgeOffside(frames0: readonly TPFrame[], whistles: readonly OffsideWhistle[], touches: readonly OffsideTouch[] = []): OffsideReport {
+  // Who has the puck: the frame's carrier, or (sim stream) the man receiving
+  // it (act 'receive') - a reception names the frame's carrier only once the
+  // puck has slid onto his blade, but it is his (and his side's) from the touch.
+  const frames = frames0.map((f) => {
+    if (f.carrier !== null) return f
+    const h = [...f.home, ...f.away].find((s) => s.act === 'receive')
+    return h ? { ...f, carrier: h.id } : f
+  })
   let ti = 0
   const offWhistles = whistles.filter((w) => w.reason === 'offside').map((w) => w.t)
   const whistled = (t: number): boolean => offWhistles.some((w) => w >= t - 0.25 && w <= t + OFFSIDE.whistleS)
@@ -97,12 +105,14 @@ export function judgeOffside(frames: readonly TPFrame[], whistles: readonly Offs
   // the puck is in a zone until it COMPLETELY leaves it (over the line's far edge)
   const inZone = { home: false, away: false }
   let aheadAtGain: string | null = null
+  let carryTouch: 'home' | 'away' | null = null
   for (let i = 0; i < frames.length; i++) {
     const f = frames[i]!
     const p = i > 0 ? frames[i - 1]! : null
     if (!f.live || f.homeNetX === 0) {
       delayed = null
       lastTouch = null
+      carryTouch = null
       inZone.home = false
       inZone.away = false
       continue
@@ -125,8 +135,11 @@ export function judgeOffside(frames: readonly TPFrame[], whistles: readonly Offs
       }
       return false
     }
-    let touchedNow: 'home' | 'away' | null = null
-    while (ti < touches.length && touches[ti]!.t <= f.t + 1e-6) {
+    // touches since the last frame came before this frame's picture; one AT
+    // this frame's time came after it (the frame is written before the think)
+    let touchedNow = carryTouch
+    carryTouch = null
+    while (ti < touches.length && touches[ti]!.t < f.t - 1e-6) {
       const tc = touches[ti++]!
       const team = tc.team ?? teamOf(tc.id ?? null)
       if (team) lastTouch = touchedNow = team
@@ -134,6 +147,11 @@ export function judgeOffside(frames: readonly TPFrame[], whistles: readonly Offs
     const prevTouch = lastTouch
     const ct = teamOf(f.carrier)
     if (ct) lastTouch = ct
+    while (ti < touches.length && touches[ti]!.t <= f.t + 1e-6) {
+      const tc = touches[ti++]!
+      const team = tc.team ?? teamOf(tc.id ?? null)
+      if (team) lastTouch = carryTouch = team
+    }
     // A man who takes the puck while he is already over the line (reaching
     // back for it from inside the zone) is ahead of it: carrying it in does not
     // make him onside (rule 83.1's exception is for a carrier who crosses WITH it).
