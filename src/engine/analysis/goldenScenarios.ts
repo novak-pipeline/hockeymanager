@@ -24,11 +24,12 @@ export type ScenarioKind =
   | 'saveRebound'
   | 'emptyNetLate'
   | 'dZoneCoverage'
+  | 'offsideCall'
 
 export const SCENARIO_KINDS: readonly ScenarioKind[] = [
   'breakaway', 'twoOnOne', 'ozCycleShot', 'ppSetPlay', 'goalReplay',
   'lineChangeOnFly', 'faceoffWinPlay', 'bigHit', 'saveRebound', 'emptyNetLate',
-  'dZoneCoverage',
+  'dZoneCoverage', 'offsideCall',
 ]
 
 /** Human label + how much game time to show around the moment (lead before, tail after).
@@ -47,6 +48,8 @@ export const SCENARIO_META: Record<ScenarioKind, { label: string; lead: number; 
   emptyNetLate:    { label: 'Empty net / late game',          lead: 10,  tail: 20 },
   // W3: a long spell in one zone ending in a shot, judged on the DEFENDING side's coverage
   dZoneCoverage:   { label: 'Defensive-zone coverage',        lead: 20,  tail: 5 },
+  // W3 S2 (owner, reel S1: "he was offside"): a zone entry the linesman blows offside
+  offsideCall:     { label: 'Zone entry: offside called',     lead: 10,  tail: 5 },
 }
 
 export interface ScenarioHit {
@@ -205,6 +208,15 @@ export function findScenarios(
       const side = sideOf(ev.by)
       const q = (ev.force ?? 0.5) + (ev.knockdown ? 1 : 0) + (ev.kind === 'openIce' ? 0.3 : 0) + (ev.targetHadPuck ? 0.2 : 0)
       push({ kind: 'bigHit', absT: t, period: ev.period, side, note: `${ev.kind ?? 'hit'}${ev.force !== undefined ? ` force ${ev.force.toFixed(2)}` : ''}${ev.knockdown ? ', knockdown' : ''}`, quality: q })
+    } else if (ev.type === 'whistle' && ev.reason === 'offside' && ev.pos) {
+      // The offending side attacks the zone the puck is in. Which way each side
+      // attacks this period: away from its own goalie.
+      const f = stream.find((y) => y.type === 'frame' && y.period === ev.period)
+      const homeDefendsSign = f && f.type === 'frame' ? Math.sign(f.homeGoalie.pos.x) || 1 : 1
+      const side: 'home' | 'away' = Math.sign(ev.pos.x) === -homeDefendsSign ? 'home' : 'away'
+      // a delayed call (the puck went in and someone touched it after a beat) reads best
+      const touch = evs.find((y) => y.abs >= t - 4 && y.abs < t && (y.ev.type === 'pass' || y.ev.type === 'shot'))
+      push({ kind: 'offsideCall', absT: t, period: ev.period, side, note: `offside${touch ? ` after a ${touch.ev.type}` : ''}`, quality: 1 + (touch ? 0.3 : 0) })
     } else if (ev.type === 'save' && ev.rebound) {
       const side = sideOf(ev.goalie)
       const shooting: 'home' | 'away' = side === 'home' ? 'away' : 'home'

@@ -294,21 +294,22 @@ Reel v1 scores are not in yet. Fill this table when they arrive, then after each
 | Clip | v0 (agent) | v0 owner note (short) | v1 | after S1 | after S2 | after S3 | after S4 | after S5 | after S6 | after S7 | after S8 | S9 exit |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | breakaway | 1 | shots instant, penalty unexplained, change with men on | | | | | | | | | | |
-| twoOnOne | 3 | D skates to far boards, two on one man | | | | | | | | | | |
-| ozCycleShot | 1 | too glitchy to read | | | | | | | | | | |
+| twoOnOne | 3 | D skates to far boards, two on one man | | 4 | | | | | | | | |
+| ozCycleShot | 1 | too glitchy to read | | 1 ("he was offside") | | | | | | | | |
 | ppSetPlay | 1 | too glitchy to read | | | | | | | | | | |
 | goalReplay | 3 | replay misses the goal; bench doesn't celebrate | | | | | | | | | | |
-| lineChangeOnFly | 1 | three new men ignore the puck carrier | | | | | | | | | | |
+| lineChangeOnFly | 1 | three new men ignore the puck carrier | | 4 | | | | | | | | |
 | faceoffWinPlay | 1 | puck not dropped in the circle | | | | | | | | | | |
 | bigHit | 2 | falls with nobody hitting him | | | | | | | | | | |
-| saveRebound | 2 | positioning looks bad | | | | | | | | | | |
+| saveRebound | 2 | positioning looks bad | | 5 | | | | | | | | |
 | emptyNetLate | 4 | fine | | | | | | | | | | |
-| dZoneCoverage (new) | – | – | | | | | | | | | | |
+| dZoneCoverage (new) | – | – | | 4 | | | | | | | | |
 | breakoutPlay (new) | – | – | | | | | | | | | | |
 | forecheckTurnover (new) | – | – | | | | | | | | | | |
 | nzRegroup (new) | – | – | | | | | | | | | | |
 | dumpInRace (new) | – | – | | | | | | | | | | |
 | pkClear (new) | – | – | | | | | | | | | | |
+| offsideCall (new, S2) | – | – | | – | | | | | | | | |
 | 20-minute period (exit) | – | – | | | | | | | | | | |
 
 ---

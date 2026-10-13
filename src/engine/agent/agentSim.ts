@@ -77,6 +77,7 @@ import { SHAPE_TUNING, DEKE, DEKE_LEVEL, REACH, blockChance, decideCarrier, deke
 import { decideHit, resolveHit, type HitIntent } from './physical'
 import { jobName, newTeamPlan, setJob } from './plans'
 import { emptyAgentTelemetry, type AgentTelemetry } from './telemetry'
+import { ACTION_FLOOR, settleFloor, windupFloor, type ActName } from './constraints'
 import { LEVEL, levelDefOffset, levelOffset, rDef, rLevel, type CarrierAction, type Side, type World } from './world'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
@@ -91,7 +92,7 @@ const RECV_SPEED = 30
 /** A puck just won can't be taken straight back for this long (s). */
 const SETTLE_S = 0.2
 /** A knocked-down / pinned man is in the picture at least this long (s): the fall and the get-up. */
-const DOWN_S = { knockdown: 1.8, pinned: 1.7 }
+const DOWN_S = { knockdown: ACTION_FLOOR.contact.knockdown, pinned: ACTION_FLOOR.contact.pinned }
 
 // ---------------------------------------------------------------------------
 // Calibration constants (measured against the engine, then frozen — retune
@@ -107,7 +108,7 @@ export const AGENT_TUNING = {
   /** Tip-chance scale for a stick on the line in front. */
   tipK: 2,
   /** How long a tie-up lasts before somebody wins it (s), and the burst (ft/s) a carrier who spins off it leaves with. */
-  tieUpS: 0.7,
+  tieUpS: ACTION_FLOOR.contact.tieUp,
   spinV: 10,
   /** Share of won tie-ups the scorer logs as a takeaway. */
   tieUpTakeaway: 0.5,
@@ -145,7 +146,7 @@ const PP_SHOT_BOOST = 1.12
  * least 0.4 s and is timed so contact lands on this release.
  * One-timers and tips are catch-and-release and don't wind up here.
  */
-export const VAL_WINDUP = { near: 0.25, far: 0.5 }
+export const VAL_WINDUP = { near: ACTION_FLOOR.shot.windup.wrist, far: ACTION_FLOOR.shot.windup.slap } // the rows live in constraints.ts (W3 S2)
 const SHIFT_TARGET = 22
 const PENALTY_SECONDS = 120
 /**
@@ -163,11 +164,18 @@ const GOAL_CELEBRATION_S = 4
 const FACEOFF_MIN_WAIT = 1.5
 const FACEOFF_MAX_WAIT = 12
 /** Seconds between everyone being set and the drop (the linesman squares the centres up). */
-const FACEOFF_HOLD: [number, number] = [0.6, 1.2]
+const FACEOFF_HOLD: [number, number] = ACTION_FLOOR.faceoff.hold
 /** Seconds a defender needs between two real stick checks. */
-const POKE_RELOAD_S = 1.4
+const POKE_RELOAD_S = ACTION_FLOOR.stick.poke.recover
 /** Chance a carrier holds up at the line when a mate is still offside. */
 const OFFSIDE_READ = 0.7
+/**
+ * The blue line is 1 ft wide (centred on BLUE_X) and belongs to the zone the
+ * puck is in (rule 83.1): the puck enters a zone, or leaves it, only when it
+ * has COMPLETELY crossed the line - its centre half a line plus a puck radius
+ * (0.125 ft) past the line's centre.
+ */
+const ZONE_EDGE_FT = 0.625
 /** Seconds a carrier and a checker can lean on each other before one wins it. */
 /** A skater who fumbles a touch gets another try this much later. */
 const RETRY_S = 0.3
@@ -291,7 +299,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   let foSetAt = null as number | null
   let foHold = 0
   let pending: { dot: XY; zone: 'offensive' | 'defensive' | 'neutral'; since: number; zoneFor: Side | null } | null = null
-  let celebration: { scorer: Body; side: Side; until: number } | null = null
+  let celebration = null as { scorer: Body; side: Side; until: number } | null
   let delayed: DelayedPenalty | null = null
   const touches: { b: Body; side: Side; t: number }[] = []
   let poke: { by: Body; from: Body; side: Side; t: number } | null = null
@@ -302,8 +310,18 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   const cmds = new Map<Body, MoveCmd>()
   const smooth = new Map<Body, { x: number; y: number }>()
   const shaping = new Map<Body, { ox: number; oy: number; sf: number }>()
-  let prevAdv = 0 // puck x in the controlling side's frame, last substep
-  let lastCarrierAdvSide = null as Side | null
+  // Blue lines (NHL rule 83). Per side: the puck is in that side's attacking
+  // zone. It enters when it crosses the line and stays in until it COMPLETELY
+  // leaves (over the line's far edge), so a puck riding the line is not a new
+  // entry every substep. Re-read from the puck after every whistle.
+  const zoneIn = new Map<Side, boolean>()
+  let zoneKnown = false
+  // The side that last PROPELLED the puck: a carrier, passer or shooter, and
+  // also a blocker, a goalie's rebound, a poke or a tie-up. An entry the
+  // defenders put in their own zone puts nobody offside, whatever moved it.
+  let propelledBy: Side | null = null
+  // The carrier took the puck while he was already over the line (see gainControl).
+  let aheadAtGain: Body | null = null
   const hitIntent = new Map<Body, HitIntent>()
   let codeDue: { answerer: Body; hitter: Body; side: Side } | null = null
   let battle: { start: number; x: number; y: number; kind: 'boards' | 'netFront' | 'loosePuck'; players: Set<Body>; last: number } | null = null
@@ -322,6 +340,27 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   let tieUp = null as { c: Body; o: Body; since: number } | null
   let deke = null as { c: Body; on: Body; goalie: boolean; move: DekeKind; success: boolean; until: number; dir: number } | null
   let windup = null as { c: Body; at: number; from: number } | null
+  // W3 S2 (constraints.ts): a pass released after its floor - the puck stays on
+  // the passer's blade (the sweep) until `due`, then leaves at the pass event.
+  let passWind = null as { c: Body; s: Side; kind: 'pass' | 'dump'; pk: PassKind; at: XY; speed: number; lift: number; to?: Body | undefined; oneTimer: boolean; from: number; due: number } | null
+  // What each man is committed to (an ActName from constraints.ts) and since
+  // when: he starts nothing new until it runs out; written on every frame.
+  const acts = new Map<Body, { act: ActName; from: number; until: number }>()
+  const setAct = (b: Body, act: ActName, dur: number): void => {
+    acts.set(b, { act, from: now, until: now + Math.max(0, dur) })
+  }
+  const actOf = (b: Body): { act: ActName; from: number; until: number } | null => {
+    const a = acts.get(b)
+    if (!a) return null
+    if (now < a.until - 1e-9) return a
+    acts.delete(b)
+    return null
+  }
+  /** Committed to an action that leaves no hands for the puck or a new job (follow-through, a check, a lunge, on the ice...). */
+  const handsFull = (b: Body): boolean => {
+    const a = actOf(b)
+    return a !== null && a.act !== 'windup' && a.act !== 'pass' && a.act !== 'receive' && a.act !== 'deke' && a.act !== 'set' && a.act !== 'save'
+  }
   let bite = null as { side: Side; dy: number; until: number } | null
   let prevPoss: { side: Side; since: number; adv: number } | null = null
 
@@ -598,6 +637,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     endBattle(null)
     deke = null
     windup = null
+    passWind = null
     ev({ t: T(), period, type: 'whistle', pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y }, ...(reason ? { reason } : {}) })
     if (tm && reason) tm.stoppages[reason]++
     deadAt = { x: puck.x, y: puck.y }
@@ -611,6 +651,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     w.oneTimerFor = null
     puck.vx = puck.vy = puck.vz = puck.z = 0
     w.delayedOffside = null
+    zoneKnown = false
     hitIntent.clear()
     // A delayed penalty is assessed at the whistle.
     if (delayed) assessDelayed()
@@ -743,6 +784,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     if (foSetAt === null) {
       foSetAt = now
       foHold = rng.float(FACEOFF_HOLD[0], FACEOFF_HOLD[1])
+      for (const s of sides) for (const b of s.skaters) setAct(b, 'set', foHold)
     }
     if (now - foSetAt < foHold) return false
     const setAt = foSetAt
@@ -790,6 +832,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     w.carrier = null
     puck.carrier = null
     w.lastTouch = clean ? win : null
+    propelledBy = clean ? win : null
     w.passTo = target
     flight = { kind: 'loose', side: clean ? win : null, from: winner, releaseAdv: -99, untouched: false, tried: tries(hC, aC) }
     void lose
@@ -815,6 +858,10 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   const gainControl = (b: Body, s: Side): void => {
     deke = null
     windup = null
+    passWind = null
+    // how hard it arrives on his stick (receive and settle, below)
+    const arriveV = Math.hypot(puck.vx - b.vx, puck.vy - b.vy)
+    const arrivingPass = flight?.kind === 'pass' && flight.side === s ? flight.passEv : undefined
     const prevSide = w.control ?? w.lastTouch
     flightKindAtGain = flight ? (flight.kind === 'pass' && flight.side === s ? 'pass' : flight.kind === 'shot' ? 'shotDeflect' : flight.side === s ? 'ownLoose' : 'oppLoose') : 'none'
     const gainKind = `${flightKindAtGain}:${flight?.kind ?? "-"}${poke ? "+poke" : ""}${fumble ? "+fumble" : ""}`
@@ -822,6 +869,11 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     puck.carrier = b
     w.control = s
     w.lastTouch = s
+    propelledBy = s
+    // He took it while already over the blue line, the puck still outside:
+    // he is ahead of it, and carrying it in does not put him onside (the
+    // possession exception is for a carrier who crosses WITH the puck).
+    aheadAtGain = zoneKnown && !zoneIn.get(s) && b.x * s.a > BLUE_X + 1 ? b : null
     {
       const bp0 = bladePoint(b, now, 0)
       recv = Math.hypot(puck.x - bp0.x, puck.y - bp0.y) > RECV_SNAP ? b : null
@@ -859,6 +911,17 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     fumble = null
     // One-timer: the receiver shoots on arrival.
     const oneT = w.oneTimerFor === b
+    // Receive and settle (constraints.ts): the puck is not his to use until it
+    // is on his blade and quiet - longer off a hard pass, shorter for good
+    // hands. A one-timer is caught on the release.
+    if (oneT) {
+      if (arrivingPass) arrivingPass.settleS = 0
+    } else {
+      const hands = 0.5 * r01(b.player.ratings.technical.stickhandling) + 0.5 * r01(b.player.composites.puckControl)
+      const st = settleFloor(arriveV, hands)
+      setAct(b, 'receive', st)
+      if (arrivingPass) arrivingPass.settleS = Math.round(st * 100) / 100
+    }
     flight = null
     w.passTo = null
     w.flightSide = null
@@ -889,26 +952,25 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     gotHow = flightKindAtGain
     gotPos = { x: puck.x, y: puck.y }
     if (touches.length > 6) touches.shift()
-    // Delayed offside: an offside attacker's team plays the puck in the zone.
-    if (w.delayedOffside === s && puck.x * s.a > BLUE_X) {
-      if (anyOffside(s)) {
-        if (tm) tm.dbg["offDelayed"] = (tm.dbg["offDelayed"] ?? 0) + 1
-        callOffside(s)
-        return
-      }
-      w.delayedOffside = null
+    // Delayed offside: the offending side plays the puck in the zone before
+    // every one of its men has cleared it (tagged up) - whistle, whoever
+    // touched it, the offside man himself included (rule 83.3).
+    if (w.delayedOffside === s && zoneIn.get(s)) {
+      if (tm) tm.dbg["offDelayed"] = (tm.dbg["offDelayed"] ?? 0) + 1
+      callOffside(s)
+      return
     }
     // Delayed penalty: the offending side touched it — whistle.
     if (delayed && delayed.side === s) {
       stopPlay(dzDot(s, puck.y), 'defensive', s, 'penalty')
       return
     }
-    prevAdv = puck.x * s.a
-    lastCarrierAdvSide = s
     if (oneT && puck.x * s.a > BLUE_X) shoot(b, s, true)
   }
 
-  const loosen = (vx: number, vy: number, side: Side | null): void => {
+  /** The puck comes free. `by`: the side whose stick / body / pads sent it (default: whoever had it). */
+  const loosen = (vx: number, vy: number, side: Side | null, by?: Side | null): void => {
+    if (by !== undefined) propelledBy = by
     w.carrier = null
     puck.carrier = null
     w.control = null
@@ -920,7 +982,20 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   // -------------------------------------------------------------------------
   // Passing, dumping, shooting
   // -------------------------------------------------------------------------
-  const release = (c: Body, s: Side, at: XY, speed: number, liftIn: number, kind: 'pass' | 'dump', to?: Body, oneTimer = false): void => {
+  /** A stick in the passing lane that a good passer lifts the puck over (a saucer). */
+  const saucerLane = (c: Body, s: Side, at: XY): boolean => {
+    if (r01(c.player.ratings.technical.passing) <= 0.45) return false
+    const dx = at.x - puck.x
+    const dy = at.y - puck.y
+    const L = Math.max(Math.hypot(dx, dy), 0.1)
+    for (const o of oppOf(s).skaters) {
+      const t0 = ((o.x - puck.x) * dx + (o.y - puck.y) * dy) / (L * L)
+      if (t0 < 0.15 || t0 > 0.85) continue
+      if (Math.hypot(o.x - (puck.x + dx * t0), o.y - (puck.y + dy * t0)) < 3) return true
+    }
+    return false
+  }
+  const release = (c: Body, s: Side, at: XY, speed: number, liftIn: number, kind: 'pass' | 'dump', to?: Body, oneTimer = false, planned?: PassKind): void => {
     let lift = liftIn
     const passing = r01(c.player.ratings.technical.passing)
     const pressure = pressureOn(c, oppOf(s).skaters)
@@ -942,11 +1017,13 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     puck.carrier = null
     w.control = null
     w.lastTouch = s
+    propelledBy = s
     w.flightSide = s
     w.passTo = to ?? null
     w.oneTimerFor = oneTimer && to ? to : null
     // A stick in the lane: good passers saucer it over (the puck flies, sticks can't reach it).
-    if (kind === 'pass' && lift === 0 && passing > 0.45) {
+    // (only when the release was a saucer's: the sweep that lifts it takes longer, constraints.ts)
+    if (kind === 'pass' && lift === 0 && passing > 0.45 && (planned === undefined || planned === 'saucer')) {
       for (const o of oppOf(s).skaters) {
         const t0 = ((o.x - puck.x) * dx + (o.y - puck.y) * dy) / (L * L)
         if (t0 < 0.15 || t0 > 0.85) continue
@@ -970,7 +1047,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         b: { x: clamp(at.x / HALF_X, -1, 1), y: clamp(at.y / HALF_Y, -1, 1) },
         completed: false,
         speedMph: Math.round(sp * 0.6818),
-        kind: passKind(c, to, at, s, oneTimer, lift > 0)
+        kind: planned !== undefined && (planned !== 'saucer' || lift > 0) ? planned : passKind(c, to, at, s, oneTimer, lift > 0)
       }
       ev(pe)
       f.passEv = pe
@@ -1022,9 +1099,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const xg = xgAt(from.x, from.y, a)
     const tech = c.player.ratings.technical
     const pressure = pressureOn(c, opp.skaters)
-    const slap = !oneTimer && dist > 45 && pressure < 0.3 && rng.chance(0.45 * r01(tech.slapShot) + 0.1)
+    // a slapper needs its wind-up (constraints.ts): a short set is a snap or a wrister
+    const slap = !oneTimer && dist > 45 && pressure < 0.3 && (windupS === undefined || windupS >= ACTION_FLOOR.shot.windup.slap - 1e-6) && rng.chance(0.45 * r01(tech.slapShot) + 0.1)
     const acc = slap ? r01(tech.slapShot) : r01(tech.wristShot)
-    const speed = (slap ? 118 : 96) + acc * 30 + (oneTimer ? 8 : 0)
     const shotType = (): ShotType => {
       if (oneTimer) return 'oneTimer'
       if (slap) return 'slap'
@@ -1033,6 +1110,14 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       if (c.hx * fx + c.hy * fy < 0.2) return 'backhand'
       return dist < 25 ? 'snap' : 'wrist'
     }
+    // Release speed (constraints.ts): a jam or tuck in tight and a backhand
+    // leave slower than a full forehand release. Speed is flight time only -
+    // the outcome is decided at the release - so this changes what is seen,
+    // not what is scored.
+    const RS = ACTION_FLOOR.shot
+    const speed = ((slap ? 118 : 96) + acc * 30 + (oneTimer ? 8 : 0)) *
+      (oneTimer || slap ? 1 : clamp(RS.inTightMin + (1 - RS.inTightMin) * (dist / RS.inTightFt), RS.inTightMin, 1)) *
+      (!oneTimer && !slap && shotType() === 'backhand' ? RS.backhand : 1)
     const shotOrigin = (): ShotOrigin => {
       if (now - lastSaveAt < 2.5) return 'rebound'
       if (oneTimer) return 'oneTimer'
@@ -1058,7 +1143,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const pc = r01(c.player.composites.puckControl)
         if (rng.chance(clamp(0.3 + (sc - pc) * 0.4, 0.1, 0.6))) {
           if (tm) tm.stickLifts++
-          loosen(c.vx * 0.5 + rng.float(-6, 6), c.vy * 0.5 + rng.float(-6, 6), null)
+          setAct(c, 'lifted', ACTION_FLOOR.stick.stickLift)
+          loosen(c.vx * 0.5 + rng.float(-6, 6), c.vy * 0.5 + rng.float(-6, 6), null, opp)
           flight!.tried.set(c, now)
           return
         }
@@ -1235,6 +1321,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     puck.carrier = null
     w.control = null
     w.lastTouch = s
+    propelledBy = s
+    // the follow-through: no new action for a beat (constraints.ts)
+    setAct(c, 'release', ACTION_FLOOR.shot.followThrough)
     w.flightSide = s
     w.passTo = null
     w.oneTimerFor = null
@@ -1251,18 +1340,40 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
 
   const resolveShot = (f: Flight): void => {
     const sp = f.shot!
+    // A keyframe where the shot meets the pads / the blocker / the net: a shot
+    // is over in a tenth of a second, inside one 4 Hz frame, and the picture
+    // would otherwise draw the puck from the blade straight to the rebound
+    // (VT3 flight: close-range rebound shots read as nothing; W3 S2).
+    if (now > lastFrameT + 1e-6) emitFrame()
     const s = sp.side
     const opp = oppOf(s)
     const a = s.a
     if (sp.outcome === 'block' && sp.blocker) {
       ev({ t: T(), period, type: 'blockedShot', shooter: sp.shooter.player.id, blocker: sp.blocker.player.id, pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y } })
       if (tm) tm.blocked++
-      loosen(-a * rng.float(8, 26), rng.float(-14, 14), s)
+      loosen(-a * rng.float(8, 26), rng.float(-14, 14), s, opp)
       return
     }
     if (sp.outcome === 'miss') {
       // Wide: the puck carries on, live, around the boards.
       flight = { kind: 'loose', side: s, from: sp.shooter, releaseAdv: sp.from.x * a, untouched: true, tried: tries() }
+      return
+    }
+    // A shot on goal during a delayed offside: the play is stopped (rule 83.3),
+    // the faceoff in the offending side's end. Not a shot on goal, no goal.
+    if (w.delayedOffside === s && zoneIn.get(s)) {
+      stat(ctx, sp.shooter.player.id).shots--
+      if (!opp.pulled) {
+        const gs = stat(ctx, opp.goalie.player.id)
+        gs.shotsAgainst--
+        gs.xgAgainst = (gs.xgAgainst ?? 0) - sp.xg
+      }
+      if (tm) {
+        tm.shotsOnGoal--
+        tm.offsides++
+        tm.dbg['offShotOnGoal'] = (tm.dbg['offShotOnGoal'] ?? 0) + 1
+      }
+      stopPlay(dzDot(s, puck.y), 'defensive', s, 'offside')
       return
     }
     const g = opp.goalie
@@ -1324,6 +1435,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const freeze = rng.chance(pFreeze)
     ev({ t: T(), period, type: 'save', goalie: g.player.id, rebound: !freeze, pos: { x: g.x / HALF_X, y: g.y / HALF_Y } })
     if (tm) tm.saves++
+    // The shot / save pair (constraints.ts): the goalie's reaction holds him
+    // on his spot - no push to a new one until it runs out.
+    setAct(g, 'save', freeze ? ACTION_FLOOR.goalie.freeze : ACTION_FLOOR.goalie.saveReaction)
     if (freeze) {
       puck.x = g.x
       puck.y = g.y
@@ -1336,10 +1450,10 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     puck.x = g.x + out * 1.5
     puck.y = g.y
     if (poor) {
-      loosen(out * rng.float(16, 34), rng.float(-14, 14), null)
+      loosen(out * rng.float(16, 34), rng.float(-14, 14), null, opp)
     } else {
       const side = rng.chance(0.5) ? 1 : -1
-      loosen(out * rng.float(2, 8), side * rng.float(18, 32), null)
+      loosen(out * rng.float(2, 8), side * rng.float(18, 32), null, opp)
     }
     if (flight) flight.tried = tries(g)
   }
@@ -1434,6 +1548,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       if (act.goalie && success) tm.dekesOnGoalieWon++
     }
     deke = { c, on: act.on, goalie: act.goalie, move: act.move, success, until: now + dur, dir: act.dir }
+    setAct(c, 'deke', dur)
     if (success && !act.goalie) {
       // He bit: off balance for the move (no stick on it), carried the wrong way.
       act.on.stun = Math.max(act.on.stun, dur * 0.8 + 0.2)
@@ -1453,15 +1568,17 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         else {
           // The goalie reads it: poke check / smother, the puck squirts free.
           const out = -s.a
-          loosen(out * rng.float(4, 12) + c.vx * 0.2, (rng.chance(0.5) ? 1 : -1) * rng.float(6, 16), null)
+          loosen(out * rng.float(4, 12) + c.vx * 0.2, (rng.chance(0.5) ? 1 : -1) * rng.float(6, 16), null, oppOf(s))
           flight!.tried.set(c, now)
         }
       } else if (!d.success) {
         // The defender reads it and takes it off him.
         ev({ t: T(), period, type: 'pokeCheck', by: d.on.player.id, on: c.player.id, success: true, pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y } })
         poke = { by: d.on, from: c, side: oppOf(s), t: now }
+        setAct(d.on, 'poke', ACTION_FLOOR.stick.poke.commit)
+        setAct(c, 'lifted', ACTION_FLOOR.stick.stickLift)
         const ang = Math.atan2(c.y - d.on.y, c.x - d.on.x) + rng.float(-0.8, 0.8)
-        loosen(Math.cos(ang) * rng.float(6, 12), Math.sin(ang) * rng.float(6, 12), null)
+        loosen(Math.cos(ang) * rng.float(6, 12), Math.sin(ang) * rng.float(6, 12), null, oppOf(s))
         flight!.tried.set(c, now)
       }
       return
@@ -1543,48 +1660,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     // ---- Emit the frame for the state at `now`. ----
     // (role/job: the skater's role in the shape and the job he is executing;
     // additive snapshot fields read by the W3 detectors.)
-    const snapOf = (s: Side, b: Body): SkaterSnapshot => {
-      const plan = s.plans.get(b)
-      const role = plan?.role || s.roles.get(b)
-      const job = b === w.carrier ? 'carry' : s.leaving.has(b) ? 'change' : plan ? jobName(plan) : undefined
-      return {
-        player: b.player.id,
-        pos: { x: clamp(b.x / HALF_X, -1, 1), y: clamp(b.y / HALF_Y, -1, 1) },
-        facing: Math.round(Math.atan2(b.hy, b.hx) * 100) / 100,
-        ...(role !== undefined ? { role } : {}),
-        ...(job !== undefined ? { job } : {})
-      }
-    }
-    if (now > lastFrameT + 1e-6) {
-      for (const s of sides) {
-        s.sim.unit.skaters.forEach((r, i) => {
-          const b = s.skaters[i]
-          if (!b) return
-          r.pos.x = clamp(b.x / HALF_X, -1, 1)
-          r.pos.y = clamp(b.y / HALF_Y, -1, 1)
-          r.vel.x = b.vx
-          r.vel.y = b.vy
-        })
-        const g = s.sim.unit.goalie
-        g.pos.x = clamp(s.goalie.x / HALF_X, -1, 1)
-        g.pos.y = clamp(s.goalie.y / HALF_Y, -1, 1)
-      }
-      const pk = deadAt ?? puck
-      ctx.stream.push({
-        t: Math.round(now * 100) / 100,
-        period,
-        type: 'frame',
-        home: H.skaters.map((b) => snapOf(H, b)),
-        away: A.skaters.map((b) => snapOf(A, b)),
-        homeGoalie: { player: H.goalie.player.id, pos: { x: H.goalie.x / HALF_X, y: H.goalie.y / HALF_Y } },
-        awayGoalie: { player: A.goalie.player.id, pos: { x: A.goalie.x / HALF_X, y: A.goalie.y / HALF_Y } },
-        puck: { x: clamp(pk.x / HALF_X, -1, 1), y: clamp(pk.y / HALF_Y, -1, 1) },
-        puckCarrier: deadAt === null && !pending && w.carrier && recv !== w.carrier ? w.carrier.player.id : null,
-        ...(deadAt === null && puck.z > 0.05 ? { puckZ: Math.round(puck.z * 10) / 10 } : {})
-      })
-      lastFrameT = now
-      if (tm) tm.frames++
-    }
+    if (now > lastFrameT + 1e-6) emitFrame()
 
     // ---- Think. ----
     cmds.clear()
@@ -1623,8 +1699,17 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const s = w.control
         if (deke && deke.c !== c) deke = null
         if (windup && windup.c !== c) windup = null
+        if (passWind && passWind.c !== c) passWind = null
+        const cAct = actOf(c)
         if (deke) {
           stepDeke(deke, s)
+        } else if (passWind) {
+          // The pass is on its way off his blade (released in the substeps).
+          cmds.set(c, { tx: c.x + c.vx * 0.6, ty: c.y + c.vy * 0.6, speed: speedOf(c) * 0.9, arrive: false, urgency: 0.5 })
+        } else if (cAct && cAct.act !== 'windup' && cAct.act !== 'deke' && cAct.act !== 'pass' && cAct.act !== 'receive') {
+          // Receive and settle (constraints.ts): the puck is on his blade but
+          // not his to use yet - he skates on with it.
+          cmds.set(c, { tx: c.x + c.vx * 0.6, ty: c.y + c.vy * 0.6, speed: speedOf(c), arrive: false, urgency: 0.5 })
         } else if (windup) {
           // The release: the puck leaves the blade at the shot event (the
           // renderer swings in the lead-up, with the puck still on his stick).
@@ -1635,23 +1720,34 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           } else cmds.set(c, { tx: c.x + c.vx * 0.6, ty: c.y + c.vy * 0.6, speed: speedOf(c) * 0.9, arrive: false, urgency: 0.5 })
         } else {
         const act = decideCarrier(w, s, c)
+        // receive and settle (constraints.ts) still running: what he does next can start, not finish
+        const settleLeft = cAct && cAct.act === 'receive' ? cAct.until - now : 0
         if (tm) tm.carrierThinks++
         if (act.kind === 'deke') {
           startDeke(c, s, act)
         } else if (act.kind === 'carry') {
           cmds.set(c, act.cmd)
           if (act.protect && tm) tm.protects++
-        } else if (act.kind === 'pass') {
-          release(c, s, act.at, act.speed, 0, 'pass', act.to, act.oneTimer)
-        } else if (act.kind === 'dump') {
-          release(c, s, act.at, act.speed, act.lift, 'dump')
+        } else if (act.kind === 'pass' || act.kind === 'dump') {
+          // The release takes its floor (constraints.ts): the sweep, with the
+          // puck still on his blade; it leaves in the substeps at `due`.
+          // (a stick in the lane: a good passer saucers it, and a saucer takes longer)
+          const pk: PassKind = act.kind === 'dump' ? 'rim' : saucerLane(c, s, act.at) ? 'saucer' : passKind(c, act.to, act.at, s, act.oneTimer, false)
+          // (catch and move it: the sweep starts as the puck settles - it leaves no sooner than both)
+          const rs = Math.max(ACTION_FLOOR.pass.release[pk], settleLeft)
+          passWind = act.kind === 'pass'
+            ? { c, s, kind: 'pass', pk, at: act.at, speed: act.speed, lift: 0, to: act.to, oneTimer: act.oneTimer, from: now, due: now + rs }
+            : { c, s, kind: 'dump', pk, at: act.at, speed: act.speed, lift: act.lift, oneTimer: false, from: now, due: now + rs }
+          setAct(c, 'pass', rs)
+          cmds.set(c, { tx: c.x + c.vx * 0.6, ty: c.y + c.vy * 0.6, speed: speedOf(c) * 0.9, arrive: false, urgency: 0.5 })
         } else {
           // Every shot winds up from the moment he commits (the puck on his
           // blade, the stick loading): the viewer sees the set, and the
           // defence gets the same beat to close or block.
-          const far = Math.hypot(s.a * GOAL_X - c.x, c.y) > 45
-          const need = far ? VAL_WINDUP.far : VAL_WINDUP.near
+          // (catch and shoot: the load starts as the puck settles - it is released no sooner than both)
+          const need = Math.max(windupFloor(Math.hypot(s.a * GOAL_X - c.x, c.y)), settleLeft)
           windup = { c, at: now + need, from: now }
+          setAct(c, 'windup', need)
           cmds.set(c, { tx: c.x + c.vx * 0.6, ty: c.y + c.vy * 0.6, speed: speedOf(c) * 0.75, arrive: false, urgency: 0.5 })
         }
         }
@@ -1661,6 +1757,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       for (const s of sides) {
         for (const b of s.skaters) {
           if (s.leaving.has(b)) continue
+          if (handsFull(b)) continue
           const tgt = w.carrier === b ? null : decideHit(w, s, b, hitIntent, ctx.intensity ?? 0)
           // Claims: the carrier is the presser's job. A man covering somebody
           // else does not leave him open to line up the carrier (W3 S1).
@@ -1685,6 +1782,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const c = w.carrier
         if (!c || !w.control || settling) break
         if (pk.stun > 0) continue // beaten on the deke: no stick on it
+        if (handsFull(pk)) continue
         const dp = Math.hypot(pk.x - puck.x, pk.y - puck.y)
         if (dp > REACH) continue
         if (now < (pokeReady.get(pk) ?? 0)) continue
@@ -1696,6 +1794,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const sc = 0.1 * rDef(pk.player.ratings.defensive.stickChecking) + 0.9 * r01(pk.player.composites.takeaway)
         if (!rng.chance((stillC ? AGENT_TUNING.pokeTryStill : AGENT_TUNING.pokeTry) * (0.1 + 2 * sc * sc * sc))) continue
         pokeReady.set(pk, now + POKE_RELOAD_S * rng.float(0.8, 1.3))
+        setAct(pk, 'poke', ACTION_FLOOR.stick.poke.commit)
         const pc = r01(c.player.composites.puckControl)
         const protect = (c.hx * (pk.x - c.x) + c.hy * (pk.y - c.y)) < 0 ? 0.6 : 1 // body between
         const still = stillC ? AGENT_TUNING.pokeStill : 1
@@ -1708,7 +1807,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           const ang = Math.atan2(puck.y - pk.y, puck.x - pk.x) + rng.float(-0.8, 0.8)
           const sp = rng.float(6, 14)
           poke = { by: pk, from: c, side: oppOf(s), t: now }
-          loosen(Math.cos(ang) * sp, Math.sin(ang) * sp, null)
+          setAct(c, 'lifted', ACTION_FLOOR.stick.stickLift)
+          loosen(Math.cos(ang) * sp, Math.sin(ang) * sp, null, oppOf(s))
           flight!.tried.set(c, now)
           if (tm) tm.pokeSuccess++
           break
@@ -1751,8 +1851,16 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         }
         if (tier && speedOf(c) < 7.3) {
           // (A second checker stepping in does not restart the clock on the carrier.)
-          if (!tieUp || tieUp.c !== c) tieUp = { c, o: tier, since: now }
-          else if (now - tieUp.since > AGENT_TUNING.tieUpS && !settling) {
+          if (!tieUp || tieUp.c !== c) {
+            // The pair starts with both men in reach (constraints.ts): both are
+            // committed - they lean on each other - until somebody wins it.
+            tieUp = { c, o: tier, since: now }
+            setAct(c, 'tieUp', AGENT_TUNING.tieUpS + FRAME_DT)
+            setAct(tier, 'tieUp', AGENT_TUNING.tieUpS + FRAME_DT)
+          } else if (now - tieUp.since > AGENT_TUNING.tieUpS && !settling) {
+            const holdS = now - tieUp.since
+            // the pair is over (a check or a pin since stays on him)
+            for (const x of [c, tieUp.o, tier]) if (actOf(x)?.act === 'tieUp') acts.delete(x)
             const atk = r01(c.player.ratings.physical.strength) * 0.5 + r01(c.player.composites.puckControl) * 0.5
             const dfn = r01(tier.player.composites.takeaway) * 0.55 + rDef(tier.player.ratings.defensive.checking) * 0.2 + r01(tier.player.ratings.physical.strength) * 0.25
             tieUp = null
@@ -1771,16 +1879,21 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
               c.vx += (sx / sl) * AGENT_TUNING.spinV
               c.vy += (sy / sl) * AGENT_TUNING.spinV
             } else {
-              ev({ t: T(), period, type: 'battle', kind: distToBoards(c.x, c.y) < 8 ? 'boards' : 'loosePuck', pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y }, players: [c.player.id, tier.player.id], winner: tier.player.id, durationS: AGENT_TUNING.tieUpS })
+              ev({ t: T(), period, type: 'battle', kind: distToBoards(c.x, c.y) < 8 ? 'boards' : 'loosePuck', pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y }, players: [c.player.id, tier.player.id], winner: tier.player.id, durationS: AGENT_TUNING.tieUpS, holdS: Math.round(holdS * 100) / 100 })
               // He came away with it: the scorer credits the checker a takeaway if
               // his side collects the loose puck (a battle won by aggression).
               if (rng.chance(AGENT_TUNING.tieUpTakeaway)) poke = { by: tier, from: c, side: oppOf(w.control), t: now }
               const ang = Math.atan2(c.y - tier.y, c.x - tier.x) + rng.float(-1.2, 1.2)
-              loosen(Math.cos(ang) * rng.float(4, 9), Math.sin(ang) * rng.float(4, 9), null)
+              loosen(Math.cos(ang) * rng.float(4, 9), Math.sin(ang) * rng.float(4, 9), null, sideOf(tier))
               flight!.tried.set(c, now)
             }
           }
         } else tieUp = null
+      }
+      // A tie-up holds both men until it is won (constraints.ts): they lean on
+      // each other, neither skates off to a new job.
+      if (tieUp) {
+        for (const b of [tieUp.c, tieUp.o]) if (actOf(b)?.act === 'tieUp') cmds.set(b, { tx: b.x, ty: b.y, speed: 0.5, arrive: true, urgency: 0.3 })
       }
       // Fumbles under pressure (unforced).
       if (w.carrier && w.control && !pending && !settling) {
@@ -1793,6 +1906,17 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           loosen(c.vx + Math.cos(ang) * 6, c.vy + Math.sin(ang) * 6, w.control)
           flight!.tried.set(c, now)
           if (tm) tm.fumbles++
+        }
+      }
+      // Committed men carry on with what they started (constraints.ts): the
+      // shooter follows through, the hitter drives through, the lunge of a
+      // poke check - no new job until it runs out.
+      for (const s of sides) {
+        for (const b of s.skaters) {
+          if (b === w.carrier) continue
+          const a = actOf(b)
+          if (!a || (a.act !== 'release' && a.act !== 'hit' && a.act !== 'poke')) continue
+          cmds.set(b, { tx: b.x + b.vx * 0.6, ty: b.y + b.vy * 0.6, speed: speedOf(b) * (a.act === 'poke' ? 0.85 : 1), arrive: false, urgency: 0.5 })
         }
       }
       // Miscellaneous stoppages (net off its moorings, high stick, hand pass…).
@@ -1899,6 +2023,13 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         if (pending || celebration) break
         const r = resolveHit(w, ct, hitIntent, rng, ctx.intensity ?? 0)
         if (!r) continue
+        // The contact pair (constraints.ts): the hitter drives through (or
+        // holds the pin), the man hit staggers, goes down, or is pinned - both
+        // committed for their share. Physics made the contact, so both bodies
+        // are in range by construction.
+        const recvS = r.knockdown ? Math.max(r.victim.stun, DOWN_S.knockdown) : r.pinned ? Math.max(r.victim.stun, DOWN_S.pinned) : r.victim.stun
+        setAct(r.hitter, r.pinned ? 'pin' : 'hit', r.pinned ? ACTION_FLOOR.contact.pinDoer : ACTION_FLOOR.contact.hitDoer)
+        setAct(r.victim, r.knockdown ? 'down' : r.pinned ? 'pinned' : 'stagger', recvS)
         ev({
           t: T(),
           period,
@@ -1910,10 +2041,11 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           kind: r.kind,
           targetHadPuck: r.hadPuck,
           ...(r.knockdown ? { knockdown: true } : {}),
-          ...(r.pinned ? { pinned: true } : {})
+          ...(r.pinned ? { pinned: true } : {}),
+          receiverS: Math.round(recvS * 100) / 100
         })
         if (tm) tm.noteHit(r)
-        if (r.knockdown || r.pinned) downUntil.set(r.victim, now + Math.max(r.victim.stun, r.knockdown ? DOWN_S.knockdown : DOWN_S.pinned))
+        if (r.knockdown || r.pinned) downUntil.set(r.victim, now + recvS)
         if (r.loosePuck && w.carrier === r.victim) {
           const ang = Math.atan2(r.victim.vy, r.victim.vx) + rng.float(-1, 1)
           loosen(Math.cos(ang) * rng.float(4, 10) + r.victim.vx * 0.3, Math.sin(ang) * rng.float(4, 10) + r.victim.vy * 0.3, null)
@@ -1926,9 +2058,22 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       w.t = now
       if (deadAt !== null) continue
       if (k === SUBSTEPS - 1) battleTick()
+      // The pass leaves the blade at the end of its release (constraints.ts).
+      if (passWind && now >= passWind.due - 1e-9) {
+        const pw = passWind
+        passWind = null
+        if (w.carrier === pw.c && w.control === pw.s && !pending) {
+          // His man kept skating through the sweep: lead him by that much more.
+          const late = now - pw.from
+          const at = pw.to ? { x: pw.at.x + pw.to.vx * late, y: pw.at.y + pw.to.vy * late } : pw.at
+          release(pw.c, pw.s, at, pw.speed, pw.lift, pw.kind, pw.to, pw.oneTimer, pw.pk)
+          if (flight?.passEv) flight.passEv.releaseS = Math.round(late * 100) / 100
+        }
+      }
       if (w.delayedOffside) {
         const ds = w.delayedOffside
-        if (puck.x * ds.a < BLUE_X || !anyOffside(ds)) w.delayedOffside = null
+        // over when the puck leaves the zone or every attacker has cleared it (tag-up)
+        if (!zoneIn.get(ds) || !anyOffside(ds)) w.delayedOffside = null
       }
 
       // Puck.
@@ -1969,44 +2114,14 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         // A carrier reads the line: with a mate still in the zone he stops the
         // puck short of it (edges dug in) rather than walking it in offside —
         // offside is a mistake (a mate who didn't get out), not a habit.
-        if (lastCarrierAdvSide === s && prevAdv < BLUE_X && puck.x * s.a >= BLUE_X && anyOffside(s) && rng.chance(OFFSIDE_READ)) {
+        if (zoneKnown && !zoneIn.get(s) && puck.x * s.a >= BLUE_X + ZONE_EDGE_FT && anyOffside(s) && rng.chance(OFFSIDE_READ)) {
           const over = puck.x * s.a - (BLUE_X - 0.3)
           c.x -= s.a * over
           puck.x -= s.a * over
           if (c.vx * s.a > 0) c.vx = 0
           puck.vx = c.vx
         }
-        const adv = puck.x * s.a
-        if (lastCarrierAdvSide === s && prevAdv < BLUE_X && adv >= BLUE_X) {
-          if (checkOffside(s, true)) continue
-          s.entryAt = now
-          if (tm) {
-            tm.entriesCarry++
-            // Entry numbers (scorecard definition): attackers level/ahead vs defenders goal-side.
-            const adv0 = puck.x * s.a
-            let atk = 0
-            let def = 0
-            let caught = 0
-            for (const b of s.skaters) if (b.x * s.a >= adv0 - 10) atk++
-            for (const o of oppOf(s).skaters) {
-              if (o.x * s.a > adv0) def++
-              else if (o.x * s.a < adv0 - 20) caught++
-            }
-            const key = `${atk}v${def}${now - w.possSince <= 8 ? 'T' : ''} c${caught}`
-            tm.entryNumbers[key] = (tm.entryNumbers[key] ?? 0) + 1
-            if (def === 0 && tm.entryLog.length < 40) tm.entryLog.push(`P${period} ${now.toFixed(1)} ${key}`)
-            if (atk > def && now - w.possSince <= 8) {
-              const how = turnSnap.split('@')[0] + ':' + (Number(turnSnap.split('@')[1]?.split(' ')[0] ?? 0) < -BLUE_X ? 'DZ' : Number(turnSnap.split('@')[1]?.split(' ')[0] ?? 0) < BLUE_X ? 'NZ' : 'OZ')
-              tm.dbg[`odd:${how}`] = (tm.dbg[`odd:${how}`] ?? 0) + 1
-              const at = Number(turnSnap.split('@')[1]?.split(' ')[0] ?? 0)
-              const zone = at < -BLUE_X ? 'DZ' : at < BLUE_X ? 'NZ' : 'OZ'
-              tm.dbg[`oddZone:${zone}`] = (tm.dbg[`oddZone:${zone}`] ?? 0) + 1
-              if (tm.dbgLog.length < 60) tm.dbgLog.push(`${key} poss ${(now - w.possSince).toFixed(1)}s | ${turnSnap}`)
-            }
-          }
-        }
-        prevAdv = adv
-        lastCarrierAdvSide = s
+        if (blueLines()) continue
       } else if (flight?.kind === 'shot' && flight.shot) {
         const sp = flight.shot
         const step = Math.hypot(puck.vx, puck.vy) * DT
@@ -2018,6 +2133,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         } else {
           puck.x += puck.vx * DT
           puck.y += puck.vy * DT
+          // a shot from outside the zone is an entry like any other
+          if (blueLines()) continue
         }
       } else {
         const res = stepPuck(puck, DT)
@@ -2035,19 +2152,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           continue
         }
         const fs = flight?.side ?? null
-        // Offside on a pass/dump over the line.
-        if (fs && flight && flight.kind !== 'loose') {
-          const adv = puck.x * fs.a
-          if (lastCarrierAdvSide === fs && prevAdv < BLUE_X && adv >= BLUE_X) {
-            if (checkOffside(fs, false)) continue
-            fs.entryAt = now
-            if (tm) {
-              if (flight.kind === 'dump') tm.entriesDump++
-              else tm.entriesPass++
-            }
-          }
-          prevAdv = adv
-        }
+        // Offside on any entry: pass, dump, chip, a puck knocked or bounced in.
+        if (blueLines()) continue
         // Icing: shot from our side of the red line, crosses their goal line untouched.
         if (flight && flight.untouched && fs && flight.releaseAdv < 0 && puck.x * fs.a > GOAL_X && Math.abs(puck.y) > NET_HALF_W + 0.5) {
           if (!fs.shorthanded) {
@@ -2093,6 +2199,56 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   // -------------------------------------------------------------------------
   // Helpers that close over the period state.
   // -------------------------------------------------------------------------
+  /** The frame for the state at `now` (role/job and the W3 S2 act on every skater). */
+  function emitFrame(): void {
+    // W3 S2: the action he is committed to and how far into it (constraints.ts).
+    const actSnap = (b: Body): { act?: string; actT?: number } => {
+      const a = actOf(b)
+      return a ? { act: a.act, actT: Math.round((now - a.from) * 100) / 100 } : {}
+    }
+    const snapOf = (s: Side, b: Body): SkaterSnapshot => {
+      const plan = s.plans.get(b)
+      const role = plan?.role || s.roles.get(b)
+      const job = b === w.carrier ? 'carry' : s.leaving.has(b) ? 'change' : plan ? jobName(plan) : undefined
+      return {
+        player: b.player.id,
+        pos: { x: clamp(b.x / HALF_X, -1, 1), y: clamp(b.y / HALF_Y, -1, 1) },
+        facing: Math.round(Math.atan2(b.hy, b.hx) * 100) / 100,
+        ...(role !== undefined ? { role } : {}),
+        ...(job !== undefined ? { job } : {}),
+        ...actSnap(b)
+      }
+    }
+    for (const s of sides) {
+      s.sim.unit.skaters.forEach((r, i) => {
+        const b = s.skaters[i]
+        if (!b) return
+        r.pos.x = clamp(b.x / HALF_X, -1, 1)
+        r.pos.y = clamp(b.y / HALF_Y, -1, 1)
+        r.vel.x = b.vx
+        r.vel.y = b.vy
+      })
+      const g = s.sim.unit.goalie
+      g.pos.x = clamp(s.goalie.x / HALF_X, -1, 1)
+      g.pos.y = clamp(s.goalie.y / HALF_Y, -1, 1)
+    }
+    const pk = deadAt ?? puck
+    ctx.stream.push({
+      t: Math.round(now * 100) / 100,
+      period,
+      type: 'frame',
+      home: H.skaters.map((b) => snapOf(H, b)),
+      away: A.skaters.map((b) => snapOf(A, b)),
+      homeGoalie: { player: H.goalie.player.id, pos: { x: H.goalie.x / HALF_X, y: H.goalie.y / HALF_Y }, ...actSnap(H.goalie) },
+      awayGoalie: { player: A.goalie.player.id, pos: { x: A.goalie.x / HALF_X, y: A.goalie.y / HALF_Y }, ...actSnap(A.goalie) },
+      puck: { x: clamp(pk.x / HALF_X, -1, 1), y: clamp(pk.y / HALF_Y, -1, 1) },
+      puckCarrier: deadAt === null && !pending && w.carrier && recv !== w.carrier ? w.carrier.player.id : null,
+      ...(deadAt === null && puck.z > 0.05 ? { puckZ: Math.round(puck.z * 10) / 10 } : {})
+    })
+    lastFrameT = now
+    if (tm) tm.frames++
+  }
+
   function sideOf(b: Body): Side | null {
     if (H.skaters.includes(b)) return H
     if (A.skaters.includes(b)) return A
@@ -2100,7 +2256,69 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   }
 
   function anyOffside(s: Side): boolean {
-    for (const b of s.skaters) if (b !== w.carrier && b.x * s.a > BLUE_X + 1) return true
+    for (const b of s.skaters) {
+      if (b === w.carrier && b !== aheadAtGain) continue
+      if (b.x * s.a > BLUE_X + 1) return true
+    }
+    return false
+  }
+
+  /**
+   * The blue lines, after the puck moved this substep (whatever moved it: a
+   * carry, a pass, a dump, a shot, a chip, a bounce). Returns true when the
+   * play was whistled dead. An entry is judged for the side whose zone it is
+   * only if that side propelled the puck in: carried in → offside now;
+   * anything else → delayed offside (rule 83).
+   */
+  function blueLines(): boolean {
+    if (!zoneKnown) {
+      for (const s of sides) zoneIn.set(s, puck.x * s.a >= BLUE_X + ZONE_EDGE_FT)
+      zoneKnown = true
+      return false
+    }
+    for (const s of sides) {
+      const adv = puck.x * s.a
+      if (zoneIn.get(s)) {
+        // out only once it has completely left (over the line's far edge)
+        if (adv < BLUE_X - ZONE_EDGE_FT) zoneIn.set(s, false)
+        continue
+      }
+      if (adv < BLUE_X + ZONE_EDGE_FT) continue
+      zoneIn.set(s, true)
+      const carried = w.carrier !== null && w.control === s
+      // the defenders put it in their own zone: nobody is offside
+      if (!carried && propelledBy !== s) continue
+      if (checkOffside(s, carried)) return true
+      s.entryAt = now
+      if (!tm) continue
+      if (!carried) {
+        if (flight?.kind === 'dump') tm.entriesDump++
+        else if (flight?.kind === 'pass') tm.entriesPass++
+        continue
+      }
+      tm.entriesCarry++
+      // Entry numbers (scorecard definition): attackers level/ahead vs defenders goal-side.
+      const adv0 = puck.x * s.a
+      let atk = 0
+      let def = 0
+      let caught = 0
+      for (const b of s.skaters) if (b.x * s.a >= adv0 - 10) atk++
+      for (const o of oppOf(s).skaters) {
+        if (o.x * s.a > adv0) def++
+        else if (o.x * s.a < adv0 - 20) caught++
+      }
+      const key = `${atk}v${def}${now - w.possSince <= 8 ? 'T' : ''} c${caught}`
+      tm.entryNumbers[key] = (tm.entryNumbers[key] ?? 0) + 1
+      if (def === 0 && tm.entryLog.length < 40) tm.entryLog.push(`P${period} ${now.toFixed(1)} ${key}`)
+      if (atk > def && now - w.possSince <= 8) {
+        const how = turnSnap.split('@')[0] + ':' + (Number(turnSnap.split('@')[1]?.split(' ')[0] ?? 0) < -BLUE_X ? 'DZ' : Number(turnSnap.split('@')[1]?.split(' ')[0] ?? 0) < BLUE_X ? 'NZ' : 'OZ')
+        tm.dbg[`odd:${how}`] = (tm.dbg[`odd:${how}`] ?? 0) + 1
+        const at = Number(turnSnap.split('@')[1]?.split(' ')[0] ?? 0)
+        const zone = at < -BLUE_X ? 'DZ' : at < BLUE_X ? 'NZ' : 'OZ'
+        tm.dbg[`oddZone:${zone}`] = (tm.dbg[`oddZone:${zone}`] ?? 0) + 1
+        if (tm.dbgLog.length < 60) tm.dbgLog.push(`${key} poss ${(now - w.possSince).toFixed(1)}s | ${turnSnap}`)
+      }
+    }
     return false
   }
 
@@ -2245,7 +2463,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const cands: { b: Body; s: Side; d: number }[] = []
     for (const s of sides) {
       for (const b of s.skaters) {
-        if (b.stun > 0) continue
+        if (b.stun > 0 || handsFull(b)) continue
         const d = Math.hypot(b.x - puck.x, b.y - puck.y)
         if (d > REACH) {
           if (d > REACH + 1.5) f.tried.delete(b)
@@ -2356,7 +2574,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const ideal0 = goalieIdeal(s, px, py)
     // He bit on a deke: he goes with the fake, out across his crease.
     const bit = bite !== null && bite.side === s && now < bite.until
-    const ideal = bit && bite ? { x: ideal0.x, y: clamp(ideal0.y + bite.dy, -NET_HALF_W - 3, NET_HALF_W + 3) } : ideal0
+    const saving = actOf(g)?.act === 'save'
+    const ideal = saving ? { x: g.x, y: g.y } : bit && bite ? { x: ideal0.x, y: clamp(ideal0.y + bite.dy, -NET_HALF_W - 3, NET_HALF_W + 3) } : ideal0
     const dx = ideal.x - g.x
     const dy = ideal.y - g.y
     const d = Math.hypot(dx, dy)

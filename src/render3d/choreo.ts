@@ -188,6 +188,12 @@ export interface PlannedCue {
   lead: number
   /** Clip playback rate (a shot's swing stretched over the sim's wind-up; 1 otherwise). */
   speed?: number
+  /**
+   * Seconds the shooter holds the set (puck on the blade, stick loaded) BEFORE
+   * the clip starts, when the sim's wind-up is longer than the clip can be
+   * stretched (W3 S2, VT12: the drawn wind-up is never shorter than the sim's).
+   */
+  hold?: number
 }
 
 /**
@@ -230,7 +236,8 @@ export function planCues(cues: ActionCue[], contactOf: (clip: string) => number 
     const swing = cue.windupS !== undefined ? Math.max(cue.windupS, SHOT_SWING_MIN_S) : 0
     if (clip && cue.kind === 'shot' && swing > lead && lead > 0) {
       const speed = Math.max(SHOT_SWING_MIN_RATE, lead / swing)
-      out.push({ cue, clip, lead: lead / speed, speed })
+      const hold = swing - lead / speed
+      out.push({ cue, clip, lead: lead / speed, speed, ...(hold > 1e-3 ? { hold } : {}) })
       continue
     }
     out.push({ cue, clip, lead })
@@ -396,7 +403,7 @@ export class Choreographer {
     for (let i = lo; i < ps.length; i++) {
       const p = ps[i]!
       if (p.cue.absT - 0.9 > t) break
-      if ((p.cue.kind === 'shot' || p.cue.kind === 'pass') && p.clip && p.cue.absT - p.lead <= t) return p.cue.actorId
+      if ((p.cue.kind === 'shot' || p.cue.kind === 'pass') && p.clip && p.cue.absT - p.lead - (p.hold ?? 0) <= t) return p.cue.actorId
     }
     return null
   }

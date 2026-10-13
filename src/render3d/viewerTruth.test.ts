@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ProbeFrame, ProbeGeometry, ProbeRig } from './viewerProbe'
-import { runViewerTruth, vt13Aimless, vt14Coverage, vt17Grip, vt1Bodies, vt5Replay, vt6Clocks, vt8Changes, type VTInput } from './viewerTruth'
+import { runViewerTruth, vt13Aimless, vt14Coverage, vt17Grip, vt18Offside, vt1Bodies, vt5Replay, vt6Clocks, vt8Changes, type VTInput } from './viewerTruth'
 
 const GEO: ProbeGeometry = { rinkHalfL: 100, rinkHalfW: 42.5, benchGates: { home: { x: -26, z: 41 }, away: { x: 26, z: 41 } } }
 
@@ -105,9 +105,26 @@ describe('viewer-truth detectors', () => {
     expect(vt17Grip(input([frame(0, five('home'))])).status).toBe('n/a')
   })
 
+  it('VT18 flags a drawn carry over the blue line with a team-mate already in the zone and no whistle', () => {
+    // home attacks +x (its goalie is at -86); h0 carries from x 20 to 32 while h1 waits at x 45
+    const frames = Array.from({ length: 30 }, (_, i) => {
+      const x = 20 + i * 0.4
+      return frame(i, [...goalies, rig('home', 'h0', x - 1, 0), rig('home', 'h1', 45, 10), rig('away', 'a0', 60, 0)], { carrier: 'h0', puck: { x, y: 0, z: 0, sx: 0, sy: 0, onScreen: true, simX: x, simZ: 0 } })
+    })
+    const red = vt18Offside(input(frames))
+    expect(red.status).toBe('red')
+    expect(red.evidence[0]).toContain('h1')
+    // the linesman blows it: green
+    const blown = vt18Offside(input(frames, { events: [{ type: 'whistle', absT: frames[20]!.clock, reason: 'offside' }] }))
+    expect(blown.status).toBe('green')
+    // h1 back onside behind the puck: green, nothing to call
+    const onside = frames.map((f) => ({ ...f, rigs: f.rigs.map((r) => (r.id === 'h1' ? { ...r, x: 10 } : r)) }))
+    expect(vt18Offside(input(onside)).status).toBe('green')
+  })
+
   it('runs every detector and reports n/a with nothing to judge', () => {
     const res = runViewerTruth(input([]))
-    expect(res.map((r) => r.id)).toEqual(['VT1', 'VT2', 'VT3', 'VT4', 'VT5', 'VT6', 'VT7', 'VT8', 'VT9', 'VT10', 'VT11', 'VT13', 'VT14', 'VT16', 'VT17'])
+    expect(res.map((r) => r.id)).toEqual(['VT1', 'VT2', 'VT3', 'VT4', 'VT5', 'VT6', 'VT7', 'VT8', 'VT9', 'VT10', 'VT11', 'VT12', 'VT13', 'VT14', 'VT16', 'VT17', 'VT18'])
     expect(res.every((r) => r.status === 'n/a')).toBe(true)
   })
 })

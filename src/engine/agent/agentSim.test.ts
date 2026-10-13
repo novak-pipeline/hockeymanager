@@ -16,6 +16,9 @@ import { histPct } from './telemetry'
 import { passShape } from '@engine/full/passShape'
 import { analyzeGame } from '@engine/analysis'
 import { framesFromStream, judgeTeamPlay, SIM_GATES } from '@engine/analysis/teamPlay'
+import { judgeOffsideStream } from '@engine/analysis/offside'
+import { judgeActionFloor, judgeContacts } from '@engine/analysis/actions'
+import { ACTION_FLOOR } from './constraints'
 
 /** W3 S1 design band for the stream gates (per 60 live minutes / per player-minute). */
 const TEAM_PLAY_BAND = { aimlessPer60: 30, coveragePer60: 5, flipsPerPlayerMin: 26 }
@@ -142,6 +145,78 @@ describe('agent engine', () => {
     expect(p60(aimless)).toBeLessThan(TEAM_PLAY_BAND.aimlessPer60)
     expect(p60(coverage)).toBeLessThan(TEAM_PLAY_BAND.coveragePer60)
     expect(flips / jobMin).toBeLessThan(TEAM_PLAY_BAND.flipsPerPlayerMin)
+  }, 120000)
+
+  it('blows every offside (owner, reel S1: "he was offside"): carried, passed, shot, chipped or bounced in', () => {
+    // The offside judge (src/engine/analysis/offside.ts, also VT18 on the drawn
+    // screen) on the sim stream. Before the fix the engine judged only carries
+    // and passes / dumps: a shot, a chip, a poke or a block that took the puck
+    // over the line was never looked at, the puck was "in" at the line's centre
+    // (so a puck riding the line re-entered every substep), and on a delayed
+    // offside the man touching the puck was not counted. Imported league: 6.6
+    // missed calls a game; generated league below: see W3-LOG S2.
+    let entries = 0
+    let offsideEntries = 0
+    let whistles = 0
+    const missed: string[] = []
+    for (let i = 0; i < 6; i++) {
+      const out = agentSimGame(team(i), team(i + 5), resolve, { seed: 940 + i })
+      const r = judgeOffsideStream(out.stream)
+      entries += r.entries
+      offsideEntries += r.offsideEntries
+      whistles += r.whistles
+      for (const m of r.missed) missed.push(`g${i} ${m.what}`)
+    }
+    // eslint-disable-next-line no-console
+    console.log(`offside: ${entries} entries, ${offsideEntries} with a man over the line, ${whistles} whistles, ${missed.length} missed`)
+    expect(entries).toBeGreaterThan(500)
+    expect(offsideEntries).toBeGreaterThan(20)
+    expect(whistles).toBeGreaterThan(5)
+    expect(missed).toEqual([])
+  }, 120000)
+
+  it('holds every action to its floor and every contact to a pair in range (W3 S2, VT12)', () => {
+    // constraints.ts: no shot, pass, check, tie-up, stick or goalie action
+    // completes faster than its row, and a hit or a tie-up only happens with
+    // both bodies in reach. Judged on the stream by @engine/analysis/actions.
+    const short: string[] = []
+    const apart: string[] = []
+    const byAct: Record<string, number> = {}
+    let shots = 0
+    let passes = 0
+    let hits = 0
+    let tieUps = 0
+    let hitsWithReceiver = 0
+    let streamHits = 0
+    let passesTimed = 0
+    for (let i = 0; i < 4; i++) {
+      const out = agentSimGame(team(i), team(i + 6), resolve, { seed: 970 + i })
+      const fl = judgeActionFloor(out.stream)
+      const ct = judgeContacts(out.stream)
+      shots += fl.shots
+      passes += fl.passes
+      hits += ct.hits
+      tieUps += ct.tieUps
+      for (const [k, v] of Object.entries(fl.byAct)) byAct[k] = (byAct[k] ?? 0) + v
+      for (const c of fl.short) short.push(`g${i} ${c.what}`)
+      for (const c of ct.apart) apart.push(`g${i} ${c.what}`)
+      for (const e of out.stream) {
+        if (e.type === 'hit') streamHits++
+        if (e.type === 'hit' && e.receiverS !== undefined && e.receiverS > 0) hitsWithReceiver++
+        if (e.type === 'pass' && e.releaseS !== undefined && e.releaseS >= ACTION_FLOOR.pass.release.drop - 0.06) passesTimed++
+      }
+    }
+    // eslint-disable-next-line no-console
+    console.log(`action floor: ${shots} shots, ${passes} passes, acts ${JSON.stringify(byAct)}; contact pairs: ${hits} hits, ${tieUps} tie-ups`)
+    expect(shots).toBeGreaterThan(100)
+    expect(passes).toBeGreaterThan(1000)
+    expect(passesTimed).toBe(passes)
+    for (const a of ['windup', 'release', 'receive', 'tieUp', 'hit', 'stagger', 'save', 'set', 'deke', 'lifted']) expect(byAct[a] ?? 0).toBeGreaterThan(0)
+    expect(hits).toBeGreaterThan(100)
+    expect(hitsWithReceiver).toBe(streamHits)
+    expect(tieUps).toBeGreaterThan(50)
+    expect(short).toEqual([])
+    expect(apart).toEqual([])
   }, 120000)
 
   it('lands in the NHL band and keeps its play logic over many games', () => {

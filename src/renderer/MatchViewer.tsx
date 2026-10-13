@@ -1734,14 +1734,18 @@ function probeEventsOf(stream: WatchedGame['stream']): VTEvent[] {
     const absT = (bases.get(ev.period) ?? (ev.period - 1) * 1200) + ev.t
     const e: VTEvent = { type: ev.type, absT }
     switch (ev.type) {
-      case 'shot': e.actor = ev.shooter; e.x = ev.from.x * 100; e.z = ev.from.y * 42.5; e.netX = Math.sign(ev.target.x || 1) * 89; if (ev.shotType) e.shotType = ev.shotType; break
-      case 'missedShot': e.actor = ev.shooter; e.netX = Math.sign(ev.target.x || 1) * 89; if (ev.shotType) e.shotType = ev.shotType; break
+      case 'shot': e.actor = ev.shooter; e.x = ev.from.x * 100; e.z = ev.from.y * 42.5; e.netX = Math.sign(ev.target.x || 1) * 89; if (ev.shotType) e.shotType = ev.shotType; if (ev.windupS !== undefined) e.windupS = ev.windupS; break
+      case 'missedShot': e.actor = ev.shooter; e.netX = Math.sign(ev.target.x || 1) * 89; if (ev.shotType) e.shotType = ev.shotType; if (ev.windupS !== undefined) e.windupS = ev.windupS; break
       case 'goal': e.actor = ev.scorer; e.scorer = ev.scorer; break
       case 'save': e.actor = ev.goalie; e.rebound = ev.rebound; break
       case 'faceoff': e.actor = ev.winner; e.x = ev.pos.x * 100; e.z = ev.pos.y * 42.5; break
       case 'hit': e.actor = ev.by; e.target = ev.on; if (ev.knockdown !== undefined) e.knockdown = ev.knockdown; break
       case 'deke': e.actor = ev.by; break
       case 'penalty': e.actor = ev.player; break
+      case 'whistle': if (ev.reason) e.reason = ev.reason; break
+      case 'pokeCheck': e.actor = ev.by; e.success = ev.success; break
+      case 'blockedShot': e.actor = ev.blocker; break
+      case 'battle': if (ev.winner) e.actor = ev.winner; break
     }
     out.push(e)
   }

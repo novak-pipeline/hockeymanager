@@ -98,4 +98,5 @@ const SCEN = {
   breakaway: 'Breakaway', twoOnOne: '2-on-1 rush', ozCycleShot: 'OZ cycle into a shot', ppSetPlay: 'PP set play',
   goalReplay: 'Goal + celebration + replay', lineChangeOnFly: 'Line change on the fly', faceoffWinPlay: 'Faceoff win into play',
   bigHit: 'Big hit', saveRebound: 'Save + rebound', emptyNetLate: 'Empty net / late game', dZoneCoverage: 'Defensive-zone coverage',
+  offsideCall: 'Zone entry: offside called',
 }
