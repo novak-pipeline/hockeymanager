@@ -1742,6 +1742,10 @@ function probeEventsOf(stream: WatchedGame['stream']): VTEvent[] {
       case 'hit': e.actor = ev.by; e.target = ev.on; if (ev.knockdown !== undefined) e.knockdown = ev.knockdown; break
       case 'deke': e.actor = ev.by; break
       case 'penalty': e.actor = ev.player; break
+      case 'whistle': if (ev.reason) e.reason = ev.reason; break
+      case 'pokeCheck': e.actor = ev.by; e.success = ev.success; break
+      case 'blockedShot': e.actor = ev.blocker; break
+      case 'battle': if (ev.winner) e.actor = ev.winner; break
     }
     out.push(e)
   }

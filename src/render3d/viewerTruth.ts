@@ -9,6 +9,7 @@
  */
 import type { ProbeFrame, ProbeGeometry, ProbeRig } from './viewerProbe'
 import { judgeTeamPlay, TP, type TPFrame, type TPReport } from '@engine/analysis/teamPlay'
+import { judgeOffside, OFFSIDE } from '@engine/analysis/offside'
 
 /** A non-frame stream event on the absolute clock, positions in world feet. */
 export interface VTEvent {
@@ -27,6 +28,10 @@ export interface VTEvent {
   /** hits: the man hit; knockdown: the engine put him down. */
   target?: string
   knockdown?: boolean
+  /** whistles: why play stopped (offside, icing...). */
+  reason?: string
+  /** poke checks: it took the puck. */
+  success?: boolean
 }
 
 /** A spoken / captioned booth line as fired (channel 'commentary'). */
@@ -611,7 +616,32 @@ export function vt16Camping(inp: VTInput): VTResult {
   }
 }
 
-export const DETECTORS = [vt1Bodies, vt2Divergence, vt3Shots, vt4Motion, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt9Framing, vt10Commentary, vt11Hits, vt13Aimless, vt14Coverage, vt16Camping] as const
+/* ── VT18 offside: an attacker over the line ahead of the puck, no whistle ── */
+// Owner, reel S1 ozCycleShot: "he was offside". Judged on the DRAWN blue line
+// (1 ft wide on ±25 ft), drawn bodies and the drawn puck; the rules live in
+// @engine/analysis/offside (the same judge gates the sim stream).
+export function vt18Offside(inp: VTInput): VTResult {
+  const whistles = inp.events.filter((e) => e.type === 'whistle').map((e) => ({ t: e.absT, ...(e.reason ? { reason: e.reason } : {}) }))
+  // touches the frames can't show: a poke, a block, a save, a tie-up won (the defenders put it in: nobody offside)
+  const goalieTeam = new Map<string, 'home' | 'away'>()
+  for (const f of inp.frames) for (const r of f.rigs) if (r.goalie && r.id !== null) goalieTeam.set(r.id, r.team)
+  const touches = inp.events
+    .filter((e) => e.actor !== undefined && ((e.type === 'pokeCheck' && e.success) || e.type === 'blockedShot' || e.type === 'save' || e.type === 'battle'))
+    .map((e) => {
+      const team = goalieTeam.get(e.actor!)
+      return team ? { t: e.absT, team } : { t: e.absT, id: e.actor! }
+    })
+  const r = judgeOffside(teamPlayFrames(inp), whistles, touches)
+  return {
+    id: 'VT18', name: 'Offside: no attacker enters ahead of the puck unwhistled',
+    status: r.entries === 0 ? 'n/a' : r.missed.length === 0 ? 'green' : 'red',
+    rule: `a zone entry the attackers propelled, with a team-mate's body > ${OFFSIDE.manOverFt} ft past the line's centre when the puck completely crossed: carried in → a whistle within ${OFFSIDE.whistleS} s; passed / shot / chipped in → no attacker touches it in the zone before every attacker tags up, without a whistle`,
+    value: `${r.missed.length} missed calls in ${r.entries} entries (${r.offsideEntries} with a man offside, ${r.whistles} offside whistles)`,
+    evidence: r.missed.slice(0, 5).map((c) => c.what),
+  }
+}
+
+export const DETECTORS = [vt1Bodies, vt2Divergence, vt3Shots, vt4Motion, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt9Framing, vt10Commentary, vt11Hits, vt13Aimless, vt14Coverage, vt16Camping, vt18Offside] as const
 
 export function runViewerTruth(inp: VTInput): VTResult[] {
   return DETECTORS.map((d) => d(inp))

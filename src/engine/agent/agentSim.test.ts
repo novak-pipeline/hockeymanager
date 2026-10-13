@@ -16,6 +16,7 @@ import { histPct } from './telemetry'
 import { passShape } from '@engine/full/passShape'
 import { analyzeGame } from '@engine/analysis'
 import { framesFromStream, judgeTeamPlay, SIM_GATES } from '@engine/analysis/teamPlay'
+import { judgeOffsideStream } from '@engine/analysis/offside'
 
 /** W3 S1 design band for the stream gates (per 60 live minutes / per player-minute). */
 const TEAM_PLAY_BAND = { aimlessPer60: 30, coveragePer60: 5, flipsPerPlayerMin: 26 }
@@ -142,6 +143,34 @@ describe('agent engine', () => {
     expect(p60(aimless)).toBeLessThan(TEAM_PLAY_BAND.aimlessPer60)
     expect(p60(coverage)).toBeLessThan(TEAM_PLAY_BAND.coveragePer60)
     expect(flips / jobMin).toBeLessThan(TEAM_PLAY_BAND.flipsPerPlayerMin)
+  }, 120000)
+
+  it('blows every offside (owner, reel S1: "he was offside"): carried, passed, shot, chipped or bounced in', () => {
+    // The offside judge (src/engine/analysis/offside.ts, also VT18 on the drawn
+    // screen) on the sim stream. Before the fix the engine judged only carries
+    // and passes / dumps: a shot, a chip, a poke or a block that took the puck
+    // over the line was never looked at, the puck was "in" at the line's centre
+    // (so a puck riding the line re-entered every substep), and on a delayed
+    // offside the man touching the puck was not counted. Imported league: 6.6
+    // missed calls a game; generated league below: see W3-LOG S2.
+    let entries = 0
+    let offsideEntries = 0
+    let whistles = 0
+    const missed: string[] = []
+    for (let i = 0; i < 6; i++) {
+      const out = agentSimGame(team(i), team(i + 5), resolve, { seed: 940 + i })
+      const r = judgeOffsideStream(out.stream)
+      entries += r.entries
+      offsideEntries += r.offsideEntries
+      whistles += r.whistles
+      for (const m of r.missed) missed.push(`g${i} ${m.what}`)
+    }
+    // eslint-disable-next-line no-console
+    console.log(`offside: ${entries} entries, ${offsideEntries} with a man over the line, ${whistles} whistles, ${missed.length} missed`)
+    expect(entries).toBeGreaterThan(500)
+    expect(offsideEntries).toBeGreaterThan(20)
+    expect(whistles).toBeGreaterThan(5)
+    expect(missed).toEqual([])
   }, 120000)
 
   it('lands in the NHL band and keeps its play logic over many games', () => {
