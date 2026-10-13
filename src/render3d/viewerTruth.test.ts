@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ProbeFrame, ProbeGeometry, ProbeRig } from './viewerProbe'
-import { runViewerTruth, vt13Aimless, vt14Coverage, vt1Bodies, vt5Replay, vt6Clocks, vt8Changes, type VTInput } from './viewerTruth'
+import { runViewerTruth, vt13Aimless, vt14Coverage, vt17Grip, vt1Bodies, vt5Replay, vt6Clocks, vt8Changes, type VTInput } from './viewerTruth'
 
 const GEO: ProbeGeometry = { rinkHalfL: 100, rinkHalfW: 42.5, benchGates: { home: { x: -26, z: 41 }, away: { x: 26, z: 41 } } }
 
@@ -89,9 +89,25 @@ describe('viewer-truth detectors', () => {
     expect(vt14Coverage(input(ok)).status).toBe('green')
   })
 
+  it('VT17 flags the one-handed lance and a carried puck on a lifted blade; a swing is not judged', () => {
+    const g = (o: Partial<NonNullable<ProbeRig['grip']>>): NonNullable<ProbeRig['grip']> => ({ lance: false, oneHand: false, bladeY: 0.02, carrying: false, swing: false, state: 'relaxed', ...o })
+    const withGrip = (carrier: NonNullable<ProbeRig['grip']>) => [rig('home', 'h0', 0, 0, { grip: carrier }), ...[1, 2, 3, 4].map((k) => rig('home', `h${k}`, k * 10, 0, { grip: g({}) }))]
+    const lance = vt17Grip(input([0, 1, 2].map((i) => frame(i, withGrip(g({ carrying: true, lance: true, oneHand: true, state: 'n/a' }))))))
+    expect(lance.status).toBe('red')
+    expect(lance.evidence[0]).toContain('lance')
+    const lifted = vt17Grip(input([0, 1, 2].map((i) => frame(i, withGrip(g({ carrying: true, bladeY: 0.6, state: 'carry' }))))))
+    expect(lifted.status).toBe('red')
+    const swing = vt17Grip(input([0, 1, 2].map((i) => frame(i, withGrip(g({ carrying: true, lance: true, bladeY: 1.2, swing: true }))))))
+    expect(swing.status).toBe('green')
+    const ok = vt17Grip(input([0, 1, 2].map((i) => frame(i, withGrip(g({ carrying: true, state: 'carry' }))))))
+    expect(ok.status).toBe('green')
+    // older probes (no grip data): nothing to judge
+    expect(vt17Grip(input([frame(0, five('home'))])).status).toBe('n/a')
+  })
+
   it('runs every detector and reports n/a with nothing to judge', () => {
     const res = runViewerTruth(input([]))
-    expect(res.map((r) => r.id)).toEqual(['VT1', 'VT2', 'VT3', 'VT4', 'VT5', 'VT6', 'VT7', 'VT8', 'VT9', 'VT10', 'VT11', 'VT13', 'VT14', 'VT16'])
+    expect(res.map((r) => r.id)).toEqual(['VT1', 'VT2', 'VT3', 'VT4', 'VT5', 'VT6', 'VT7', 'VT8', 'VT9', 'VT10', 'VT11', 'VT13', 'VT14', 'VT16', 'VT17'])
     expect(res.every((r) => r.status === 'n/a')).toBe(true)
   })
 })

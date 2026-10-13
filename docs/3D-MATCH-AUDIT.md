@@ -40,6 +40,7 @@ The current watched-game engine **rolls every outcome on dice first and then ben
 | 29 | **Partly fixed.** Real player rigs stand on the benches (the blocks are gone); the crowd has faces and caps; procedural sound was already in the app. |
 | 28 | Agent engine: 0% overlap. Renderer-side separation for the classic engine was tried and reverted (see memory). |
 | new | Settings → **Match engine**: Classic or New engine (beta), so the owner can play the agent engine now. |
+| grip | **Fixed (2026-10-13, after reel S1).** The owner's one-handed "lance" (every skater holding the stick straight out in front in one hand) came from the owner skating clips driving the arms and stick, plus the one-handed `skate_start` / `hockey_stop`. Skater arms and stick now come from six grips chosen from the stream (`gripState.ts`): two-hand carry, relaxed, one hand (skating hard without the puck), ready (covering / backing up), receive (blade square to the pass) and faceoff, eased over ~0.3 s. VT17 (`gripTruth.ts`) on the harness, owner rigs, 60 s: lance 90.4% → 0.0% of skater frames, 48.2% → 0.0% of carrier frames. |
 
 ## Master issue list (ranked by impact on "FM-quality")
 

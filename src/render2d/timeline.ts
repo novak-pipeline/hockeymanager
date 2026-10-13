@@ -86,6 +86,9 @@ export interface PosSnapshot {
   /** Body facing per skater index, radians in rink feet (agent engine; absent = infer from travel). */
   homeFacing?: (number | undefined)[]
   awayFacing?: (number | undefined)[]
+  /** The agent engine's job per skater index (W3: "puck", "chase", "mark:<id>"…; absent = not emitted). */
+  homeJobs?: (string | undefined)[]
+  awayJobs?: (string | undefined)[]
 }
 
 export interface ClockLabel {
@@ -358,6 +361,7 @@ export class MatchTimeline {
         ? { puckZ: stoppageT !== null ? (absT < stoppageT ? a.puckZ ?? 0 : b.puckZ ?? 0) : (a.puckZ ?? 0) + ((b.puckZ ?? 0) - (a.puckZ ?? 0)) * f }
         : {}),
       ...(dom.home.some((s) => s.facing !== undefined) ? { homeFacing: blendFacing(a.home, b.home, f), awayFacing: blendFacing(a.away, b.away, f) } : {}),
+      ...jobsOf(dom),
     }
   }
 
@@ -459,7 +463,14 @@ function snapshotOf(frame: FrameEvent): PosSnapshot {
     awayGoalieId: frame.awayGoalie.player,
     ...(frame.puckZ !== undefined ? { puckZ: frame.puckZ } : {}),
     ...(frame.home.some((s) => s.facing !== undefined) ? { homeFacing: frame.home.map((s) => s.facing), awayFacing: frame.away.map((s) => s.facing) } : {}),
+    ...jobsOf(frame),
   }
+}
+
+/** Jobs per skater index, when the engine emits them (additive W3 field). */
+function jobsOf(frame: FrameEvent): Pick<PosSnapshot, 'homeJobs' | 'awayJobs'> {
+  if (!frame.home.some((s) => s.job !== undefined) && !frame.away.some((s) => s.job !== undefined)) return {}
+  return { homeJobs: frame.home.map((s) => s.job), awayJobs: frame.away.map((s) => s.job) }
 }
 
 /** Facing per slot: shortest-arc blend when the same player holds it, else the later frame's. */

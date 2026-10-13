@@ -32,6 +32,13 @@ export interface ProbeRig {
   simZ: number | null
   /** Max body-core (hips…head) LOCAL bone angular speed this frame, rad/s of wall time. */
   boneW: number
+  /**
+   * How the drawn skater holds his stick (gripTruth.ts; skaters only, optional:
+   * older probes). `carrying` = he has the puck on his blade (not mid-swing),
+   * `swing` = an action clip is playing (shot, pass, deke, poke, the draw, a
+   * check or hit reaction, a celebration).
+   */
+  grip?: { lance: boolean; oneHand: boolean; bladeY: number; carrying: boolean; swing: boolean; state: string }
 }
 
 export interface ProbeViewerState {

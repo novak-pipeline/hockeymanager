@@ -37,6 +37,13 @@ export interface ClipMeta {
    * the renderer locks them onto the shaft (athlete.ts lockGrips). Default both.
    */
   grip?: 'both' | 'R'
+  /**
+   * Locomotion moments (a hockey stop, a push-off): the clip moves the body
+   * only; the stick and hands stay in the grip the sim's situation calls for
+   * (gripState.ts). The owner's one-handed versions held the stick out in
+   * front like a lance on every start and stop.
+   */
+  bodyOnly?: boolean
   goalie?: boolean
   /**
    * Slot only an OWNER import fills (scripts/blender/import_owner_assets.py);
@@ -55,8 +62,8 @@ export const CLIPS: Record<string, ClipMeta> = {
   skate_crossover_L: { mask: 'lower', hands: 'stick', loop: true, fadeIn: 0.2, fadeOut: 0.25 },
   skate_crossover_R: { mask: 'lower', hands: 'stick', loop: true, fadeIn: 0.2, fadeOut: 0.25 },
   skate_back: { mask: 'lower', hands: 'stick', loop: true, fadeIn: 0.25, fadeOut: 0.25 },
-  // (owner imports fill these with one-handed skating clips: only the top hand is locked)
-  hockey_stop: { mask: 'full', hands: 'stick', grip: 'R', fadeIn: 0.2, fadeOut: 0.25 },
+  // (owner imports fill these with one-handed skating clips: the body only — the grip holds the stick)
+  hockey_stop: { mask: 'full', hands: 'stick', grip: 'R', bodyOnly: true, fadeIn: 0.2, fadeOut: 0.25 },
   stickhandle: { mask: 'upper', hands: 'stick', loop: true, fadeIn: 0.2, fadeOut: 0.2 },
   // ── puck skills ──
   // shots: two variants per release type (shotClipFor); film study item 12
@@ -117,7 +124,7 @@ export const CLIPS: Record<string, ClipMeta> = {
 
   // owner-import slots (the Blender fallback covers them otherwise)
   skate_idle: { mask: 'lower', hands: 'stick', loop: true, fadeIn: 0.3, fadeOut: 0.3, ownerOnly: true, fallback: 'skate_glide' },
-  skate_start: { mask: 'full', hands: 'stick', grip: 'R', fadeIn: 0.2, fadeOut: 0.3, ownerOnly: true },
+  skate_start: { mask: 'full', hands: 'stick', grip: 'R', bodyOnly: true, fadeIn: 0.2, fadeOut: 0.3, ownerOnly: true },
   g_pad_save_L: { mask: 'full', hands: 'clip', contact: f(4), fadeIn: 0.05, fadeOut: 0.3, goalie: true, ownerOnly: true, fallback: 'g_pad_save' },
   g_pad_save_R: { mask: 'full', hands: 'clip', contact: f(4), fadeIn: 0.05, fadeOut: 0.3, goalie: true, ownerOnly: true, fallback: 'g_pad_save' },
   g_skate_fwd: { mask: 'lower', hands: 'clip', loop: true, fadeIn: 0.3, fadeOut: 0.3, goalie: true, ownerOnly: true },
