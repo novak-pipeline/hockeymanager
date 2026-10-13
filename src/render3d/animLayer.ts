@@ -231,7 +231,7 @@ export class ActionLayer {
   }
 
   blendStick(bones: Bones): void {
-    for (const a of this.active) blendClip(bones, a.clip, this.time(a), !!a.meta.loop, this.weight(a), a.meta.mask, 'stick')
+    for (const a of this.active) if (!a.meta.bodyOnly) blendClip(bones, a.clip, this.time(a), !!a.meta.loop, this.weight(a), a.meta.mask, 'stick')
   }
 
   /**
@@ -241,7 +241,7 @@ export class ActionLayer {
    * TOUCHED UP onto the shaft (gripWeights → athlete.ts lockGrips).
    */
   blendArms(bones: Bones): void {
-    for (const a of this.active) blendClip(bones, a.clip, this.time(a), !!a.meta.loop, this.weight(a), a.meta.mask, 'arms')
+    for (const a of this.active) if (!a.meta.bodyOnly) blendClip(bones, a.clip, this.time(a), !!a.meta.loop, this.weight(a), a.meta.mask, 'arms')
   }
 
   /** Weight of active clips driving the arms (upper / full body). */
@@ -256,7 +256,7 @@ export class ActionLayer {
     let L = 0
     let R = 0
     for (const a of this.active) {
-      if (a.meta.hands !== 'stick' || a.meta.mask === 'lower') continue
+      if (a.meta.hands !== 'stick' || a.meta.mask === 'lower' || a.meta.bodyOnly) continue
       const w = this.weight(a)
       R = Math.max(R, w)
       if (a.meta.grip !== 'R') L = Math.max(L, w)

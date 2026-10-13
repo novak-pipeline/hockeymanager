@@ -1,6 +1,7 @@
 /**
  * Viewer-truth detectors VT1–VT11 (docs/gameplan-2026-09-28/ROOT-CAUSES.md §2.1)
- * and the W3 team-play detectors VT13, VT14, VT16 (W3-DESIGN.md §2).
+ * plus the W3 team-play detectors VT13, VT14, VT16 (W3-DESIGN.md §2), and VT17 the
+ * stick grip (gripTruth.ts: the one-handed "lance" after reel S1).
  *
  * Each detector judges what the real match screen DREW (viewerProbe frames,
  * recorded from the built app at the owner's settings), not the sim stream.
@@ -611,7 +612,45 @@ export function vt16Camping(inp: VTInput): VTResult {
   }
 }
 
-export const DETECTORS = [vt1Bodies, vt2Divergence, vt3Shots, vt4Motion, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt9Framing, vt10Commentary, vt11Hits, vt13Aimless, vt14Coverage, vt16Camping] as const
+/* ── VT17 stick grip: no lance, the carrier's blade on the ice ────────────── */
+/** Limits (share of skater-frames on live play, outside swing clips). */
+export const VT17 = { carrierLance: 0.01, allLance: 0.02, carrierBladeOff: 0.05, bladeOffFt: 0.25 } as const
+export function vt17Grip(inp: VTInput): VTResult {
+  let carrier = 0
+  let carrierLance = 0
+  let carrierOff = 0
+  let all = 0
+  let allLance = 0
+  const ev: string[] = []
+  for (const f of inp.frames) {
+    if (!isLive(f) || f.dead || inReplay(f)) continue
+    for (const r of skaters(f)) {
+      const g = r.grip
+      if (!g || !r.visible || !r.onScreen || r.mode !== 'play' || g.swing) continue
+      all++
+      if (g.lance) allLance++
+      if (g.carrying) {
+        carrier++
+        if (g.lance) carrierLance++
+        if (g.bladeY > VT17.bladeOffFt) carrierOff++
+      }
+      if ((g.lance || (g.carrying && g.bladeY > VT17.bladeOffFt)) && ev.length < 5 && !ev.some((e) => e.startsWith(`${clk(f.clock)} ${r.id}`))) {
+        ev.push(`${clk(f.clock)} ${r.id}: ${g.lance ? 'lance (one hand, stick thrust out in front)' : `blade ${f2(g.bladeY)} ft off the ice`}${g.carrying ? ' with the puck' : ''} [grip ${g.state}]`)
+      }
+    }
+  }
+  const s = (a: number, b: number) => (b ? a / b : 0)
+  const red = s(carrierLance, carrier) > VT17.carrierLance || s(allLance, all) > VT17.allLance || s(carrierOff, carrier) > VT17.carrierBladeOff
+  return {
+    id: 'VT17', name: 'Stick grip: no lance, the carried puck on a blade on the ice',
+    status: all === 0 ? 'n/a' : red ? 'red' : 'green',
+    rule: `outside shot/pass/deke/poke clips: the lance pose (bottom hand > 0.5 ft off the shaft, top hand 2–5.2 ft high, the stick straight out in front: blade ≥ 2.5 ft ahead of the hand and ≥ 1.5× as far ahead as to the side) on ≤ ${VT17.carrierLance * 100}% of carrier frames and ≤ ${VT17.allLance * 100}% of all skater frames; the carrier's blade > ${VT17.bladeOffFt} ft off the ice on ≤ ${VT17.carrierBladeOff * 100}% of his frames`,
+    value: `carrier ${carrier} fr: lance ${(s(carrierLance, carrier) * 100).toFixed(1)}%, blade off ice ${(s(carrierOff, carrier) * 100).toFixed(1)}%; all skaters ${all} fr: lance ${(s(allLance, all) * 100).toFixed(1)}%`,
+    evidence: ev,
+  }
+}
+
+export const DETECTORS = [vt1Bodies, vt2Divergence, vt3Shots, vt4Motion, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt9Framing, vt10Commentary, vt11Hits, vt13Aimless, vt14Coverage, vt16Camping, vt17Grip] as const
 
 export function runViewerTruth(inp: VTInput): VTResult[] {
   return DETECTORS.map((d) => d(inp))

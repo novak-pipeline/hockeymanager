@@ -172,6 +172,11 @@ const SHOT_SWING_MIN_RATE = 0.55
 /** A shot the sim wound up (windupS present) is drawn swinging for at least this long, so the set reads at 1×. */
 const SHOT_SWING_MIN_S = 0.4
 
+/** A receiver squares his blade this long before the pass leaves (he sees it coming) … */
+const PASS_PRESENT_S = 0.25
+/** … and holds it at most this long after the release (until the puck is his). */
+const PASS_RECEIVE_S = 1.5
+
 /** Seconds the faceoff set (crouch, wingers down) starts before the drop, when the engine doesn't say. */
 export const FACEOFF_LEAD_S = 1.5
 
@@ -392,6 +397,28 @@ export class Choreographer {
       const p = ps[i]!
       if (p.cue.absT - 0.9 > t) break
       if ((p.cue.kind === 'shot' || p.cue.kind === 'pass') && p.clip && p.cue.absT - p.lead <= t) return p.cue.actorId
+    }
+    return null
+  }
+
+  /**
+   * A completed pass in flight to `id` at game time `t` (from just before the
+   * release until ~1.5 s after it — the renderer ends it as soon as he has the
+   * puck): where it was passed from (world ft). Null when none.
+   */
+  incomingPass(id: string, t: number): { x: number; z: number } | null {
+    const ps = this.plans
+    let lo = 0
+    let hi = ps.length
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (ps[mid]!.cue.absT < t - PASS_RECEIVE_S) lo = mid + 1
+      else hi = mid
+    }
+    for (let i = lo; i < ps.length; i++) {
+      const c = ps[i]!.cue
+      if (c.absT - PASS_PRESENT_S > t) break
+      if (c.kind === 'pass' && c.targetId === id) return { x: normXtoWorld(c.nx), z: normYtoWorld(c.ny) }
     }
     return null
   }
@@ -625,13 +652,14 @@ export class Choreographer {
     const gclips = this.locoClips.goalie
     const loco = this.loco
     const owner = this.ownerLoco
-    // Owner imports: the authored skating / stance cycles carry their own arms
-    // and stick handling (retargeted together from the source), so they drive
-    // arms + stick too — the renderer's carry IK is only the fallback under
-    // them. An action clip that re-grips the stick by IK (a Blender shot or
-    // pass on an owner rig) takes the arms back in proportion to its weight.
+    // Owner imports: the authored skating / stance cycles drive the whole body
+    // (torso too), but NOT the skaters' stick and arms: their one-handed carry
+    // held the stick out in front like a lance on every skater (owner, reel S1).
+    // The stick and hands come from the grip the sim's situation calls for
+    // (gripState.ts → athlete.ts); action clips still swing the stick on top.
+    // Owner goalies keep their authored stance arms + stick.
     const skate = (B: Record<BoneName, THREE.Bone>, part: 'body' | 'stick' | 'arms', k = 1) => {
-      if (clips && !actor.rig.goalie && loco !== 'code') blendLocomotion(B, clips, actor, loco, owner, part, k)
+      if (clips && !actor.rig.goalie && loco !== 'code' && part === 'body') blendLocomotion(B, clips, actor, loco, owner, part, k)
       if (gclips && actor.rig.goalie && gclips.has('g_stance')) blendGoalieLocomotion(B, gclips, actor, part, k)
     }
     return {

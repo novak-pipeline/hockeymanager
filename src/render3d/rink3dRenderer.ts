@@ -53,6 +53,8 @@ import { advanceStridePhase, skaterPose, goaliePose, celebrationWeight, crowdExc
 import { Arena, NET_X, REFLECT_LAYER } from './arena'
 import { AthleteBatch, AthleteRig, athleteMaterial, type PoseOverlay } from './athlete'
 import type { ProbeGeometry, ProbeRig, ProbeSink } from './viewerProbe'
+import { isLance, isOneHanded, measureGrip, type GripSample } from './gripTruth'
+import { blendGrip, chooseGrip, gripBend, type GripInput, type GripState, type GripWeights } from './gripState'
 import { loadAthleteAssets, loadOwnerAssets, mergeClips, type AthleteAssets, type OwnerAssets, type OwnerTextures } from './gltfAthlete'
 import { AtlasUploader, type Rect } from './atlasUpload'
 import { OwnerKitPainter, buildOwnerAtlasCanvas, clothesMaterial, gearMaterial, loadTexture, visorMaterial } from './ownerKit'
@@ -158,6 +160,11 @@ const MAX_TURN_RATE_RAD_PER_SEC = (Math.PI * 200) / 180
 const FACING_VEL_TAU = 0.3
 // Action clips that are really locomotion: the stick stays on the ice through them (groundStick).
 const GROUNDED_CLIPS = new Set(['hockey_stop', 'skate_start', 'stickhandle'])
+/** Grips an event sets at once (gripState.ts); the others wait out GRIP_DWELL_S. */
+const EVENT_GRIPS = new Set<GripState>(['carry', 'receive', 'faceoff'])
+const GRIP_DWELL_S = 0.35
+/** Clips that swing the stick on purpose (shots, passes, dekes, pokes). */
+const SWING_CLIP = /^(shot_|pass$|deke_|poke$)/
 
 const smoothstep01 = (e0: number, e1: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)))
@@ -252,6 +259,11 @@ interface PlayerPose {
   stopCooldown: number
   stopAccum: number
   stopFrom: number
+  /** The stick grip blend (gripState.ts) and the grip it is heading for. */
+  gripW?: GripWeights | null
+  gripTarget?: GripState | null
+  /** Game seconds a different read-of-play grip has been asked for (the dwell). */
+  gripPend?: number
 }
 
 interface ActiveCue {
@@ -434,6 +446,10 @@ export class Rink3dRenderer implements MatchRenderer {
   private carrierWx = 0
   private carrierWz = 0
   private lastCarrier: PlayerId | null = null
+  /** Grip inputs this frame: the agent engine's job per player, the side with the puck, the man mid wind-up. */
+  private readonly jobById = new Map<string, string>()
+  private possession: 'home' | 'away' | null = null
+  private windupNow: string | null = null
 
   private constructor(renderer: THREE.WebGLRenderer) {
     this.renderer = renderer
@@ -1525,6 +1541,27 @@ export class Rink3dRenderer implements MatchRenderer {
     }
   }
 
+  /** How one drawn skater holds his stick now (gripTruth.ts), with the context the detector needs. */
+  private gripOf(p: PlayerPose): { sample: GripSample; lance: boolean; oneHand: boolean; carrying: boolean; swing: boolean; state: string; speedFt: number } | null {
+    const sample = measureGrip(p.rig)
+    if (!sample) return null
+    const id = p.playerId as string | null
+    const carrying = id !== null && id === (this.lastCarrier as string | null) && this.choreo?.windupActor(this.clockPos) !== id
+    const swing = !!p.layer?.playing.some((n) => SWING_CLIP.test(n))
+    return { sample, lance: isLance(sample), oneHand: isOneHanded(sample), carrying, swing, state: p.rig.gripState ?? 'n/a', speedFt: Math.hypot(p.vx, p.vz) }
+  }
+
+  /** Dev/harness: every visible on-ice skater's grip this frame. */
+  gripProbe(): Array<{ id: string | null; team: 'home' | 'away'; clips: string[] } & NonNullable<ReturnType<Rink3dRenderer['gripOf']>>> {
+    const out: Array<{ id: string | null; team: 'home' | 'away'; clips: string[] } & NonNullable<ReturnType<Rink3dRenderer['gripOf']>>> = []
+    for (const p of [...this.homePoses, ...this.awayPoses]) {
+      if (!p.rig.visible || p.mode !== 'play') continue
+      const g = this.gripOf(p)
+      if (g) out.push({ id: p.playerId as string | null, team: p.team, clips: p.layer?.playing ?? [], ...g })
+    }
+    return out
+  }
+
   private emitProbe(dt: number): void {
     const sink = this.probeSink
     if (!sink) return
@@ -1566,10 +1603,12 @@ export class Rink3dRenderer implements MatchRenderer {
         if (pq && dt > 0 && rig.root.visible !== false) boneW = Math.max(boneW, pq.angleTo(q) / dt)
       })
       this.probePrevQ.set(rig, cur)
+      const grip = !goalie && rig.visible && p.mode !== 'idle' ? this.gripOf(p) : null
       rigs.push({
         team: p.team, goalie, id, mode: goalie ? 'play' : p.mode, visible: rig.visible,
         x: p.worldX.pos, z: p.worldZ.pos, sx: pr.sx, sy: pr.sy, onScreen: pr.onScreen,
         simX: sp ? sp.x : null, simZ: sp ? sp.z : null, boneW,
+        ...(grip ? { grip: { lance: grip.lance, oneHand: grip.oneHand, bladeY: grip.sample.bladeY, carrying: grip.carrying, swing: grip.swing, state: grip.state } } : {}),
       })
     }
     const pm = this.puckMesh.position
@@ -1713,6 +1752,18 @@ export class Rink3dRenderer implements MatchRenderer {
     if (!snap) return
     this.lastSnap = snap
     this.lastCarrier = snap.carrier
+    // grip inputs (gripState.ts): each man's job (agent engine) and who has the puck (sticky through a loose puck)
+    this.jobById.clear()
+    snap.homeJobs?.forEach((j, k) => { const id = snap.homeIds?.[k]; if (id && j) this.jobById.set(id as string, j) })
+    snap.awayJobs?.forEach((j, k) => { const id = snap.awayIds?.[k]; if (id && j) this.jobById.set(id as string, j) })
+    if (snap.carrier !== null) {
+      const c = snap.carrier as string
+      if (snap.homeIds?.includes(snap.carrier)) this.possession = 'home'
+      else if (snap.awayIds?.includes(snap.carrier)) this.possession = 'away'
+      else if (c === (snap.homeGoalieId as string | undefined)) this.possession = 'home'
+      else if (c === (snap.awayGoalieId as string | undefined)) this.possession = 'away'
+    } else if (dt === 0) this.possession = null
+    this.windupNow = this.choreo?.windupActor(absT) ?? null
     const puckWx = normXtoWorld(snap.puck.x)
     const puckWz = normYtoWorld(snap.puck.y)
 
@@ -1924,7 +1975,9 @@ export class Rink3dRenderer implements MatchRenderer {
     // eased in / out (~0.1 s half-life) so a clip starting or ending doesn't pop the stick
     const prev = this.groundW.get(pose) ?? (eligible ? 1 : 0)
     const k = dt > 0 ? 1 - Math.pow(0.5, dt / 0.1) : 0
-    const gw = prev + ((eligible ? (lift <= full ? 1 : 1 - (lift - full) / 0.2) : 0) - prev) * k
+    // (a one-handed skater carries the blade a little off the ice on purpose)
+    const free = 1 - (pose.gripW?.oneHand ?? 0)
+    const gw = prev + ((eligible ? (lift <= full ? 1 : 1 - (lift - full) / 0.2) * free : 0) - prev) * k
     this.groundW.set(pose, gw)
     if (gw < 0.01 || lift < 0.02) return
     const weight = gw
@@ -2276,10 +2329,69 @@ export class Rink3dRenderer implements MatchRenderer {
     // handedness: a rig handed to a player who shoots the other way eases into the mirror
     const mw = pose.rig.rightHanded ? 1 : 0
     pose.rig.mirrorW = dt === 0 ? mw : pose.rig.mirrorW + (mw - pose.rig.mirrorW) * (1 - Math.exp(-dt / 0.08))
-    pose.rig.apply(pose.worldX.pos, pose.worldZ.pos, pose.angle, body, stick, pose.overlay)
+    pose.rig.apply(pose.worldX.pos, pose.worldZ.pos, pose.angle, body, stick, pose.overlay, this.gripFor(pose, dt, simDt))
 
     pose.labelY = body.hipHeight + 3.4
     if (pose.mode === 'play' || pose.mode === 'arriving') pose.labelOn = true
+  }
+
+  /**
+   * The stick grip for one skater (gripState.ts), from what the stream says he
+   * is doing: the puck on his blade, a pass coming to him, a faceoff, his job,
+   * his speed and whether he skates backward. Eased over game time (≈0.3 s), so
+   * a grip never pops; a seek snaps it.
+   */
+  private gripFor(pose: PlayerPose, dt: number, simDt: number): GripInput {
+    const id = pose.playerId as string | null
+    const playing = pose.layer?.playing ?? []
+    const speedFt = Math.hypot(pose.vx, pose.vz)
+    const back = speedFt > 1 ? Math.max(0, -Math.cos(wrapAngle(Math.atan2(pose.vx, pose.vz) - pose.angle))) : 0
+    const carrying = id !== null && (id === (this.lastCarrier as string | null) || id === this.windupNow)
+    const from = id !== null && !carrying && this.choreo ? this.choreo.incomingPass(id, this.clockPos) : null
+    const target = chooseGrip(
+      {
+        carrying,
+        stickClip: playing.some((n) => SWING_CLIP.test(n) || n === 'stickhandle'),
+        faceoff: playing.some((n) => n.startsWith('faceoff_')),
+        receiving: from !== null,
+        speedFt,
+        backward: back,
+        defending: this.possession !== null && this.possession !== pose.team,
+        job: id !== null ? this.jobById.get(id) : undefined,
+      },
+      pose.gripTarget ?? null
+    )
+    // A read of the play (relaxed ↔ ready ↔ one hand) must hold for a beat before
+    // the hands change — the sim's speed and jobs wobble; events (the puck on his
+    // blade, a pass to him, a faceoff) change the grip at once.
+    const cur = pose.gripTarget ?? null
+    if (cur === null || dt === 0 || EVENT_GRIPS.has(target) || EVENT_GRIPS.has(cur)) {
+      pose.gripTarget = target
+      pose.gripPend = 0
+    } else if (target !== cur) {
+      pose.gripPend = (pose.gripPend ?? 0) + simDt
+      if (pose.gripPend >= GRIP_DWELL_S) {
+        pose.gripTarget = target
+        pose.gripPend = 0
+      }
+    } else pose.gripPend = 0
+    const tgt = pose.gripTarget!
+    // a seek snaps; a paused frame holds; play eases on game time
+    if (dt === 0 || !pose.gripW) pose.gripW = blendGrip(null, tgt, 0)
+    else if (simDt > 0) pose.gripW = blendGrip(pose.gripW, tgt, simDt)
+    let incoming: { x: number; z: number } | null = null
+    if (from) {
+      // the passer in his own frame (front = (sin a, cos a), left = (cos a, −sin a)), authored left-handed
+      const dx = from.x - pose.worldX.pos
+      const dz = from.z - pose.worldZ.pos
+      const l = Math.hypot(dx, dz) || 1
+      const a = pose.angle
+      const x = (dx * Math.cos(a) - dz * Math.sin(a)) / l
+      incoming = { x: pose.rig.rightHanded ? -x : x, z: (dx * Math.sin(a) + dz * Math.cos(a)) / l }
+    }
+    // an action clip owns the torso (a shot's wind-up, a check): the grip's waist bend yields to it
+    const bend = gripBend(pose.gripW) * (1 - Math.min(1, pose.layer?.armsWeight() ?? 0))
+    return { w: pose.gripW, incoming, armSwing: Math.sin(pose.stridePhase), bend }
   }
 
   private updateGoaliePose(

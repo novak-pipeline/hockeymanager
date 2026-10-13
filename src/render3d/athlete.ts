@@ -33,6 +33,7 @@ import { RIG, legDrop, solveTwoBone, type BodyPose, type V3 } from './pose'
 import { ATLAS_GRID, ATLAS_REGIONS, atlasOffset } from './textures'
 import type { Kit } from './palette'
 import type { AthleteTemplate } from './gltfAthlete'
+import { GRIP_GEOM, GRIP_STATES, dominantGrip, squareBladeDir, type GripInput } from './gripState'
 
 export const BONE_NAMES = [
   'root', 'hips', 'spine', 'chest', 'neck', 'head',
@@ -632,6 +633,21 @@ export class AthleteRig {
   /** Where each glove's palm holds the shaft, in its hand bone's frame (zero = the wrist joint). */
   readonly gripPalm: Record<'L' | 'R', THREE.Vector3>
 
+  /**
+   * How far the palm sits past the wrist, along the forearm (ft; 0 = the wrist).
+   * The arm IK aims the PALM at the grip point: a solve to the wrist left an
+   * owner glove's palm ~0.4 ft past the shaft, and the reach short of a real
+   * grip a third of the way down.
+   */
+  get palmExt(): number {
+    return Math.max(0, -Math.min(this.gripPalm.L.y, this.gripPalm.R.y))
+  }
+
+  /** Shoulder → palm at full stretch (ft). */
+  get armReach(): number {
+    return this.dims.upperArm + this.dims.forearm + this.palmExt
+  }
+
   constructor(readonly goalie: boolean, readonly slot: number, material: THREE.Material | THREE.Material[], template?: AthleteTemplate | null) {
     this.skin = SKIN_TONES[slot % SKIN_TONES.length]!
     this.stickColor = STICK_TONES[(slot * 7) % STICK_TONES.length]!
@@ -741,7 +757,7 @@ export class AthleteRig {
    * @param stick   'carry' (blade on the ice at the puck spot), 'shoot'
    *                (0..1 swing progress), 'raise' (celebration)
    */
-  apply(wx: number, wz: number, heading: number, pose: BodyPose, stick: { mode: 'carry' | 'shoot' | 'raise'; t?: number }, overlay?: PoseOverlay | null): void {
+  apply(wx: number, wz: number, heading: number, pose: BodyPose, stick: { mode: 'carry' | 'shoot' | 'raise'; t?: number }, overlay?: PoseOverlay | null, grip?: GripInput | null): void {
     const B = this.bones
     const r = this.root
     r.position.set(wx, 0, wz)
@@ -775,6 +791,8 @@ export class AthleteRig {
       foot.rotation.set(-leg.ankle, 0, 0)
     }
     overlay?.body(B)
+    // the grip's waist bend (gripState.ts GRIP_BEND): forward pitch about the spine's own X
+    if (grip?.bend && !this.goalie) B.spine.quaternion.multiply(_q0.setFromAxisAngle(_u.set(1, 0, 0), grip.bend))
     r.updateMatrixWorld(true)
     // ── hands & stick, solved in root space ──
     _inv.copy(r.matrixWorld).invert()
@@ -789,6 +807,9 @@ export class AthleteRig {
     let lowGrip: number
     let handL: V3
     let handR: V3
+    // one-handed grip: where the free (bottom) hand goes, and how far it has let go (0..1)
+    let freeHand: V3 | null = null
+    let freeW = 0
     if (this.goalie) {
       heel = { x: -0.62, y: 0.02, z: 1.6 }
       bladeDir = { x: 1, y: 0, z: 0.05 }
@@ -808,34 +829,60 @@ export class AthleteRig {
       handR = add3(heel, scale3(shaftDir, topGrip))
       handL = add3(heel, scale3(shaftDir, lowGrip))
     } else {
-      // carry / shoot: blade centred on the puck spot (math.puckCarriedOffset):
-      // a real carry — blade flat on the ice ~3.7 ft out front on the forehand
-      // side, stick at a ~45° lie, top hand at the hip/waist out in front,
-      // bottom hand a third of the way down the shaft, arms reaching forward
-      let bz = CARRY_BLADE.z
-      let by = 0.02
+      // carry / shoot: the carry puts the blade on the puck spot (math.puckCarriedOffset):
+      // blade flat on the ice out front on the forehand side, stick at a ~45°
+      // lie, top hand at the hip/waist out in front, bottom hand a third of the
+      // way down the shaft. The grip (gripState.ts) is a blend of grips chosen
+      // from what the sim says he is doing; without one, the two-handed carry.
+      const gw = grip?.w ?? null
+      this.gripState = gw ? dominantGrip(gw) : 'carry'
+      let mid: V3 = { x: CARRY_BLADE.x, y: 0.02, z: CARRY_BLADE.z }
+      bladeDir = { x: 1, y: 0, z: 0.28 }
+      // oneHand share: the bottom hand lets go of the shaft
+      let oh = 0
+      let low = 0
+      if (gw) {
+        mid = { x: 0, y: 0, z: 0 }
+        bladeDir = { x: 0, y: 0, z: 0 }
+        for (const s of GRIP_STATES) {
+          const k = gw[s]
+          if (k <= 0) continue
+          const g = GRIP_GEOM[s]
+          const dir = s === 'receive' && grip?.incoming ? squareBladeDir(grip.incoming) : g.bladeDir
+          mid = add3(mid, scale3(g.blade, k))
+          bladeDir = add3(bladeDir, scale3(dir, k))
+        }
+        oh = gw.oneHand
+        low = gw.faceoff + gw.ready * 0.5
+      }
+      mid.x += pose.stickSway * (1 - oh)
       const t = stick.mode === 'shoot' ? (stick.t ?? 0) : -1
       if (t >= 0) {
+        // the code swing (no clip): always two hands
+        oh = 0
         if (t < 0.45) {
           const k = t / 0.45
-          bz = CARRY_BLADE.z - 2.9 * k
-          by = 0.02 + 0.9 * k
+          mid.z = CARRY_BLADE.z - 2.9 * k
+          mid.y = 0.02 + 0.9 * k
         } else {
           const k = (t - 0.45) / 0.55
-          bz = 0.8 + 4.0 * k
-          by = 0.92 + 0.6 * k
+          mid.z = 0.8 + 4.0 * k
+          mid.y = 0.92 + 0.6 * k
         }
       }
-      bladeDir = norm({ x: 1, y: 0, z: 0.28 })
-      const mid = { x: CARRY_BLADE.x + pose.stickSway, y: by, z: bz }
+      bladeDir = norm(bladeDir)
       heel = add3(mid, scale3(bladeDir, -0.45))
-      // top hand in front of the right hip (he shoots left), ahead of the
-      // chest; if the bottom hand (a third of the way down) can't reach the
-      // shaft from there, the top hand eases up / forward / toward the middle
-      // just enough (bisection → continuous, no pops) — both hands stay on
-      const reachL = (this.dims.upperArm + this.dims.forearm) * 0.97
-      const T0 = { x: shR.x * 0.6, y: hipY + 0.2, z: Math.max(1.0, shR.z + 0.7) }
-      const T1 = { x: shR.x * 0.3, y: hipY + 0.45, z: Math.max(1.3, shR.z + 1.2) }
+      // two hands: top hand in front of the right hip (he shoots left), ahead
+      // of the chest; if the bottom hand (a third of the way down) can't reach
+      // the shaft from there, the top hand eases up / forward / toward the
+      // middle just enough (bisection → continuous, no pops) — both hands stay
+      // on. One hand: the top hand rides at his hip, beside the body (the stick
+      // runs across him to the forehand side, blade low — never out in front).
+      const reachL = this.armReach * 0.97
+      const TO = { x: shR.x - 0.2, y: hipY - 0.05, z: shR.z + 0.15 }
+      const lerpV = (a: V3, b: V3, k: number): V3 => add3(a, scale3(sub3(b, a), k))
+      const T0 = lerpV({ x: shR.x * 0.6, y: hipY + 0.2 - 0.35 * low, z: Math.max(1.0, shR.z + 0.7) }, TO, oh)
+      const T1 = lerpV({ x: shR.x * 0.3, y: hipY + 0.45 - 0.3 * low, z: Math.max(1.3, shR.z + 1.2) }, TO, oh)
       const lowOk = (k: number): boolean => {
         const t = add3(T0, scale3(sub3(T1, T0), k))
         const dd = sub3(t, heel)
@@ -855,7 +902,7 @@ export class AthleteRig {
         }
         kk = hi
       }
-      const top = add3(T0, scale3(sub3(T1, T0), kk))
+      const top = add3(T0, scale3(sub3(T1, T0), kk * (1 - oh)))
       // the top hand holds the KNOB (no stick poking up past the hand like a
       // cane): slide the blade out along the ice until the shaft is full length
       const full = this.dims.stickLen - 0.25
@@ -875,6 +922,13 @@ export class AthleteRig {
       lowGrip = topGrip * 0.66
       handR = add3(heel, scale3(shaftDir, topGrip))
       handL = add3(heel, scale3(shaftDir, lowGrip))
+      if (oh > 0.001) {
+        // the free arm hangs a little forward of the shoulder and swings with the stride
+        const arm = (this.dims.upperArm + this.dims.forearm) * 0.86
+        const a = 0.32 * (grip?.armSwing ?? 0) + 0.12
+        freeHand = { x: shL.x + 0.22, y: shL.y - arm * Math.cos(a), z: shL.z + arm * Math.sin(a) }
+        freeW = oh
+      }
     }
 
     B.stick.position.set(heel.x, heel.y, heel.z)
@@ -893,7 +947,7 @@ export class AthleteRig {
     // arms, a clip moving the stick) slides along the shaft to the nearest
     // reachable point; if the shaft is out of reach altogether the stick comes
     // to the top hand (never the hand off the stick).
-    const reach = (this.dims.upperArm + this.dims.forearm) * 0.985
+    const reach = this.armReach * 0.985
     const top = gripOnShaft(heel, shaftDir, shR, topGrip, reach, topGrip * 0.7, topGrip)
     if (top.shift) {
       heel = add3(heel, top.shift)
@@ -904,6 +958,8 @@ export class AthleteRig {
     if (!this.goalie) {
       const low = gripOnShaft(heel, shaftDir, shL, lowGrip, reach, lowGrip * 0.8, top.t - 0.25)
       handL = add3(heel, scale3(shaftDir, low.t))
+      // one-handed: the bottom hand lets go (eased by the grip blend — never pops)
+      if (freeHand) handL = add3(handL, scale3(sub3(freeHand, handL), freeW))
     }
     B.stick.updateMatrixWorld(true)
     B.stick_blade.updateMatrixWorld(true)
@@ -951,6 +1007,9 @@ export class AthleteRig {
     }
   }
 
+  /** The dominant grip this frame (gripState.ts), for probes; null before the first pose. */
+  gripState: string | null = null
+
   /** Right-handed shooter: the pose is mirrored (see mirrorPose). The renderer eases mirrorW toward it. */
   rightHanded = false
   /** 0 = the authored (left-handed) pose, 1 = fully mirrored. */
@@ -987,7 +1046,7 @@ export class AthleteRig {
     const heel = B.stick.getWorldPosition(new THREE.Vector3()).applyMatrix4(_inv)
     const dir = new THREE.Vector3(0, 1, 0).applyQuaternion(B.stick.quaternion).normalize()
     const len = this.dims.stickLen
-    const reach = (this.dims.upperArm + this.dims.forearm) * 0.95
+    const reach = this.armReach * 0.95
     for (const h of ['R', 'L'] as const) {
       const k = w[h]
       if (k <= 0.001) continue
@@ -1047,7 +1106,7 @@ export class AthleteRig {
   private placeArm(sh: V3, target: V3, upper: THREE.Bone, fore: THREE.Bone, side: 1 | -1): void {
     // elbows out and down, not tucked back: the arms reach forward to the stick
     const pole = { x: sh.x + side * 1.5, y: sh.y - 1.3, z: sh.z + 0.2 }
-    const { elbow, hand } = solveTwoBone(sh, target, this.dims.upperArm, this.dims.forearm, pole)
+    const { elbow, hand } = solveTwoBone(sh, target, this.dims.upperArm, this.dims.forearm + this.palmExt, pole)
     this.aimArm(upper, fore, sh, elbow, hand, pole)
   }
 
