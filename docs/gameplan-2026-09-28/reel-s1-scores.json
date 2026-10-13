@@ -1,0 +1,33 @@
+{
+  "reel": "s1",
+  "exportedAt": "2026-10-13T15:28:49.853Z",
+  "scores": {
+    "agent-twoOnOne": {
+      "c0": true,
+      "c1": true,
+      "c2": true,
+      "score": 4
+    },
+    "agent-ozCycleShot": {
+      "note": "he was offside",
+      "score": 1
+    },
+    "agent-lineChangeOnFly": {
+      "c0": true,
+      "c2": true,
+      "score": 4
+    },
+    "agent-saveRebound": {
+      "c0": true,
+      "c1": true,
+      "c2": true,
+      "score": 5
+    },
+    "agent-dZoneCoverage": {
+      "score": 4,
+      "c0": true,
+      "c2": true,
+      "c3": true
+    }
+  }
+}
