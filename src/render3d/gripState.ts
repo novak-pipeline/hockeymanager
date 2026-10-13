@@ -148,7 +148,7 @@ export const GRIP_GEOM: Record<GripState, GripGeom> = {
   carry: { blade: { x: 1.0, y: 0.02, z: 4.1 }, bladeDir: n2(1, 0.28) },
   relaxed: { blade: { x: 0.9, y: 0.02, z: 3.6 }, bladeDir: n2(1, 0.28) },
   // across the body: the shaft runs from the top hand at his hip out to the forehand side, blade low
-  oneHand: { blade: { x: 3.0, y: 0.3, z: 2.0 }, bladeDir: n2(1, 0.4) },
+  oneHand: { blade: { x: 3.0, y: 0.18, z: 2.0 }, bladeDir: n2(1, 0.4) },
   // wide in the passing lane, blade flat and open
   ready: { blade: { x: 1.9, y: 0.02, z: 3.6 }, bladeDir: n2(1, 0.15) },
   receive: { blade: { x: 1.2, y: 0.02, z: 3.4 }, bladeDir: n2(1, 0.28) },

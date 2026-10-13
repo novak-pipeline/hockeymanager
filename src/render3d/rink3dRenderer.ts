@@ -163,8 +163,10 @@ const GROUNDED_CLIPS = new Set(['hockey_stop', 'skate_start', 'stickhandle'])
 /** Grips an event sets at once (gripState.ts); the others wait out GRIP_DWELL_S. */
 const EVENT_GRIPS = new Set<GripState>(['carry', 'receive', 'faceoff'])
 const GRIP_DWELL_S = 0.35
-/** Clips that swing the stick on purpose (shots, passes, dekes, pokes). */
-const SWING_CLIP = /^(shot_|pass$|deke_|poke$)/
+/** Clips that swing the stick on purpose (shots, passes, dekes, pokes, the draw). */
+const SWING_CLIP = /^(shot_|pass$|deke_|poke$|faceoff_draw$|faceoff_tieup$)/
+/** … and clips where the body is thrown about on purpose (a check given or taken, a fall, a celebration): VT17 doesn't judge the grip through them. */
+const ACTION_CLIP = /^(shot_|pass$|deke_|poke$|faceoff_draw$|faceoff_tieup$|check|hit_|pinned_|getup|celly_)/
 
 const smoothstep01 = (e0: number, e1: number, x: number) => {
   const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)))
@@ -1547,7 +1549,7 @@ export class Rink3dRenderer implements MatchRenderer {
     if (!sample) return null
     const id = p.playerId as string | null
     const carrying = id !== null && id === (this.lastCarrier as string | null) && this.choreo?.windupActor(this.clockPos) !== id
-    const swing = !!p.layer?.playing.some((n) => SWING_CLIP.test(n))
+    const swing = !!p.layer?.playing.some((n) => ACTION_CLIP.test(n))
     return { sample, lance: isLance(sample), oneHand: isOneHanded(sample), carrying, swing, state: p.rig.gripState ?? 'n/a', speedFt: Math.hypot(p.vx, p.vz) }
   }
 
@@ -1974,10 +1976,13 @@ export class Rink3dRenderer implements MatchRenderer {
     const eligible = !(playing && playing.some((n) => !GROUNDED_CLIPS.has(n))) && lift <= full + 0.2
     // eased in / out (~0.1 s half-life) so a clip starting or ending doesn't pop the stick
     const prev = this.groundW.get(pose) ?? (eligible ? 1 : 0)
-    const k = dt > 0 ? 1 - Math.pow(0.5, dt / 0.1) : 0
-    // (a one-handed skater carries the blade a little off the ice on purpose)
-    const free = 1 - (pose.gripW?.oneHand ?? 0)
-    const gw = prev + ((eligible ? (lift <= full ? 1 : 1 - (lift - full) / 0.2) * free : 0) - prev) * k
+    // (a one-handed skater carries the blade a little off the ice on purpose —
+    // never with the puck: the blade comes down onto it in a few frames)
+    const isCarrier = pose.playerId !== null && pose.playerId === this.lastCarrier
+    const free = isCarrier ? 1 : 1 - (pose.gripW?.oneHand ?? 0)
+    const goal = eligible ? (lift <= full ? 1 : 1 - (lift - full) / 0.2) * free : 0
+    const k = dt > 0 ? 1 - Math.pow(0.5, dt / (isCarrier && goal > prev ? 0.03 : 0.1)) : 0
+    const gw = prev + (goal - prev) * k
     this.groundW.set(pose, gw)
     if (gw < 0.01 || lift < 0.02) return
     const weight = gw

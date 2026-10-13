@@ -644,7 +644,7 @@ export function vt17Grip(inp: VTInput): VTResult {
   return {
     id: 'VT17', name: 'Stick grip: no lance, the carried puck on a blade on the ice',
     status: all === 0 ? 'n/a' : red ? 'red' : 'green',
-    rule: `outside shot/pass/deke/poke clips: the lance pose (bottom hand > 0.5 ft off the shaft, top hand 2–5.2 ft high, the stick straight out in front: blade ≥ 2.5 ft ahead of the hand and ≥ 1.5× as far ahead as to the side) on ≤ ${VT17.carrierLance * 100}% of carrier frames and ≤ ${VT17.allLance * 100}% of all skater frames; the carrier's blade > ${VT17.bladeOffFt} ft off the ice on ≤ ${VT17.carrierBladeOff * 100}% of his frames`,
+    rule: `outside action clips (shot, pass, deke, poke, the draw, checks and hit reactions, celebrations): the lance pose (bottom hand > 0.5 ft off the shaft, top hand 2–5.2 ft high, the stick straight out in front: blade ≥ 2.5 ft ahead of the hand and ≥ 1.5× as far ahead as to the side) on ≤ ${VT17.carrierLance * 100}% of carrier frames and ≤ ${VT17.allLance * 100}% of all skater frames; the carrier's blade > ${VT17.bladeOffFt} ft off the ice on ≤ ${VT17.carrierBladeOff * 100}% of his frames`,
     value: `carrier ${carrier} fr: lance ${(s(carrierLance, carrier) * 100).toFixed(1)}%, blade off ice ${(s(carrierOff, carrier) * 100).toFixed(1)}%; all skaters ${all} fr: lance ${(s(allLance, all) * 100).toFixed(1)}%`,
     evidence: ev,
   }

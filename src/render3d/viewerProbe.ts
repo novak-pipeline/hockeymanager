@@ -35,7 +35,8 @@ export interface ProbeRig {
   /**
    * How the drawn skater holds his stick (gripTruth.ts; skaters only, optional:
    * older probes). `carrying` = he has the puck on his blade (not mid-swing),
-   * `swing` = a shot / pass / deke / poke clip is playing.
+   * `swing` = an action clip is playing (shot, pass, deke, poke, the draw, a
+   * check or hit reaction, a celebration).
    */
   grip?: { lance: boolean; oneHand: boolean; bladeY: number; carrying: boolean; swing: boolean; state: string }
 }
