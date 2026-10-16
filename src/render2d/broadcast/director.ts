@@ -20,7 +20,7 @@
  */
 import type { GameStream, GoalEvent } from '@domain'
 import type { BroadcastContext, BroadcastStoryline } from '@engine/story/broadcastStorylines'
-import { absTime } from '../timeline'
+import { playAbsT } from '@domain'
 import { BOOTH_LINES, linesFor, nameSlotPosition, type BoothLine, type BoothMoment } from './commentaryLibrary'
 import type {
   BroadcastPlan,
@@ -118,7 +118,7 @@ export function powerPlayWindows(stream: GameStream, isHome: (id: string) => boo
   for (const ev of stream) {
     if (ev.type === 'penalty') {
       if (ev.infraction === 'fighting') continue
-      const at = absTime(ev.period, ev.t)
+      const at = playAbsT(ev)
       out.push({
         side: isHome(ev.player) ? 'away' : 'home',
         offenderId: ev.player,
@@ -127,7 +127,7 @@ export function powerPlayWindows(stream: GameStream, isHome: (id: string) => boo
         toAbsT: at + ev.minutes * 60,
       })
     } else if (ev.type === 'goal' && ev.strength === 'pp') {
-      const at = absTime(ev.period, ev.t)
+      const at = playAbsT(ev)
       const side = isHome(ev.scorer) ? 'home' : 'away'
       const open = out.find((w) => w.side === side && w.fromAbsT <= at && w.toAbsT > at && w.toAbsT - w.fromAbsT <= 120)
       if (open) open.toAbsT = at
@@ -345,7 +345,7 @@ export function directBroadcast(
   }
 
   for (const ev of stream) {
-    const at = absTime(ev.period, ev.t)
+    const at = playAbsT(ev)
     switch (ev.type) {
       case 'shot': {
         lastShot = { danger: ev.danger, shooter: ev.shooter }

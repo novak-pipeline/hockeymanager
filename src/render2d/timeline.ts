@@ -9,7 +9,7 @@
  * reads this.
  */
 import type { FrameEvent, GameStream, PlayerId, SkaterSnapshot, XY } from '@domain'
-import { isEvent } from '@domain'
+import { isEvent, playAbsT, streamPeriodBases, streamPeriodLengths } from '@domain'
 
 const REGULATION_PERIOD_SECONDS = 1200
 
@@ -42,6 +42,7 @@ export function absTime(period: number, t: number): number {
  * drifts by minutes once a playoff game reaches a second overtime.
  */
 export function periodBases(stream: GameStream): Map<number, number> {
+  if (stream.some((e) => e.playT !== undefined)) return streamPeriodBases(stream) // the agent engine: playback bases (W3 S3)
   // Frames first — they define the period the way MatchTimeline sees it. Streams
   // with no positional frames (the quick sim, synthetic test streams) fall back
   // to their other events so the helper still places them.
@@ -176,6 +177,8 @@ export class MatchTimeline {
    * Falls back to REGULATION_PERIOD_SECONDS for periods with no frames.
    */
   private readonly periodLength: Map<number, number> = new Map()
+  /** The official (clock) length of each period: 1200 in regulation, the latest clock in OT. */
+  private readonly clockLength: Map<number, number> = new Map()
   /**
    * Dead-puck windows [from, to): a whistle or a goal until the next faceoff
    * (clipped to the period's end). The engine keeps its clock running through
@@ -189,52 +192,45 @@ export class MatchTimeline {
   readonly awayFinal: number
 
   constructor(stream: GameStream, isHomePlayer: (id: PlayerId) => boolean) {
-    // First pass: find the max frame.t per period to know each period's length.
-    const maxT = new Map<number, number>()
-    for (const ev of stream) {
-      if (isEvent(ev, 'frame')) {
-        const prev = maxT.get(ev.period) ?? 0
-        if (ev.t > prev) maxT.set(ev.period, ev.t)
-      }
+    // Period bases and lengths on the PLAYBACK timeline (@domain/streamTime):
+    // regulation 1200 s and OT from the stream, or the agent engine's playT
+    // (its clock stops at whistles, so a period runs longer on screen).
+    const bases = streamPeriodBases(stream)
+    const lens = streamPeriodLengths(stream, bases)
+    for (const p of [...bases.keys()].sort((a, b) => a - b)) {
+      if (!stream.some((e) => e.period === p && e.type === 'frame')) continue
+      this.periodBase.set(p, bases.get(p)!)
+      this.periodLength.set(p, lens.get(p) ?? REGULATION_PERIOD_SECONDS)
+      // the period's OFFICIAL length (the clock): 1200 in regulation, the latest clock seen in OT
+      let maxClock = 0
+      for (const e of stream) if (e.period === p && e.type === 'frame' && e.t > maxClock) maxClock = e.t
+      this.clockLength.set(p, p <= 3 ? REGULATION_PERIOD_SECONDS : maxClock || (lens.get(p) ?? REGULATION_PERIOD_SECONDS))
     }
-
-    // Build the absolute base offset for each period in ascending order.
-    // Periods are guaranteed to be in 1, 2, 3[, 4[, 5...]] order.
-    const allPeriods = [...maxT.keys()].sort((a, b) => a - b)
-    let base = 0
-    for (const p of allPeriods) {
-      this.periodBase.set(p, base)
-      const len = p <= 3 ? REGULATION_PERIOD_SECONDS : (maxT.get(p) ?? REGULATION_PERIOD_SECONDS)
-      this.periodLength.set(p, len)
-      base += len
-    }
+    const at = (ev: GameStream[number]): number => playAbsT(ev, this.periodBase)
 
     // Second pass: index frames + goals + stoppages with their true absolute times.
     let lastShotEnd = -Infinity
     for (const ev of stream) {
       if (isEvent(ev, 'frame')) {
-        const pBase = this.periodBase.get(ev.period) ?? (ev.period - 1) * REGULATION_PERIOD_SECONDS
-        this.frames.push({ absT: pBase + ev.t, frame: ev })
+        this.frames.push({ absT: at(ev), frame: ev })
       } else if (isEvent(ev, 'goal')) {
-        const pBase = this.periodBase.get(ev.period) ?? (ev.period - 1) * REGULATION_PERIOD_SECONDS
-        this.goals.push({ absT: pBase + ev.t, home: isHomePlayer(ev.scorer) })
+        this.goals.push({ absT: at(ev), home: isHomePlayer(ev.scorer) })
       } else if (isEvent(ev, 'whistle') || isEvent(ev, 'faceoff')) {
         // Index stoppages so sampleAt() can snap the puck at stoppage boundaries
         // instead of lerping it across the ice to the new faceoff position.
-        const pBase = this.periodBase.get(ev.period) ?? (ev.period - 1) * REGULATION_PERIOD_SECONDS
-        const at = pBase + ev.t
+        const st = at(ev)
         // …except the whistle that ENDS a shot (a frozen save, a goal): the puck
         // is still flying into the goalie / the net there, and snapping made
         // every such shot vanish off the blade and appear at the net (W2, VT3).
-        if (isEvent(ev, 'faceoff') || at - lastShotEnd > 0.3) this.stoppages.push({ absT: at })
+        if (isEvent(ev, 'faceoff') || st - lastShotEnd > 0.3) this.stoppages.push({ absT: st })
       }
       if (isEvent(ev, 'shot') || isEvent(ev, 'missedShot')) {
-        this.releases.push({ absT: (this.periodBase.get(ev.period) ?? (ev.period - 1) * REGULATION_PERIOD_SECONDS) + ev.t, by: ev.shooter })
+        this.releases.push({ absT: at(ev), by: ev.shooter })
       } else if (isEvent(ev, 'pass')) {
-        this.releases.push({ absT: (this.periodBase.get(ev.period) ?? (ev.period - 1) * REGULATION_PERIOD_SECONDS) + ev.t, by: ev.from })
+        this.releases.push({ absT: at(ev), by: ev.from })
       }
       if (isEvent(ev, 'save') || isEvent(ev, 'goal')) {
-        lastShotEnd = (this.periodBase.get(ev.period) ?? (ev.period - 1) * REGULATION_PERIOD_SECONDS) + ev.t
+        lastShotEnd = at(ev)
       }
     }
     // stoppages are already in stream order (ascending absT)
@@ -244,8 +240,7 @@ export class MatchTimeline {
     for (const ev of stream) {
       const open = isEvent(ev, 'whistle') || isEvent(ev, 'goal')
       if (!open && !isEvent(ev, 'faceoff')) continue
-      const pBase = this.periodBase.get(ev.period) ?? (ev.period - 1) * REGULATION_PERIOD_SECONDS
-      marks.push({ absT: pBase + ev.t, open, period: ev.period })
+      marks.push({ absT: at(ev), open, period: ev.period })
     }
     marks.sort((x, y) => x.absT - y.absT || (x.open === y.open ? 0 : x.open ? -1 : 1))
     let openAt: { absT: number; period: number } | null = null
@@ -440,8 +435,21 @@ export class MatchTimeline {
       periodStart = (period - 1) * REGULATION_PERIOD_SECONDS
       periodLen = REGULATION_PERIOD_SECONDS
     }
-    const elapsed = absT - periodStart
-    const remaining = Math.max(0, periodLen - elapsed)
+    // The official clock: the frames' t (the agent engine stops it at every
+    // whistle, so playback time and clock time part ways), interpolated
+    // between two frames of this period; no frames → the playback offset.
+    let elapsed = absT - periodStart
+    const clockLen = this.clockLength.get(period) ?? periodLen
+    const i = this.frameIndexAt(absT)
+    if (i >= 0 && this.frames[i].frame.period === period) {
+      const a = this.frames[i]
+      const b = this.frames[i + 1]
+      elapsed = a.frame.t
+      if (b && b.frame.period === period && b.absT > a.absT && b.frame.t > a.frame.t && absT > a.absT) {
+        elapsed = a.frame.t + (b.frame.t - a.frame.t) * Math.min(1, (absT - a.absT) / (b.absT - a.absT))
+      } else if (!b || b.frame.period !== period) elapsed = a.frame.t + Math.max(0, absT - a.absT) // past the period's last frame: the clock runs out
+    }
+    const remaining = Math.max(0, clockLen - elapsed)
     const r = Math.ceil(remaining)
     const mm = Math.floor(r / 60)
     const ss = r % 60

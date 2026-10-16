@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest'
 import { generateLeague } from '@data/generate'
-import type { FrameEvent, Player, PlayerId } from '@domain'
+import type { ForecheckSystem, FrameEvent, Player, PlayerId } from '@domain'
 import { isEvent } from '@domain'
 import { CALIBRATION_TARGETS } from '@calibrate'
 import { agentSimGame, emptyAgentTelemetry } from './agentSim'
@@ -19,6 +19,11 @@ import { framesFromStream, judgeTeamPlay, SIM_GATES } from '@engine/analysis/tea
 import { judgeOffsideStream } from '@engine/analysis/offside'
 import { judgeActionFloor, judgeContacts } from '@engine/analysis/actions'
 import { ACTION_FLOOR } from './constraints'
+import { goalPath, shotGeometry } from './agentSim'
+import { DOT_EZ_X, DOT_NZ_X, DOT_Y } from './rink'
+import { DRAWN_DOTS, judgeFaceoffDots } from '@engine/analysis/faceoffRule'
+import { judgeGoalGeometry } from '@engine/analysis/goalGeometry'
+import { streamPeriodBases } from '@domain'
 
 /** W3 S1 design band for the stream gates (per 60 live minutes / per player-minute). */
 const TEAM_PLAY_BAND = { aimlessPer60: 30, coveragePer60: 5, flipsPerPlayerMin: 26 }
@@ -217,6 +222,177 @@ describe('agent engine', () => {
     expect(tieUps).toBeGreaterThan(50)
     expect(short).toEqual([])
     expect(apart).toEqual([])
+  }, 120000)
+
+  it('drops every faceoff on the dot its stoppage calls for (W3 S3, owner reel S2: "not dropping on the faceoff dot")', () => {
+    // NHL rule 76 by the whistle's detail (faceoffRule.ts), in the painted
+    // geometry the 3D sheet uses. Before S3 the engine's end dots were 9 ft up
+    // the slot from the painted ones (60 vs 69 ft) and "nearest dot" sent a
+    // stoppage inside the zone out to the neutral zone.
+    const wrong: string[] = []
+    let judged = 0
+    const kinds: Record<string, number> = {}
+    for (let i = 0; i < 4; i++) {
+      const out = agentSimGame(team(i), team(i + 2), resolve, { seed: 1100 + i })
+      const r = judgeFaceoffDots(out.stream, { endX: DOT_EZ_X, neutralX: DOT_NZ_X, y: DOT_Y })
+      judged += r.judged.length
+      for (const j of r.judged) kinds[j.expected.kind] = (kinds[j.expected.kind] ?? 0) + 1
+      for (const w of r.wrong) wrong.push(`g${i} ${w.what}`)
+      for (const e of out.stream) if (e.type === 'whistle') expect(e.detail).toBeDefined()
+    }
+    expect({ endX: DOT_EZ_X, neutralX: DOT_NZ_X, y: DOT_Y }).toEqual(DRAWN_DOTS)
+    expect(judged).toBeGreaterThan(150)
+    expect(kinds['end'] ?? 0).toBeGreaterThan(50)
+    expect(kinds['neutral'] ?? 0).toBeGreaterThan(10)
+    expect(wrong).toEqual([])
+  }, 120000)
+
+  it('scores only through the mouth: no goal from behind the goal line or at no angle (W3 S3, owner reel S2 breakaway)', () => {
+    const bad: string[] = []
+    let goals = 0
+    for (let i = 0; i < 8; i++) {
+      const out = agentSimGame(team(i), team(i + 4), resolve, { seed: 1200 + i })
+      const r = judgeGoalGeometry(out.stream)
+      goals += r.goals
+      for (const b of r.bad) bad.push(`g${i} ${b.what}`)
+    }
+    expect(goals).toBeGreaterThan(20)
+    expect(bad).toEqual([])
+    // the geometry rule itself: behind the line no shot; the goal line extended no angle; the slot on net
+    expect(shotGeometry({ x: 92, y: 2 }, 1).behind).toBe(true)
+    expect(shotGeometry({ x: 88, y: 12 }, 1).onNet).toBe(false)
+    expect(shotGeometry({ x: 70, y: 5 }, 1).onNet).toBe(true)
+    // a goal's path enters between the posts, from the front, and stays inside the net
+    for (const [x, y, ye] of [[80, 20, 2.6], [86, -10, -2.6], [60, 0, 0], [88, 6, 2.5]] as const) {
+      const p = goalPath({ x, y }, 1, ye)
+      expect(p.x).toBeGreaterThan(89)
+      expect(Math.abs(p.y)).toBeLessThan(3)
+    }
+  })
+
+  it('stops the period clock at the whistle and plays 20 minutes of live time a period (W3 S3)', () => {
+    const out = agentSimGame(team(1), team(2), resolve, { seed: 77 })
+    const frames = out.stream.filter((e): e is FrameEvent => isEvent(e, 'frame'))
+    let dead = 0
+    let prev: FrameEvent | null = null
+    for (const f of frames) {
+      expect(f.playT).toBeDefined()
+      if (prev && prev.period === f.period) {
+        // playback time always runs; the clock never runs faster than it
+        expect(f.playT!).toBeGreaterThan(prev.playT!)
+        expect(f.t - prev.t).toBeLessThanOrEqual(f.playT! - prev.playT! + 1e-6)
+        if (f.t === prev.t) dead++
+      }
+      prev = f
+    }
+    // a good share of the frames are dead time (line-ups, changes, celebrations)
+    expect(dead / frames.length).toBeGreaterThan(0.05)
+    // every regulation period ends at 20:00 of CLOCK, and lasts longer than that on screen
+    const ends = out.stream.filter((e) => e.type === 'periodEnd' && e.period <= 3)
+    expect(ends.map((e) => e.t)).toEqual([1200, 1200, 1200])
+    const bases = streamPeriodBases(out.stream)
+    expect(bases.get(2)!).toBeGreaterThan(1250)
+    // every stoppage's whistle and its faceoff share one clock reading
+    let whistleT: number | null = null
+    for (const e of out.stream) {
+      if (e.type === 'whistle' && e.reason !== 'goal') whistleT = e.t
+      else if (e.type === 'faceoff' && whistleT !== null) {
+        expect(e.t).toBeCloseTo(whistleT, 5)
+        whistleT = null
+      } else if (e.type === 'periodEnd') whistleT = null
+    }
+  }, 60000)
+
+  it('makes tactic changes only at stop points, and replays them exactly (W3 S3)', () => {
+    const hash = (s: unknown[]): string => {
+      // FNV-1a over the JSON: cheap and order-sensitive
+      const str = JSON.stringify(s)
+      let h = 0x811c9dc5
+      for (let k = 0; k < str.length; k++) h = Math.imul(h ^ str.charCodeAt(k), 0x01000193) >>> 0
+      return h.toString(16)
+    }
+    const h0 = team(3)
+    const a0 = team(4)
+    const straight = agentSimGame(h0, a0, resolve, { seed: 31 })
+    // an empty list, and no-op records at many stop points: the very same game
+    const noop = agentSimGame(h0, a0, resolve, { seed: 31, changes: [] })
+    const noops = agentSimGame(h0, a0, resolve, {
+      seed: 31,
+      changes: [0, 5, 17, 40].map((index) => ({ team: 'home' as const, at: { kind: 'stop' as const, index }, what: 'tactics' as const, tactics: { forecheck: h0.tactics.forecheck } })),
+    })
+    expect(hash(noop.stream)).toBe(hash(straight.stream))
+    expect(hash(noops.stream)).toBe(hash(straight.stream))
+    // a real change at the 10th stoppage: identical up to that whistle, then it takes effect there
+    const forecheck: ForecheckSystem = h0.tactics.forecheck === '1-2-2' ? '2-1-2' : '1-2-2'
+    const changes = [{ team: 'home' as const, at: { kind: 'stop' as const, index: 10 }, what: 'tactics' as const, tactics: { forecheck, hitting: 0.9 } }]
+    const changed = agentSimGame(h0, a0, resolve, { seed: 31, changes })
+    const tc = changed.stream.findIndex((e) => e.type === 'tacticChange')
+    expect(tc).toBeGreaterThan(0)
+    const tcEv = changed.stream[tc]!
+    expect(tcEv.type === 'tacticChange' && tcEv.at.kind === 'stop' && tcEv.at.index === 10).toBe(true)
+    // it comes right after the 10th (0-based) whistle, while play is stopped
+    let whistles = 0
+    for (let k = 0; k < tc; k++) if (changed.stream[k]!.type === 'whistle') whistles++
+    expect(whistles).toBe(11)
+    expect(changed.stream[tc - 1]!.type).toBe('whistle')
+    expect(hash(changed.stream.slice(0, tc))).toBe(hash(straight.stream.slice(0, tc)))
+    // the replay of input + change list: the same stream, event for event
+    const replay = agentSimGame(h0, a0, resolve, { seed: 31, changes })
+    expect(hash(replay.stream)).toBe(hash(changed.stream))
+    // a period-start change: emitted at the intermission, before the period's first faceoff
+    const p2 = agentSimGame(h0, a0, resolve, { seed: 31, changes: [{ team: 'away', at: { kind: 'period', period: 2 }, what: 'tactics', tactics: { hitting: 0.95 } }] })
+    const k2 = p2.stream.findIndex((e) => e.type === 'tacticChange')
+    expect(p2.stream[k2]!.period).toBe(2)
+    expect(p2.stream[k2]!.t).toBe(0)
+  }, 120000)
+
+  it('takes a strength change in live play through the bench door, never in place mid-ice (W3 S3, VT8)', () => {
+    // A man leaves the frames only near his bench door (or in dead time, when
+    // the renderer walks him off), and a new man first appears there.
+    const gates = [{ x: -22, y: 41 }, { x: 22, y: 41 }]
+    const nearGate = (p: { x: number; y: number }): boolean => gates.some((g) => Math.hypot(p.x * 100 - g.x, p.y * 42.5 - g.y) < 10)
+    const bad: string[] = []
+    let liveSwaps = 0
+    let deadSwaps = 0
+    let deadMid = 0
+    for (let i = 0; i < 4; i++) {
+      const out = agentSimGame(team(i), team(i + 1), resolve, { seed: 1300 + i })
+      let prev: FrameEvent | null = null
+      let stopped = false
+      for (const f of out.stream) {
+        if (f.type === 'whistle' || f.type === 'goal' || f.type === 'periodEnd') stopped = true
+        if (f.type !== 'frame') continue
+        const live = prev && prev.period === f.period && f.t > prev.t && !stopped
+        stopped = false
+        if (!live && prev && prev.period === f.period) {
+          // dead time: a change at the whistle also goes through the door
+          // (whistleChange); only a strength change (a penalty, the extra
+          // attacker) still redeploys - the count on the ice moves
+          if (f.home.length === prev.home.length && f.away.length === prev.away.length) {
+            for (const side of ['home', 'away'] as const) {
+              const now = new Set(f[side].map((s) => s.player))
+              for (const s of prev[side]) if (!now.has(s.player)) { deadSwaps++; if (!nearGate(s.pos)) deadMid++ }
+            }
+          }
+        }
+        if (live && prev) {
+          // both frames live (the clock moved): changes on the fly only
+          for (const side of ['home', 'away'] as const) {
+            const now = new Map(f[side].map((s) => [s.player, s.pos]))
+            const was = new Map(prev[side].map((s) => [s.player, s.pos]))
+            for (const [id, pos] of was) if (!now.has(id)) { liveSwaps++; if (!nearGate(pos)) bad.push(`g${i} P${f.period} ${f.t} ${id} left mid-ice at (${(pos.x * 100).toFixed(0)}, ${(pos.y * 42.5).toFixed(0)})`) }
+            for (const [id, pos] of now) if (!was.has(id) && !nearGate(pos)) bad.push(`g${i} P${f.period} ${f.t} ${id} appeared mid-ice at (${(pos.x * 100).toFixed(0)}, ${(pos.y * 42.5).toFixed(0)})`)
+          }
+        }
+        prev = f
+      }
+    }
+    // eslint-disable-next-line no-console
+    console.log(`changes: ${liveSwaps} men off on the fly; in dead time ${deadSwaps}, ${deadMid} of them away from the door`)
+    expect(liveSwaps).toBeGreaterThan(100)
+    expect(bad).toEqual([])
+    expect(deadSwaps).toBeGreaterThan(100)
+    expect(deadMid / deadSwaps).toBeLessThan(0.1)
   }, 120000)
 
   it('lands in the NHL band and keeps its play logic over many games', () => {

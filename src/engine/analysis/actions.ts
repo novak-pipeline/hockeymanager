@@ -15,6 +15,7 @@
  *    tie-up (a battle with `holdS`) the two men are within battle range, on the
  *    frame nearest the event.
  */
+import { playAbsT } from '@domain'
 import type { FrameEvent, GameStream, PassKind, ShotType } from '@domain'
 import { ACT_FLOOR, ACTION_FLOOR, type ActName } from '@engine/agent/constraints'
 
@@ -66,18 +67,17 @@ const clk = (t: number): string => {
 export function judgeActionFloor(stream: GameStream): ActionFloorReport {
   const base = absBase(stream)
   const rep: ActionFloorReport = { shots: 0, passes: 0, runs: 0, short: [], byAct: {} }
-  const abs = (period: number, t: number): number => (base.get(period) ?? (period - 1) * 1200) + t
   // Event floors.
   for (const e of stream) {
     if (e.type === 'shot' || e.type === 'missedShot') {
       if (e.windupS === undefined || e.shotType === undefined) continue
       rep.shots++
       const need = ACTION_FLOOR.shot.windup[e.shotType as ShotType]
-      if (e.windupS < need - TOL) rep.short.push({ t: abs(e.period, e.t), what: `${clk(abs(e.period, e.t))} ${e.shotType} by ${e.shooter}: wound up ${e.windupS.toFixed(2)} s, the row is ${need} s` })
+      if (e.windupS < need - TOL) rep.short.push({ t: playAbsT(e, base), what: `${clk(playAbsT(e, base))} ${e.shotType} by ${e.shooter}: wound up ${e.windupS.toFixed(2)} s, the row is ${need} s` })
     } else if (e.type === 'pass' && e.releaseS !== undefined) {
       rep.passes++
       const need = ACTION_FLOOR.pass.release[(e.kind ?? 'tape') as PassKind]
-      if (e.releaseS < need - TOL) rep.short.push({ t: abs(e.period, e.t), what: `${clk(abs(e.period, e.t))} ${e.kind ?? 'tape'} pass by ${e.from}: released after ${e.releaseS.toFixed(2)} s, the row is ${need} s` })
+      if (e.releaseS < need - TOL) rep.short.push({ t: playAbsT(e, base), what: `${clk(playAbsT(e, base))} ${e.kind ?? 'tape'} pass by ${e.from}: released after ${e.releaseS.toFixed(2)} s, the row is ${need} s` })
     }
   }
   // Contacts on each man (a hit, a poke, a battle): a run they cut short is not a floor breach.
@@ -88,7 +88,7 @@ export function judgeActionFloor(stream: GameStream): ActionFloorReport {
     else touched.set(id, [t])
   }
   for (const e of stream) {
-    const t = abs(e.period, e.t)
+    const t = playAbsT(e, base)
     if (e.type === 'hit') { touch(e.by as string, t); touch(e.on as string, t) }
     else if (e.type === 'pokeCheck') { touch(e.by as string, t); touch(e.on as string, t) }
     else if (e.type === 'battle') for (const p of e.players) touch(p as string, t)
@@ -103,7 +103,7 @@ export function judgeActionFloor(stream: GameStream): ActionFloorReport {
       live = false
       runs.clear()
     } else if (e.type === 'frame') {
-      const t = abs(e.period, e.t)
+      const t = playAbsT(e, base)
       const seen = new Set<string>()
       for (const s of [...e.home, ...e.away, e.homeGoalie, e.awayGoalie]) {
         const id = s.player as string
@@ -151,10 +151,9 @@ export function judgeActionFloor(stream: GameStream): ActionFloorReport {
 export function judgeContacts(stream: GameStream): ContactReport {
   const rep: ContactReport = { hits: 0, tieUps: 0, apart: [] }
   const base = absBase(stream)
-  const abs = (period: number, t: number): number => (base.get(period) ?? (period - 1) * 1200) + t
   const frames: FrameEvent[] = []
   const times: number[] = []
-  for (const e of stream) if (e.type === 'frame') { frames.push(e); times.push(abs(e.period, e.t)) }
+  for (const e of stream) if (e.type === 'frame') { frames.push(e); times.push(playAbsT(e, base)) }
   const before = (t: number): number => {
     let lo = 0
     let hi = times.length - 1
@@ -186,7 +185,7 @@ export function judgeContacts(stream: GameStream): ContactReport {
   const slack = 1.5
   for (const e of stream) {
     if (e.type === 'hit') {
-      const t = abs(e.period, e.t)
+      const t = playAbsT(e, base)
       const a = at(t, e.by as string)
       const b = at(t, e.on as string)
       if (!a || !b) continue
@@ -194,7 +193,7 @@ export function judgeContacts(stream: GameStream): ContactReport {
       const d = Math.hypot(a.x - b.x, a.y - b.y)
       if (d > ACTION_FLOOR.contact.hitFt + slack) rep.apart.push({ t, what: `${clk(t)} hit ${e.by} on ${e.on}: ${d.toFixed(1)} ft apart at contact` })
     } else if (e.type === 'battle' && e.holdS !== undefined && e.players.length === 2) {
-      const t = abs(e.period, e.t)
+      const t = playAbsT(e, base)
       const a = at(t, e.players[0] as string)
       const b = at(t, e.players[1] as string)
       if (!a || !b) continue

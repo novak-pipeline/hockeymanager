@@ -11,6 +11,7 @@ import { Rink3dRenderer, type CameraPreset } from '@render3d'
 import { GOAL_SEQ } from '@render3d/rink3dRenderer'
 import { viewerProbeEnabled, type ProbeFrame, type ProbeGeometry, type ProbeViewerState } from '@render3d/viewerProbe'
 import { runViewerTruth, type VTCue, type VTEvent, type VTGoal, type VTTimer } from '@render3d/viewerTruth'
+import { judgeFaceoffDots } from '@engine/analysis/faceoffRule'
 import { periodBases } from '@render2d/timeline'
 import type { WatchedGame } from '../worker/protocol'
 import { MatchSfx } from './lib/sfx'
@@ -27,6 +28,7 @@ import { sideInks } from './components/matchday/MatchDayPanels'
 import { cancelSpeech } from './lib/speak'
 import { EventCursor } from '../render2d/eventCursor'
 import type { GoalEvent, StoppageReason } from '@domain'
+import { playAbsT } from '@domain'
 import { Icons } from './components/icons'
 import { Icon } from './components/primitives'
 import { SimContext } from './hooks/useSim'
@@ -1729,20 +1731,23 @@ function newProbeStore(): ProbeStore {
 function probeEventsOf(stream: WatchedGame['stream']): VTEvent[] {
   const bases = periodBases(stream)
   const out: VTEvent[] = []
+  // the dot each faceoff belongs on, by the stoppage before it (NHL rule 76; VT7)
+  const foExp = judgeFaceoffDots(stream).expectations
+  let foK = 0
   for (const ev of stream) {
     if (ev.type === 'frame') continue
-    const absT = (bases.get(ev.period) ?? (ev.period - 1) * 1200) + ev.t
+    const absT = playAbsT(ev, bases)
     const e: VTEvent = { type: ev.type, absT }
     switch (ev.type) {
       case 'shot': e.actor = ev.shooter; e.x = ev.from.x * 100; e.z = ev.from.y * 42.5; e.netX = Math.sign(ev.target.x || 1) * 89; if (ev.shotType) e.shotType = ev.shotType; if (ev.windupS !== undefined) e.windupS = ev.windupS; break
       case 'missedShot': e.actor = ev.shooter; e.netX = Math.sign(ev.target.x || 1) * 89; if (ev.shotType) e.shotType = ev.shotType; if (ev.windupS !== undefined) e.windupS = ev.windupS; break
       case 'goal': e.actor = ev.scorer; e.scorer = ev.scorer; break
       case 'save': e.actor = ev.goalie; e.rebound = ev.rebound; break
-      case 'faceoff': e.actor = ev.winner; e.x = ev.pos.x * 100; e.z = ev.pos.y * 42.5; break
+      case 'faceoff': { e.actor = ev.winner; e.x = ev.pos.x * 100; e.z = ev.pos.y * 42.5; if (ev.loser) e.target = ev.loser; const exp = foExp[foK++]; if (exp) e.dot = exp; break }
       case 'hit': e.actor = ev.by; e.target = ev.on; if (ev.knockdown !== undefined) e.knockdown = ev.knockdown; break
       case 'deke': e.actor = ev.by; break
       case 'penalty': e.actor = ev.player; break
-      case 'whistle': if (ev.reason) e.reason = ev.reason; break
+      case 'whistle': if (ev.reason) e.reason = ev.reason; if (ev.detail) e.detail = ev.detail; break
       case 'pokeCheck': e.actor = ev.by; e.success = ev.success; break
       case 'blockedShot': e.actor = ev.blocker; break
       case 'battle': if (ev.winner) e.actor = ev.winner; break

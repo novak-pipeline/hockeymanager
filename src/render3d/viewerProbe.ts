@@ -87,6 +87,8 @@ export interface ProbeGeometry {
   benchGates: { home: { x: number; z: number }; away: { x: number; z: number } }
   /** Where a penalised man leaves the ice (optional: older probes). */
   penaltyBoxes?: { home: { x: number; z: number }; away: { x: number; z: number } }
+  /** The painted faceoff dots (iceCanvas ICE_DOTS; optional: older probes). */
+  faceoffDots?: { endX: number; neutralX: number; y: number }
 }
 
 export type ProbeSink = (frame: ProbeFrame) => void

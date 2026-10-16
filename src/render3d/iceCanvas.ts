@@ -18,6 +18,13 @@ import { mulberry32 } from './rng'
 export const ICE_PX_PER_FT = 14
 export const RINK_HALF_L = 100
 export const RINK_HALF_W = 42.5
+/**
+ * The faceoff dots as painted (NHL sheet, feet: end dots 20 ft off the goal
+ * line and 44 ft apart, neutral dots 5 ft outside the blue line). The agent
+ * engine drops the puck on these (src/engine/agent/rink.ts DOT_*), and VT7
+ * judges the drawn puck and centres against them (W3 S3).
+ */
+export const ICE_DOTS = { endX: 69, neutralX: 20, y: 22 } as const
 export const RINK_CORNER_R = 28
 
 const PX = ICE_PX_PER_FT
@@ -297,8 +304,8 @@ export function buildIceCanvas(opts: { centerLogo?: (CanvasImageSource & { width
   circle(ctx, 0, 0, 15, 2 * INCH, BLUE)
   disc(ctx, 0, 0, 0.5, BLUE)
 
-  for (const ex of [-69, 69]) for (const ez of [-22, 22]) endZoneCircle(ctx, ex, ez)
-  for (const nx of [-20, 20]) for (const nz of [-22, 22]) disc(ctx, nx, nz, 1, RED)
+  for (const ex of [-ICE_DOTS.endX, ICE_DOTS.endX]) for (const ez of [-ICE_DOTS.y, ICE_DOTS.y]) endZoneCircle(ctx, ex, ez)
+  for (const nx of [-ICE_DOTS.neutralX, ICE_DOTS.neutralX]) for (const nz of [-ICE_DOTS.y, ICE_DOTS.y]) disc(ctx, nx, nz, 1, RED)
 
   crease(ctx, -1)
   crease(ctx, 1)

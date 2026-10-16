@@ -19,6 +19,7 @@
  * `OFFSIDE.manOverFt` past the line's centre (both skates over the outer edge,
  * with a margin for 4 Hz sampling so a borderline case is never called red).
  */
+import { playAbsT } from '@domain'
 import type { GameStream } from '@domain'
 import { framesFromStream, type TPFrame } from './teamPlay'
 
@@ -246,7 +247,7 @@ export function whistlesFromStream(stream: GameStream): OffsideWhistle[] {
     b += p <= 3 ? 1200 : (maxT.get(p) ?? 1200)
   }
   const out: OffsideWhistle[] = []
-  for (const e of stream) if (e.type === 'whistle') out.push({ t: (base.get(e.period) ?? 0) + e.t, ...(e.reason ? { reason: e.reason } : {}) })
+  for (const e of stream) if (e.type === 'whistle') out.push({ t: playAbsT(e, base), ...(e.reason ? { reason: e.reason } : {}) })
   return out
 }
 
@@ -263,7 +264,7 @@ export function touchesFromStream(stream: GameStream): OffsideTouch[] {
   const goalies = new Map<string, 'home' | 'away'>()
   const out: OffsideTouch[] = []
   for (const e of stream) {
-    const t = (base.get(e.period) ?? 0) + e.t
+    const t = playAbsT(e, base)
     if (e.type === 'frame') {
       goalies.set(e.homeGoalie.player as string, 'home')
       goalies.set(e.awayGoalie.player as string, 'away')

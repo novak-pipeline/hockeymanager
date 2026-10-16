@@ -21,6 +21,7 @@
  *   - Kinematics use finite differences of consecutive LIVE frames (the full
  *     engine emits 4 fps; any frame rate works).
  */
+import { playAbsT } from '@domain'
 import type { GameEvent, GameStream, Position, XY } from '@domain'
 import { addSample, mergeGrid, mergeHist, newGrid, newHist, type Grid, type Hist } from './hist'
 import {
@@ -332,7 +333,7 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
       base += p <= 3 ? 1200 : Math.max(periodMaxT.get(p) ?? 0, 1)
     }
   }
-  const abs = (ev: { period: number; t: number }): number => (periodBase.get(ev.period) ?? 0) + ev.t
+  const abs = (ev: { period: number; t: number; playT?: number }): number => playAbsT(ev, periodBase)
 
   // --- Running state ----------------------------------------------------------
   let live = false

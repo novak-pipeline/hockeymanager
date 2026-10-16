@@ -24,7 +24,7 @@
 import { _electron } from 'playwright-core'
 import { createHash } from 'node:crypto'
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildReelHtml } from './viewer-truth-reel.mjs'
 
@@ -39,6 +39,10 @@ const OUT = String(flag('out', join(root, '.cache', 'viewer-truth')))
 const SEEDS = Number(flag('seeds', 12))
 const PINS = flag('pins', null)
 const ONLY = flag('only', null) // comma list of scenario kinds
+// The reel's name (its scores export as reel-<name>-scores.json): --reel=<name>,
+// else read off the output folder (.cache/reel-s3 → "s3"). It was a fixed
+// 'v0', so the S2 reel exported as "v0" unless the flag was passed (W3 S3).
+const REEL = String(flag('reel', /^reel-(.+)$/.exec(basename(OUT))?.[1] ?? 'v0'))
 const APPDATA = process.env.APPDATA ?? join(process.env.USERPROFILE ?? '', 'AppData', 'Roaming')
 const REAL_SAVES = join(APPDATA, 'hockey-manager', 'saves')
 const SAVE = String(flag('save', join(REAL_SAVES, 'slot-1.json')))
@@ -67,6 +71,8 @@ export const CHECKLIST = {
   emptyNetLate: ['Goalie to the bench?', 'Extra attacker from the gate?', 'A long-range attempt?'],
   dZoneCoverage: ['Every defender has a job (a man, the net front, a lane)?', 'Nobody standing still in the slot doing nothing?', 'One man on the puck, not two?', 'Nobody skating off to the far boards?'],
   offsideCall: ['Was a man over the blue line ahead of the puck when it crossed?', 'Did the whistle go at the right moment (or the men tag up on a delayed call)?', 'Faceoff outside the zone?'],
+  faceoffNeutral: ['Puck dropped ON the painted dot?', 'The right dot for that stoppage?', 'Everyone set before the drop?'],
+  faceoffDefensive: ['Puck dropped ON the painted dot?', 'The right dot for that stoppage?', 'Everyone set before the drop?'],
 }
 
 const sha1 = (file) => createHash('sha1').update(readFileSync(file)).digest('hex')
@@ -104,7 +110,7 @@ const app = await _electron.launch({
   cwd: root,
   env: { ...process.env, HOCKEY_USER_DATA: userData, HOCKEY_VIEWER_PROBE: '1', HOCKEY_OFFSCREEN: '1' },
 })
-const report = { startedAt: new Date().toISOString(), save: SAVE, prefs: OWNER_PREFS, engines: {}, safety: {} }
+const report = { reel: REEL, startedAt: new Date().toISOString(), save: SAVE, prefs: OWNER_PREFS, engines: {}, safety: {} }
 let failed = false
 try {
   const win = await app.firstWindow()
@@ -295,7 +301,7 @@ console.log(txt)
 writeFileSync(join(OUT, 'report.txt'), txt + '\n')
 writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2))
 if (RECORD) {
-  writeFileSync(join(OUT, 'reel.html'), buildReelHtml(report, CHECKLIST, String(flag('reel', 'v0'))))
+  writeFileSync(join(OUT, 'reel.html'), buildReelHtml(report, CHECKLIST, REEL))
   console.log(`▶ reel: ${join(OUT, 'reel.html')}`)
 }
 process.exit(failed ? 1 : 0)

@@ -6,7 +6,7 @@
  * derived from (absT, playerId hash) via mulberry32 — no Math.random.
  */
 import type { GameStream, PlayerRef } from '@domain'
-import { absTime } from './timeline'
+import { playAbsT } from '@domain'
 
 export interface CommentaryLine {
   absT: number
@@ -63,10 +63,6 @@ export function clockStr(_period: number, t: number): string {
   const mm = Math.floor(r / 60)
   const ss = r % 60
   return `${mm}:${ss.toString().padStart(2, '0')}`
-}
-
-function absT(period: number, t: number): number {
-  return absTime(period, t)
 }
 
 // ── surname tracking ──────────────────────────────────────────────────────────
@@ -370,7 +366,7 @@ export function generateCommentary(
       }
     }
 
-    const at = absT(ev.period, ev.t)
+    const at = playAbsT(ev)
     const clk = clockStr(ev.period, ev.t)
 
     switch (ev.type) {

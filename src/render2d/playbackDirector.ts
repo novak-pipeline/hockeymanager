@@ -27,6 +27,7 @@
  */
 
 import type { GameStream } from '@domain'
+import { playAbsT, streamPeriodBases } from '@domain'
 import { highlightsFor, type HighlightMode } from './highlights'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -151,18 +152,18 @@ export function nextActiveJump(
  */
 function _planFull(stream: GameStream, duration: number): SpeedSegment[] {
   const bases = _computePeriodBases(stream)
-  const at = (period: number, t: number): number => (bases.get(period) ?? (period - 1) * 1200) + t
+  const at = (ev: GameStream[number]): number => playAbsT(ev, bases)
   const segs: SpeedSegment[] = []
   let cursor = 0
   let whistle: { at: number; goal: boolean } | null = null
   let lastGoalAt = -Infinity
   for (const ev of stream) {
-    if (ev.type === 'goal') lastGoalAt = at(ev.period, ev.t)
+    if (ev.type === 'goal') lastGoalAt = at(ev)
     if (ev.type === 'whistle') {
-      const w = at(ev.period, ev.t)
+      const w = at(ev)
       whistle = { at: w, goal: ev.reason === 'goal' || w - lastGoalAt < 1.5 }
     } else if (ev.type === 'faceoff' && whistle !== null) {
-      const drop = at(ev.period, ev.t)
+      const drop = at(ev)
       const from = whistle.at + (whistle.goal ? GOAL_STOPPAGE_SHOWN_S : STOPPAGE_SHOWN_S)
       const to = drop - PRE_DROP_S
       if (to - from >= MIN_CUT_S && from > cursor) {
@@ -226,14 +227,14 @@ function _streamDuration(stream: GameStream): number {
   let max = 0
   const periods = _computePeriodBases(stream)
   for (const ev of stream) {
-    const base = periods.get(ev.period) ?? (ev.period - 1) * 1200
-    const at = base + ev.t
+    const at = playAbsT(ev, periods)
     if (at > max) max = at
   }
   return max
 }
 
 function _computePeriodBases(stream: GameStream): Map<number, number> {
+  if (stream.some((e) => e.playT !== undefined)) return streamPeriodBases(stream) // the agent engine: playback bases (W3 S3)
   // Two-pass: first find max t per period, then accumulate bases
   const maxT = new Map<number, number>()
   for (const ev of stream) {

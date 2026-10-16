@@ -2,6 +2,7 @@
  * Match-day layer: the stream fold, the ratings maths, the assistant's read,
  * and the intermission / postgame builders.
  */
+import { streamPeriodBases } from '@domain'
 import { describe, expect, it } from 'vitest'
 import type { FrameEvent, GameEvent, GameStream, GoalStrength, PlayerRef } from '@domain'
 import { generateLeague } from '@data/generate'
@@ -437,7 +438,12 @@ describe('on a real watched game', () => {
     expect(pg.box.home.goalies.length).toBeGreaterThan(0)
     expect(pg.box.away.goalies.length).toBeGreaterThan(0)
     expect(pg.ratings.every((r) => r.rating >= 1 && r.rating <= 10)).toBe(true)
-    expect(idx.intermissions.slice(0, 2).map((b) => b.absT)).toEqual([1200, 2400])
+    // Intermissions sit where the periods start on the playback timeline: the
+    // agent engine stops its clock at whistles (W3 S3), so a 20-minute period
+    // runs longer than 1200 s on screen.
+    const bases = streamPeriodBases(game.stream)
+    expect(idx.intermissions.slice(0, 2).map((b) => b.absT)).toEqual([bases.get(2), bases.get(3)])
+    expect(bases.get(2)!).toBeGreaterThan(1200)
   })
 
   it('every intermission builds, and its score matches the fold at the horn', () => {

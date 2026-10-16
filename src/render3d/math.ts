@@ -127,7 +127,7 @@ export function jerseyNumber(playerId: string): number {
 
 import type { GameStream } from '@domain'
 import { isEvent } from '@domain'
-import { absTime } from '@render2d/timeline'
+import { playAbsT } from '@domain'
 
 export type CueKind = 'shot' | 'save' | 'goal' | 'hit'
 
@@ -149,7 +149,7 @@ export function extractCues(stream: GameStream): EventCue[] {
     if (isEvent(ev, 'shot')) {
       cues.push({
         kind: 'shot',
-        absT: absTime(ev.period, ev.t),
+        absT: playAbsT(ev),
         nx: ev.from.x,
         ny: ev.from.y,
         actorId: ev.shooter
@@ -157,7 +157,7 @@ export function extractCues(stream: GameStream): EventCue[] {
     } else if (isEvent(ev, 'save')) {
       cues.push({
         kind: 'save',
-        absT: absTime(ev.period, ev.t),
+        absT: playAbsT(ev),
         nx: ev.pos.x,
         ny: ev.pos.y,
         actorId: ev.goalie
@@ -165,7 +165,7 @@ export function extractCues(stream: GameStream): EventCue[] {
     } else if (isEvent(ev, 'goal')) {
       cues.push({
         kind: 'goal',
-        absT: absTime(ev.period, ev.t),
+        absT: playAbsT(ev),
         nx: ev.pos.x,
         ny: ev.pos.y,
         actorId: ev.scorer
@@ -173,7 +173,7 @@ export function extractCues(stream: GameStream): EventCue[] {
     } else if (isEvent(ev, 'hit')) {
       cues.push({
         kind: 'hit',
-        absT: absTime(ev.period, ev.t),
+        absT: playAbsT(ev),
         nx: ev.pos.x,
         ny: ev.pos.y,
         actorId: ev.by

@@ -19,9 +19,10 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js'
-import { absTime, type MatchTimeline, type PosSnapshot } from '@render2d/timeline'
+import { type MatchTimeline, type PosSnapshot } from '@render2d/timeline'
 import type { MatchRenderer, MatchView, RinkColors, PlayerLabels } from '@render2d/rendererContract'
 import type { GameStream, PlayerId } from '@domain'
+import { playAbsT } from '@domain'
 import {
   normXtoWorld,
   normYtoWorld,
@@ -74,7 +75,7 @@ import { ActionLayer } from './animLayer'
 import { Choreographer, extractActionCues, FACEOFF_LEAD_S, type LocoMode } from './choreo'
 import { kitFor, type Kit } from './palette'
 import { ATLAS_GRID, buildAtlasCanvas, paintJerseySlot, paintOfficialSlot } from './textures'
-import { RINK_HALF_W } from './iceCanvas'
+import { ICE_DOTS, RINK_HALF_W } from './iceCanvas'
 import { approach, assignRigs, capStep, type RigMode } from './lineChange'
 import { layoutLabels, type LabelRequest, type PlacedLabel } from '@render2d/labelLayout'
 import { MOMENT_CHOREOGRAPHY, type MomentCue, type ShotCue } from '@render2d/broadcast/types'
@@ -344,6 +345,8 @@ export class Rink3dRenderer implements MatchRenderer {
    * scoring bench → the crowd → cut back to the game. Every change is a CUT.
    */
   private deadTimes: Array<{ from: number; to: number; x: number; z: number }> = []
+  /** Fallback sweater numbers, unique per team (setEventStream). */
+  private readonly teamNumbers = new Map<string, number>()
   /** Every faceoff (drop time, set time, dot) — the linesman's schedule. */
   private faceoffs: Array<{ t: number; set: number; x: number; z: number }> = []
   /** The linesman: a stick-less skater rig in stripes who drops the puck (null without authored athletes). */
@@ -1073,7 +1076,7 @@ export class Rink3dRenderer implements MatchRenderer {
 
   private paintSlot(p: PlayerPose): void {
     const kit = p.team === 'home' ? this.homeKit : this.awayKit
-    const num = p.playerId ? (this.labels[p.playerId]?.number ?? jerseyNumber(p.playerId)) : p.rig.goalie ? 30 : 10 + p.rig.slot
+    const num = p.playerId ? (this.labels[p.playerId]?.number ?? this.teamNumbers.get(p.playerId) ?? jerseyNumber(p.playerId)) : p.rig.goalie ? 30 : 10 + p.rig.slot
     if (this.ownerPainter && this.ownerAtlas && this.owner && (!p.rig.goalie || this.owner.goalie)) {
       const name = p.playerId ? (this.labels[p.playerId]?.lastName ?? '') : ''
       this.ownerPainter.paint(this.ownerAtlas, p.rig.slot, p.rig.goalie ? 'goalie' : 'skater', kit, num, name)
@@ -1308,6 +1311,21 @@ export class Rink3dRenderer implements MatchRenderer {
 
   setEventStream(stream: GameStream): void {
     this.cues = extractCues(stream)
+    // Sweater numbers when the labels carry none: the id hash, made unique
+    // within each team (a bare hash put two #14s on one team's ice in reel S2's
+    // offsideCall clip — 23 men on 99 numbers collide more often than not).
+    this.teamNumbers.clear()
+    for (const side of ['home', 'away'] as const) {
+      const ids = new Set<string>()
+      for (const e of stream) if (e.type === 'frame') { for (const s of e[side]) ids.add(s.player as string); ids.add(e[`${side}Goalie`].player as string) }
+      const used = new Set<number>()
+      for (const id of [...ids].sort()) {
+        let n = jerseyNumber(id)
+        while (used.has(n)) n = (n % 99) + 1
+        used.add(n)
+        this.teamNumbers.set(id, n)
+      }
+    }
     // stoppages (goal / whistle) and the faceoffs that end them: during the dead
     // time the game camera frames the NEXT faceoff, not the dead puck in the net
     this.deadTimes = []
@@ -1315,7 +1333,7 @@ export class Rink3dRenderer implements MatchRenderer {
     for (const ev of stream) {
       const e = ev as { type: string; period?: number; t?: number; pos?: { x: number; y: number } }
       if (e.period === undefined || e.t === undefined) continue
-      const at = absTime(e.period, e.t)
+      const at = playAbsT(ev)
       if (e.type === 'goal' || e.type === 'whistle') pending ??= at
       else if (e.type === 'faceoff' && pending !== null && e.pos) {
         this.deadTimes.push({ from: pending, to: at, x: normXtoWorld(e.pos.x), z: normYtoWorld(e.pos.y) })
@@ -1323,7 +1341,7 @@ export class Rink3dRenderer implements MatchRenderer {
       }
     }
     const cues = extractActionCues(stream)
-    this.penalties = stream.flatMap((e) => (e.type === 'penalty' ? [{ t: absTime(e.period, e.t), id: e.player as string }] : []))
+    this.penalties = stream.flatMap((e) => (e.type === 'penalty' ? [{ t: playAbsT(e), id: e.player as string }] : []))
     this.hits = cues
       .filter((c) => c.kind === 'hit' && c.actorId && c.targetId)
       .map((c) => ({ t: c.absT, x: normXtoWorld(c.nx), z: normYtoWorld(c.ny), by: c.actorId, on: c.targetId! }))
@@ -1540,6 +1558,7 @@ export class Rink3dRenderer implements MatchRenderer {
       rinkHalfL: 100, rinkHalfW: RINK_HALF_W,
       benchGates: { home: { ...BENCH_GATE.home }, away: { ...BENCH_GATE.away } },
       penaltyBoxes: { home: { x: PENALTY_BOX.home.x, z: -(RINK_HALF_W - 1.5) }, away: { x: PENALTY_BOX.away.x, z: -(RINK_HALF_W - 1.5) } },
+      faceoffDots: { ...ICE_DOTS },
     }
   }
 
