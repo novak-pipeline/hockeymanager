@@ -17,6 +17,7 @@
  * keystone stream by time.
  */
 import type { GameEvent, GameStream } from '@domain'
+import { playAbsT } from '@domain'
 import { periodBases } from './timeline'
 
 /** One stream event tagged with its absolute game-clock time. */
@@ -43,8 +44,7 @@ export class EventCursor {
     const bases = periodBases(stream)
     for (const ev of stream) {
       if (!includeFrames && ev.type === 'frame') continue
-      const base = bases.get(ev.period) ?? (ev.period - 1) * 1200
-      this.timed.push({ absT: base + ev.t, ev })
+      this.timed.push({ absT: playAbsT(ev, bases), ev })
     }
     // The engine emits in time order per period and periods in order, so this is
     // already sorted; sort defensively rather than trusting it.

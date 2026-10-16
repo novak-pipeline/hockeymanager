@@ -35,6 +35,7 @@ import type {
   Player,
   PlayerId,
   SkaterSnapshot,
+  StoppageDetail,
   Team,
   XY
 } from '@domain'
@@ -44,7 +45,9 @@ import { benchTilt, scoreEffectMult } from '@engine/shared/scoreEffects'
 import { FIGHT_MAJOR_SECONDS } from '@engine/shared/fights'
 import { fragilityWeight } from '@engine/shared/inGameInjury'
 import { coachFitMultiplier } from '@engine/league/coachProfile'
+import { changedFields, changesAt, type MatchChange, type StopPoint } from '@engine/shared/matchChanges'
 import {
+  budgetTactics,
   goaliePullWindow,
   pickAssists,
   runGame,
@@ -128,7 +131,9 @@ export const AGENT_TUNING = {
   /** Unforced fumble rate under pressure (giveaways). */
   fumbleK: 14.5,
   /** Per-think stick-foul chance when beaten (penalties). */
-  stickFoulK: 1.9,
+  // 1.9 → 1.6 (W3 S3): compensates for the stopped dead-time clock - 16% more
+  // live play per game put penalties at 4.55 a team-game, over the band (4.46).
+  stickFoulK: 1.6,
   /** Misc stoppages per second of live play ("other": net off, high stick…). */
   miscStopPerSec: 0.0028
 }
@@ -182,6 +187,44 @@ const RETRY_S = 0.3
 /** Loose-puck pickup: base chance, relative speed (ft/s) that is still easy, how fast it gets hard. */
 export const LOOSE_PICK = { base: 0.85, easyRel: 22, relScale: 70 }
 
+/**
+ * Can a shot from `from` (ft) reach the mouth of the net `a` attacks? (W3 S3,
+ * the goal-geometry invariant.) The mouth is the 6 ft between the posts on the
+ * goal line; a puck goes in only by crossing it from IN FRONT. `behind`: on or
+ * behind the goal line - no shot at all. `onNet`: in front, and the near post's
+ * inside edge is within SHOT_GEOM.maxAngleDeg of straight on (the goal line
+ * extended is not a shooting lane).
+ */
+export const SHOT_GEOM = { behindFt: 0.5, maxAngleDeg: 78 }
+export function shotGeometry(from: XY, a: number): { behind: boolean; onNet: boolean; angleDeg: number } {
+  const adv = from.x * a
+  const behind = adv > GOAL_X - SHOT_GEOM.behindFt
+  const dx = GOAL_X - adv
+  const edge = Math.max(0, Math.abs(from.y) - (NET_HALF_W - 0.4))
+  const angleDeg = behind ? 90 : (Math.atan2(edge, Math.max(dx, 1e-6)) * 180) / Math.PI
+  return { behind, onNet: !behind && angleDeg < SHOT_GEOM.maxAngleDeg, angleDeg }
+}
+
+/**
+ * Where a goal ends up: the puck crosses the goal line at (a·GOAL_X, yEntry),
+ * inside the posts, travelling on the straight line from the release, and
+ * stops a little past it, inside the side netting. (It used to aim at a point
+ * 1.5 ft behind the line at a random height, so from a sharp angle the drawn
+ * puck crossed the line outside the post.)
+ */
+export function goalPath(from: XY, a: number, yEntry: number): XY {
+  const ex = a * GOAL_X
+  const dx = ex - from.x
+  const dy = yEntry - from.y
+  const L = Math.max(Math.hypot(dx, dy), 1e-6)
+  const ux = dx / L
+  const uy = dy / L
+  let k = 1.5 / Math.max(Math.abs(ux), 1e-6)
+  const room = NET_HALF_W - 0.1 - Math.abs(yEntry)
+  if (Math.abs(uy) > 1e-6 && Math.sign(uy) === Math.sign(yEntry || uy)) k = Math.min(k, Math.max(0, room) / Math.abs(uy))
+  return { x: ex + ux * k, y: yEntry + uy * k }
+}
+
 interface Flight {
   kind: 'pass' | 'shot' | 'dump' | 'loose'
   side: Side | null
@@ -219,7 +262,17 @@ interface DelayedPenalty {
   drawnBy: Body | null
 }
 
-export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec, tm: AgentTelemetry | null): PeriodOutcome {
+/** What carries over from period to period of one agent game (W3 S3). */
+export interface AgentGame {
+  /** Playback second at which this period starts (the stream's playT base). */
+  playBase: number
+  /** Stop points so far (whistles and goals), the index of the next. */
+  stops: number
+  /** The bench's changes (src/engine/shared/matchChanges.ts), applied at their stop points. */
+  changes?: readonly MatchChange[] | undefined
+}
+
+export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: PeriodSpec, tm: AgentTelemetry | null, game: AgentGame = { playBase: 0, stops: 0 }): PeriodOutcome {
   const { rng } = ctx
   const { period, lengthSeconds, suddenDeath, absBase, baseSkaters } = spec
   home.defendsPositive = period % 2 === 0
@@ -293,7 +346,13 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     nearBy: null
   }
   let flight = null as Flight | null
+  // Two clocks (W3 S3, owner-approved): `now` is sim time within the period
+  // and runs through everything (physics, acts, the line-up, the change, the
+  // celebration); `clock` is the period clock, which stops at the whistle and
+  // starts at the drop, as the NHL's does. The period is 20 minutes of CLOCK.
+  // Events carry t = clock and playT = the playback second (game.playBase + now).
   let now = 0
+  let clock = 0
   let ended = false
   let deadAt: XY | null = null
   let foSetAt = null as number | null
@@ -307,6 +366,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   let lastSaveAt = -99
   let boardPinSince = -1
   const lastShift = new Map<Side, number>([[H, 0], [A, 0]])
+  const lastClock = new Map<Side, number>([[H, 0], [A, 0]])
   const cmds = new Map<Body, MoveCmd>()
   const smooth = new Map<Body, { x: number; y: number }>()
   const shaping = new Map<Body, { ox: number; oy: number; sf: number }>()
@@ -367,9 +427,39 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   const pokeReady = new Map<Body, number>()
   const tries = (...bs: Body[]): Map<Body, number> => new Map(bs.map((b) => [b, now] as [Body, number]))
   const ev = (e: GameEvent): void => {
+    if (e.playT === undefined) e.playT = P() // in place: some events are completed after the push (a pass's releaseS)
     ctx.stream.push(e)
   }
-  const T = (): number => Math.round(now * 100) / 100
+  const T = (): number => Math.round(clock * 100) / 100
+  /**
+   * A stop point (W3 S3, src/engine/shared/matchChanges.ts): the bench's
+   * changes due here take effect now, and only here — never in live play.
+   * Returns the sides whose lines changed (they change at this whistle).
+   * A list with nothing due draws no dice: the replay is the same stream.
+   */
+  const applyChanges = (at: StopPoint): Set<Side> => {
+    const relined = new Set<Side>()
+    for (const c of changesAt(game.changes, at)) {
+      const s = c.team === 'home' ? H : A
+      const sim = s.sim as unknown as { team: Team }
+      if (c.what === 'tactics') {
+        const fields = changedFields(sim.team.tactics, c.tactics)
+        if (fields.length === 0) continue
+        sim.team = budgetTactics({ ...sim.team, tactics: { ...sim.team.tactics, ...c.tactics } })
+        s.tactics = sim.team.tactics
+        ev({ t: T(), period, type: 'tacticChange', team: sim.team.id, what: 'tactics', fields, at })
+      } else {
+        sim.team = { ...sim.team, lines: c.lines }
+        relined.add(s)
+        ev({ t: T(), period, type: 'tacticChange', team: sim.team.id, what: 'lines', at })
+      }
+    }
+    return relined
+  }
+  /** A whistle (or a goal): the game's next stop point. */
+  const atStop = (): Set<Side> => applyChanges({ kind: 'stop', index: game.stops++ })
+  /** The playback second of `now` (absolute, from the opening faceoff). */
+  const P = (): number => Math.round((game.playBase + now) * 100) / 100
 
   // -------------------------------------------------------------------------
   // Deployment / strength / line changes
@@ -388,7 +478,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   }
 
   const creditShift = (s: Side, upTo: number): void => {
-    const dur = upTo - (lastShift.get(s) ?? 0)
+    const dur = clock - (lastClock.get(s) ?? 0) // time on ice is CLOCK time (W3 S3)
     const kind = s.sim.deployKey.split(':')[0]
     for (const r of s.sim.unit.skaters) {
       const st = stat(ctx, r.player.id)
@@ -398,6 +488,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     }
     stat(ctx, s.sim.unit.goalie.player.id).toi += dur
     lastShift.set(s, upTo)
+    lastClock.set(s, clock)
   }
 
   /** Re-read the side's on-ice bodies after a deploy. */
@@ -443,15 +534,18 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   // there only when the man he replaces arrives (no too-many-men, no
   // teleports), so a change takes a few real seconds.
   interface Change {
-    swaps: { out: Body; inId: PlayerId }[]
+    /** inId null: he goes off and nobody comes on (a strength change, liveShape). */
+    swaps: { out: Body; inId: PlayerId | null }[]
     swapped: number
     key: string
+    /** On the fly (live play) or at a whistle (dead time). */
+    fly: boolean
   }
   const changing = new Map<Side, Change>()
-  const beginChange = (s: Side): void => {
+  const beginChange = (s: Side, fly = true): void => {
     const opp = oppOf(s)
     const d = desiredFor(s.sim, opp.sim)
-    const tilt = benchTilt(s.sim.goals - opp.sim.goals, (period - 1 + now / lengthSeconds) / 3)
+    const tilt = benchTilt(s.sim.goals - opp.sim.goals, (period - 1 + clock / lengthSeconds) / 3)
     const ids = (s.sim as unknown as { deployIds(r: Rng, k: DeployKind, c: number, o?: TeamSim, t?: number): PlayerId[] }).deployIds(rng, d.kind, d.count, opp.sim, tilt)
     const cur = new Set(s.skaters.map((b) => b.player.id))
     const incoming = ids.filter((id) => !cur.has(id))
@@ -459,7 +553,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     if (incoming.length === 0 || incoming.length !== outgoing.length) {
       // Same men (a double shift) — or a shape change: reset the shift clock.
       creditShift(s, now)
-      if (incoming.length !== outgoing.length) deploySide(s, true, true)
+      // (A different count is a strength change: syncStrength takes it
+      // through the door, one man at a time. It used to redeploy here, which
+      // swapped men in place mid-ice - VT8, W3 S3.)
       return
     }
     const swaps: Change['swaps'] = []
@@ -471,7 +567,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       swaps.push({ out: b, inId: left[k] })
       left.splice(k, 1)
     }
-    changing.set(s, { swaps, swapped: 0, key: `${d.kind}:${d.count}` })
+    changing.set(s, { swaps, swapped: 0, key: `${d.kind}:${d.count}`, fly })
   }
   const stepChanges = (): void => {
     for (const [s, ch] of changing) {
@@ -486,7 +582,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         // door stays on and plays (a change is abandoned, not completed into
         // an odd-man rush against).
         const oppS = oppOf(s)
-        if (dg > 30 && w.control === oppS && w.carrier && (w.carrier.x - b.x) * s.a > -10 && w.carrier.vx * s.a < -8) {
+        if (sw.inId !== null && dg > 30 && w.control === oppS && w.carrier && (w.carrier.x - b.x) * s.a > -10 && w.carrier.vx * s.a < -8) {
           ch.swaps.splice(i, 1)
           continue
         }
@@ -498,6 +594,23 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const idx = s.skaters.indexOf(b)
         if (idx < 0) {
           ch.swaps.splice(i, 1)
+          continue
+        }
+        if (sw.inId === null) {
+          // through the door and off: one man fewer out there
+          benchEnergy.set(b.player.id, { e: b.energy, at: now })
+          bodies.delete(b.player.id)
+          s.skaters.splice(idx, 1)
+          s.sim.unit.skaters.splice(idx, 1)
+          s.sim.unit.slots = s.sim.unit.slots.filter((_, k) => k !== idx)
+          hitIntent.delete(b)
+          s.plans.delete(b)
+          s.leaving.delete(b)
+          s.roles.delete(b)
+          s.team.force = true
+          if (w.passTo === b) w.passTo = null
+          ch.swaps.splice(i, 1)
+          ch.swapped++
           continue
         }
         const p = s.sim.resolve(sw.inId)
@@ -530,7 +643,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         changing.delete(s)
         s.sim.deployKey = ch.key
         if (tm && ch.swapped > 0) tm.lineChanges++
-        if (ch.swapped > 0) ev({ t: T(), period, type: 'lineChange', team: s.sim.team.id, onIce: s.skaters.map((q) => q.player.id), onTheFly: true })
+        if (ch.swapped > 0) ev({ t: T(), period, type: 'lineChange', team: s.sim.team.id, onIce: s.skaters.map((q) => q.player.id), onTheFly: ch.fly })
       }
     }
   }
@@ -560,7 +673,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     changing.delete(s)
     const opp = oppOf(s)
     const d = desiredFor(s.sim, opp.sim)
-    const tilt = benchTilt(s.sim.goals - opp.sim.goals, (period - 1 + now / lengthSeconds) / 3)
+    const tilt = benchTilt(s.sim.goals - opp.sim.goals, (period - 1 + clock / lengthSeconds) / 3)
     const old = s.skaters.slice()
     const inherit = old.map((b) => ({ x: b.x / HALF_X, y: b.y / HALF_Y }))
     const [curKind, curCount] = s.sim.deployKey.split(':')
@@ -597,10 +710,68 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     s.powerPlay = !s.shorthanded && opp.sim.shorthanded()
   }
 
+  /**
+   * A strength change in live play (a penalty runs out, the extra attacker
+   * jumps on or comes off) goes through the bench door one man at a time, like
+   * any change (VT8, W3 S3). One more man: he comes over the boards at the
+   * door and joins the men out there. One fewer: the man nearest the door
+   * skates off through it. Same count, new kind (PP → EV): the same men play
+   * on and the next change brings the proper line.
+   */
+  const liveShape = (s: Side, d: { kind: DeployKind; count: number }): void => {
+    const cur = s.skaters.length
+    const unit = s.sim.unit
+    const key = `${d.kind}:${d.count}`
+    if (d.count === cur) {
+      s.sim.deployKey = key
+    } else if (d.count === cur + 1) {
+      const boxed = new Set([...s.sim.penalties, ...s.sim.sidelined].map((p) => p.playerId))
+      const onIce = unit.skaters.map((r) => r.player.id)
+      const extraId = (s.sim as unknown as { bestExtraAttacker(on: PlayerId[], boxed: Set<PlayerId>): PlayerId | null }).bestExtraAttacker(onIce, boxed)
+      if (!extraId) {
+        creditShift(s, now)
+        deploySide(s, true, true)
+        return
+      }
+      creditShift(s, now)
+      const p = s.sim.resolve(extraId)
+      const gate = gateOf(s)
+      const nb = makeBody(p, gate.x, gate.y + INTO_ICE * 2, s.a)
+      nb.vy = 8 * INTO_ICE
+      const rest = benchEnergy.get(p.id)
+      if (rest) nb.energy = clamp(rest.e + (now - rest.at) * BENCH_RECOVER_PER_S, 0, 1)
+      bodies.set(p.id, nb)
+      const free = [0, 1, 2, 3, 4].find((k) => !unit.slots.includes(k)) ?? 1
+      unit.skaters.push({ player: p, pos: { x: nb.x / HALF_X, y: nb.y / HALF_Y }, vel: { x: 0, y: 0 } })
+      unit.slots = [...unit.slots, free]
+      s.skaters.push(nb)
+      s.team.force = true
+      s.sim.deployKey = key
+      if (tm) tm.lineChanges++
+      ev({ t: T(), period, type: 'lineChange', team: s.sim.team.id, onIce: s.skaters.map((q) => q.player.id), onTheFly: true })
+    } else if (d.count === cur - 1) {
+      // the man nearest the door, never the carrier
+      const gate = gateOf(s)
+      const out = s.skaters.filter((b) => b !== w.carrier).sort((q, r) => Math.hypot(q.x - gate.x, q.y - gate.y) - Math.hypot(r.x - gate.x, r.y - gate.y))[0]
+      if (!out) return
+      changing.set(s, { swaps: [{ out, inId: null }], swapped: 0, key, fly: true })
+    } else {
+      creditShift(s, now)
+      deploySide(s, true, true)
+    }
+    s.shorthanded = s.sim.shorthanded()
+    s.powerPlay = !s.shorthanded && oppOf(s).sim.shorthanded()
+  }
+
   const syncStrength = (): void => {
     for (const s of sides) {
       const d = desiredFor(s.sim, oppOf(s).sim)
       if (`${d.kind}:${d.count}` !== s.sim.deployKey) {
+        if (!pending && !celebration && deadAt === null) {
+          // Live play: the new strength comes through the door (VT8).
+          if (!changing.has(s)) liveShape(s, d)
+          continue
+        }
         creditShift(s, now)
         deploySide(s, true)
       }
@@ -620,7 +791,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     }
     const deficit = oppOf(s).sim.goals - t.goals
     const win = goaliePullWindow(deficit, t.team.tactics.aggressiveness)
-    const wanted = win > 0 && lengthSeconds - now <= win
+    const wanted = win > 0 && lengthSeconds - clock <= win
     if (!wanted) {
       t.pulled = false
       return
@@ -633,12 +804,17 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   // -------------------------------------------------------------------------
   // Stoppages and faceoffs
   // -------------------------------------------------------------------------
-  const stopPlay = (dot: XY, zone: 'offensive' | 'defensive' | 'neutral', zoneFor: Side | null, reason?: 'offside' | 'icing' | 'goalieFreeze' | 'penalty' | 'other'): void => {
+  const stopPlay = (dot: XY, zone: 'offensive' | 'defensive' | 'neutral', zoneFor: Side | null, reason: 'offside' | 'icing' | 'goalieFreeze' | 'penalty' | 'other', detail: StoppageDetail, by: Side | null = null): void => {
     endBattle(null)
     deke = null
     windup = null
     passWind = null
-    ev({ t: T(), period, type: 'whistle', pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y }, ...(reason ? { reason } : {}) })
+    // A delayed penalty is assessed at this whistle, and the draw goes to the
+    // penalised side's end whatever stopped play (assessDelayed, rule 76.2).
+    const penBy = delayed ? delayed.side : null
+    const who = penBy ?? by
+    ev({ t: T(), period, type: 'whistle', pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y }, reason, detail: penBy ? 'penalty' : detail, ...(who ? { team: who.sim.team.id } : {}) })
+    const relined = atStop()
     if (tm && reason) tm.stoppages[reason]++
     deadAt = { x: puck.x, y: puck.y }
     pending = { dot, zone, since: now, zoneFor }
@@ -660,34 +836,48 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     // Tired lines change at the whistle.
     for (const s of sides) {
       // The team that iced it stays out there (NHL rule 81.1).
-      if (reason === 'icing' && s === zoneFor && !answered) continue
+      if (reason === 'icing' && s === zoneFor && !answered && !relined.has(s)) continue
       const shift = now - (lastShift.get(s) ?? 0)
-      if (shift > 20 || answered) {
+      if (shift > 20 || answered || relined.has(s)) {
         creditShift(s, now)
-        deploySide(s, true)
+        if (answered) deploySide(s, true)
+        else whistleChange(s)
       }
     }
+  }
+
+  /**
+   * A change at a whistle goes through the bench door like one on the fly:
+   * the tired man skates to the door and his replacement comes over the boards
+   * there (stepChanges runs in dead time too). The clock is stopped, so the
+   * walk costs no play (W3 S3). Reel S2's offsideCall: the old five vanished
+   * at the whistle and the renderer walked their rigs to the door while the
+   * new five already stood there - eight or nine sweaters in one pile.
+   * A different count (a penalty, the extra attacker) is still a redeploy.
+   */
+  const whistleChange = (s: Side): void => {
+    const d = desiredFor(s.sim, oppOf(s).sim)
+    if (d.count !== s.skaters.length || downOn(s)) {
+      deploySide(s, true)
+      return
+    }
+    beginChange(s, false)
   }
 
   const dotFt = (x: number, y: number): XY => ({ x, y })
   /** The end-zone dot on the puck's side in `s`'s DEFENSIVE zone. */
   const dzDot = (s: Side, y: number): XY => dotFt(-s.a * DOT_EZ_X, y >= 0 ? DOT_Y : -DOT_Y)
+  /**
+   * The dot for a stoppage where the puck is (NHL rule 76.4): in an end zone,
+   * that end's dot on the puck's side; in the neutral zone, the neutral-zone
+   * dot on its half and side. (It was the NEAREST dot of all nine: with the
+   * end dots on their real spot a stoppage at the top of the circles came out
+   * to the neutral zone. Centre ice is for period starts and goals only.)
+   */
   const nearestDot = (p: XY): XY => {
-    const dots: XY[] = [{ x: 0, y: 0 }]
-    for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
-      dots.push({ x: sx * DOT_NZ_X, y: sy * DOT_Y })
-      dots.push({ x: sx * DOT_EZ_X, y: sy * DOT_Y })
-    }
-    let best = dots[0]
-    let bd = Infinity
-    for (const d of dots) {
-      const dd = Math.hypot(d.x - p.x, d.y - p.y)
-      if (dd < bd) {
-        bd = dd
-        best = d
-      }
-    }
-    return best
+    const sx = p.x < 0 ? -1 : 1
+    const sy = p.y < 0 ? -1 : 1
+    return Math.abs(p.x) > BLUE_X ? { x: sx * DOT_EZ_X, y: sy * DOT_Y } : { x: sx * DOT_NZ_X, y: sy * DOT_Y }
   }
   const zoneOf = (dot: XY, s: Side): 'offensive' | 'defensive' | 'neutral' =>
     Math.abs(dot.x) <= 25 ? 'neutral' : dot.x * s.a > 0 ? 'offensive' : 'defensive'
@@ -718,12 +908,14 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const hashY = [dot.y + sy * 16.5, dot.y - sy * 16.5]
     fwd.forEach((b, i) => {
       if (i < 2) put(b, dx - 3, hashY[i])
+      else if (inDz) put(b, dx - 8, dot.y - sy * 22) // the slot (the D is low, behind the circle)
       else put(b, dx - 16, dot.y - sy * 8)
     })
-    // Defence.
+    // Defence. (End dots sit 20 ft off the goal line: in his own end the
+    // strong-side D is low behind the circle, his partner at the far post.)
     dmen.forEach((b, i) => {
       if (inOz) put(b, 32, i === 0 ? sy * 20 : -sy * 12)
-      else if (inDz) put(b, i === 0 ? dx - 18 : -84, i === 0 ? dot.y - sy * 4 : -sy * 4)
+      else if (inDz) put(b, i === 0 ? dx - 16 : -84, i === 0 ? dot.y - sy * 7 : -sy * 4)
       else put(b, dx - 28, i === 0 ? sy * 12 : -sy * 16)
     })
     return out
@@ -765,17 +957,21 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const hC = H.skaters[takerIdxOf(H.sim.unit)]
     const aC = A.skaters[takerIdxOf(A.sim.unit)]
     // Everybody set before the drop (the linesman waits for them).
-    let set = waited >= FACEOFF_MIN_WAIT && !!hC && !!aC && deferredDeploy.size === 0
+    let set = waited >= FACEOFF_MIN_WAIT && !!hC && !!aC && deferredDeploy.size === 0 && changing.size === 0
     if (set) {
       for (const s of sides) {
         const spots = faceoffSpots(s, p.dot)
         for (const b of s.skaters) {
           const q = spots.get(b)
           if (q && Math.hypot(q.x - b.x, q.y - b.y) > 3.5) set = false
+          // ...and stopped there (VT7: < 3 ft/s). W2 reverted this check because the
+          // running clock paid for the wait in live play; the clock now stops at
+          // the whistle, so the linesman waits for a real set (W3 S3).
+          if (speedOf(b) > 2.5) set = false
         }
       }
     }
-    if (!set && waited < FACEOFF_MAX_WAIT) {
+    if (!set && (waited < FACEOFF_MAX_WAIT || (changing.size > 0 && waited < 2 * FACEOFF_MAX_WAIT))) {
       foSetAt = null
       return false
     }
@@ -846,7 +1042,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       winner: winner.player.id,
       pos: { x: p.dot.x / HALF_X, y: p.dot.y / HALF_Y },
       loser: (homeWins ? aC : hC).player.id,
-      setAt: Math.round(setAt * 100) / 100,
+      setAt: T(), // the clock is stopped while they line up: the set is at the drop clock
+      setPlayT: Math.round((game.playBase + setAt) * 100) / 100,
       ...(tieUpDraw ? { tieUp: true } : {})
     })
     return true
@@ -957,12 +1154,12 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     // touched it, the offside man himself included (rule 83.3).
     if (w.delayedOffside === s && zoneIn.get(s)) {
       if (tm) tm.dbg["offDelayed"] = (tm.dbg["offDelayed"] ?? 0) + 1
-      callOffside(s)
+      callOffside(s, false)
       return
     }
     // Delayed penalty: the offending side touched it — whistle.
     if (delayed && delayed.side === s) {
-      stopPlay(dzDot(s, puck.y), 'defensive', s, 'penalty')
+      stopPlay(dzDot(s, puck.y), 'defensive', s, 'penalty', 'penalty', s)
       return
     }
     if (oneT && puck.x * s.a > BLUE_X) shoot(b, s, true)
@@ -1094,6 +1291,13 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const opp = oppOf(s)
     const a = s.a
     const from = { x: puck.x, y: puck.y }
+    const geo = shotGeometry(from, a)
+    // On or behind the goal line there is no shot (the net is in the way): he
+    // keeps the puck and plays on - a wrap or a pass-out is his next read.
+    if (geo.behind) {
+      if (tm) tm.dbg['shotBehindLine'] = (tm.dbg['shotBehindLine'] ?? 0) + 1
+      return
+    }
     const netX = a * GOAL_X
     const dist = Math.hypot(netX - from.x, from.y)
     const xg = xgAt(from.x, from.y, a)
@@ -1192,6 +1396,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       if (sk === c) continue
       const dn = Math.hypot(sk.x - netX * 0.93, sk.y)
       if (dn > 12) continue
+      // a stick behind the goal line, or with no angle, cannot tip it in (W3 S3)
+      if (!shotGeometry({ x: sk.x, y: sk.y }, a).onNet) continue
       const s1 = (sk.x - from.x) * ux + (sk.y - from.y) * uy
       const d = Math.abs(-(sk.x - from.x) * uy + (sk.y - from.y) * ux)
       if (s1 > L - 16 && d < 3 && rng.chance((0.25 * r01(sk.player.ratings.technical.deflections) + 0.05) * AGENT_TUNING.tipK)) tipper = sk
@@ -1218,11 +1424,16 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         0.65
       )
       // At an empty net the only question is accuracy over the distance.
-      const miss = opp.pulled ? rng.chance(1 - clamp(1.05 - dist / 180, 0.3, 0.95)) : rng.chance(pMiss)
+      // No angle (W3 S3, owner reel S2 breakaway: "the puck went in from behind
+      // the net at impossible angle"): from on or behind the goal line, or so
+      // flat to it that no straight line reaches the mouth, the puck cannot be
+      // on goal - it goes along the line or off the side of the net.
+      const miss = !geo.onNet || (opp.pulled ? rng.chance(1 - clamp(1.05 - dist / 180, 0.3, 0.95)) : rng.chance(pMiss))
       if (tm) tm.unblocked++
       if (miss) {
         outcome = 'miss'
-        const wide = (rng.chance(0.5) ? 1 : -1) * rng.float(NET_HALF_W + 1, NET_HALF_W + 9)
+        // (no angle: it goes off the near side of the net, never across the mouth)
+        const wide = (geo.onNet ? (rng.chance(0.5) ? 1 : -1) : from.y < 0 ? -1 : 1) * rng.float(NET_HALF_W + 1, NET_HALF_W + 9)
         at = { x: netX, y: wide }
         travel = Math.hypot(at.x - from.x, at.y - from.y)
         if (tm) tm.missed++
@@ -1271,7 +1482,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const goal = rng.chance(pGoal)
         outcome = goal ? 'goal' : 'save'
         at = goal
-          ? { x: a * (GOAL_X + 1.5), y: clamp(rng.normal(0, 1.4), -NET_HALF_W + 0.4, NET_HALF_W - 0.4) }
+          ? goalPath(from, a, clamp(rng.normal(0, 1.4), -NET_HALF_W + 0.4, NET_HALF_W - 0.4))
           : { x: g.x, y: g.y }
         travel = Math.hypot(at.x - from.x, at.y - from.y)
         // Shot on goal: the stream's 'shot' event (danger drives renderer drama).
@@ -1373,7 +1584,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         tm.offsides++
         tm.dbg['offShotOnGoal'] = (tm.dbg['offShotOnGoal'] ?? 0) + 1
       }
-      stopPlay(dzDot(s, puck.y), 'defensive', s, 'offside')
+      stopPlay(dzDot(s, puck.y), 'defensive', s, 'offside', 'offsideShot', s)
       return
     }
     const g = opp.goalie
@@ -1405,7 +1616,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       puck.x = a * (GOAL_X + 1.8)
       puck.y = clamp(puck.y, -2.5, 2.5)
       ev({ t: T(), period, type: 'goal', scorer: sp.shooter.player.id, assists: credited, strength, pos: { x: sp.from.x / HALF_X, y: sp.from.y / HALF_Y } })
-      ev({ t: T(), period, type: 'whistle', reason: 'goal', pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y } })
+      ev({ t: T(), period, type: 'whistle', reason: 'goal', detail: 'goal', team: s.sim.team.id, pos: { x: puck.x / HALF_X, y: puck.y / HALF_Y } })
+      atStop()
       if (tm) {
         tm.goals++
         tm.stoppages.goal++
@@ -1441,7 +1653,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     if (freeze) {
       puck.x = g.x
       puck.y = g.y
-      stopPlay(dzDot(opp, sp.from.y), zoneOf(dzDot(opp, sp.from.y), s), opp, 'goalieFreeze')
+      stopPlay(dzDot(opp, puck.y), zoneOf(dzDot(opp, puck.y), s), opp, 'goalieFreeze', 'goalieFreeze', opp)
       return
     }
     // Rebound: into the slot (a poor rebound) or steered to a corner.
@@ -1470,12 +1682,12 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       return
     }
     delayed = { offender, side: s, infraction, drawnBy }
-    stopPlay(dzDot(s, puck.y), 'defensive', s, 'penalty')
+    stopPlay(dzDot(s, puck.y), 'defensive', s, 'penalty', 'penalty', s)
   }
   const assessDelayed = (): void => {
     const d = delayed!
     delayed = null
-    const absNow = absBase + now
+    const absNow = absBase + clock
     d.side.sim.penalties.push({ expiresAt: absNow + PENALTY_SECONDS, playerId: d.offender.player.id })
     stat(ctx, d.offender.player.id).penaltyMinutes += 2
     ev({ t: T(), period, type: 'penalty', player: d.offender.player.id, infraction: d.infraction, minutes: 2, ...(d.drawnBy ? { drawnBy: d.drawnBy.player.id } : {}) })
@@ -1493,6 +1705,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   // -------------------------------------------------------------------------
   // The frame loop
   // -------------------------------------------------------------------------
+  // The intermission is a stop point: the bench's changes for this period.
+  applyChanges({ kind: 'period', period })
   // Opening deployment + faceoff.
   for (const s of sides) {
     const d = desiredFor(s.sim, oppOf(s).sim)
@@ -1559,6 +1773,17 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     }
     stepDeke(deke, s)
   }
+  /** A shooter loading his shot glides on with the puck - but he pulls up short of the goal line (W3 S3: no release from behind the net). */
+  function shooterGlide(c: Body, s: Side, f: number): MoveCmd {
+    let tx = c.x + c.vx * 0.6
+    const ty = c.y + c.vy * 0.6
+    const lim = GOAL_X - 3
+    if (tx * s.a > lim) {
+      tx = s.a * Math.min(Math.max(lim, c.x * s.a), GOAL_X - SHOT_GEOM.behindFt - 0.7)
+      return { tx, ty, speed: speedOf(c) * f * 0.5, arrive: true, urgency: 0.5 }
+    }
+    return { tx, ty, speed: speedOf(c) * f, arrive: false, urgency: 0.5 }
+  }
   function stepDeke(d: Deke, s: Side): void {
     const c = d.c
     if (now >= d.until - 1e-6) {
@@ -1585,15 +1810,17 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     }
     const pth = DEKE_PATH[d.move]
     cmds.set(c, {
-      tx: c.x + s.a * pth.fwd,
+      // the move carries him across, not past the goal line (a deke on the
+      // goalie that ended behind the net became a goal from there: W3 S3)
+      tx: s.a * Math.min(c.x * s.a + pth.fwd, Math.max(c.x * s.a, GOAL_X - 6)),
       ty: clamp(c.y + d.dir * pth.lat, -HALF_Y + 3, HALF_Y - 3),
       speed: Math.max(speedOf(c), 12),
       arrive: false,
       urgency: 0.9
     })
   }
-  while (now < lengthSeconds - 1e-9 && !ended) {
-    const absNow = absBase + now
+  while (clock < lengthSeconds - 1e-9 && !ended) {
+    const absNow = absBase + clock
     home.prunePenalties(absNow)
     away.prunePenalties(absNow)
     updatePull(H)
@@ -1634,7 +1861,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
             ev({ t: T(), period, type: 'penalty', player: p.id, infraction: 'fighting', minutes: 5 })
           }
           if (tm) tm.fights++
-          stopPlay(nearestDot({ x: puck.x, y: puck.y }), 'neutral', null, 'penalty')
+          stopPlay(nearestDot({ x: puck.x, y: puck.y }), 'neutral', null, 'penalty', 'fight')
           for (const s of sides) {
             creditShift(s, now)
             deploySide(s, true)
@@ -1682,7 +1909,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         pending = { dot: { x: 0, y: 0 }, zone: 'neutral', since: now + 2.5, zoneFor: null }
         for (const s of sides) {
           creditShift(s, now)
-          deploySide(s, true)
+          whistleChange(s)
         }
       }
     } else if (pending) {
@@ -1717,7 +1944,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
             const ws = now - windup.from
             windup = null
             shoot(c, s, false, false, ws)
-          } else cmds.set(c, { tx: c.x + c.vx * 0.6, ty: c.y + c.vy * 0.6, speed: speedOf(c) * 0.9, arrive: false, urgency: 0.5 })
+          } else cmds.set(c, shooterGlide(c, s, 0.9))
         } else {
         const act = decideCarrier(w, s, c)
         // receive and settle (constraints.ts) still running: what he does next can start, not finish
@@ -1748,7 +1975,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           const need = Math.max(windupFloor(Math.hypot(s.a * GOAL_X - c.x, c.y)), settleLeft)
           windup = { c, at: now + need, from: now }
           setAct(c, 'windup', need)
-          cmds.set(c, { tx: c.x + c.vx * 0.6, ty: c.y + c.vy * 0.6, speed: speedOf(c) * 0.75, arrive: false, urgency: 0.5 })
+          cmds.set(c, shooterGlide(c, s, 0.75))
         }
         }
         if (w.carrier === c && !cmds.has(c)) cmds.set(c, { tx: c.x + c.vx, ty: c.y + c.vy, speed: speedOf(c), arrive: false, urgency: 0.4 })
@@ -1921,13 +2148,13 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       }
       // Miscellaneous stoppages (net off its moorings, high stick, hand pass…).
       if (!pending && rng.chance(AGENT_TUNING.miscStopPerSec * FRAME_DT)) {
-        stopPlay(nearestDot({ x: puck.x, y: puck.y }), 'neutral', null, 'other')
+        stopPlay(nearestDot({ x: puck.x, y: puck.y }), 'neutral', null, 'other', 'misc')
         const p = pending as unknown as { zone: 'offensive' | 'defensive' | 'neutral'; dot: XY } | null
         if (p) p.zone = Math.abs(p.dot.x) <= 25 ? 'neutral' : 'defensive'
       }
     }
 
-    if (!pending && !celebration) stepChanges()
+    if (!celebration) stepChanges() // (at a whistle too: a change in dead time goes through the door - W3 S3)
 
     // ---- Command shaping (once per frame). ----
     // Personal space: steer around teammates instead of bumping into them
@@ -2055,6 +2282,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         maybeTheCode(r)
       }
       now += DT
+      // the period clock runs only in live play (stopped from the whistle to the drop)
+      if (deadAt === null) clock += DT
       w.t = now
       if (deadAt !== null) continue
       if (k === SUBSTEPS - 1) battleTick()
@@ -2147,7 +2376,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
             if (pending) continue
           }
           const dot = nearestDot({ x: puck.x, y: puck.y })
-          stopPlay(dot, 'neutral', null, 'other')
+          stopPlay(dot, 'neutral', null, 'other', 'puckOutOfPlay')
           if (pending) pending.zone = Math.abs(dot.x) <= 25 ? 'neutral' : 'defensive'
           continue
         }
@@ -2159,7 +2388,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           if (!fs.shorthanded) {
             if (tm) tm.icings++
             puck.x = fs.a * GOAL_X
-            stopPlay(dzDot(fs, puck.y), 'defensive', fs, 'icing')
+            stopPlay(dzDot(fs, puck.y), 'defensive', fs, 'icing', 'icing', fs)
             continue
           }
           flight.untouched = false
@@ -2181,7 +2410,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
               boardPinSince = -1
               if (tm) tm.pinWhistles++
               const dot = nearestDot({ x: puck.x, y: puck.y })
-              stopPlay(dot, 'neutral', null, 'other')
+              stopPlay(dot, 'neutral', null, 'other', 'boardPin')
               if (pending) pending.zone = Math.abs(dot.x) <= 25 ? 'neutral' : 'defensive'
               continue
             }
@@ -2234,7 +2463,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     }
     const pk = deadAt ?? puck
     ctx.stream.push({
-      t: Math.round(now * 100) / 100,
+      t: T(),
+      playT: P(),
       period,
       type: 'frame',
       home: H.skaters.map((b) => snapOf(H, b)),
@@ -2322,10 +2552,10 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     return false
   }
 
-  function callOffside(s: Side): void {
+  function callOffside(s: Side, carried: boolean): void {
     if (tm) tm.offsides++
     w.delayedOffside = null
-    stopPlay(dotFt(s.a * DOT_NZ_X, puck.y >= 0 ? DOT_Y : -DOT_Y), 'neutral', null, 'offside')
+    stopPlay(dotFt(s.a * DOT_NZ_X, puck.y >= 0 ? DOT_Y : -DOT_Y), 'neutral', null, 'offside', carried ? 'offsideCarried' : 'offsideTouch', s)
   }
 
   /**
@@ -2338,7 +2568,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     if (!anyOffside(s)) return false
     if (carried) {
       if (tm) { const off = s.skaters.filter((b) => b !== w.carrier && b.x * s.a > BLUE_X + 1); const k = `offC:${off.length}:${off.map((b) => (b.vx * s.a < -2 ? "out" : b.vx * s.a > 2 ? "in" : "still")).join("")}:cv${Math.round((w.carrier ? w.carrier.vx * s.a : 0) / 10) * 10}`; tm.dbg[k] = (tm.dbg[k] ?? 0) + 1 }
-      callOffside(s)
+      callOffside(s, true)
       return true
     }
     w.delayedOffside = s
@@ -2359,7 +2589,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       for (const b of opp.skaters) if (Math.hypot(b.x - puck.x, b.y - puck.y) < 2.2) jam = true
       if (jam && rng.chance(0.5)) return false
       const dot = dzDot(s, puck.y)
-      stopPlay(dot, zoneOf(dot, opp), s, 'goalieFreeze')
+      stopPlay(dot, zoneOf(dot, opp), s, 'goalieFreeze', 'goalieFreeze', s)
       return true
     }
     return false
@@ -2394,7 +2624,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     if (!c) return false
     const hs = sideOf(c.hitter)
     if (!hs || !c.side.skaters.includes(c.answerer)) return false
-    const absNow = absBase + now
+    const absNow = absBase + clock
     // Gloves off, or just a shove after the whistle (roughing).
     const willing = (c.hitter.player.fighting ?? 50) + r01(c.hitter.player.ratings.mental.aggression) * 40
     if (rng.chance(clamp(willing / 120, 0.2, 0.85))) {
@@ -2607,9 +2837,12 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   }
 
   // Close out the period.
-  const endT = ended ? now : lengthSeconds
-  for (const s of sides) creditShift(s, endT)
-  ctx.stream.push({ t: Math.round(endT * 100) / 100, period, type: 'periodEnd' })
+  if (!ended) clock = Math.min(clock, lengthSeconds)
+  const endT = clock
+  for (const s of sides) creditShift(s, now)
+  ev({ t: Math.round(endT * 100) / 100, period, type: 'periodEnd' })
+  // the next period starts where this one ended on the playback timeline
+  game.playBase = Math.round((game.playBase + now) * 100) / 100
   void HALF_Y
   void realPressure
   void scoreEffectMult
@@ -2619,6 +2852,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
 export interface AgentSimOptions extends FullSimOptions {
   /** Optional agent-engine telemetry sink (motion, passing, rules, physical). */
   agentTelemetry?: AgentTelemetry
+  /** The bench's changes, each applied at its stop point only (src/engine/shared/matchChanges.ts, W3 S3). */
+  changes?: readonly MatchChange[]
 }
 
 /** Simulate a watched game with the agent engine. Same contract as fullSimGame. */
@@ -2629,7 +2864,16 @@ export function agentSimGame(
   opts: AgentSimOptions
 ): GameOutcome {
   const tm = opts.agentTelemetry ?? null
-  return runGame(home, away, resolve, opts, () => (c, h, a, spec) => agentPeriod(c, h, a, spec, tm))
+  const game: AgentGame = { playBase: 0, stops: 0, changes: opts.changes }
+  const out = runGame(home, away, resolve, opts, () => (c, h, a, spec) => agentPeriod(c, h, a, spec, tm, game))
+  // The game shell's own events (a shootout, gameEnd) come after the last
+  // period: on the playback timeline they sit where it ended.
+  let last = 0
+  for (const e of out.stream) {
+    if (e.playT === undefined) e.playT = last
+    else last = e.playT
+  }
+  return out
 }
 
 export { emptyAgentTelemetry }

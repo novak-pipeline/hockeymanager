@@ -16,6 +16,7 @@
  * SAME rules judge the sim stream (vitest gates, the scorecard) and what the
  * match screen drew (viewerTruth.ts adapts probe frames). No sim, no DOM.
  */
+import { playAbsT } from '@domain'
 import type { GameStream } from '@domain/events'
 
 export interface TPSkater {
@@ -350,7 +351,7 @@ export function framesFromStream(stream: GameStream): TPFrame[] {
       const homeNetX = g > 0 ? 89 : g < 0 ? -89 : 0
       const sk = (s: { player: string; pos: { x: number; y: number }; job?: string | undefined; act?: string | undefined }): TPSkater => ({ id: s.player as string, x: s.pos.x * 100, y: s.pos.y * 42.5, job: s.job, ...(s.act !== undefined ? { act: s.act } : {}) })
       out.push({
-        t: (base.get(e.period) ?? 0) + e.t,
+        t: playAbsT(e, base),
         live,
         home: e.home.map(sk),
         away: e.away.map(sk),

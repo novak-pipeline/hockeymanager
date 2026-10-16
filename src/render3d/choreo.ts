@@ -20,6 +20,7 @@
 import type { GameStream } from '@domain'
 import { isEvent } from '@domain'
 import { absTime } from '@render2d/timeline'
+import { playAbsT } from '@domain'
 import { normXtoWorld, normYtoWorld, wrapAngle } from './math'
 import { NET_X } from './arena'
 import type { ActionLayer } from './animLayer'
@@ -96,22 +97,22 @@ export function extractActionCues(stream: GameStream): ActionCue[] {
   for (const ev of stream) {
     if (isEvent(ev, 'shot')) {
       lastShot = { x: ev.from.x, y: ev.from.y, tx: ev.target.x, ty: ev.target.y }
-      out.push({ kind: 'shot', absT: absTime(ev.period, ev.t), nx: ev.from.x, ny: ev.from.y, actorId: ev.shooter, ...(ev.shotType ? { shotType: ev.shotType } : {}), ...(ev.windupS !== undefined ? { windupS: ev.windupS } : {}) })
+      out.push({ kind: 'shot', absT: playAbsT(ev), nx: ev.from.x, ny: ev.from.y, actorId: ev.shooter, ...(ev.shotType ? { shotType: ev.shotType } : {}), ...(ev.windupS !== undefined ? { windupS: ev.windupS } : {}) })
     } else if (isEvent(ev, 'missedShot')) {
       // a miss is still a shot: the shooter swings (it used to just leave his stick)
-      out.push({ kind: 'shot', absT: absTime(ev.period, ev.t), nx: ev.from.x, ny: ev.from.y, actorId: ev.shooter, ...(ev.shotType ? { shotType: ev.shotType } : {}), ...(ev.windupS !== undefined ? { windupS: ev.windupS } : {}) })
+      out.push({ kind: 'shot', absT: playAbsT(ev), nx: ev.from.x, ny: ev.from.y, actorId: ev.shooter, ...(ev.shotType ? { shotType: ev.shotType } : {}), ...(ev.windupS !== undefined ? { windupS: ev.windupS } : {}) })
     } else if (isEvent(ev, 'save')) {
       out.push({
-        kind: 'save', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.goalie, rebound: ev.rebound,
+        kind: 'save', absT: playAbsT(ev), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.goalie, rebound: ev.rebound,
         ...(lastShot ? { shotFrom: { x: lastShot.x, y: lastShot.y }, shotTarget: { x: lastShot.tx, y: lastShot.ty } } : {}),
       })
     } else if (isEvent(ev, 'goal')) {
-      out.push({ kind: 'goal', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.scorer, assists: [...ev.assists] })
+      out.push({ kind: 'goal', absT: playAbsT(ev), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.scorer, assists: [...ev.assists] })
     } else if (isEvent(ev, 'hit')) {
       const kd = (ev as unknown as { knockdown?: unknown }).knockdown
       const pn = (ev as unknown as { pinned?: unknown }).pinned
       out.push({
-        kind: 'hit', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.by, targetId: ev.on,
+        kind: 'hit', absT: playAbsT(ev), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.by, targetId: ev.on,
         ...(ev.force !== undefined ? { force: ev.force } : {}), ...(ev.kind ? { hitKind: ev.kind } : {}), ...(typeof kd === 'boolean' ? { knockdown: kd } : ev.force !== undefined ? { knockdown: false } : {}),
         // the agent engine says outright whether he was pinned (absent on its hits = not pinned)
         ...(typeof pn === 'boolean' ? { pinned: pn } : ev.force !== undefined ? { pinned: false } : {}),
@@ -122,31 +123,31 @@ export function extractActionCues(stream: GameStream): ActionCue[] {
       const d = ev as unknown as { period: number; t: number; player?: string; on?: string; by?: string; pos?: { x: number; y: number }; force?: number }
       const who = d.player ?? d.on
       if (who) {
-        const at = absTime(d.period, d.t)
+        const at = playAbsT(d)
         let hit: ActionCue | undefined
         for (let j = out.length - 1; j >= 0 && out[j]!.absT > at - 1.2; j--) if (out[j]!.kind === 'hit' && out[j]!.targetId === who) { hit = out[j]; break }
         if (hit) hit.knockdown = true
         else out.push({ kind: 'hit', absT: at, nx: d.pos?.x ?? 0, ny: d.pos?.y ?? 0, actorId: d.by ?? '', targetId: who, force: d.force ?? 0.9, knockdown: true })
       }
     } else if (isEvent(ev, 'pass') && ev.completed) {
-      out.push({ kind: 'pass', absT: absTime(ev.period, ev.t), nx: ev.a.x, ny: ev.a.y, actorId: ev.from, targetId: ev.to })
+      out.push({ kind: 'pass', absT: playAbsT(ev), nx: ev.a.x, ny: ev.a.y, actorId: ev.from, targetId: ev.to })
     } else if ((ev as { type: string }).type === 'deke') {
       // additive agent-engine event: { by, on?, kind, success, pos } (tolerant read)
       const d = ev as unknown as { period: number; t: number; by: string; on?: string; kind?: string; pos?: { x: number; y: number } }
-      out.push({ kind: 'deke', absT: absTime(d.period, d.t), nx: d.pos?.x ?? 0, ny: d.pos?.y ?? 0, actorId: d.by, ...(d.on ? { targetId: d.on } : {}), dekeKind: d.kind ?? 'forehandBackhand' })
+      out.push({ kind: 'deke', absT: playAbsT(d), nx: d.pos?.x ?? 0, ny: d.pos?.y ?? 0, actorId: d.by, ...(d.on ? { targetId: d.on } : {}), dekeKind: d.kind ?? 'forehandBackhand' })
     } else if ((ev as { type: string }).type === 'pokeCheck') {
       // additive agent-engine event: { by, on, success, pos } (tolerant read)
       const d = ev as unknown as { period: number; t: number; by?: string; on?: string; success?: boolean; pos?: { x: number; y: number } }
-      if (d.by) out.push({ kind: 'poke', absT: absTime(d.period, d.t), nx: d.pos?.x ?? 0, ny: d.pos?.y ?? 0, actorId: d.by, ...(d.on ? { targetId: d.on } : {}), success: d.success !== false })
+      if (d.by) out.push({ kind: 'poke', absT: playAbsT(d), nx: d.pos?.x ?? 0, ny: d.pos?.y ?? 0, actorId: d.by, ...(d.on ? { targetId: d.on } : {}), success: d.success !== false })
     } else if (isEvent(ev, 'takeaway')) {
       // the defender's stick knocked it off him: a poke (both engines emit takeaways)
-      out.push({ kind: 'poke', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.by, targetId: ev.from, success: true })
+      out.push({ kind: 'poke', absT: playAbsT(ev), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.by, targetId: ev.from, success: true })
     } else if (isEvent(ev, 'faceoff')) {
       // additive agent-engine pacing (tolerant): `setAt` (period seconds the set began) and `tieUp`
       const f = ev as unknown as { setAt?: unknown; tieUp?: unknown; loser?: unknown }
       out.push({
-        kind: 'faceoff', absT: absTime(ev.period, ev.t), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.winner,
-        ...(typeof f.setAt === 'number' ? { setT: absTime(ev.period, f.setAt) } : pendingSet !== null ? { setT: pendingSet } : {}),
+        kind: 'faceoff', absT: playAbsT(ev), nx: ev.pos.x, ny: ev.pos.y, actorId: ev.winner,
+        ...(typeof f.setAt === 'number' ? { setT: ev.setPlayT ?? absTime(ev.period, f.setAt) } : pendingSet !== null ? { setT: pendingSet } : {}),
         // the agent engine sets tieUp only on a tie-up: with its setAt present, absent = a clean draw
         ...(typeof f.tieUp === 'boolean' ? { tieUp: f.tieUp } : typeof f.setAt === 'number' ? { tieUp: false } : {}),
         ...(typeof f.loser === 'string' ? { loserId: f.loser } : {}),
@@ -155,7 +156,7 @@ export function extractActionCues(stream: GameStream): ActionCue[] {
     } else if ((ev as { type: string }).type === 'faceoffSet') {
       // additive agent-engine event: the set begins for the next faceoff (tolerant read)
       const d = ev as unknown as { period: number; t: number; pos?: { x: number; y: number } }
-      pendingSet = absTime(d.period, d.t)
+      pendingSet = playAbsT(d)
     }
   }
   out.sort((a, b) => a.absT - b.absT)

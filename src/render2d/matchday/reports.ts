@@ -231,7 +231,7 @@ export function buildPostgame(index: MatchIndex): PostgameReport {
     : stats.goals.length > 0 && stats.goals[stats.goals.length - 1]!.period >= 4 ? 'overtime' : 'regulation'
   const tpGoals: TurningPointGoal[] = stats.goals.filter((g) => !g.shootout).map((g) => ({
     period: g.period,
-    t: g.absT - (index.periodStarts.get(g.period) ?? (g.period - 1) * 1200),
+    t: g.clockT ?? g.absT - (index.periodStarts.get(g.period) ?? (g.period - 1) * 1200),
     scorerName: g.scorerName,
     byUser: g.side === userSide,
   }))

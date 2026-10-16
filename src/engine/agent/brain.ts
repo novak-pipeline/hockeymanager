@@ -102,6 +102,10 @@ export const REACH = 5
 // ---------------------------------------------------------------------------
 
 export function xgAt(x: number, y: number, a: number): number {
+  // The shared xG surface folds |dx|: a puck BEHIND the goal line read as the
+  // mirror spot in front of it (6 ft behind the net = 6 ft in the slot). No
+  // angle there (W3 S3).
+  if (x * a > GOAL_X - 0.5) return 0.002
   return shotXg({ x: x / 100, y: y / 42.5 }, a)
 }
 

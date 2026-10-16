@@ -30,6 +30,16 @@ export type GoalStrength = 'ev' | 'pp' | 'sh' | 'en'
 export interface GameEventBase {
   t: number
   period: number
+  /**
+   * Additive (agent engine, W3 S3): absolute PLAYBACK seconds since the opening
+   * faceoff. The agent engine stops the period clock (`t`) at every whistle, as
+   * the NHL does, while the line-up, the change and the celebration still take
+   * real time on screen: `playT` keeps running through them. Consumers that
+   * place events on a playback timeline (renderers, replays, detectors) use it
+   * when present (see `playAbsT` in @domain/streamTime); box scores and clock
+   * displays keep reading `t`. Absent → the event's place is period base + t.
+   */
+  playT?: number
 }
 
 export type FaceoffEvent = GameEventBase & {
@@ -47,6 +57,8 @@ export type FaceoffEvent = GameEventBase & {
   setAt?: number
   /** Additive (agent engine): neither centre won it clean — a tie-up / scrum at the dot before the puck squirts out. */
   tieUp?: boolean
+  /** Additive (agent engine, W3 S3): `setAt` on the playback timeline (absolute s, like `playT`); the period clock is stopped while the men line up. */
+  setPlayT?: number
 }
 
 export type CarryEvent = GameEventBase & {
@@ -243,10 +255,48 @@ export type LineChangeEvent = GameEventBase & {
 /** Why play stopped — additive optional field; consumers must tolerate absence. */
 export type StoppageReason = 'offside' | 'icing' | 'goalieFreeze' | 'penalty' | 'goal' | 'other'
 
+/**
+ * What exactly stopped play (additive, agent engine, W3 S3) — finer than the
+ * frozen `StoppageReason` union, which it leaves alone (owner decision: a
+ * `detail` string, not a wider union). It also fixes where the faceoff goes
+ * (NHL rule 76; see @engine/analysis/faceoffRule).
+ */
+export type StoppageDetail =
+  | 'offsideCarried' // carried over the line with a man ahead: neutral-zone dot outside that zone
+  | 'offsideTouch' // delayed offside, touched in the zone: neutral-zone dot outside that zone
+  | 'offsideShot' // delayed offside, a shot on goal: the offending side's end
+  | 'icing' // the icing side's end
+  | 'goalieFreeze' // that goalie's end, the side the puck was on
+  | 'puckOutOfPlay' // over the glass: nearest dot in that zone
+  | 'boardPin' // frozen along the boards: nearest dot in that zone
+  | 'misc' // high stick, hand pass, net off: nearest dot in that zone
+  | 'penalty' // a penalty called: the offending side's end
+  | 'fight' // a fight: nearest dot in that zone
+  | 'goal' // centre ice
+
 export type StoppageEvent = GameEventBase & {
   type: 'whistle' | 'periodEnd' | 'gameEnd'
   pos?: XY
   reason?: StoppageReason
+  /** Additive (agent engine, W3 S3): see StoppageDetail. */
+  detail?: StoppageDetail
+  /** Additive (agent engine, W3 S3): the team whose infraction it was (offside, icing, a penalty) or whose goalie froze it. */
+  team?: TeamRef
+}
+
+/**
+ * Additive variant (agent engine, W3 S3): a team changed its tactics, lines or
+ * goalie at a stop point (never in live play). `stop` is the stop point's index
+ * in the game (every whistle and goal counts, from 0; intermissions are
+ * `kind: 'period'`). Emitted when the change takes effect.
+ */
+export type TacticChangeEvent = GameEventBase & {
+  type: 'tacticChange'
+  team: TeamRef
+  what: 'tactics' | 'lines' | 'goalie' | 'timeout'
+  /** The tactics fields changed (what = 'tactics'). */
+  fields?: string[]
+  at: { kind: 'stop'; index: number } | { kind: 'period'; period: number }
 }
 
 /** One skater's position at a single tick. */
@@ -319,6 +369,7 @@ export type GameEvent =
   | BattleEvent
   | DekeEvent
   | PokeCheckEvent
+  | TacticChangeEvent
 
 export type GameEventType = GameEvent['type']
 

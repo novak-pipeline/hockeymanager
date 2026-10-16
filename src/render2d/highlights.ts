@@ -5,7 +5,7 @@
  * around key events. Overlapping segments are merged. Sorted ascending by start.
  */
 import type { GameStream } from '@domain'
-import { absTime } from './timeline'
+import { playAbsT } from '@domain'
 
 export interface HighlightSegment {
   startAbsT: number
@@ -33,7 +33,7 @@ export function buildHighlights(stream: GameStream): HighlightSegment[] {
   const lastShotAbsT: Map<string, number> = new Map()
 
   for (const ev of stream) {
-    const at = absTime(ev.period, ev.t)
+    const at = playAbsT(ev)
 
     switch (ev.type) {
       case 'goal':
@@ -147,7 +147,7 @@ export function buildComprehensive(stream: GameStream): HighlightSegment[] {
   let lastShot: { at: number; danger: number } | null = null
   let ppStart: number | null = null
   for (const ev of stream) {
-    const at = absTime(ev.period, ev.t)
+    const at = playAbsT(ev)
     switch (ev.type) {
       case 'shot':
         lastShot = { at, danger: ev.danger }

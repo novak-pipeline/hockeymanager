@@ -11,6 +11,7 @@
  */
 import type { GameEvent, GameStream, PlayerRef } from '@domain'
 import { periodBases } from './timeline'
+import { playAbsT } from '@domain'
 
 /** How loud a line is — the feed's density filter keys off this. */
 export type PlayWeight = 'key' | 'normal' | 'ambient'
@@ -95,12 +96,12 @@ export function buildPlayByPlay(
     text: string,
     weight: PlayWeight
   ): void => {
-    const base = bases.get(ev.period) ?? (ev.period - 1) * PERIOD_LEN
+
     // The engine's `gameEnd` carries t=0 rather than the final clock, which
     // would place the FINAL line twenty minutes before the horn it follows.
     // Pin it (and any other straggler) to where the feed has already reached —
     // this is a presentation concern, so it is fixed here, not in the stream.
-    const raw = ev.type === 'gameEnd' ? 0 : base + ev.t
+    const raw = ev.type === 'gameEnd' ? 0 : playAbsT(ev, bases)
     const absT = Math.max(raw, out.length ? out[out.length - 1].absT : 0)
     out.push({
       absT,

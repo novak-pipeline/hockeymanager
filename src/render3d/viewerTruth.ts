@@ -12,6 +12,8 @@ import type { ProbeFrame, ProbeGeometry, ProbeRig } from './viewerProbe'
 import { judgeTeamPlay, TP, type TPFrame, type TPReport } from '@engine/analysis/teamPlay'
 import { judgeOffside, OFFSIDE } from '@engine/analysis/offside'
 import { ACTION_FLOOR } from '@engine/agent/constraints'
+import { DRAWN_DOTS, dotXY, type DotSpec } from '@engine/analysis/faceoffRule'
+import { crossesMouth, GOAL_GEOM } from '@engine/analysis/goalGeometry'
 
 /** A non-frame stream event on the absolute clock, positions in world feet. */
 export interface VTEvent {
@@ -36,6 +38,10 @@ export interface VTEvent {
   success?: boolean
   /** shots: seconds the sim's shooter wound up (W2/W3 S2). */
   windupS?: number
+  /** whistles: what exactly stopped play (StoppageDetail, W3 S3). */
+  detail?: string
+  /** faceoffs: the dot it belongs on by the stoppage before it (faceoffRule, NHL rule 76; W3 S3). The loser is `target`. */
+  dot?: DotSpec
 }
 
 /** A spoken / captioned booth line as fired (channel 'commentary'). */
@@ -354,8 +360,16 @@ export function vt7Faceoffs(inp: VTInput): VTResult {
   const ev: string[] = []
   let judged = 0
   let bad = 0
+  let offDot = 0
   const frames = inp.frames
   const brk = seekBreaks(frames)
+  const g = inp.geometry.faceoffDots ?? DRAWN_DOTS
+  // every painted dot (centre, 4 neutral, 4 end)
+  const painted: Array<{ x: number; z: number; name: string }> = [{ x: 0, z: 0, name: 'centre' }]
+  for (const xs of [-1, 1]) for (const ys of [-1, 1]) {
+    painted.push({ x: xs * g.neutralX, z: ys * g.y, name: `neutral (${xs * g.neutralX}, ${ys * g.y})` })
+    painted.push({ x: xs * g.endX, z: ys * g.y, name: `end (${xs * g.endX}, ${ys * g.y})` })
+  }
   for (const fo of inp.events.filter((e) => e.type === 'faceoff')) {
     const idx = frames.map((f, i) => [f, i] as const).filter(([f, i]) => f.clock >= fo.absT - 0.5 && f.clock <= fo.absT && isLive(f) && !inReplay(f) && !brk[i])
     if (idx.length < 4) continue
@@ -372,22 +386,67 @@ export function vt7Faceoffs(inp: VTInput): VTResult {
       })
     }
     const drop = idx[idx.length - 1]![0]
-    const inCircle = fo.x !== undefined && fo.z !== undefined
-      ? skaters(drop).filter((r) => r.visible && r.id !== null && Math.hypot(r.x - fo.x!, r.z - fo.z!) < 15).length
-      : 0
-    // the puck is dropped AT the dot (owner: "the puck wasn't even dropped in the faceoff circle")
-    const puckOff = fo.x !== undefined && fo.z !== undefined ? Math.hypot(drop.puck.x - fo.x, drop.puck.z - fo.z) : 0
-    const ok = maxSp < 3 && inCircle <= 2 && puckOff <= 2
+    // The dot it belongs on, in the PAINTED geometry: by the stoppage's rule
+    // when the stream says what stopped play, else the painted dot nearest the
+    // drawn puck (still: a puck dropped 9 ft off any painted dot is red).
+    const want = fo.dot
+      ? (() => { const d = dotXY(fo.dot, g); return { x: d.x, z: d.y, name: `${fo.dot.kind} (${d.x}, ${d.y})` } })()
+      : painted.reduce((b, d) => (Math.hypot(drop.puck.x - d.x, drop.puck.z - d.z) < Math.hypot(drop.puck.x - b.x, drop.puck.z - b.z) ? d : b), painted[0]!)
+    const puckOff = Math.hypot(drop.puck.x - want.x, drop.puck.z - want.z)
+    const centres = [fo.actor, fo.target].filter((id): id is string => !!id)
+    const centreOff = centres.map((id) => {
+      const r = skaters(drop).find((q) => q.id === id && q.visible)
+      return r ? Math.hypot(r.x - want.x, r.z - want.z) : NaN
+    })
+    const worstCentre = centreOff.length ? Math.max(...centreOff.map((d) => (Number.isFinite(d) ? d : 99))) : 0
+    const inCircle = skaters(drop).filter((r) => r.visible && r.id !== null && Math.hypot(r.x - want.x, r.z - want.z) < 15).length
+    const onDot = puckOff <= 2 && worstCentre <= 4
+    if (!onDot) offDot++
+    const ok = maxSp < 3 && inCircle <= 2 && onDot
     if (!ok) {
       bad++
-      if (ev.length < 5) ev.push(`${clk(fo.absT)} faceoff: fastest skater ${f1(maxSp)} ft/s in the last 0.5 s, ${inCircle} skaters inside the circle, puck ${f1(puckOff)} ft from the dot at the drop`)
+      if (ev.length < 6) ev.push(`${clk(fo.absT)} faceoff for the ${want.name} dot: puck drawn ${f1(puckOff)} ft from it, centres ${centreOff.map(f1).join(' / ')} ft, ${inCircle} skaters inside the circle, fastest skater ${f1(maxSp)} ft/s in the last 0.5 s`)
     }
   }
   return {
-    id: 'VT7', name: 'Faceoff set',
+    id: 'VT7', name: 'Faceoff set, on the right dot',
     status: judged === 0 ? 'n/a' : bad === 0 ? 'green' : 'red',
-    rule: 'at the drop: the puck at the dot (≤ 2 ft), ≤ 2 skaters inside the circle, every skater stationary (< 3 ft/s) for the last 0.5 s',
-    value: `${judged - bad}/${judged} faceoffs set`,
+    rule: 'at the drop, on the PAINTED dot the stoppage calls for (NHL rule 76: zone and side): the drawn puck ≤ 2 ft from it and both centres ≤ 4 ft; ≤ 2 skaters inside its circle; every skater stationary (< 3 ft/s) for the last 0.5 s',
+    value: `${judged - bad}/${judged} faceoffs set${offDot ? `, ${offDot} off the dot` : ''}`,
+    evidence: ev,
+  }
+}
+
+/* ── VT19 goal geometry ──────────────────────────────────────────────────── */
+/**
+ * Owner, reel S2 breakaway: "the puck went in from behind the net at
+ * impossible angle". Every goal: the drawn puck crosses the goal line FROM IN
+ * FRONT and BETWEEN THE POSTS on its way in (the engine's goalGeometry rule,
+ * judged on what the screen drew).
+ */
+export function vt19GoalGeometry(inp: VTInput): VTResult {
+  const ev: string[] = []
+  let judged = 0
+  let bad = 0
+  for (const goal of inp.events.filter((e) => e.type === 'goal')) {
+    const shot = [...inp.events].reverse().find((e) => e.type === 'shot' && e.absT <= goal.absT + 1e-6 && e.absT >= goal.absT - 3)
+    if (!shot || shot.netX === undefined) continue
+    const pts = inp.frames
+      .filter((f) => f.clock >= shot.absT - 0.05 && f.clock <= goal.absT + 0.4 && f.playing && !inReplay(f))
+      .map((f) => ({ t: f.clock, x: f.puck.x, y: f.puck.z }))
+    if (pts.length < 3) continue
+    judged++
+    const r = crossesMouth(pts, shot.netX)
+    if (!r.ok) {
+      bad++
+      if (ev.length < 5) ev.push(`${clk(goal.absT)} goal by ${goal.scorer ?? goal.actor}: the drawn puck ${r.why}`)
+    }
+  }
+  return {
+    id: 'VT19', name: 'Goals go in from the front, between the posts',
+    status: judged === 0 ? 'n/a' : bad === 0 ? 'green' : 'red',
+    rule: `every goal: the drawn puck crosses the goal line (x = ±${GOAL_GEOM.goalX}) from in front, within ${GOAL_GEOM.postY} ft of centre (+${GOAL_GEOM.postTolFt} ft)`,
+    value: `${judged - bad}/${judged} goals in through the mouth`,
     evidence: ev,
   }
 }
@@ -722,7 +781,7 @@ export function vt18Offside(inp: VTInput): VTResult {
   }
 }
 
-export const DETECTORS = [vt1Bodies, vt2Divergence, vt3Shots, vt4Motion, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt9Framing, vt10Commentary, vt11Hits, vt12ActionFloor, vt13Aimless, vt14Coverage, vt16Camping, vt17Grip, vt18Offside] as const
+export const DETECTORS = [vt1Bodies, vt2Divergence, vt3Shots, vt4Motion, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt9Framing, vt10Commentary, vt11Hits, vt12ActionFloor, vt13Aimless, vt14Coverage, vt16Camping, vt17Grip, vt18Offside, vt19GoalGeometry] as const
 
 export function runViewerTruth(inp: VTInput): VTResult[] {
   return DETECTORS.map((d) => d(inp))

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ProbeFrame, ProbeGeometry, ProbeRig } from './viewerProbe'
-import { runViewerTruth, vt13Aimless, vt14Coverage, vt17Grip, vt18Offside, vt1Bodies, vt5Replay, vt6Clocks, vt8Changes, type VTInput } from './viewerTruth'
+import { runViewerTruth, vt13Aimless, vt14Coverage, vt17Grip, vt18Offside, vt1Bodies, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt19GoalGeometry, type VTInput } from './viewerTruth'
 
 const GEO: ProbeGeometry = { rinkHalfL: 100, rinkHalfW: 42.5, benchGates: { home: { x: -26, z: 41 }, away: { x: 26, z: 41 } } }
 
@@ -122,9 +122,48 @@ describe('viewer-truth detectors', () => {
     expect(vt18Offside(input(onside)).status).toBe('green')
   })
 
+  it('VT7 holds the drawn drop to the painted dot the stoppage calls for (owner, reel S2: "not dropping on the faceoff dot")', () => {
+    // An icing in the away end (whistle at x = +89): the draw belongs at the
+    // home team's end-zone dot (-69, 22). The S2 engine dropped it at its own
+    // dot (-60, 23.4), 9 ft up the slot: red. On the painted dot: green.
+    const dropAt = (x: number, z: number): ProbeFrame[] => Array.from({ length: 20 }, (_, i) => frame(i, [
+      rig('home', 'c1', x - 1.3, z), rig('away', 'c2', x + 1.3, z), rig('home', 'w1', x - 3, z + 16.5), rig('away', 'w2', x + 3, z - 16.5),
+    ], { speed: 1, clock: 100 + i / 30, puck: { x, y: 0, z, sx: 0, sy: 0, onScreen: true, simX: x, simZ: z } }))
+    const geo = { ...GEO, faceoffDots: { endX: 69, neutralX: 20, y: 22 } }
+    const fo = (frames: ProbeFrame[]) => ({ type: 'faceoff', absT: frames[frames.length - 1]!.clock, actor: 'c1', target: 'c2', dot: { kind: 'end' as const, xs: -1, ys: 1 } })
+    const s2 = dropAt(-60, 23.4)
+    const red = vt7Faceoffs({ ...input(s2, { events: [fo(s2)] }), geometry: geo })
+    expect(red.status).toBe('red')
+    expect(red.evidence[0]).toContain('end (-69, 22)')
+    const fixed = dropAt(-69, 22)
+    expect(vt7Faceoffs({ ...input(fixed, { events: [fo(fixed)] }), geometry: geo }).status).toBe('green')
+    // the right spot in the wrong zone (an end-zone stoppage dropped at the neutral dot): red
+    const nz = dropAt(-20, 22)
+    expect(vt7Faceoffs({ ...input(nz, { events: [fo(nz)] }), geometry: geo }).status).toBe('red')
+    // no stoppage detail (an old stream): still judged against the nearest PAINTED dot
+    const { dot, ...noDot } = fo(s2)
+    void dot
+    expect(vt7Faceoffs({ ...input(s2, { events: [noDot] }), geometry: geo }).status).toBe('red')
+  })
+
+  it('VT19 flags a goal whose drawn puck comes into the net from behind the goal line (owner, reel S2 breakaway)', () => {
+    // the puck goes from behind the net (x 95, z 6) into it
+    const path = (pts: Array<[number, number]>): ProbeFrame[] => pts.map(([x, z], i) => frame(i, five('home'), { speed: 1, clock: 200 + i / 30, puck: { x, y: 0, z, sx: 0, sy: 0, onScreen: true, simX: x, simZ: z } }))
+    const ev = (frames: ProbeFrame[]) => [
+      { type: 'shot', absT: frames[0]!.clock, actor: 'h0', netX: 89 },
+      { type: 'goal', absT: frames[frames.length - 1]!.clock, actor: 'h0', scorer: 'h0' },
+    ]
+    const behind = path([[95, 6], [93, 4], [91, 2], [90, 1]])
+    expect(vt19GoalGeometry(input(behind, { events: ev(behind) })).status).toBe('red')
+    const sharp = path([[86, 14], [88, 9], [89.5, 6], [90, 4]]) // crosses the line 6+ ft wide of centre
+    expect(vt19GoalGeometry(input(sharp, { events: ev(sharp) })).status).toBe('red')
+    const front = path([[70, 6], [78, 4], [86, 2], [90.5, 1]])
+    expect(vt19GoalGeometry(input(front, { events: ev(front) })).status).toBe('green')
+  })
+
   it('runs every detector and reports n/a with nothing to judge', () => {
     const res = runViewerTruth(input([]))
-    expect(res.map((r) => r.id)).toEqual(['VT1', 'VT2', 'VT3', 'VT4', 'VT5', 'VT6', 'VT7', 'VT8', 'VT9', 'VT10', 'VT11', 'VT12', 'VT13', 'VT14', 'VT16', 'VT17', 'VT18'])
+    expect(res.map((r) => r.id)).toEqual(['VT1', 'VT2', 'VT3', 'VT4', 'VT5', 'VT6', 'VT7', 'VT8', 'VT9', 'VT10', 'VT11', 'VT12', 'VT13', 'VT14', 'VT16', 'VT17', 'VT18', 'VT19'])
     expect(res.every((r) => r.status === 'n/a')).toBe(true)
   })
 })

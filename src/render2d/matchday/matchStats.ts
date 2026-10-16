@@ -18,6 +18,7 @@
  * Pure and DOM-free.
  */
 import type { GameEvent, GameStream, GoalStrength, PlayerRef } from '@domain'
+import { playAbsT } from '@domain'
 import { periodBases } from '../timeline'
 
 export type Side = 'home' | 'away'
@@ -96,7 +97,7 @@ export function buildMatchIndex(game: MatchDayGame, positions: Record<string, st
   let duration = 0
   let lastPeriod = 1
   for (const ev of game.stream) {
-    const absT = (bases.get(ev.period) ?? (ev.period - 1) * 1200) + ev.t
+    const absT = playAbsT(ev, bases)
     if (absT > duration) duration = absT
     if (ev.period > lastPeriod) lastPeriod = ev.period
     if (ev.type === 'frame') {
@@ -192,6 +193,8 @@ export interface GoalSummary {
   period: number
   /** Elapsed time in the period, "M:SS". */
   clock: string
+  /** The period clock at the goal, seconds elapsed (the stream's t; W3 S3: playback absT runs through stoppages). */
+  clockT?: number
   side: Side
   scorerId: string
   scorerName: string
@@ -342,7 +345,6 @@ export function computeMatchStats(index: MatchIndex, upTo: number = Infinity): M
     f(teams[side])
     f(per(side, period))
   }
-  const inPeriod = (absT: number, period: number): number => absT - (index.periodStarts.get(period) ?? (period - 1) * 1200)
 
   // Goalie of record, kept current from the frames' goalie changes and saves.
   const goalie: Record<Side, string | null> = { home: null, away: null }
@@ -444,7 +446,7 @@ export function computeMatchStats(index: MatchIndex, upTo: number = Infinity): M
           teams[side].goals++
           shootoutWinner = side
           goals.push({
-            absT, period: ev.period, clock: periodClock(inPeriod(absT, ev.period)), side,
+            absT, period: ev.period, clock: periodClock(ev.t), clockT: ev.t, side,
             scorerId: ev.scorer as string, scorerName: index.names[ev.scorer as string] ?? (ev.scorer as string),
             assistIds: [], assistNames: [], strength: ev.strength, home: score.home, away: score.away, shootout: true,
           })
@@ -487,7 +489,7 @@ export function computeMatchStats(index: MatchIndex, upTo: number = Infinity): M
           for (const id of onIce[other(side)]) line(id).plusMinus--
         }
         goals.push({
-          absT, period: ev.period, clock: periodClock(inPeriod(absT, ev.period)), side,
+          absT, period: ev.period, clock: periodClock(ev.t), clockT: ev.t, side,
           scorerId: ev.scorer as string, scorerName: index.names[ev.scorer as string] ?? (ev.scorer as string),
           assistIds: ev.assists.map((a) => a as string),
           assistNames: ev.assists.map((a) => index.names[a as string] ?? (a as string)),
@@ -528,7 +530,7 @@ export function computeMatchStats(index: MatchIndex, upTo: number = Infinity): M
         both(side, ev.period, (t) => { t.penaltyMinutes += ev.minutes })
         if (ev.infraction !== 'fighting') both(other(side), ev.period, (t) => { t.powerPlays++ })
         penalties.push({
-          absT, period: ev.period, clock: periodClock(inPeriod(absT, ev.period)), side,
+          absT, period: ev.period, clock: periodClock(ev.t), side,
           playerId: ev.player as string, playerName: index.names[ev.player as string] ?? (ev.player as string),
           infraction: ev.infraction, minutes: ev.minutes,
         })

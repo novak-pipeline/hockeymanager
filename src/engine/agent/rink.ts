@@ -5,8 +5,8 @@
  *
  * The sheet is a rounded rectangle (28-ft corner radius, NHL); nets sit on the
  * goal lines at x = ±89 (6 ft mouth, ~3.3 ft deep, extending toward the end
- * boards). Faceoff dots match the ones the renderers draw (the old engine's
- * normalized dots) so a whistle comes back to a dot the viewer can see.
+ * boards). Faceoff dots are the 3D sheet's painted ones (NHL geometry, W3 S3)
+ * so a whistle comes back to a dot the viewer can see.
  */
 import type { XY } from '@domain'
 
@@ -21,10 +21,17 @@ export const BLUE_X = 25
 /** Crease radius (semi-circle), feet. */
 export const CREASE_R = 6
 
-/** Faceoff dots (feet): center, four neutral-zone, four end-zone. */
-export const DOT_EZ_X = 60
+/**
+ * Faceoff dots (feet): center, four neutral-zone, four end-zone — the NHL
+ * sheet the 3D renderer draws (iceCanvas: end dots 20 ft out from the goal
+ * line, 44 ft apart; neutral dots 5 ft outside the blue line). They were the
+ * old 2D engine's normalized dots (0.6 / 0.55 → 60 ft, 23.4 ft), which put
+ * every end-zone faceoff 9 ft up the slot from the drawn dot (owner, reel S2:
+ * "they're not dropping on the faceoff dot"; W3 S3).
+ */
+export const DOT_EZ_X = 69
 export const DOT_NZ_X = 20
-export const DOT_Y = 23.4
+export const DOT_Y = 22
 export const CENTER: XY = { x: 0, y: 0 }
 export const ALL_DOTS_FT: XY[] = [
   CENTER,

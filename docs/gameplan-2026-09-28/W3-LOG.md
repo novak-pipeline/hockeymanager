@@ -99,3 +99,67 @@ Seven clips: breakaway, twoOnOne, ozCycleShot, faceoffWinPlay, bigHit, saveRebou
 - The wingers' tie-ups at the faceoff drop, and the net-front box-out pair: no box-out job exists yet (S4/S5).
 - Goalie butterfly / lateral-push floors as separate acts. Only the save reaction is a sim state now.
 - PP% runs low (about 10% against the NHL's about 20%), as before S2: S8.
+
+## S3 stop points and the clock (2026-10-16)
+
+### First: the reel S2 regressions (owner scores 2/3/3/3/4/4, offsideCall unscored)
+
+**Faceoffs off the dot** (ozCycleShot, faceoffWinPlay: "they're not dropping on the faceoff dot"). Not a new break: the agent engine's dots were the old 2D engine's normalized ones (`DOT_EZ_X 60`, `DOT_Y 23.4`), while the 3D sheet paints the NHL dots (69, 22). Every end-zone draw was 9 ft up the slot from the painted dot, inside the circle, so W2's "puck in the circle" fix and VT7 (which measured the puck against the *sim's* dot) were both green. On the S2 engine 73% of faceoffs were more than 2 ft off a painted dot. Second fault in the same class: a stoppage went to the *nearest* of the nine dots, so with real end dots a whistle at the top of the circles came out to the neutral zone. Fix: `rink.ts` dots = the painted ones (`iceCanvas ICE_DOTS`, one constant the probe hands to VT7); a stoppage dot is chosen by zone (rule 76.4: an end-zone stoppage stays in that end); D-zone alignment moved with the deeper dot. Detectors: `faceoffRule.ts` gives the dot a stoppage calls for (by the whistle's new `detail`, the penalised / icing / offside side, the goalie's end); the sim gate `agentSim.test` holds every faceoff to it; **VT7 now judges the drawn puck and both drawn centres against the painted dot the stoppage calls for** (≤ 2 ft / ≤ 4 ft), and with no `detail` against the nearest painted dot. Imported league, 480 games: 0 of 26,231 faceoffs off the right dot.
+
+**A goal from behind the net** (breakaway: "the puck went in from behind the net at impossible angle"). The S2 clip could not be replayed frame for frame (the reel was recorded before the offside merge), so the class was found on the S2 head: a successful deke on the goalie carried the shooter up to 12 ft forward (past the goal line), and the shot that followed was released from behind the net; the shared xG surface folds |dx|, so 9 ft behind the net read as 9 ft in the slot (`DEKE.beatG` on top). A shooter loading his shot also glided on past the line, and a goal aimed at a random point 1.5 ft behind the line, so from a sharp angle the puck crossed the line outside the post. S2 head, 120 imported games: **89 of 676 goals illegal** (57 released on or behind the goal line, 11 past 78°, 21 crossing the line outside the post); same game as the reel (seed 1001): P3 7:08 goal from (97.8, 6.5) after a shoulder-fake on the goalie. Fix: `shotGeometry()` - no shot from on/behind the goal line (he keeps the puck), no shot on goal past 78° (it goes off the near side of the net); `goalPath()` - a goal crosses the line inside the posts on the straight line from the release; the deke and the wind-up glide stop short of the line; a tip needs an angle too; `xgAt` returns ~0 behind the line. Detectors: `goalGeometry.ts` (release angle + puck path through the mouth) as a sim gate, and new **VT19** on the drawn puck. Imported league after: 0 illegal in 3,086 goals.
+
+**offsideCall "so much weird stuff"** - frames of the S2 clip (0.25 s apart), what is wrong:
+1. Two TOR skaters wear #14 (Danford, Nylander). The labels carry no numbers, and the fallback is a hash of the id over 99 numbers: on a 23-man roster a duplicate is more likely than not. Fixed: fallback numbers are unique per team (`rink3dRenderer.teamNumbers`).
+2. At the whistle BOS changes all five at once: eight or nine white sweaters pile up at their bench door for ~2 s. The sim swapped the five instantly at the whistle and the renderer walked the old rigs to the door while the new five already stood there. Fixed in the sim: a change at a whistle goes through the door like one on the fly (`whistleChange`, stepChanges now runs in dead time), and the faceoff waits for it - the clock is stopped, so it costs no play.
+3. The scorebug froze at 14:01 for the stoppage, but the engine clock ran through it, so the clock jumped at the next drop. Fixed by the stopped clock (below).
+4. The offside draw's dot (20, 23.4) was 1.4 ft off the painted neutral dot. Fixed with the dots.
+5. Name labels of men at the bench float above the dasher boards (Hagens, Knies) while play goes on. Not fixed here (bench presentation, W5).
+
+**The reel exporter** labelled every reel `"reel": "v0"` unless `--reel` was passed (the S2 scores were hand-named). It now takes the name from the output folder (`.cache/reel-s3` → `s3`) and writes it into report.json too.
+
+### S3 (W3-DESIGN item 8)
+
+- **The clock stops at the whistle** (owner-approved). Two clocks in `agentPeriod`: `now` (sim time, runs through everything) and `clock` (the period clock: only in live play). A period is 20:00 of clock. Events carry `t` = clock and the new additive `playT` (absolute playback second); `FaceoffEvent.setPlayT`. Penalties, the goalie pull, the bench tilt and TOI run on the clock. Every playback consumer now places events with `playAbsT` / `streamPeriodBases` (`@domain/streamTime`): timeline (the scorebug reads the frames' clock), 3D renderer, choreo, highlights, broadcast director, playback director, event cursor, match stats, play-by-play, viewer probe, the analysis judges. Box scores keep reading `t`. Live play per game: 52.2 → 60.5 min.
+- **Strict faceoff set restored**: the linesman waits for every man to be still (< 2.5 ft/s) on his spot (W2 reverted it because the running clock paid for the wait).
+- **VT8 mid-ice swap**: a strength change in live play (a penalty runs out, the extra attacker) used to redeploy in place. `liveShape`: one more man comes over the boards at the door, one fewer skates off through it, a new kind with the same count keeps the men out there until the next change; `beginChange` no longer redeploys on a count mismatch. Gate: no man leaves or appears mid-ice in live play (4 games, 0), and at whistles < 10% away from the door.
+- **Tactic changes at stop points only** (`src/engine/shared/matchChanges.ts`, `AgentSimOptions.changes`): a record names a stop point (the n-th whistle or goal, or the intermission before a period) and changes tactics or lines there; a lines change goes on at that whistle. New event variant `tacticChange`. Determinism gate: an empty list and no-op records give the same stream hash as no list; a real change leaves the stream identical up to its whistle; the same input + list replays to the same hash.
+- **`StoppageEvent.detail`** (owner-approved, the union left alone) and `team`: offsideCarried / offsideTouch / offsideShot / icing / goalieFreeze / puckOutOfPlay / boardPin / misc / penalty / fight / goal. A whistle during a delayed penalty is `penalty` (the draw goes to that end).
+- Reel scenarios `faceoffNeutral`, `faceoffDefensive` (a draw in each zone).
+
+### Detectors
+
+| | before (S2 head) | after S3 |
+|---|---|---|
+| faceoffs > 2 ft off the painted dot (imported, 120 g / 480 g) | 73% | 0 of 26,231 off the dot the stoppage calls for |
+| illegal goals (behind the line / past 78° / outside the post) | 89 of 676 | 0 of 3,086 (the shootout's nominal goals skipped) |
+| VT7 strict on the drawn screen | red (hybrid build, S2 dots: "puck drawn 9.1 ft from the end (69, -22) dot, centres 9.8 / 5.7 ft") | green 3/3 (OZ, NZ, DZ draws) |
+| VT19 drawn goals through the mouth | (new; synthetic red on a puck from behind the net) | green 3/3 goals |
+| VT8 / live strength changes mid-ice (sim gate, 4 games) | redeploy in place | 0 mid-ice; whistle changes < 10% away from the door |
+| VT12 floors, offside missed calls (stream judge), contact pairs apart (480 g) | 0 short; 12 missed in 83,649 entries; 7 apart | 0 short; 22 missed in 103,832 entries (more live play; all delayed-touch sampling cases but 2); 5 apart |
+| VT13 aimless /60, VT14 coverage /60 | 17.2, 3.9 | 14.9, 3.9 |
+
+### Calibration (imported league, 480 games, seeds 7000-7479)
+
+| | S2 head | S3 (clock stopped) | S3 + stickFoulK |
+|---|---|---|---|
+| live minutes / game | 52.2 | 60.5 | 60.5 |
+| goals / team-game (band 2.70-3.43) | 2.86 | 3.24 | **3.23** |
+| shots on goal | 26.7 | 29.2 | 29.3 |
+| PP goals | 0.42 | 0.54 | 0.50 |
+| penalties (band 2.97-4.46) | 3.88 | 4.55 (over) | **4.27** |
+| hits | 21.5 | 25.7 | 25.8 |
+| rebound-shot share | 0.090 | 0.074 | 0.074 |
+| offside whistles | 1.62 | 1.88 | 1.98 |
+
+The stopped clock adds 16% live play, so every per-second rate rises with it (the design expected this, item 8). Goals stay in band; the illegal goals removed (about 13% of S2 goals) and the extra live time roughly cancel at the top of the range. One scalar changed: **`AGENT_TUNING.stickFoulK` 1.9 → 1.6, compensates for the stopped dead-time clock** (penalties had left the band). Shot volume is not re-fitted here (S9).
+
+### Reel S3 (`K:/Hockey Game/.cache/reel-s3/reel.html`)
+
+Eight clips: breakaway, ozCycleShot, goalReplay, lineChangeOnFly, faceoffWinPlay (OZ), offsideCall, faceoffNeutral, faceoffDefensive. Green: VT1-VT8, VT10, VT14, VT16, VT17, VT19. Red: VT9 framing (7 clips, S7), VT11 on lineChangeOnFly (a hit man drawn sliding against the push, the S2 class), VT13 on ozCycleShot (one 2 s case), VT12 on ozCycleShot (one backhand drawn with no wind-up; not reproduced on a re-run of the same pin), VT18 on ozCycleShot and goalReplay - see below. Owner saves SHA1-verified unchanged.
+
+### Left for later
+
+- **VT18 on the drawn puck.** Both reds are the same thing: the carrier is at the blue line and the drawn puck sits on the drawn blade 2.5-3.8 ft from the sim's puck (median 2.6-3.4 ft over carried frames, p90 3.7-5.3 ft), so on screen it is outside the zone while the sim's is already in; the pass that follows reads as an entry with men ahead of it. The sim's call was right (stream judge: 0 missed). The drawn blade vs sim blade point is the grip/IK path (VT17 work), not touched here.
+- The 2D renderer still paints its dots at the old 0.6 / 0.55 normalized spots (the classic engine uses them; it was left alone), so agent games in 2D draw end-zone faceoffs 9 ft off its dots.
+- Bench name labels drawn above the boards; bench life (W5).
+- A `lines` change is applied by replacing the team's lines at the whistle (TeamSim's strength figure is not recomputed); goalie / timeout records are W6's.

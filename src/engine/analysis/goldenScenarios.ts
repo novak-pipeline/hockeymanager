@@ -10,6 +10,7 @@
  *
  * Pure: no sim, no DOM. The worker runs it over freshly simmed games (dev only).
  */
+import { playAbsT } from '@domain'
 import type { GameEvent, GameStream } from '@domain/events'
 
 export type ScenarioKind =
@@ -25,11 +26,13 @@ export type ScenarioKind =
   | 'emptyNetLate'
   | 'dZoneCoverage'
   | 'offsideCall'
+  | 'faceoffNeutral'
+  | 'faceoffDefensive'
 
 export const SCENARIO_KINDS: readonly ScenarioKind[] = [
   'breakaway', 'twoOnOne', 'ozCycleShot', 'ppSetPlay', 'goalReplay',
   'lineChangeOnFly', 'faceoffWinPlay', 'bigHit', 'saveRebound', 'emptyNetLate',
-  'dZoneCoverage', 'offsideCall',
+  'dZoneCoverage', 'offsideCall', 'faceoffNeutral', 'faceoffDefensive',
 ]
 
 /** Human label + how much game time to show around the moment (lead before, tail after).
@@ -50,6 +53,9 @@ export const SCENARIO_META: Record<ScenarioKind, { label: string; lead: number; 
   dZoneCoverage:   { label: 'Defensive-zone coverage',        lead: 20,  tail: 5 },
   // W3 S2 (owner, reel S1: "he was offside"): a zone entry the linesman blows offside
   offsideCall:     { label: 'Zone entry: offside called',     lead: 10,  tail: 5 },
+  // W3 S3 (owner, reel S2: "not dropping on the faceoff dot"): a draw in each zone
+  faceoffNeutral:  { label: 'Neutral-zone faceoff',           lead: 6,  tail: 8 },
+  faceoffDefensive: { label: 'Defensive-zone faceoff',        lead: 6,  tail: 8 },
 }
 
 export interface ScenarioHit {
@@ -98,7 +104,7 @@ export function findScenarios(
   const evs: Timed[] = []
   for (const ev of stream) {
     if (ev.type === 'frame') continue
-    evs.push({ ev, abs: (bases.get(ev.period) ?? (ev.period - 1) * REG) + ev.t })
+    evs.push({ ev, abs: playAbsT(ev, bases) })
   }
   evs.sort((a, b) => a.abs - b.abs)
   const sideOf = (id: string): 'home' | 'away' => (isHome(id) ? 'home' : 'away')
@@ -134,7 +140,7 @@ export function findScenarios(
 
   // Puck position over live frames (for zone time): abs t and x in rink units.
   const puckTrack: Array<{ abs: number; x: number }> = []
-  for (const ev of stream) if (ev.type === 'frame') puckTrack.push({ abs: (bases.get(ev.period) ?? (ev.period - 1) * REG) + ev.t, x: ev.puck.x })
+  for (const ev of stream) if (ev.type === 'frame') puckTrack.push({ abs: playAbsT(ev, bases), x: ev.puck.x })
   /** Seconds the puck has spent continuously in the zone at sign `sign` before `t` (≤ 40). */
   const zoneTime = (t: number, sign: number): number => {
     let lo = 0
@@ -204,6 +210,11 @@ export function findScenarios(
       if (pass && shot && !stopBetween(t, shot.abs)) {
         push({ kind: 'faceoffWinPlay', absT: t, period: ev.period, side, note: `${ev.zone} faceoff win → shot in ${(shot.abs - t).toFixed(1)} s`, quality: 1 + (ev.zone === 'offensive' ? 0.2 : 0) })
       }
+      // a draw in each zone (the dot it is on is what the owner judges): a
+      // neutral-zone dot (not centre ice), and one in the winner's own end
+      const clean = pass && !stopBetween(t, t + 6) ? 0.3 : 0
+      if (ev.zone === 'neutral' && Math.abs(ev.pos.x) > 0.05) push({ kind: 'faceoffNeutral', absT: t, period: ev.period, side, note: 'neutral-zone faceoff', quality: 1 + clean })
+      if (ev.zone === 'defensive') push({ kind: 'faceoffDefensive', absT: t, period: ev.period, side, note: 'defensive-zone faceoff', quality: 1 + clean })
     } else if (ev.type === 'hit') {
       const side = sideOf(ev.by)
       const q = (ev.force ?? 0.5) + (ev.knockdown ? 1 : 0) + (ev.kind === 'openIce' ? 0.3 : 0) + (ev.targetHadPuck ? 0.2 : 0)
@@ -232,7 +243,7 @@ export function findScenarios(
       if (ev.type !== 'frame' || ev.period !== 3 || ev.t < REG - 180) continue
       const side = ev.home.length >= 6 ? 'home' : ev.away.length >= 6 ? 'away' : null
       if (!side) continue
-      push({ kind: 'emptyNetLate', absT: (bases.get(3) ?? 2 * REG) + ev.t, period: 3, side, note: 'goalie pulled, extra attacker', quality: 1 })
+      push({ kind: 'emptyNetLate', absT: playAbsT(ev, bases), period: 3, side, note: 'goalie pulled, extra attacker', quality: 1 })
       break
     }
   }
