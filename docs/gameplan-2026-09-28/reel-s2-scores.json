@@ -1,0 +1,39 @@
+{
+  "reel": "s2",
+  "exportedAt": "2026-10-16T18:15:55.835Z",
+  "scores": {
+    "agent-breakaway": {
+      "score": 2,
+      "note": "the put went in from behind the net at impossible angle "
+    },
+    "agent-twoOnOne": {
+      "score": 3,
+      "c0": true,
+      "c1": true,
+      "c2": true
+    },
+    "agent-ozCycleShot": {
+      "score": 3,
+      "note": "cycle fine but they're dropping faceoff NOT on the faceoff dot "
+    },
+    "agent-faceoffWinPlay": {
+      "score": 3,
+      "note": "animation fine but they're not dropping on the faceoff dot "
+    },
+    "agent-bigHit": {
+      "score": 4,
+      "c0": true,
+      "c1": true,
+      "c2": true
+    },
+    "agent-saveRebound": {
+      "c0": true,
+      "c1": true,
+      "c2": true,
+      "score": 4
+    },
+    "agent-offsideCall": {
+      "note": "offside but so much weird stuff happening in this clip "
+    }
+  }
+}
