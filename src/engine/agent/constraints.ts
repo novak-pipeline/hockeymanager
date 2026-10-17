@@ -23,7 +23,7 @@
 import type { PassKind, ShotType } from '@domain'
 
 /** Bump when a row changes: an old match input replays with the table that made it (SPEC §1.5). */
-export const CONSTRAINTS_VERSION = 1
+export const CONSTRAINTS_VERSION = 2
 
 export const ACTION_FLOOR = {
   shot: {
@@ -81,11 +81,30 @@ export const ACTION_FLOOR = {
     hitDoer: 0.4,
     /** Board pin: the pinning man holds for this long. */
     pinDoer: 0.6,
+    /**
+     * A body check that does not drop him: staggered, coasting with no edge,
+     * at least this long (W3 S4, version 2: it was the force-scaled stun alone,
+     * as short as 0.15 s, and a man stood up by a check skated straight back
+     * into the hitter inside VT11's 0.4 s window).
+     */
+    stagger: 0.45,
     /** On the ice (the fall and the get-up) / pinned on the wall, at least this long. */
     knockdown: 1.8,
     pinned: 1.7,
     /** Tie-up on the wall / along the ice: both are actors, held at least this long before somebody wins it. */
     tieUp: 0.7,
+    /**
+     * W3 S4, the net-front box-out pair (both are actors): the defender on the
+     * screener within `boxOutFt`, inside `boxOutNetFt` of the net, at most every
+     * `boxOutEvery` s; both committed `boxOut` s; the loser of the shove is
+     * moved `boxOutPush` ft/s off the spot (the screener off the shot line, or
+     * the defender back onto his crease).
+     */
+    boxOut: 0.5,
+    boxOutFt: 4,
+    boxOutNetFt: 14,
+    boxOutEvery: 2,
+    boxOutPush: 5,
   },
 } as const
 
@@ -111,6 +130,7 @@ export type ActName =
   | 'deke' | 'poke' | 'lifted'      // stickwork; 'lifted': his stick was lifted
   | 'hit' | 'stagger' | 'down' | 'pin' | 'pinned' // contact pairs
   | 'tieUp'                         // a wall / ice tie-up (both men)
+  | 'boxOut' | 'boxedOut'           // the net-front box-out (W3 S4): won it (stick free) / lost it (stick tied up)
   | 'set'                           // faceoff: set on his spot
   | 'save'                          // goalie: the save reaction
 
@@ -124,11 +144,13 @@ export const ACT_FLOOR: Record<ActName, number> = {
   poke: ACTION_FLOOR.stick.poke.commit,
   lifted: ACTION_FLOOR.stick.stickLift,
   hit: ACTION_FLOOR.contact.hitDoer,
-  stagger: 0.15,
+  stagger: ACTION_FLOOR.contact.stagger,
   down: ACTION_FLOOR.contact.knockdown,
   pin: ACTION_FLOOR.contact.pinDoer,
   pinned: ACTION_FLOOR.contact.pinned,
   tieUp: ACTION_FLOOR.contact.tieUp,
+  boxOut: ACTION_FLOOR.contact.boxOut,
+  boxedOut: ACTION_FLOOR.contact.boxOut,
   set: ACTION_FLOOR.faceoff.setStill,
   save: ACTION_FLOOR.goalie.saveReaction,
 }

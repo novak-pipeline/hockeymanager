@@ -37,7 +37,9 @@ export const HIT_TUNING = {
   penaltyK: 1.7,
   /** Hit-intent multipliers by where the target is: the hitter's offensive zone / own zone. */
   forecheckK: 5.6,
-  ownZoneK: 0.9
+  ownZoneK: 0.9,
+  /** The hitter's own speed into the man along the line of impact (ft/s) for the contact to be his check (W3 S4). */
+  driveMin: 1
 }
 
 /**
@@ -189,6 +191,16 @@ export function resolveHit(w: World, ct: Contact, intents: Map<Body, HitIntent>,
     if (!rng.chance(0.15 + rDef(hitter.player.composites.hitting) * 0.85)) return null
   }
   if (planned && ct.closing < HIT_TUNING.plannedClosing) return null
+  // A check is the hitter driving INTO the man (W3 S4, VT11). A man who
+  // skates into the back of a "hitter" skating away from him is a bump, not a
+  // hit: scored as one, the man hit was drawn sliding on into the check (the
+  // recoil below is relative, and both bodies were still going his way).
+  {
+    const ddx = victim.x - hitter.x
+    const ddy = victim.y - hitter.y
+    const dd = Math.max(Math.hypot(ddx, ddy), 0.1)
+    if ((hitter.vx * ddx + hitter.vy * ddy) / dd < HIT_TUNING.driveMin) return null
+  }
   intents.delete(hitter)
   const hs = sideOfBody(w, hitter)!
   const massShare = hitter.mass / (hitter.mass + victim.mass)

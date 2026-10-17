@@ -111,6 +111,13 @@ export interface Team {
    */
   coachFit?: number
   /**
+   * W3 S4: the head coach's named system (CoachSystemId, engine/league/
+   * coachProfile.ts), set by the career layer with the tactics. The watched-
+   * game engine runs its playbook (forecheck, D-zone, breakouts, regroup) with
+   * the team's tactics on top. Absent = read off the tactics alone.
+   */
+  coachSystem?: string
+  /**
    * Special-teams coaching edges, computed by the career layer from the head
    * coach's PP/PK competence and how well his chosen PP formation suits the
    * PP1 personnel. `ppEdge` multiplies this club's own power-play shot

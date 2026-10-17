@@ -1734,8 +1734,19 @@ function probeEventsOf(stream: WatchedGame['stream']): VTEvent[] {
   // the dot each faceoff belongs on, by the stoppage before it (NHL rule 76; VT7)
   const foExp = judgeFaceoffDots(stream).expectations
   let foK = 0
+  // W3 S4 (VT15): each side's declared system play, as an event whenever it changes ('-' = none)
+  const sysNow = { home: '-', away: '-' }
   for (const ev of stream) {
-    if (ev.type === 'frame') continue
+    if (ev.type === 'frame') {
+      for (const side of ['home', 'away'] as const) {
+        const lab = (side === 'home' ? ev.homeSystem : ev.awaySystem) ?? '-'
+        if (lab !== sysNow[side]) {
+          sysNow[side] = lab
+          out.push({ type: 'system', absT: playAbsT(ev, bases), actor: side, detail: lab })
+        }
+      }
+      continue
+    }
     const absT = playAbsT(ev, bases)
     const e: VTEvent = { type: ev.type, absT }
     switch (ev.type) {

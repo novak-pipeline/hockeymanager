@@ -24,6 +24,11 @@ import { DOT_EZ_X, DOT_NZ_X, DOT_Y } from './rink'
 import { DRAWN_DOTS, judgeFaceoffDots } from '@engine/analysis/faceoffRule'
 import { judgeGoalGeometry } from '@engine/analysis/goalGeometry'
 import { streamPeriodBases } from '@domain'
+import { judgeSystems, legibility, systemFramesFromStream, type SeqCase } from '@engine/analysis/systemPlay'
+import { tacticsForSystem, type CoachSystemId } from '@engine/league/coachProfile'
+
+/** W3 S4 VT15 gate (design band, measured on the S4 engine: see W3-LOG S4). */
+const VT15_GATE = { forecheckFamily: 0.5, collapseLead: 0.12, pressureLead: 0.3 }
 
 /** W3 S1 design band for the stream gates (per 60 live minutes / per player-minute). */
 const TEAM_PLAY_BAND = { aimlessPer60: 30, coveragePer60: 5, flipsPerPlayerMin: 26 }
@@ -186,6 +191,7 @@ describe('agent engine', () => {
     // both bodies in reach. Judged on the stream by @engine/analysis/actions.
     const short: string[] = []
     const apart: string[] = []
+    const against: string[] = []
     const byAct: Record<string, number> = {}
     let shots = 0
     let passes = 0
@@ -205,6 +211,7 @@ describe('agent engine', () => {
       for (const [k, v] of Object.entries(fl.byAct)) byAct[k] = (byAct[k] ?? 0) + v
       for (const c of fl.short) short.push(`g${i} ${c.what}`)
       for (const c of ct.apart) apart.push(`g${i} ${c.what}`)
+      for (const c of ct.against) against.push(`g${i} ${c.what}`)
       for (const e of out.stream) {
         if (e.type === 'hit') streamHits++
         if (e.type === 'hit' && e.receiverS !== undefined && e.receiverS > 0) hitsWithReceiver++
@@ -222,6 +229,12 @@ describe('agent engine', () => {
     expect(tieUps).toBeGreaterThan(50)
     expect(short).toEqual([])
     expect(apart).toEqual([])
+    // W3 S4 (VT11 on the stream): the man hit does not carry on into the
+    // check. Before S4 (a 'hit' scored when he skated into the back of the
+    // hitter, and a stagger as short as 0.15 s): 3.7% of hits (generated
+    // league, 8 games) / 3.8% (imported, 12); after 2.4% / 1.7% (what is
+    // left: head-on glancing collisions that slide past each other).
+    expect(against.length / hits, against.slice(0, 5).join('\n')).toBeLessThan(0.03)
   }, 120000)
 
   it('drops every faceoff on the dot its stoppage calls for (W3 S3, owner reel S2: "not dropping on the faceoff dot")', () => {
@@ -450,4 +463,56 @@ describe('agent engine', () => {
     // settled cycle is hockey; on the rush it isn't — see the scorecard).
     expect(ozBack / Math.max(1, ozPasses)).toBeLessThan(0.4)
   }, 900000)
+
+  it('VT15: the coach system is legible on the ice (W3 S4)', () => {
+    // Contrasting coaches (the heavy forecheck against the shell, the trap
+    // against the structured 1-2-2): what the classifier reads off the
+    // positions has to be the system each team declared, and the systems have
+    // to look different from each other. Before S4 every team played the same
+    // shapes and nothing was declared.
+    const pairs: Array<[CoachSystemId, CoachSystemId]> = [['aggressiveForecheck', 'defensiveShell'], ['lowEventTrap', 'structuredTwoWay']]
+    const fc = new Map<CoachSystemId, SeqCase<string>[]>()
+    const dz = new Map<CoachSystemId, SeqCase<string>[]>()
+    let labelled = 0
+    for (const [k, [A, B]] of pairs.entries()) {
+      for (let i = 0; i < 3; i++) {
+        const [hs, as] = i % 2 === 0 ? [A, B] : [B, A]
+        const h0 = team(k * 3 + i)
+        const a0 = team(k * 3 + i + 8)
+        const out = agentSimGame({ ...h0, coachSystem: hs, tactics: tacticsForSystem(hs, h0.tactics) }, { ...a0, coachSystem: as, tactics: tacticsForSystem(as, a0.tactics) }, resolve, { seed: 6100 + k * 10 + i })
+        const { frames, passes } = systemFramesFromStream(out.stream)
+        labelled += frames.filter((f) => f.homeSystem && f.awaySystem).length
+        const r = judgeSystems(frames, passes)
+        for (const [side, sys] of [['home', hs], ['away', as]] as const) {
+          fc.set(sys, [...(fc.get(sys) ?? []), ...r[side].forecheck])
+          dz.set(sys, [...(dz.get(sys) ?? []), ...r[side].dzone])
+        }
+      }
+    }
+    const lines: string[] = []
+    const share = (m: Map<CoachSystemId, SeqCase<string>[]>, s: CoachSystemId, cls: string): number => {
+      const cs = (m.get(s) ?? []).filter((c) => c.declared)
+      return cs.length ? cs.filter((c) => c.classified === cls).length / cs.length : 0
+    }
+    for (const s of ['aggressiveForecheck', 'defensiveShell', 'lowEventTrap', 'structuredTwoWay'] as CoachSystemId[]) {
+      const l = legibility(fc.get(s) ?? [])
+      const d = legibility(dz.get(s) ?? [])
+      lines.push(`${s}: forecheck ${l.matched}/${l.judged} (exact ${l.exact}) ${JSON.stringify(l.table)}; D zone ${d.matched}/${d.judged} ${JSON.stringify(d.table)}`)
+    }
+    // eslint-disable-next-line no-console
+    console.log(`VT15 system legibility:\n  ${lines.join('\n  ')}`)
+    expect(labelled).toBeGreaterThan(1000)
+    // forecheck: pressure (2-1-2 / 1-2-2) vs sitting back (1-3-1 / 1-4), read off the bodies
+    for (const s of ['aggressiveForecheck', 'defensiveShell', 'lowEventTrap', 'structuredTwoWay'] as CoachSystemId[]) {
+      const l = legibility(fc.get(s) ?? [])
+      expect(l.judged, s).toBeGreaterThan(20)
+      expect(l.share, `${s} ${lines.join(' | ')}`).toBeGreaterThan(VT15_GATE.forecheckFamily)
+    }
+    // the shell sits back further than the trap's F1 (1-4 vs 1-3-1); the heavy forecheck presses where the shell sits back
+    expect(share(fc, 'defensiveShell', '1-4')).toBeGreaterThan(share(fc, 'lowEventTrap', '1-4'))
+    const pressure = (s: CoachSystemId): number => share(fc, s, '2-1-2') + share(fc, s, '1-2-2')
+    expect(pressure('aggressiveForecheck') - pressure('defensiveShell')).toBeGreaterThan(VT15_GATE.pressureLead)
+    // D zone: the shell's collapse reads as a collapse far more often than a box team's coverage
+    expect(share(dz, 'defensiveShell', 'collapse') - share(dz, 'structuredTwoWay', 'collapse')).toBeGreaterThan(VT15_GATE.collapseLead)
+  }, 600000)
 })

@@ -163,3 +163,86 @@ Eight clips: breakaway, ozCycleShot, goalReplay, lineChangeOnFly, faceoffWinPlay
 - The 2D renderer still paints its dots at the old 0.6 / 0.55 normalized spots (the classic engine uses them; it was left alone), so agent games in 2D draw end-zone faceoffs 9 ft off its dots.
 - Bench name labels drawn above the boards; bench life (W5).
 - A `lines` change is applied by replacing the team's lines at the whistle (TeamSim's strength figure is not recomputed); goalie / timeout records are W6's.
+
+## S4 5-on-5 systems from the coach (2026-10-17)
+
+The owner said "go" without scoring reel S3.
+
+### First: the S3 carry-overs
+
+**1. The drawn carried puck 2.5-3.8 ft off the sim's (VT18 red on ozCycleShot / goalReplay).** The S3 note guessed body lag. Measured on the S3 pins (viewer-probe dumps, carried frames): the drawn carrier was only ~1 ft behind his sim position; the drawn puck sat 5.0-5.9 ft (p50) in front of the drawn body, the sim's 2.3 ft. Root cause: a carried puck was drawn on the drawn blade, and the carry pose holds the blade far out (`CARRY_BLADE` 4.1 ft, then slid out until the shaft is full length; the owner rigs' stick is 5.6 ft), while the sim carries it 2.3 ft ahead (`bladePoint`). Fix (renderer only, the sim's puck wins):
+- A carried puck is drawn where the sim has it, whenever the sim has a carrier, including while the choreography still holds a passer in his swing (that put a passed puck that never left the zone 5 ft back outside it for a frame, which read as an entry: a second VT18 class found on reel S4). A swing keeps the puck on the blade only while the sim's puck is within 2.5 ft of it.
+- The blade bends to the puck: `GripInput.puck` (the sim's puck in the carrier's frame) is the carry's blade target; the top hand comes back and up toward the ribs and chokes down to a 4.2 ft shaft before the blade is slid out, and gives the puck up rather than let the bottom hand off the shaft (no lance). The stickhandle loop's own stick and arms yield 80% to it (`animLayer.puckHold`).
+- VT17 now also judges the carried puck against the sim's (≤ 1 ft on ≥ 95% of carried frames) and the blade on the drawn puck (≤ 1 ft on ≥ 65%: the measured floor). Before / after, same pins: drawn puck vs sim p50 2.6-3.5 ft → 0.00 ft, 100% within 1 ft; blade on the puck 31-39% (puck at the sim's, no bend) → 71-89%. Unit test (`gripState.test`): the carry puts the blade within 0.6 ft of the sim's puck, both hands on (red before: 1.9 ft). VT18 on the S3 pins: red → green; reel S4: 8 green, 0 red.
+- What is left: the sim carries the puck 2.3 ft ahead of the body, nearer than a 5.6 ft stick reaches with both hands on it, so the tight carry chokes up to 1.2 ft down the owner stick. Moving the sim's blade point out to ~3.5 ft is an owner decision (it moves possession geometry and calibration).
+
+**2. VT11, a hit man moving into the check (lineChangeOnFly since S2).** Stream judge first (`judgeContacts.against`: over the 0.4 s after a hit the man hit travels < -0.5 ft along the push, and toward the hitter too). Three causes: (a) a "hit" was scored when the man hit skated into the back of a hitter who was skating away from him (the hitter's own speed along the line of impact ≤ 0): the recoil is relative, so both kept going his way; (b) a stagger lasted the force-scaled stun only, as short as 0.15 s, after which he skated straight back into the hitter; (c) the contact fell between two 4 Hz frames and the picture interpolated straight from the approach to the recoil. Fix: a check needs the hitter driving into the man (`HIT_TUNING.driveMin` 1 ft/s, otherwise it is a bump); a stagger coasts at least `ACTION_FLOOR.contact.stagger` 0.45 s (`CONSTRAINTS_VERSION` 2); a keyframe is written at every hit. Against-the-push share: imported league 12 games 3.8% → 1.7%, generated 8 games 3.7% → 2.4% (gate in `agentSim.test` < 3%). VT11 also reads relative to the hitter (a man rubbed out along the wall travels with the man finishing the check). The S3 pin's hit (p189 → p12): drawn -2.8 / sim -2.3 ft → -1.0 / -0.8, along the boards with the hitter. Reel S4: VT11 green on all three clips with hits, the knockdown included. Hits 25.8 → 25.2 a team-game.
+
+**3. Name plates over the boards.** Men arriving from the bench (behind the boards, hopping over) got their plate. Plates now only over men on the ice (`plateOnIce`: within the boards' line less 1 ft, not arriving); VT8 judges it (the probe writes `label` per rig). Reel S4: 0 of ~10,000 plates per clip behind the boards.
+
+**4. `npm run reel` dropping `--out` with a space.** Root cause: the script is `electron-vite build && node viewer-truth.mjs --record`; npm runs it through cmd and escapes an argument with a space for cmd, and because the chain starts with a .cmd shim the carets reach node literally (`^--out=K:/Hockey^ Game/.cache/reel-s4^`), which no longer starts with `--out=`, so the reel went to the default folder. `scripts/dev/cliFlags.mjs`: `unCaret`, plus `--out <dir>` and npm's own `npm_config_out`; a bare argument nobody claimed stops the run. `reelArgs.test` (the captured string). Reel S4 was written with `npm run reel -- "--out=K:/Hockey Game/.cache/reel-s4"`.
+
+### S4 (W3-DESIGN item 3, the 5-on-5 phases)
+
+- **Playbooks** (`coachProfile.ts`, no change to existing exports): `SYSTEM_PLAYBOOK` per `CoachSystemId` (forecheck, D-zone, weighted breakouts, regroup, entry, pinch, screen), `playbookFor(system, tactics)` and `systemPlaybook(profile)`. The forecheck and man/zone choice always come from the tactics (the coach writes them, the GM can change them); the system adds its flavour (the shell's trap is a 1-4, its coverage the collapse). Breakout, regroup, entry and D-zone structure (`tactics.breakout / nzOffensive / ozEntry / dZoneStructure`) override the system where the tactics carry them (owner-approved). Those four were DEAD; they are now AGENT ENGINE ONLY in `leverStaticAudit.test` and LEVER-AUDIT.md (no UI writes them; not priced). `Team.coachSystem` (additive) is set where the career writes tactics from a profile, and filled from the head coach before a watched game (old saves).
+- **On the ice** (`src/engine/agent/systems.ts`, 5-on-5 only; PP/PK/4-on-4/3-on-3 keep their tables):
+  - forecheck: 2-1-2 (F1 and F2 both in deep, F2 taking away the carrier's first outlet, never above the deep line; the strong-side D pinching by the playbook's pinch), 1-2-2 (F2 / F3 on the walls at the hash marks), the 1-3-1 trap (F1 steers from the top of their circles and does not chase behind the net; the trap holds until the puck is over the red line), the 1-4 (F1 waits at their blue line, four across ours).
+  - D zone: zone (box +1), man (S3's), the collapse (five men in the house, the point men left alone: `DZ_COLLAPSE`, `DZ_GAP`).
+  - breakouts: up the wall, reverse (partner low on the far side), wheel (partner holds the net, the D skates it round), stretch (far winger at the red line), rim (winger low on the wall); one drawn per possession from the playbook weights with a hash (never the sim RNG); the carrier's small tilt toward the play's outlet (`SYSTEM_TILT`).
+  - regroup: controlled (a D has it in the neutral zone or the carrier turned back: the forwards swing back below the red line), stretch (a man held at their blue line), dump-and-change (dump tilt).
+  - the net-front screen (deferred from S1/S2): with a shot from beyond 45 ft the net-front man stands on its line 6 ft out (job `screen`), as far as the playbook's screen. The box-out pair answers it (`boxOuts`, constraints `contact.boxOut`): the net-front defender and the screener within 4 ft, shove for the spot every 2 s; the loser is moved off the spot, the winner's stick is free (`boxOut`), the loser's is tied up (`boxedOut`: no tip); a `battle` event `netFront` with `holdS` and no winner (it is not a puck touch).
+- **Contract** (additive): `FrameEvent.homeSystem / awaySystem` ("forecheck:2-1-2", "dzone:collapse", "breakout:reverse", "regroup:controlled").
+- **VT15** (`src/engine/analysis/systemPlay.ts`): forecheck, D-zone and breakouts classified from positions (and the pass events) and compared with the declared play. Stream gate in `agentSim.test` (heavy forecheck v shell, trap v 1-2-2, 6 games): forecheck family (pressure 2-1-2/1-2-2 v sitting back 1-3-1/1-4) > 50% per system, the shell's 1-4 share above the trap's, the heavy forecheck's pressure share 30 points above the shell's, the shell's collapse share 12 points above a zone team's. Viewer VT15 in `viewerTruth.ts` (the probe gets the declared plays as `system` events; a verdict needs two sequences of a phase).
+- Reel scenarios: `breakoutPlay`, `forecheckTurnover`, `nzRegroup`, and `systemHome` / `systemAway` (the two teams' forechecks, picked only when the families differ).
+
+What each system looks like (VT15 on the generated league, 8 games per pair, forecheck sequences classified / declared):
+
+| | forecheck read off the bodies | D zone | breakouts |
+|---|---|---|---|
+| heavy forecheck (2-1-2, man) | 2-1-2 55, 1-2-2 26, 1-3-1 40, 1-4 8 (family 63%) | collapse 32% | 7% read as declared |
+| shell (1-4, collapse) | 1-4 162, 1-3-1 43, 1-2-2 22, 2-1-2 11 (86%) | collapse 43% | 20% (rims) |
+| trap (1-3-1, zone) | 1-3-1 176, 1-2-2 31, 2-1-2 19, 1-4 12 (79%) | collapse 28% | 10% |
+| structured (1-2-2, zone) | 1-2-2 86, 2-1-2 55, 1-3-1 31, 1-4 4 (80%) | collapse 23% | 18% |
+
+Imported league with every coach's system (480 games): forecheck family 82% of 5,760 sequences; the collapse read as a collapse 47% of the time, zone coverage 28%. Sitting back against pressing is legible; 2-1-2 against 1-2-2 is not separable by positions (both read about a third 2-1-2); the man coverage riding the point men tight (gap 5 ft out to 72 ft) cost 0.5 goals a team-game (the slot emptied) and was taken back to S3's man coverage. Breakouts are a tilt, not a script: the carrier still carries it out most of the time.
+
+### Detectors (stream, imported league, 480 games)
+
+| | S3 | S4 |
+|---|---|---|
+| VT13 aimless /60 | 14.9 | 14.0 |
+| VT14 coverage /60 | 3.9 | 4.3 |
+| job flips / player-min | 24.2 | 25.0 |
+| VT12 floors | 0 short | 0 short in 374,000 |
+| offside missed (stream judge) | 22 in 103,832 entries | 27 in 103,806 |
+| illegal goals / faceoffs off the dot | 0 / 0 | 0 / 0 |
+| hit man into the check (12 games) | 3.8% | 1.7% |
+
+### Calibration (imported league, 480 games, seeds 7000-7479)
+
+Two harness settings now (`teamPlay.measure`): the DB tactics as before, and `TP_COACH=1` (every team runs its head coach's system, the tactics it writes and its coach fit, as the career does).
+
+| | S3 DB tactics | S4 DB tactics | S3 coach systems | S4 coach systems |
+|---|---|---|---|---|
+| goals / team-game (band 2.70-3.43) | 3.23 | **3.29** | 3.46 | **3.49** |
+| shots on goal | 29.3 | 29.2 | 31.0 | 30.7 |
+| PP goals | 0.50 | 0.49 | 0.54 | 0.57 |
+| hits | 25.8 | 25.2 | 26.2 | 24.3 |
+| penalties | 4.27 | 4.25 | 4.25 | 4.26 |
+| rebound-shot share | 0.073 | 0.085 | 0.077 | 0.083 |
+| tie-up battles | 16.6 | 67.5 (box-outs) | 15.8 | 61.2 |
+
+Within noise (one standard error ≈ 0.06 goals) S4 leaves goals where S3 had them. **No scalar changed.** (`AGENT_TUNING.screenXg` is the old inline 0.15 screen bonus, named; setting it to 0 or 0.08 moved goals by nothing measurable, so it stays.) Ablations on 120 games with coach systems, all S4 parts on 3.83 at the time: no man-riding 3.32, no screen 3.55, no system tables 3.59, no carrier tilts 3.62, no box-outs 3.70, no 2-1-2 hunt 3.75, no trap hold 3.93. The man riding and the 34-ft screen were the goals; both were reworked (S3 man coverage; the screen only on shots from beyond 45 ft).
+
+**Found: the coach systems already push the agent engine above the band on S3** (3.46): the career runs every NHL team on its coach's tactics, the old harness did not. The watched games the owner sees are the coach-systems column. It is S9's re-fit to bring it to ~3.05; S4 does not cause it.
+
+### Reel S4 (`K:/Hockey Game/.cache/reel-s4/reel.html`)
+
+Eleven clips (`npm run reel -- "--out=K:/Hockey Game/.cache/reel-s4"`): ozCycleShot, goalReplay, lineChangeOnFly, faceoffWinPlay, bigHit, dZoneCoverage, offsideCall, and the S4 clips breakoutPlay (a stretch breakout), nzRegroup (through the D, then the entry), systemHome (TOR's 1-2-2) and systemAway (CBJ's 1-3-1 trap) from the same game. forecheckTurnover was found on an interim build (a 2-1-2, takeaway 6.8 s in) but not in the twelve searched games on the final one. Green: VT1, VT2, VT4-VT7, VT10, VT11, VT13, VT14, VT16-VT19. VT15 is n/a on every clip: the viewer half needs two sequences of a phase for a verdict and a clip holds one at most (one alone flips on a frame: TOR's 1-2-2 F1 trailing a carrier who skated back into his own corner read as a 1-3-1 on the screen and as a 1-2-2 on the stream), so VT15 is carried by the stream gate. Red: VT9 framing (all, S7); VT3 on goalReplay (a jam from 5 ft that goes in: 0.1 s of flight ending in the goal whistle); VT8 on lineChangeOnFly (a man drawn leaving 8.1 ft from his door, the bound is 8); VT12 on nzRegroup (one backhand drawn with no wind-up, the S3 class). Owner saves SHA1-verified unchanged.
+
+### Left for later
+
+- 2-1-2 against 1-2-2 is not legible at 4 Hz; the breakouts are a tilt the carrier mostly overrides (7-20% read as declared). A breakout as a scripted sequence (first pass to the outlet, then the support routes) is plan work (W3-DESIGN item 2 steps).
+- The box-out pair emits a `battle` per shove (~25 a team-game): any reader that counts net-front battles sees them.
+- The four tactics fields are wired in the agent engine only and no UI writes them; the lever harness does not price them.
+- The sim's 2.3 ft blade point against the owner rigs' 5.6 ft stick (above): owner decision.

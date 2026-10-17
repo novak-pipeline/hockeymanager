@@ -20,12 +20,19 @@ import { loadModDatabase, validateModDatabase } from '@data'
 import { framesFromStream, judgeTeamPlay, per60, SIM_GATES } from '@engine/analysis/teamPlay'
 import { judgeOffsideStream } from '@engine/analysis/offside'
 import { judgeActionFloor, judgeContacts } from '@engine/analysis/actions'
-import { agentSimGame } from './agentSim'
+import { AGENT_TUNING, agentSimGame } from './agentSim'
+import { SCREEN } from './brain'
+import { DZ_GAP, MAN_COVER, S4_DEV } from './systems'
 import { judgeGoalGeometry } from '@engine/analysis/goalGeometry'
 import { judgeFaceoffDots } from '@engine/analysis/faceoffRule'
+import { judgeSystems, legibility, systemFramesFromStream, type SeqCase } from '@engine/analysis/systemPlay'
+import { buildCoachProfile, coachFit, profileToTactics } from '@engine/league/coachProfile'
+import { generateTeamStaff } from '@engine/league/staff'
+import { Rng, deriveSeed } from '@engine/shared/rng'
 
 function findModDb(): string | null {
   if (process.env.TP_VANILLA) return null
+  if (process.env.TP_DB && existsSync(process.env.TP_DB)) return process.env.TP_DB
   let dir = resolve(process.cwd())
   for (let i = 0; i < 6; i++) {
     const p = join(dir, 'mods', 'nhl-ehm', 'database.json')
@@ -43,6 +50,33 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
   const data = dbPath ? loadModDatabase(validateModDatabase(JSON.parse(readFileSync(dbPath, 'utf8'))), { seed: 2029 }) : generateLeague({ seed: 99 })
   const res = (id: PlayerId): Player => data.players.get(id)!
   const teams = data.league.teams
+  // TP_ABLATE=screen,boxOut,... (W3 S4): turn S4 parts off to see what each does to goals
+  for (const k of (process.env.TP_ABLATE ?? '').split(',').filter(Boolean)) (S4_DEV as Record<string, boolean>)[k] = false
+  // TP_MAN=k,cap,pointFt,urgency: man-coverage variants (systems.ts DZ_GAP.man / MAN_COVER)
+  if (process.env.TP_SCREEN) SCREEN.minShotFt = Number(process.env.TP_SCREEN)
+  if (process.env.TP_SCREENXG) AGENT_TUNING.screenXg = Number(process.env.TP_SCREENXG)
+  if (process.env.TP_MAN) {
+    const [k, cap, pointFt, urg] = process.env.TP_MAN.split(',').map(Number) as [number, number, number, number]
+    Object.assign(DZ_GAP.man, { k, cap })
+    Object.assign(MAN_COVER, { pointFt, urgency: urg })
+  }
+  // TP_COACH=1 (W3 S4): every team runs its head coach's system, the tactics
+  // that system writes and its coach fit, as the career sets them
+  // (Career.applyCoachSystems); without it the teams play their DB tactics.
+  const systems: Record<string, number> = {}
+  if (process.env.TP_COACH) {
+    for (const id of teams) {
+      const team = data.teams.get(id)!
+      const rng = new Rng(deriveSeed(2029, 77, teams.indexOf(id)))
+      const coach = data.staffByTeam?.get(id)?.headCoach ?? generateTeamStaff(rng).headCoach
+      const profile = coach.profile ?? buildCoachProfile(coach, rng)
+      const roster = team.roster.map(res)
+      team.tactics = profileToTactics(profile, roster, team.tactics)
+      team.coachSystem = profile.system
+      team.coachFit = coachFit(profile, roster)
+      systems[profile.system] = (systems[profile.system] ?? 0) + 1
+    }
+  }
   let goals = 0
   let shots = 0
   let ppGoals = 0
@@ -81,6 +115,10 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
   let foJudged = 0
   let foWrong = 0
   let foUnjudged = 0
+  // W3 S4 VT15: every team's forecheck / D-zone / breakout sequences, declared vs read off the positions
+  const sysFc: SeqCase<string>[] = []
+  const sysDz: SeqCase<string>[] = []
+  const sysBo: SeqCase<string>[] = []
   for (let i = 0; i < games; i++) {
     const k = i + Number(process.env.TP_SEED0 ?? 7000) - 7000
     // TP_PAIR=band: the pairing of agentSim.test's NHL-band sample (team k v k+1, seed 5000+k)
@@ -142,6 +180,15 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
     offMissedCarried += off.missed.filter((m) => m.kind === 'carried').length
     for (const m of off.missed) if (offEx.length < 12) offEx.push(`g${i} ${m.what}`)
     const r = judgeTeamPlay(framesFromStream(out.stream), { gates: SIM_GATES })
+    {
+      const sf = systemFramesFromStream(out.stream)
+      const sr = judgeSystems(sf.frames, sf.passes)
+      for (const side of ['home', 'away'] as const) {
+        sysFc.push(...sr[side].forecheck)
+        sysDz.push(...sr[side].dzone)
+        sysBo.push(...sr[side].breakout)
+      }
+    }
     liveMin += r.liveMin
     aimless += r.aimless.length
     aimOwn += r.aimlessOwn
@@ -155,12 +202,13 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
   }
   const tg = games * 2
   const lines = [
-    `league: ${dbPath ? 'imported' : 'generated'} - ${games} games (seeds 7000-${7000 + games - 1})`,
+    `league: ${dbPath ? 'imported' : 'generated'} - ${games} games (seeds 7000-${7000 + games - 1})${process.env.TP_COACH ? ` - coach systems ${JSON.stringify(systems)}` : ''}`,
     `calibration/team-game: goals ${(goals / tg).toFixed(2)} shots ${(shots / tg).toFixed(1)} ppGoals ${(ppGoals / tg).toFixed(2)} shGoals ${(shGoals / tg).toFixed(2)} penalties ${(pens / tg).toFixed(2)} hits ${(hits / tg).toFixed(1)} PP% ${(pens ? (ppGoals / pens) * 100 : 0).toFixed(1)} rebound-share ${(rebounds / Math.max(1, shots)).toFixed(3)} blocked-share ${(blocked / Math.max(1, shots + blocked + missed)).toFixed(3)} at-save near-net atk ${(atkNear / Math.max(1, saves)).toFixed(2)} def ${(defNear / Math.max(1, saves)).toFixed(2)}`,
     `team play per 60 live min: VT13 aimless ${per60(aimless, liveMin).toFixed(2)} (own net ${per60(aimOwn, liveMin).toFixed(2)}) - VT14 doubles ${per60(doubles, liveMin).toFixed(2)} farSide ${per60(farSide, liveMin).toFixed(2)} ignored ${per60(ignored, liveMin).toFixed(2)} - VT16 camping ${per60(camping, liveMin).toFixed(2)} - job flips ${(flips / Math.max(jobMin, 1e-9)).toFixed(2)}/player-min (live ${liveMin.toFixed(0)} min)`,
     `offside: entries ${entries} offside-entries ${offEntries} whistles ${offCalls} (${(offCalls / tg).toFixed(2)}/team-game) MISSED ${offMissed} (carried ${offMissedCarried}, delayed touch ${offMissed - offMissedCarried})`,
     `VT12 action floor: ${floorShort} short in ${floorRuns} acts/shots/passes - contact pairs: ${contactApart} apart in ${contactPairs} (tie-ups ${(tieUpEvents / tg).toFixed(1)}/team-game)`,
     `goal geometry: ${geoBad} illegal in ${geoGoals} goals - faceoff dots: ${foWrong} off the right painted dot in ${foJudged} judged (${foUnjudged} unjudged)`,
+    ...(['forecheck', 'D zone', 'breakouts'] as const).map((k, i) => { const l = legibility([sysFc, sysDz, sysBo][i]!); return `VT15 ${k}: ${l.matched}/${l.judged} family (${l.exact} exact) ${JSON.stringify(l.table)}` }),
     ...offEx,
     ...ex
   ]

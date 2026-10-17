@@ -8,8 +8,9 @@
  * Pure functions: frames + a compact event list in, one red/green line each out.
  * A new visible bug class earns a detector here BEFORE its fix is written.
  */
-import type { ProbeFrame, ProbeGeometry, ProbeRig } from './viewerProbe'
+import { LABEL_BOARDS_FT, type ProbeFrame, type ProbeGeometry, type ProbeRig } from './viewerProbe'
 import { judgeTeamPlay, TP, type TPFrame, type TPReport } from '@engine/analysis/teamPlay'
+import { judgeSystems, legibility, type SeqCase, type SysFrame } from '@engine/analysis/systemPlay'
 import { judgeOffside, OFFSIDE } from '@engine/analysis/offside'
 import { ACTION_FLOOR } from '@engine/agent/constraints'
 import { DRAWN_DOTS, dotXY, type DotSpec } from '@engine/analysis/faceoffRule'
@@ -464,9 +465,22 @@ export function vt8Changes(inp: VTInput): VTResult {
   }
   let changes = 0
   let bad = 0
+  // W3 S4: a name plate on a man behind the boards (at the bench, hopping
+  // over) floats above the dasher (reel S3 offsideCall: Hagens, Knies)
+  let plates = 0
+  let benchPlates = 0
   const ev: string[] = []
   frames.forEach((f, i) => {
-    if (i === 0 || brk[i] || !isLive(f) || inReplay(f)) return
+    if (!isLive(f) || inReplay(f)) return
+    for (const r of f.rigs) {
+      if (!r.label || r.goalie) continue
+      plates++
+      if (Math.abs(r.z) > inp.geometry.rinkHalfW - LABEL_BOARDS_FT) {
+        benchPlates++
+        if (ev.length < 6 && benchPlates % 30 === 1) ev.push(`${clk(f.clock)} ${r.team} ${r.id}: name plate drawn on a man behind the boards (z ${f1(r.z)}, ${r.mode})`)
+      }
+    }
+    if (i === 0 || brk[i]) return
     const p = frames[i - 1]!
     f.rigs.forEach((r, k) => {
       const q = p.rigs[k]
@@ -491,9 +505,9 @@ export function vt8Changes(inp: VTInput): VTResult {
   })
   return {
     id: 'VT8', name: 'Line changes through the door',
-    status: changes === 0 ? 'n/a' : bad === 0 ? 'green' : 'red',
-    rule: 'every departing / arriving man crosses within ~8 ft of his bench door (or the penalty box); none appear or vanish mid-ice',
-    value: `${bad} violations in ${changes} rig hand-overs`,
+    status: changes === 0 && plates === 0 ? 'n/a' : bad === 0 && benchPlates === 0 ? 'green' : 'red',
+    rule: `every departing / arriving man crosses within ~8 ft of his bench door (or the penalty box); none appear or vanish mid-ice; no name plate on a man behind the boards (|z| > half-width − ${LABEL_BOARDS_FT} ft)`,
+    value: `${bad} violations in ${changes} rig hand-overs; ${benchPlates} of ${plates} name plates on men behind the boards`,
     evidence: ev,
   }
 }
@@ -578,17 +592,22 @@ export function vt11Hits(inp: VTInput): VTResult {
     // going INTO the hitter's push direction's opposite (sliding on through the check)
     const later = frames.find((g, j) => j > at && g.clock >= h.absT + 0.4)
     const tl = later?.rigs.find((r) => r.id === h.target)
+    const hl = later?.rigs.find((r) => r.id === h.actor)
     let along = 0
+    let rel = 0
     let simAlong = NaN
     if (tl) {
       const px = tgt.x - hitter.x
       const pz = tgt.z - hitter.z
       const n = Math.hypot(px, pz) || 1
       along = ((tl.x - tgt.x) * px + (tl.z - tgt.z) * pz) / n
+      // (W3 S4) and relative to the hitter: a man rubbed out along the wall
+      // travels WITH the man finishing the check; what reads wrong is closing on him
+      rel = hl ? along - ((hl.x - hitter.x) * px + (hl.z - hitter.z) * pz) / n : along
       if (tl.simX !== null && tgt.simX !== null && tl.simZ !== null && tgt.simZ !== null) simAlong = ((tl.simX - tgt.simX) * px + (tl.simZ - tgt.simZ) * pz) / n
     }
     judged++
-    const ok = gap <= 4.5 && along >= -0.5
+    const ok = gap <= 4.5 && (along >= -0.5 || rel >= -0.5)
     if (!ok) {
       bad++
       if (ev.length < 5) ev.push(`${clk(h.absT)} ${h.actor} → ${h.target}${h.knockdown ? ' (knockdown)' : ''}: drawn ${f1(gap)} ft apart at contact; hit man moved ${f1(along)} ft along the push in 0.4 s (sim: ${f1(simAlong)})`)
@@ -597,7 +616,7 @@ export function vt11Hits(inp: VTInput): VTResult {
   return {
     id: 'VT11', name: 'Hits: visible contact, reaction with the push',
     status: judged === 0 ? 'n/a' : bad === 0 ? 'green' : 'red',
-    rule: 'at the hit the drawn hitter and target are ≤ 4.5 ft apart, and the target does not slide on against the push in the next 0.4 s',
+    rule: 'at the hit the drawn hitter and target are ≤ 4.5 ft apart, and the target does not slide on against the push in the next 0.4 s (over the ice and toward the hitter both)',
     value: `${judged - bad}/${judged} hits read`,
     evidence: ev,
   }
@@ -679,19 +698,92 @@ export function vt16Camping(inp: VTInput): VTResult {
   }
 }
 
+/* ── VT15 system legibility (W3 S4) ───────────────────────────────────────── */
+// The same classifier as the stream gate (@engine/analysis/systemPlay), run on
+// what the screen DREW: each team's forecheck and D-zone coverage read off the
+// drawn bodies, against the play the sim declared (the frames' homeSystem /
+// awaySystem, handed to the probe as 'system' events). Breakouts need the pass
+// events, so they are judged on the stream only.
+export const VT15 = { familyShare: 0.6, minSeq: 2 } as const
+export function vt15Systems(inp: VTInput): VTResult {
+  const labels = inp.events.filter((e) => e.type === 'system' && (e.actor === 'home' || e.actor === 'away') && e.detail)
+  const at = (team: 'home' | 'away', t: number): string | undefined => {
+    let cur: string | undefined
+    for (const e of labels) {
+      if (e.absT > t + 1e-6) break
+      if (e.actor === team) cur = e.detail === '-' ? undefined : e.detail
+    }
+    return cur
+  }
+  const frames: SysFrame[] = teamPlayFrames(inp).map((f) => ({ ...f, homeSystem: at('home', f.t), awaySystem: at('away', f.t) }))
+  const rep = judgeSystems(frames)
+  const ev: string[] = []
+  const vals: string[] = []
+  let judged = 0
+  let red = false
+  for (const team of ['home', 'away'] as const) {
+    for (const k of ['forecheck', 'dzone'] as const) {
+      const l = legibility(rep[team][k] as SeqCase<string>[])
+      if (l.judged === 0) continue
+      vals.push(`${team} ${k} ${l.matched}/${l.judged} ${Object.keys(l.table).join('/')}`)
+      if (l.judged < VT15.minSeq) continue
+      judged++
+      if (l.share < VT15.familyShare) {
+        red = true
+        if (ev.length < 5) ev.push(`${team} declared ${Object.keys(l.table).join('/')} but the picture reads ${JSON.stringify(Object.values(l.table)[0])}`)
+      }
+    }
+  }
+  return {
+    id: 'VT15', name: 'System legibility: the drawn forecheck and D-zone match the declared system',
+    status: labels.length === 0 || judged === 0 ? 'n/a' : red ? 'red' : 'green',
+    rule: `per team, the forecheck (2-1-2 / 1-2-2 pressure vs 1-3-1 / 1-4 sitting back, read off the drawn bodies) and the D-zone coverage (zone / man / collapse) match the play the sim declared on ≥ ${VT15.familyShare * 100}% of sequences (judged with ≥ ${VT15.minSeq})`,
+    value: vals.join('; ') || 'no sequences',
+    evidence: ev,
+  }
+}
+
 /* ── VT17 stick grip: no lance, the carrier's blade on the ice ────────────── */
 /** Limits (share of skater-frames on live play, outside swing clips). */
-export const VT17 = { carrierLance: 0.01, allLance: 0.02, carrierBladeOff: 0.05, bladeOffFt: 0.25 } as const
+/**
+ * W3 S4 adds the carried puck's truth: drawn within `puckSimFt` of the sim's
+ * puck on `puckSimShare` of carried frames (it rode the drawn blade 2.5-3.8 ft
+ * off it on reel S3, VT18), and the carrier's blade within `bladeGapFt` of the
+ * drawn puck on `bladeGapShare` of his frames (the blade bends to the puck).
+ * Measured on reel S4: 71-89% (it was 31-39% before the blade bent to it). What
+ * is left: the sim carries the puck 2.3 ft ahead of the body, nearer than the
+ * owner rigs' 5.6 ft stick reaches with both hands on it, and the blend after
+ * a reception. The bound is the measured floor, not a target.
+ */
+export const VT17 = { carrierLance: 0.01, allLance: 0.02, carrierBladeOff: 0.05, bladeOffFt: 0.25, puckSimFt: 1, puckSimShare: 0.95, bladeGapFt: 1, bladeGapShare: 0.65 } as const
 export function vt17Grip(inp: VTInput): VTResult {
   let carrier = 0
   let carrierLance = 0
   let carrierOff = 0
   let all = 0
   let allLance = 0
+  let carried = 0
+  let puckOff = 0
+  let gapped = 0
+  let gapOff = 0
+  const puckD: number[] = []
   const ev: string[] = []
   for (const f of inp.frames) {
     if (!isLive(f) || f.dead || inReplay(f)) continue
+    if (f.carrier && !f.windup && f.goalSeq === null && Number.isFinite(f.puck.simX)) {
+      const d = Math.hypot(f.puck.x - f.puck.simX, f.puck.z - f.puck.simZ)
+      carried++
+      puckD.push(d)
+      if (d > VT17.puckSimFt) {
+        puckOff++
+        if (ev.length < 5 && puckOff % 25 === 1) ev.push(`${clk(f.clock)} ${f.carrier}: carried puck drawn ${f2(d)} ft from the sim's`)
+      }
+    }
     for (const r of skaters(f)) {
+      if (r.grip?.carrying && r.grip.puckGap !== undefined && Number.isFinite(r.grip.puckGap) && !r.grip.swing && r.visible && r.mode === 'play') {
+        gapped++
+        if (r.grip.puckGap > VT17.bladeGapFt) gapOff++
+      }
       const g = r.grip
       if (!g || !r.visible || !r.onScreen || r.mode !== 'play' || g.swing) continue
       all++
@@ -707,12 +799,17 @@ export function vt17Grip(inp: VTInput): VTResult {
     }
   }
   const s = (a: number, b: number) => (b ? a / b : 0)
-  const red = s(carrierLance, carrier) > VT17.carrierLance || s(allLance, all) > VT17.allLance || s(carrierOff, carrier) > VT17.carrierBladeOff
+  const red =
+    s(carrierLance, carrier) > VT17.carrierLance ||
+    s(allLance, all) > VT17.allLance ||
+    s(carrierOff, carrier) > VT17.carrierBladeOff ||
+    (carried > 0 && 1 - s(puckOff, carried) < VT17.puckSimShare) ||
+    (gapped > 0 && 1 - s(gapOff, gapped) < VT17.bladeGapShare)
   return {
     id: 'VT17', name: 'Stick grip: no lance, the carried puck on a blade on the ice',
     status: all === 0 ? 'n/a' : red ? 'red' : 'green',
-    rule: `outside action clips (shot, pass, deke, poke, the draw, checks and hit reactions, celebrations): the lance pose (bottom hand > 0.5 ft off the shaft, top hand 2–5.2 ft high, the stick straight out in front: blade ≥ 2.5 ft ahead of the hand and ≥ 1.5× as far ahead as to the side) on ≤ ${VT17.carrierLance * 100}% of carrier frames and ≤ ${VT17.allLance * 100}% of all skater frames; the carrier's blade > ${VT17.bladeOffFt} ft off the ice on ≤ ${VT17.carrierBladeOff * 100}% of his frames`,
-    value: `carrier ${carrier} fr: lance ${(s(carrierLance, carrier) * 100).toFixed(1)}%, blade off ice ${(s(carrierOff, carrier) * 100).toFixed(1)}%; all skaters ${all} fr: lance ${(s(allLance, all) * 100).toFixed(1)}%`,
+    rule: `outside action clips (shot, pass, deke, poke, the draw, checks and hit reactions, celebrations): the lance pose (bottom hand > 0.5 ft off the shaft, top hand 2–5.2 ft high, the stick straight out in front: blade ≥ 2.5 ft ahead of the hand and ≥ 1.5× as far ahead as to the side) on ≤ ${VT17.carrierLance * 100}% of carrier frames and ≤ ${VT17.allLance * 100}% of all skater frames; the carrier's blade > ${VT17.bladeOffFt} ft off the ice on ≤ ${VT17.carrierBladeOff * 100}% of his frames; the carried puck drawn within ${VT17.puckSimFt} ft of the sim's on ≥ ${VT17.puckSimShare * 100}% of carried frames, and the carrier's blade within ${VT17.bladeGapFt} ft of it on ≥ ${VT17.bladeGapShare * 100}% of his frames`,
+    value: `carrier ${carrier} fr: lance ${(s(carrierLance, carrier) * 100).toFixed(1)}%, blade off ice ${(s(carrierOff, carrier) * 100).toFixed(1)}%; all skaters ${all} fr: lance ${(s(allLance, all) * 100).toFixed(1)}%; carried puck vs sim p50 ${f2(pct(puckD, 0.5))} ft, ${(s(carried - puckOff, carried) * 100).toFixed(1)}% within ${VT17.puckSimFt} ft; blade on the puck ${gapped ? (s(gapped - gapOff, gapped) * 100).toFixed(1) : '-'}% within ${VT17.bladeGapFt} ft`,
     evidence: ev,
   }
 }
@@ -781,7 +878,7 @@ export function vt18Offside(inp: VTInput): VTResult {
   }
 }
 
-export const DETECTORS = [vt1Bodies, vt2Divergence, vt3Shots, vt4Motion, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt9Framing, vt10Commentary, vt11Hits, vt12ActionFloor, vt13Aimless, vt14Coverage, vt16Camping, vt17Grip, vt18Offside, vt19GoalGeometry] as const
+export const DETECTORS = [vt1Bodies, vt2Divergence, vt3Shots, vt4Motion, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt9Framing, vt10Commentary, vt11Hits, vt12ActionFloor, vt13Aimless, vt14Coverage, vt15Systems, vt16Camping, vt17Grip, vt18Offside, vt19GoalGeometry] as const
 
 export function runViewerTruth(inp: VTInput): VTResult[] {
   return DETECTORS.map((d) => d(inp))
