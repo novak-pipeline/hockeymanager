@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ProbeFrame, ProbeGeometry, ProbeRig } from './viewerProbe'
-import { runViewerTruth, vt13Aimless, vt14Coverage, vt17Grip, vt18Offside, vt1Bodies, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt19GoalGeometry, type VTInput } from './viewerTruth'
+import { runViewerTruth, vt13Aimless, vt14Coverage, vt15Systems, vt17Grip, vt18Offside, vt1Bodies, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt19GoalGeometry, type VTInput } from './viewerTruth'
 
 const GEO: ProbeGeometry = { rinkHalfL: 100, rinkHalfW: 42.5, benchGates: { home: { x: -26, z: 41 }, away: { x: 26, z: 41 } } }
 
@@ -105,6 +105,46 @@ describe('viewer-truth detectors', () => {
     expect(vt17Grip(input([frame(0, five('home'))])).status).toBe('n/a')
   })
 
+  it('VT15 (W3 S4) reads the drawn forecheck against the declared system', () => {
+    const goalies = [rig('home', 'hg', -85, 0, { goalie: true }), rig('away', 'ag', 85, 0, { goalie: true })]
+    const away = [rig('away', 'a0', 86, 6), rig('away', 'a1', 80, -20), rig('away', 'a2', 60, 30), rig('away', 'a3', 45, -10), rig('away', 'a4', 40, 15)]
+    const home = (xs: number[]) => xs.map((x, k) => rig('home', `h${k}`, x, k * 8 - 16))
+    // two forecheck sequences, split by a spell of the home team on the puck (one is anecdote, not a verdict)
+    const seq = (xs: number[]) => Array.from({ length: 250 }, (_, i) => frame(i, [...goalies, ...home(xs), ...away], i >= 120 && i < 130 ? { carrier: 'h1', puck: { x: 20, y: 0, z: 6, sx: 0, sy: 0, onScreen: true, simX: 20, simZ: 6 } } : { carrier: 'a0', puck: { x: 86, y: 0, z: 6, sx: 0, sy: 0, onScreen: true, simX: 86, simZ: 6 } }))
+    const declared = [{ type: 'system', absT: 99, actor: 'home', detail: 'forecheck:1-3-1' }]
+    // the trap: F1 steering from their circles, three across the red line, one D back
+    const trap = vt15Systems(input(seq([55, 10, 8, 6, -20]), { events: declared }))
+    expect(trap.status, trap.value).toBe('green')
+    // declared a trap, drawn two men in deep: the system is not what the screen shows
+    const deep = vt15Systems(input(seq([82, 75, 50, 30, 28]), { events: declared }))
+    expect(deep.status, deep.value).toBe('red')
+    // no declared system (the classic engine): nothing to judge
+    expect(vt15Systems(input(seq([55, 10, 8, 6, -20]))).status).toBe('n/a')
+  })
+
+  it('VT8 (W3 S4) flags a name plate on a man behind the boards', () => {
+    // reel S3 offsideCall: Hagens and Knies at the bench, their plates over the dasher
+    const atBench = (lab: boolean) => [...five('home').map((r) => ({ ...r, label: lab })), rig('home', 'h9', -22, 45.5, { mode: 'arriving', label: lab })]
+    const red = vt8Changes(input([0, 1, 2].map((i) => frame(i, atBench(true)))))
+    expect(red.status).toBe('red')
+    expect(red.evidence[0]).toContain('behind the boards')
+    expect(vt8Changes(input([0, 1, 2].map((i) => frame(i, [...five('home').map((r) => ({ ...r, label: true })), rig('home', 'h9', -22, 45.5, { mode: 'arriving', label: false })])))).status).toBe('green')
+  })
+
+  it('VT17 (W3 S4) flags a carried puck drawn off the sim puck, and a blade off the drawn puck', () => {
+    const g = (o: Partial<NonNullable<ProbeRig['grip']>>): NonNullable<ProbeRig['grip']> => ({ lance: false, oneHand: false, bladeY: 0.02, carrying: false, swing: false, state: 'carry', ...o })
+    const rigs = (gap: number) => [rig('home', 'h0', 0, 0, { grip: g({ carrying: true, puckGap: gap }) }), ...[1, 2, 3, 4].map((k) => rig('home', `h${k}`, k * 10, 0, { grip: g({ state: 'relaxed' }) }))]
+    const puckAt = (off: number) => ({ x: 2.3 + off, y: 0, z: 0, sx: 800, sy: 450, onScreen: true, simX: 2.3, simZ: 0 })
+    // reel S3: the puck rode the drawn blade ~5.5 ft out, ~3 ft off the sim's
+    const s3 = vt17Grip(input([0, 1, 2, 3].map((i) => frame(i, rigs(0.2), { carrier: 'h0', puck: puckAt(3.1) }))))
+    expect(s3.status).toBe('red')
+    expect(s3.evidence[0]).toContain("from the sim's")
+    // the puck where the sim has it, but the blade 2 ft away from it
+    expect(vt17Grip(input([0, 1, 2, 3].map((i) => frame(i, rigs(2), { carrier: 'h0', puck: puckAt(0) })))).status).toBe('red')
+    // S4: the puck on the sim's spot, the blade on it
+    expect(vt17Grip(input([0, 1, 2, 3].map((i) => frame(i, rigs(0.3), { carrier: 'h0', puck: puckAt(0.1) })))).status).toBe('green')
+  })
+
   it('VT18 flags a drawn carry over the blue line with a team-mate already in the zone and no whistle', () => {
     // home attacks +x (its goalie is at -86); h0 carries from x 20 to 32 while h1 waits at x 45
     const frames = Array.from({ length: 30 }, (_, i) => {
@@ -163,7 +203,7 @@ describe('viewer-truth detectors', () => {
 
   it('runs every detector and reports n/a with nothing to judge', () => {
     const res = runViewerTruth(input([]))
-    expect(res.map((r) => r.id)).toEqual(['VT1', 'VT2', 'VT3', 'VT4', 'VT5', 'VT6', 'VT7', 'VT8', 'VT9', 'VT10', 'VT11', 'VT12', 'VT13', 'VT14', 'VT16', 'VT17', 'VT18', 'VT19'])
+    expect(res.map((r) => r.id)).toEqual(['VT1', 'VT2', 'VT3', 'VT4', 'VT5', 'VT6', 'VT7', 'VT8', 'VT9', 'VT10', 'VT11', 'VT12', 'VT13', 'VT14', 'VT15', 'VT16', 'VT17', 'VT18', 'VT19'])
     expect(res.every((r) => r.status === 'n/a')).toBe(true)
   })
 })

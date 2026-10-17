@@ -167,10 +167,13 @@ export interface TeamTactics {
    */
   dumping?: number
 
-  // ── Positional systems — ALL DEAD (#154) ──
+  // ── Positional systems — DEAD (#154), four now AGENT ENGINE ONLY (W3 S4) ──
+  //
+  // W3 S4: breakout, nzOffensive, ozEntry and dZoneStructure override the
+  // coach's playbook in the watched-game engine where set (marked below).
   //
   // The lever audit walked every field of this interface against the engine
-  // sources. None of the nine below is read anywhere: they are labels a coach
+  // sources. None of the nine below was read anywhere: they are labels a coach
   // profile writes and the staff-meeting screen displays, and they change no
   // outcome. `leverStaticAudit.test.ts` fails the build if that stops being
   // true in either direction, and docs/LEVER-AUDIT.md carries the reasoning.
@@ -180,22 +183,22 @@ export interface TeamTactics {
   // effect is measured. See docs/LESSONS-ESPORTS-MANAGER.md for what happens to
   // a management game that ships decorative tactics.
 
-  /** DEAD — unread. Breakout system. Default: 'wheel'. */
+  /** AGENT ENGINE ONLY (W3 S4): where set, the breakout the watched-game playbook runs over the coach's (coachProfile.ts playbookFor). Not priced; no UI writes it. */
   breakout?: BreakoutSystem
 
-  /** DEAD — unread. Neutral-zone offensive system. Default: 'controlled'. */
+  /** AGENT ENGINE ONLY (W3 S4): where set, the neutral-zone regroup over the coach's (stretch / controlled). Not priced; no UI writes it. */
   nzOffensive?: NzOffensiveSystem
 
   /** DEAD — unread. Neutral-zone defensive system. Default: 'standard'. */
   nzDefensive?: NzDefensiveSystem
 
-  /** DEAD — unread. Zone-entry preference. Default: 'mixed'. */
+  /** AGENT ENGINE ONLY (W3 S4): where set, the entry style over the coach's (dump / carry tilt). Not priced; no UI writes it. */
   ozEntry?: OzEntry
 
   /** DEAD — unread. Forecheck variant (EHM labels for ForecheckSystem). */
   forecheckVariant?: ForecheckVariant
 
-  /** DEAD — unread. Defensive-zone structure. Default: 'contain'. */
+  /** AGENT ENGINE ONLY (W3 S4): where set, the D-zone coverage over the coach's (collapse / contain = zone / aggressive = man). Not priced; no UI writes it. */
   dZoneStructure?: DZoneStructure
 
   /** Offensive-zone faceoff play. Default: 'standard'. Read only by the flagged agent engine (directed draws). */

@@ -499,6 +499,14 @@ const ownerUv1 = new WeakMap<AthleteTemplate, THREE.BufferAttribute>()
 
 /** Blade centre in the carry, root space (ft): forehand side (+X = his left), out front. Matches math.puckCarriedOffset. */
 export const CARRY_BLADE = { x: 1.0, z: 4.1 }
+/** How far down the shaft a carrier's top hand may choke to keep the blade on a puck in close (ft; W3 S4). */
+export const CARRY_CHOKE_FT = 0.5
+/**
+ * In close the shaft from the top hand to the blade is at most this long (ft):
+ * a longer stick (the owner rigs' is 5.6 ft) chokes further down so the blade
+ * still reaches a puck a stride in front of him.
+ */
+export const CARRY_TIGHT_SHAFT_FT = 4.2
 
 /** Segment lengths the pose / IK maths uses (the owner's rig keeps its own proportions). */
 export interface RigDims {
@@ -857,6 +865,14 @@ export class AthleteRig {
       }
       mid.x += pose.stickSway * (1 - oh)
       const t = stick.mode === 'shoot' ? (stick.t ?? 0) : -1
+      // W3 S4: the carrier's blade goes onto the SIM's puck (root frame,
+      // authored left-handed), by the carry grip's share; the sim's puck wins,
+      // the blade bends to it (never the puck to the blade).
+      const pk = t < 0 && grip?.puck ? grip.puck : null
+      // (not while the bottom hand is letting go: a one-handed stick reaching
+      // for the puck out in front is the lance, VT17)
+      const pkW = pk ? (gw ? gw.carry * Math.max(0, 1 - 2.5 * gw.oneHand) : 1) : 0
+      if (pk && pkW > 0) mid = { x: mid.x + (pk.x - mid.x) * pkW, y: mid.y, z: mid.z + (pk.z - mid.z) * pkW }
       if (t >= 0) {
         // the code swing (no clip): always two hands
         oh = 0
@@ -902,10 +918,55 @@ export class AthleteRig {
         }
         kk = hi
       }
-      const top = add3(T0, scale3(sub3(T1, T0), kk * (1 - oh)))
+      let top = add3(T0, scale3(sub3(T1, T0), kk * (1 - oh)))
       // the top hand holds the KNOB (no stick poking up past the hand like a
       // cane): slide the blade out along the ice until the shaft is full length
-      const full = this.dims.stickLen - 0.25
+      let full = this.dims.stickLen - 0.25
+      if (pkW > 0) {
+        // W3 S4: the blade stays on the SIM's puck, close in front of him. A
+        // full-length shaft from the hip would slide it out to ~5.5 ft (the
+        // drawn puck sat 3 ft off the sim's), so the top hand comes up and in
+        // toward the chest (bisection: continuous) and chokes down the shaft
+        // a little before the blade is slid out for what is left.
+        full -= Math.max(CARRY_CHOKE_FT, full - CARRY_TIGHT_SHAFT_FT) * pkW
+        // (the tight carry: the top hand drawn back and up to his ribs on the
+        // top-hand side, the stick standing steep beside him)
+        const TH = { x: shR.x * 0.85, y: shR.y - 0.15, z: Math.max(0.4, shR.z - 1.0) }
+        const short = (k: number): boolean => len3(sub3(lerpV(top, TH, k), heel)) < full
+        if (short(0)) {
+          let lo = 0
+          let hi = 1
+          if (short(1)) lo = 1
+          else {
+            for (let it = 0; it < 12; it++) {
+              const m = (lo + hi) / 2
+              if (short(m)) lo = m
+              else hi = m
+            }
+          }
+          let k = (lo === 1 ? 1 : hi) * pkW
+          // both hands stay on the stick: the bottom hand must still reach the
+          // shaft from the drawn-back top hand, or the tight carry is a lance
+          // (VT17) - give up puck for two hands (the blade slides out after)
+          const twoHands = (kk2: number): boolean => {
+            const t2 = lerpV(top, TH, kk2)
+            const dd = sub3(t2, heel)
+            const L = Math.min(len3(dd), full)
+            return len3(sub3(add3(heel, scale3(norm(dd), L * 0.66)), shL)) <= reachL || len3(sub3(add3(heel, scale3(norm(dd), L * 0.82)), shL)) <= reachL
+          }
+          if (!twoHands(k)) {
+            let a0 = 0
+            let b0 = k
+            for (let it = 0; it < 10; it++) {
+              const m = (a0 + b0) / 2
+              if (twoHands(m)) a0 = m
+              else b0 = m
+            }
+            k = a0
+          }
+          top = lerpV(top, TH, k)
+        }
+      }
       {
         const dd = sub3(top, heel)
         const hx = heel.x - top.x

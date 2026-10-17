@@ -348,6 +348,14 @@ export type FrameEvent = GameEventBase & {
   puckCarrier: PlayerRef | null
   /** Additive (agent engine): puck height above the ice in feet (chips, saucers, clears). */
   puckZ?: number
+  /**
+   * Additive (agent engine, W3 S4): each side's phase and the play its system
+   * runs in it, "phase:play" ("forecheck:2-1-2", "dzone:collapse",
+   * "breakout:reverse", "regroup:controlled"); absent outside those phases.
+   * For the system-legibility detector (VT15) and a coaching overlay.
+   */
+  homeSystem?: string
+  awaySystem?: string
 }
 
 export type GameEvent =

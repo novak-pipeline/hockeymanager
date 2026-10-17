@@ -44,7 +44,8 @@ import type { GameOutcome } from '@engine/shared/outcome'
 import { benchTilt, scoreEffectMult } from '@engine/shared/scoreEffects'
 import { FIGHT_MAJOR_SECONDS } from '@engine/shared/fights'
 import { fragilityWeight } from '@engine/shared/inGameInjury'
-import { coachFitMultiplier } from '@engine/league/coachProfile'
+import { coachFitMultiplier, playbookFor } from '@engine/league/coachProfile'
+import { S4_DEV, systemLabel } from './systems'
 import { changedFields, changesAt, type MatchChange, type StopPoint } from '@engine/shared/matchChanges'
 import {
   budgetTactics,
@@ -76,7 +77,7 @@ import {
   type Puck
 } from './physics'
 import { BLUE_X, DOT_EZ_X, DOT_NZ_X, DOT_Y, GOAL_X, HALF_X, HALF_Y, NET_HALF_W, boardsClamp, distToBoards } from './rink'
-import { SHAPE_TUNING, DEKE, DEKE_LEVEL, REACH, blockChance, decideCarrier, dekeDefRead, dekeGoalieRead, dekeSkill, pressureOn, realPressure, thinkSide, xgAt, type ThinkOut } from './brain'
+import { NET_ROLES, SHAPE_TUNING, DEKE, DEKE_LEVEL, REACH, blockChance, decideCarrier, dekeDefRead, dekeGoalieRead, dekeSkill, pressureOn, realPressure, thinkSide, xgAt, type ThinkOut } from './brain'
 import { decideHit, resolveHit, type HitIntent } from './physical'
 import { jobName, newTeamPlan, setJob } from './plans'
 import { emptyAgentTelemetry, type AgentTelemetry } from './telemetry'
@@ -104,6 +105,8 @@ const DOWN_S = { knockdown: ACTION_FLOOR.contact.knockdown, pinned: ACTION_FLOOR
 export const AGENT_TUNING = {
   /** Reconciles the empirical xG with this engine's shot mix → goals/game. */
   finishK: 0.9,
+  /** A goal-scoring bonus per body (up to two) screening the goalie on the shot line (W3 S4: see the W3-LOG for its fit). */
+  screenXg: 0.15,
   /** A checker this close (ft) to a stopped carrier, himself stopped, is tied up with him. */
   tieUpR: 5,
   /** Share of tipped shots credited to the tipper (the NHL scores a tip as the deflector's shot). */
@@ -310,6 +313,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     slots: [],
     goalie: null as unknown as Body,
     tactics: sim.team.tactics,
+    playbook: playbookFor(sim.team.coachSystem, sim.team.tactics),
     roles: new Map(),
     presser: null,
     plans: new Map(),
@@ -406,6 +410,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   // What each man is committed to (an ActName from constraints.ts) and since
   // when: he starts nothing new until it runs out; written on every frame.
   const acts = new Map<Body, { act: ActName; from: number; until: number }>()
+  /** W3 S4: when each net-front defender last shoved for the spot (boxOuts). */
+  const boxAt = new Map<Body, number>()
   const setAct = (b: Body, act: ActName, dur: number): void => {
     acts.set(b, { act, from: now, until: now + Math.max(0, dur) })
   }
@@ -419,7 +425,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   /** Committed to an action that leaves no hands for the puck or a new job (follow-through, a check, a lunge, on the ice...). */
   const handsFull = (b: Body): boolean => {
     const a = actOf(b)
-    return a !== null && a.act !== 'windup' && a.act !== 'pass' && a.act !== 'receive' && a.act !== 'deke' && a.act !== 'set' && a.act !== 'save'
+    return a !== null && a.act !== 'windup' && a.act !== 'pass' && a.act !== 'receive' && a.act !== 'deke' && a.act !== 'set' && a.act !== 'save' && a.act !== 'boxOut'
   }
   let bite = null as { side: Side; dy: number; until: number } | null
   let prevPoss: { side: Side; since: number; adv: number } | null = null
@@ -447,6 +453,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         if (fields.length === 0) continue
         sim.team = budgetTactics({ ...sim.team, tactics: { ...sim.team.tactics, ...c.tactics } })
         s.tactics = sim.team.tactics
+        s.playbook = playbookFor(sim.team.coachSystem, sim.team.tactics)
         ev({ t: T(), period, type: 'tacticChange', team: sim.team.id, what: 'tactics', fields, at })
       } else {
         sim.team = { ...sim.team, lines: c.lines }
@@ -1394,6 +1401,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     let tipper: Body | null = null
     for (const sk of s.skaters) {
       if (sk === c) continue
+      // (his stick tied up in a box-out: no tip, W3 S4)
+      if (actOf(sk)?.act === 'boxedOut') continue
       const dn = Math.hypot(sk.x - netX * 0.93, sk.y)
       if (dn > 12) continue
       // a stick behind the goal line, or with no angle, cannot tip it in (W3 S3)
@@ -1465,7 +1474,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         let eff = xg
         eff *= 1 + clamp(err, 0, 5) * 0.12 // caught out of position
         if (oneTimer && gMoving > 5) eff *= 1.35 // across the royal road, goalie moving
-        eff *= 1 + Math.min(screen, 2) * 0.15 // can't see it
+        eff *= 1 + Math.min(screen, 2) * AGENT_TUNING.screenXg // can't see it
         if (tipper) eff *= 1.4
         if (beatGoalie) eff *= DEKE.beatG // he bit on the deke: the net is open
         if (now - lastSaveAt < 1.6) eff *= 1.3 // rebound, goalie scrambling
@@ -1731,6 +1740,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   pending = { dot: { x: 0, y: 0 }, zone: 'neutral', since: -FACEOFF_MIN_WAIT, zoneFor: null }
 
   let lastFrameT = -1
+  /** A hit landed this substep: a keyframe at the contact follows (VT11). */
+  let hitKey = false
 
   // -------------------------------------------------------------------------
   // Dekes and shot release
@@ -1921,6 +1932,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         for (const sw of changing.get(s)?.swaps ?? []) s.leaving.add(sw.out)
       }
       for (const s of sides) thinkSide(w, s, out)
+      boxOuts()
       if (w.carrier && w.control) {
         const c = w.carrier
         const s = w.control
@@ -2250,10 +2262,13 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         if (pending || celebration) break
         const r = resolveHit(w, ct, hitIntent, rng, ctx.intensity ?? 0)
         if (!r) continue
+        hitKey = true
         // The contact pair (constraints.ts): the hitter drives through (or
         // holds the pin), the man hit staggers, goes down, or is pinned - both
         // committed for their share. Physics made the contact, so both bodies
         // are in range by construction.
+        // (a stagger coasts at least its row: the stun IS the commit, physics.ts)
+        if (!r.knockdown && !r.pinned) r.victim.stun = Math.max(r.victim.stun, ACTION_FLOOR.contact.stagger)
         const recvS = r.knockdown ? Math.max(r.victim.stun, DOWN_S.knockdown) : r.pinned ? Math.max(r.victim.stun, DOWN_S.pinned) : r.victim.stun
         setAct(r.hitter, r.pinned ? 'pin' : 'hit', r.pinned ? ACTION_FLOOR.contact.pinDoer : ACTION_FLOOR.contact.hitDoer)
         setAct(r.victim, r.knockdown ? 'down' : r.pinned ? 'pinned' : 'stagger', recvS)
@@ -2285,6 +2300,14 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       // the period clock runs only in live play (stopped from the whistle to the drop)
       if (deadAt === null) clock += DT
       w.t = now
+      // A keyframe at the contact (W3 S4, VT11): a check lands between two 4 Hz
+      // frames, and the picture interpolated straight from the bodies' approach
+      // to their recoil, so the two men were drawn feet apart at the moment
+      // of contact and the man hit seemed to slide on into the hitter.
+      if (hitKey) {
+        hitKey = false
+        if (now > lastFrameT + 1e-6) emitFrame()
+      }
       if (deadAt !== null) continue
       if (k === SUBSTEPS - 1) battleTick()
       // The pass leaves the blade at the end of its release (constraints.ts).
@@ -2429,6 +2452,70 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   // Helpers that close over the period state.
   // -------------------------------------------------------------------------
   /** The frame for the state at `now` (role/job and the W3 S2 act on every skater). */
+  /**
+   * W3 S4, the net-front box-out pair (constraints.ts contact.boxOut): the
+   * defender who owns the net front (brain.ts NET_ROLES, on his man) and the
+   * attacker he covers, both in reach in front of the net, shove for the spot.
+   * Both are committed for the hold. The defender's strength and balance (and
+   * his checking) against the screener's: the loser is moved off the spot - the
+   * screener out of the goalie's eyes, or the defender back onto his crease.
+   */
+  function boxOuts(): void {
+    if (!S4_DEV.boxOut) return
+    const C = ACTION_FLOOR.contact
+    for (const s of sides) {
+      if (w.control === s || s.shorthanded) continue
+      const opp = oppOf(s)
+      const netX = -s.a * GOAL_X
+      // only with the puck in our end (a shot can come)
+      if (puck.x * s.a > -BLUE_X) continue
+      for (const d of s.skaters) {
+        const p = s.plans.get(d)
+        if (!p || p.job !== 'mark' || !p.mark || !NET_ROLES.has(p.role)) continue
+        const f = p.mark
+        if (!opp.skaters.includes(f) || f === w.carrier || actOf(d) || actOf(f) || d.stun > 0 || f.stun > 0) continue
+        // the man screening a shot from distance (brain.ts SCREEN), or parked on the crease
+        if (opp.plans.get(f)?.job !== 'screen' && Math.hypot(f.x - netX, f.y) > 8) continue
+        if (Math.hypot(f.x - netX, f.y) > C.boxOutNetFt || Math.hypot(d.x - f.x, d.y - f.y) > C.boxOutFt) continue
+        if (now - (boxAt.get(d) ?? -99) < C.boxOutEvery) continue
+        boxAt.set(d, now)
+        const power = (b: Body, def: boolean): number =>
+          0.55 * r01(b.player.ratings.physical.strength) + 0.3 * r01(b.player.ratings.physical.balance) + 0.15 * (def ? rDef(b.player.ratings.defensive.checking) : r01(b.player.ratings.technical.deflections))
+        const dWins = rng.chance(clamp(0.5 + (power(d, true) - power(f, false)) * 1.2, 0.15, 0.85))
+        // the loser goes off the spot: the screener away from the slot line, the defender back onto his crease
+        const loser = dWins ? f : d
+        const ux = dWins ? f.x - d.x : netX - d.x
+        const uy = dWins ? f.y - d.y : -d.y
+        const ul = Math.max(Math.hypot(ux, uy), 0.1)
+        loser.vx += (ux / ul) * C.boxOutPush
+        loser.vy += (uy / ul) * C.boxOutPush
+        // the winner's stick is free (a rebound is his to play), the loser's is tied up
+        setAct(dWins ? d : f, 'boxOut', C.boxOut)
+        setAct(dWins ? f : d, 'boxedOut', C.boxOut)
+        ev({
+          t: T(),
+          period,
+          type: 'battle',
+          kind: 'netFront',
+          pos: { x: (d.x + f.x) / 2 / HALF_X, y: (d.y + f.y) / 2 / HALF_Y },
+          players: [d.player.id, f.player.id],
+          // (the shove for the spot, not the puck: no winner, so no reader takes it for a puck touch - the offside judge would)
+          winner: null,
+          durationS: C.boxOut,
+          holdS: C.boxOut
+        })
+      }
+    }
+  }
+
+  /** W3 S4: each side's phase and system play (live 5v5 or not, as the brain last planned it). */
+  function sysSnap(): { homeSystem?: string; awaySystem?: string } {
+    if (deadAt !== null) return {}
+    const h = systemLabel(H.team.table, H.playbook, H.team.breakout?.plan ?? null)
+    const a = systemLabel(A.team.table, A.playbook, A.team.breakout?.plan ?? null)
+    return { ...(h ? { homeSystem: h } : {}), ...(a ? { awaySystem: a } : {}) }
+  }
+
   function emitFrame(): void {
     // W3 S2: the action he is committed to and how far into it (constraints.ts).
     const actSnap = (b: Body): { act?: string; actT?: number } => {
@@ -2473,7 +2560,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       awayGoalie: { player: A.goalie.player.id, pos: { x: A.goalie.x / HALF_X, y: A.goalie.y / HALF_Y }, ...actSnap(A.goalie) },
       puck: { x: clamp(pk.x / HALF_X, -1, 1), y: clamp(pk.y / HALF_Y, -1, 1) },
       puckCarrier: deadAt === null && !pending && w.carrier && recv !== w.carrier ? w.carrier.player.id : null,
-      ...(deadAt === null && puck.z > 0.05 ? { puckZ: Math.round(puck.z * 10) / 10 } : {})
+      ...(deadAt === null && puck.z > 0.05 ? { puckZ: Math.round(puck.z * 10) / 10 } : {}),
+      ...sysSnap()
     })
     lastFrameT = now
     if (tm) tm.frames++

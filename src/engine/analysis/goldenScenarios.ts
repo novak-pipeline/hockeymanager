@@ -12,6 +12,7 @@
  */
 import { playAbsT } from '@domain'
 import type { GameEvent, GameStream } from '@domain/events'
+import { judgeSystems, systemFramesFromStream } from './systemPlay'
 
 export type ScenarioKind =
   | 'breakaway'
@@ -28,11 +29,17 @@ export type ScenarioKind =
   | 'offsideCall'
   | 'faceoffNeutral'
   | 'faceoffDefensive'
+  | 'breakoutPlay'
+  | 'forecheckTurnover'
+  | 'nzRegroup'
+  | 'systemHome'
+  | 'systemAway'
 
 export const SCENARIO_KINDS: readonly ScenarioKind[] = [
   'breakaway', 'twoOnOne', 'ozCycleShot', 'ppSetPlay', 'goalReplay',
   'lineChangeOnFly', 'faceoffWinPlay', 'bigHit', 'saveRebound', 'emptyNetLate',
   'dZoneCoverage', 'offsideCall', 'faceoffNeutral', 'faceoffDefensive',
+  'breakoutPlay', 'forecheckTurnover', 'nzRegroup', 'systemHome', 'systemAway',
 ]
 
 /** Human label + how much game time to show around the moment (lead before, tail after).
@@ -56,6 +63,13 @@ export const SCENARIO_META: Record<ScenarioKind, { label: string; lead: number; 
   // W3 S3 (owner, reel S2: "not dropping on the faceoff dot"): a draw in each zone
   faceoffNeutral:  { label: 'Neutral-zone faceoff',           lead: 6,  tail: 8 },
   faceoffDefensive: { label: 'Defensive-zone faceoff',        lead: 6,  tail: 8 },
+  // W3 S4 (5-on-5 systems from the coach): the system's plays, and the two
+  // teams' forechecks side by side (picked only when the two systems differ)
+  breakoutPlay:    { label: 'Breakout (the system\'s pattern)', lead: 3, tail: 9 },
+  forecheckTurnover: { label: 'Forecheck forces a turnover',  lead: 8,  tail: 6 },
+  nzRegroup:       { label: 'Neutral-zone regroup',           lead: 3,  tail: 9 },
+  systemHome:      { label: 'Our system: the forecheck',      lead: 2,  tail: 10 },
+  systemAway:      { label: 'Their system: the forecheck',    lead: 2,  tail: 10 },
 }
 
 export interface ScenarioHit {
@@ -245,6 +259,64 @@ export function findScenarios(
       if (!side) continue
       push({ kind: 'emptyNetLate', absT: playAbsT(ev, bases), period: 3, side, note: 'goalie pulled, extra attacker', quality: 1 })
       break
+    }
+  }
+
+  // W3 S4: the system plays, read off the positions (systemPlay: what the
+  // classifier sees must be what the team declared, so the clip shows it).
+  {
+    const { frames, passes } = systemFramesFromStream(stream)
+    if (frames.some((f) => f.homeSystem || f.awaySystem)) {
+      const sys = judgeSystems(frames, passes)
+      const periodAt = (t: number): number => {
+        let p = 1
+        for (const [k, b] of bases) if (t >= b && k > p) p = k
+        return p
+      }
+      const family = (c: string | null): string => (c === '2-1-2' || c === '1-2-2' ? 'pressure' : c === '1-3-1' || c === '1-4' ? 'back' : '?')
+      const modeOf = (xs: readonly (string | null)[]): string | null => {
+        const n = new Map<string, number>()
+        for (const x of xs) if (x) n.set(x, (n.get(x) ?? 0) + 1)
+        return [...n.entries()].sort((p, q) => q[1] - p[1])[0]?.[0] ?? null
+      }
+      const homeFc = modeOf(sys.home.forecheck.map((c) => c.declared))
+      const awayFc = modeOf(sys.away.forecheck.map((c) => c.declared))
+      for (const side of ['home', 'away'] as const) {
+        for (const c of sys[side].forecheck) {
+          if (!c.declared || family(c.classified) !== family(c.declared)) continue
+          const exact = c.classified === c.declared ? 0.4 : 0
+          // the two teams' forechecks side by side, when their systems differ
+          if (homeFc && awayFc && family(homeFc) !== family(awayFc)) {
+            push({ kind: side === 'home' ? 'systemHome' : 'systemAway', absT: c.t, period: periodAt(c.t), side, note: `${c.declared} forecheck (reads ${c.classified})`, quality: 1 + exact })
+          }
+          // a pressure forecheck that wins the puck back in their end
+          if (family(c.declared) === 'pressure') {
+            const win = evs.find((y) => y.abs > c.t && y.abs <= c.t + 8 && y.ev.type === 'takeaway' && sideOf(y.ev.by) === side)
+            if (win) push({ kind: 'forecheckTurnover', absT: win.abs, period: win.ev.period, side, note: `${c.declared} forecheck, takeaway ${(win.abs - c.t).toFixed(1)} s in`, quality: 1 + exact })
+          }
+        }
+        for (const c of sys[side].breakout) {
+          if (!c.declared || c.classified !== c.declared) continue
+          push({ kind: 'breakoutPlay', absT: c.t, period: periodAt(c.t), side, note: `${c.declared} breakout`, quality: 1 + (c.declared === 'reverse' || c.declared === 'stretch' || c.declared === 'wheel' ? 0.3 : 0) })
+        }
+      }
+      // the regroup: the side back through its D in the neutral zone for ≥ 2 s, then into their zone
+      for (const side of ['home', 'away'] as const) {
+        let start = -1
+        for (const f of frames) {
+          const lab = side === 'home' ? f.homeSystem : f.awaySystem
+          if (f.live && lab === 'regroup:controlled') {
+            if (start < 0) start = f.t
+          } else if (start >= 0) {
+            if (f.t - start >= 2 && f.live) {
+              const ownNet = side === 'home' ? f.homeNetX : -f.homeNetX
+              const into = ownNet !== 0 && f.puck.x * (ownNet > 0 ? -1 : 1) > 25
+              push({ kind: 'nzRegroup', absT: start, period: periodAt(start), side, note: `regroup through the D ${(f.t - start).toFixed(1)} s${into ? ', then the entry' : ''}`, quality: 1 + (into ? 0.4 : 0) })
+            }
+            start = -1
+          }
+        }
+      }
     }
   }
 

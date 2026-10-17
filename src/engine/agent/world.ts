@@ -8,6 +8,7 @@ import type { Rng } from '@engine/shared/rng'
 import type { TeamSim } from '@engine/full/fullSim'
 import type { Body, MoveCmd, Puck } from './physics'
 import type { Plan, TeamPlan } from './plans'
+import type { Playbook } from '@engine/league/coachProfile'
 
 export interface Side {
   sim: TeamSim
@@ -19,6 +20,8 @@ export interface Side {
   slots: number[]
   goalie: Body
   tactics: TeamTactics
+  /** W3 S4: the coach's system with the tactics on top (coachProfile.ts playbookFor). */
+  playbook: Playbook
   /** Current role per skater (template role name or 'ONPUCK'/'CHASE'). */
   roles: Map<Body, string>
   /** The skater assigned to pressure the carrier (defending), if any. */

@@ -23,6 +23,7 @@
  */
 import type { Body } from './physics'
 import type { RoleSpot } from './templates'
+import type { BreakoutPlan } from '@engine/league/coachProfile'
 
 export type JobKind = 'puck' | 'chase' | 'mark' | 'lane' | 'twoOnOne' | 'support' | 'screen' | 'spot' | 'change' | 'carry'
 
@@ -57,6 +58,8 @@ export interface TeamPlan {
   force: boolean
   /** The man racing the loose puck (kept unless another man is clearly first). */
   chaser: Body | null
+  /** W3 S4: the breakout this possession runs (systems.ts), drawn once per possession. */
+  breakout: { plan: BreakoutPlan; poss: number } | null
 }
 
 /** Tunables (design; tuned on the target-flips metric and the VT13/VT14 detectors). */
@@ -103,7 +106,7 @@ export const PLAN = {
 }
 
 export function newTeamPlan(): TeamPlan {
-  return { key: '', strong: 1, table: null, at: -99, force: false, chaser: null }
+  return { key: '', strong: 1, table: null, at: -99, force: false, chaser: null, breakout: null }
 }
 
 /** The plan for `b` (created on first use: a new man has no plan → a trigger). */

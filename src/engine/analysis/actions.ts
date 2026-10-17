@@ -37,7 +37,17 @@ export interface ContactReport {
   hits: number
   tieUps: number
   apart: FloorCase[]
+  /**
+   * W3 S4 (VT11 on the stream): the man hit carries on INTO the check: over
+   * the next CONTACT_AFTER_S his travel along the push (hitter to him at
+   * contact) is below -0.5 ft. The receiver's half of the pair: a check moves
+   * him away from the hitter; he does not skate on through him.
+   */
+  against: FloorCase[]
 }
+
+/** The window after a hit in which the man hit must not travel back into the check (VT11 reads 0.4 s). */
+export const CONTACT_AFTER_S = 0.4
 
 /** Seconds of slack for the stream's 0.01-s rounding and a substep (0.05 s). */
 const TOL = 0.06
@@ -149,7 +159,7 @@ export function judgeActionFloor(stream: GameStream): ActionFloorReport {
  * so each man is carried from the last frame before it at his own velocity.
  */
 export function judgeContacts(stream: GameStream): ContactReport {
-  const rep: ContactReport = { hits: 0, tieUps: 0, apart: [] }
+  const rep: ContactReport = { hits: 0, tieUps: 0, apart: [], against: [] }
   const base = absBase(stream)
   const frames: FrameEvent[] = []
   const times: number[] = []
@@ -182,6 +192,20 @@ export function judgeContacts(stream: GameStream): ContactReport {
     }
     return { x, y }
   }
+  /** Linear between the two frames that bracket t (null past the frames or across a gap). */
+  const lerp = (t: number, id: string): { x: number; y: number } | null => {
+    const i = before(t)
+    if (i < 0) return null
+    const f = frames[i]!
+    const s = [...f.home, ...f.away].find((q) => q.player === id)
+    if (!s) return null
+    const g = frames[i + 1]
+    const q = g ? [...g.home, ...g.away].find((r) => r.player === id) : undefined
+    const dt = g ? times[i + 1]! - times[i]! : 0
+    if (!q || dt <= 0 || dt > 0.3) return t - times[i]! < 0.05 ? { x: s.pos.x * 100, y: s.pos.y * 42.5 } : null
+    const u = Math.min(1, Math.max(0, (t - times[i]!) / dt))
+    return { x: (s.pos.x + (q.pos.x - s.pos.x) * u) * 100, y: (s.pos.y + (q.pos.y - s.pos.y) * u) * 42.5 }
+  }
   const slack = 1.5
   for (const e of stream) {
     if (e.type === 'hit') {
@@ -192,6 +216,20 @@ export function judgeContacts(stream: GameStream): ContactReport {
       rep.hits++
       const d = Math.hypot(a.x - b.x, a.y - b.y)
       if (d > ACTION_FLOOR.contact.hitFt + slack) rep.apart.push({ t, what: `${clk(t)} hit ${e.by} on ${e.on}: ${d.toFixed(1)} ft apart at contact` })
+      // the receiver's half: carried away from the hitter, never on into him
+      const a0 = lerp(t, e.by as string)
+      const b0 = lerp(t, e.on as string)
+      const b1 = lerp(t + CONTACT_AFTER_S, e.on as string)
+      const a1 = lerp(t + CONTACT_AFTER_S, e.by as string)
+      if (a0 && b0 && b1) {
+        const px = b0.x - a0.x
+        const py = b0.y - a0.y
+        const n = Math.hypot(px, py)
+        const along = n > 1e-6 ? ((b1.x - b0.x) * px + (b1.y - b0.y) * py) / n : 0
+        // (and relative to the hitter: a man rubbed out along the wall travels with him; VT11 reads both)
+        const rel = a1 && n > 1e-6 ? along - ((a1.x - a0.x) * px + (a1.y - a0.y) * py) / n : along
+        if (along < -0.5 && rel < -0.5) rep.against.push({ t, what: `${clk(t)} hit ${e.by} on ${e.on}${e.knockdown ? ' (knockdown)' : e.pinned ? ' (pinned)' : ''}: the man hit travelled ${along.toFixed(1)} ft into the check in ${CONTACT_AFTER_S} s` })
+      }
     } else if (e.type === 'battle' && e.holdS !== undefined && e.players.length === 2) {
       const t = playAbsT(e, base)
       const a = at(t, e.players[0] as string)

@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { generateLeague } from '@data/generate'
 import type { GameStream, Player, PlayerId } from '@domain'
 import { fullSimGame } from '@engine/full/fullSim'
+import { agentSimGame } from '@engine/agent/agentSim'
+import { tacticsForSystem } from '@engine/league/coachProfile'
 import { bestPerKind, findScenarios, periodBaseMap, streamFingerprint } from './goldenScenarios'
 
 const P = (id: string): PlayerId => id as PlayerId
@@ -48,4 +50,21 @@ describe('golden scenario finder', () => {
     // a full game reliably holds hits, faceoff plays, goals and changes
     expect(kinds).toEqual(expect.arrayContaining(['bigHit', 'faceoffWinPlay', 'lineChangeOnFly']))
   })
+
+  it('finds the system clips (W3 S4) in an agent game between contrasting coaches', () => {
+    const data = generateLeague({ seed: 7 })
+    const resolve = (id: PlayerId): Player => data.players.get(id)!
+    const [aId, bId] = data.league.teams
+    const h0 = data.teams.get(aId!)!
+    const a0 = data.teams.get(bId!)!
+    const home = { ...h0, coachSystem: 'aggressiveForecheck', tactics: tacticsForSystem('aggressiveForecheck', h0.tactics) }
+    const away = { ...a0, coachSystem: 'lowEventTrap', tactics: tacticsForSystem('lowEventTrap', a0.tactics) }
+    const g = agentSimGame(home, away, resolve, { seed: 12 })
+    const homeIds = new Set(home.roster.map((x) => x as string))
+    const best = bestPerKind(findScenarios(g.stream, (id) => homeIds.has(id), 'home'))
+    // the heavy forecheck and the trap, side by side
+    expect(best.get('systemHome')?.note).toMatch(/^2-1-2 forecheck/)
+    expect(best.get('systemAway')?.note).toMatch(/^1-3-1 forecheck/)
+    expect([...best.keys()]).toEqual(expect.arrayContaining(['breakoutPlay', 'nzRegroup']))
+  }, 60000)
 })

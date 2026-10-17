@@ -53,7 +53,7 @@ import {
 import { advanceStridePhase, skaterPose, goaliePose, celebrationWeight, crowdExcitement, facingTarget } from './pose'
 import { Arena, NET_X, REFLECT_LAYER } from './arena'
 import { AthleteBatch, AthleteRig, athleteMaterial, type PoseOverlay } from './athlete'
-import type { ProbeGeometry, ProbeRig, ProbeSink } from './viewerProbe'
+import { plateOnIce, type ProbeGeometry, type ProbeRig, type ProbeSink } from './viewerProbe'
 import { isLance, isOneHanded, measureGrip, type GripSample } from './gripTruth'
 import { blendGrip, chooseGrip, gripBend, type GripInput, type GripState, type GripWeights } from './gripState'
 import { loadAthleteAssets, loadOwnerAssets, mergeClips, type AthleteAssets, type OwnerAssets, type OwnerTextures } from './gltfAthlete'
@@ -127,6 +127,10 @@ const PUCK_H = 0.09
 
 // ── Spring half-lives ───────────────────────────────────────────────────────
 const PLAYER_FOLLOW_HL = 0.08
+/** A carried puck further than this from the carrier's drawn root is not reached for (the carry keeps its spot). */
+const CARRY_REACH_FT = 6.5
+/** A swing's blade keeps the puck only while the sim's puck is within this of it (ft; W3 S4). */
+const SWING_HOLD_FT = 2.5
 
 // ── Camera follow tuning (calm broadcast) ───────────────────────────────────
 // Pipeline: puck → soft dead-band → slow EMA → focus speed limit → critically
@@ -769,6 +773,8 @@ export class Rink3dRenderer implements MatchRenderer {
     const cands: Array<{ p: PlayerPose; pri: number }> = []
     for (const p of this.allPoses()) {
       if (!p.labelOn || !p.labelText || !p.rig.visible) continue
+      // only men on the ice: a man at the bench or hopping the boards has no plate (W3 S4)
+      if (p.mode === 'arriving' || !plateOnIce(p.worldZ.pos, RINK_HALF_W)) continue
       const d = Math.hypot(p.worldX.pos - this.puck.x, p.worldZ.pos - this.puck.z)
       if (p === carrier) cands.push({ p, pri: 100 })
       else if (!p.rig.goalie && d < LABEL_NEAR_FT) cands.push({ p, pri: 50 - d })
@@ -1572,6 +1578,13 @@ export class Rink3dRenderer implements MatchRenderer {
     return { sample, lance: isLance(sample), oneHand: isOneHanded(sample), carrying, swing, state: p.rig.gripState ?? 'n/a', speedFt: Math.hypot(p.vx, p.vz) }
   }
 
+  /** Dev/harness: the drawn blade's centre to the drawn puck, over the ice (ft; W3 S4 VT17). */
+  private bladeGap(p: PlayerPose): number {
+    const w = p.rig.bladeWorld?.()
+    if (!w) return NaN
+    return Math.hypot(w.x - this.puckMesh.position.x, w.z - this.puckMesh.position.z)
+  }
+
   /** Dev/harness: every visible on-ice skater's grip this frame. */
   gripProbe(): Array<{ id: string | null; team: 'home' | 'away'; clips: string[] } & NonNullable<ReturnType<Rink3dRenderer['gripOf']>>> {
     const out: Array<{ id: string | null; team: 'home' | 'away'; clips: string[] } & NonNullable<ReturnType<Rink3dRenderer['gripOf']>>> = []
@@ -1629,7 +1642,8 @@ export class Rink3dRenderer implements MatchRenderer {
         team: p.team, goalie, id, mode: goalie ? 'play' : p.mode, visible: rig.visible,
         x: p.worldX.pos, z: p.worldZ.pos, sx: pr.sx, sy: pr.sy, onScreen: pr.onScreen,
         simX: sp ? sp.x : null, simZ: sp ? sp.z : null, boneW,
-        ...(grip ? { grip: { lance: grip.lance, oneHand: grip.oneHand, bladeY: grip.sample.bladeY, carrying: grip.carrying, swing: grip.swing, state: grip.state } } : {}),
+        label: this.labelRects.some((l) => l.key === `${p.team}:${rig.slot}`),
+        ...(grip ? { grip: { lance: grip.lance, oneHand: grip.oneHand, bladeY: grip.sample.bladeY, carrying: grip.carrying, swing: grip.swing, state: grip.state, ...(grip.carrying ? { puckGap: this.bladeGap(p) } : {}) } } : {}),
       })
     }
     const pm = this.puckMesh.position
@@ -1825,17 +1839,37 @@ export class Rink3dRenderer implements MatchRenderer {
     let pTargetX: number
     let pTargetZ: number
     const blade = carrierPose !== null ? this.bladePoint(carrierPose) : null
-    if (carrierPose !== null && blade) {
+    // (a passer the choreography still holds in his swing while the SIM has
+    // already given the puck to his receiver: the sim wins too - drawing it
+    // on the passer's blade put a puck that never left the zone a few feet
+    // outside it for a frame, which read as a fresh carried entry: VT18)
+    if (carrierPose !== null && snap.carrier !== null) {
+      // W3 S4: a carried puck is drawn where the SIM has it, and the carry
+      // bends the blade onto it (gripFor → athlete.ts). It used to ride the
+      // drawn blade, ~5.5 ft out in front, 2.5-3.8 ft off the sim's puck: at
+      // the blue line the screen showed a different entry from the sim's (VT18).
+      pTargetX = puckWx
+      pTargetZ = puckWz
+      this.carrierWx = carrierPose.worldX.pos
+      this.carrierWz = carrierPose.worldZ.pos
+    } else if (carrierPose !== null && blade) {
       // on the posed blade (C3): wherever the clip / IK actually put the stick
-      pTargetX = blade.x
-      pTargetZ = blade.z
+      // - the swing's last beat, while the sim's puck is still right there.
+      // Once the sim's puck is gone from it (released, deflected) the sim
+      // wins (W3 S4: the blade held a passed puck 5 ft back across the blue
+      // line, a drawn exit and re-entry the sim never had: VT18).
+      const off = Math.hypot(blade.x - puckWx, blade.z - puckWz) > SWING_HOLD_FT
+      pTargetX = off ? puckWx : blade.x
+      pTargetZ = off ? puckWz : blade.z
       this.carrierWx = carrierPose.worldX.pos
       this.carrierWz = carrierPose.worldZ.pos
     } else if (carrierPose !== null && carrierId !== snap.carrier) {
       // wind-up with the blade in the air: the puck waits on the ice where the
-      // stick will come down on it (it doesn't jump to a body offset)
-      pTargetX = this.puck.x
-      pTargetZ = this.puck.z
+      // stick will come down on it (it doesn't jump to a body offset) - while
+      // the sim's puck is still there (W3 S4)
+      const off = Math.hypot(this.puck.x - puckWx, this.puck.z - puckWz) > SWING_HOLD_FT
+      pTargetX = off ? puckWx : this.puck.x
+      pTargetZ = off ? puckWz : this.puck.z
       this.carrierWx = carrierPose.worldX.pos
       this.carrierWz = carrierPose.worldZ.pos
     } else if (carrierPose !== null) {
@@ -2415,7 +2449,21 @@ export class Rink3dRenderer implements MatchRenderer {
     }
     // an action clip owns the torso (a shot's wind-up, a check): the grip's waist bend yields to it
     const bend = gripBend(pose.gripW) * (1 - Math.min(1, pose.layer?.armsWeight() ?? 0))
-    return { w: pose.gripW, incoming, armSwing: Math.sin(pose.stridePhase), bend }
+    // W3 S4: the carrier's blade goes to the SIM's puck (it is drawn there,
+    // renderAt): in his root frame, authored left-handed. Out of reach (a rig
+    // still catching up after a seek or a hop) the carry keeps its own spot.
+    let puck: { x: number; z: number } | null = null
+    const snap = this.lastSnap
+    if (snap && id !== null && id === (snap.carrier as string | null) && id !== this.windupNow) {
+      const dx = normXtoWorld(snap.puck.x) - pose.worldX.pos
+      const dz = normYtoWorld(snap.puck.y) - pose.worldZ.pos
+      const a = pose.angle
+      const x = dx * Math.cos(a) - dz * Math.sin(a)
+      const z = dx * Math.sin(a) + dz * Math.cos(a)
+      if (Math.hypot(x, z) < CARRY_REACH_FT) puck = { x: pose.rig.rightHanded ? -x : x, z }
+    }
+    if (pose.layer) pose.layer.puckHold = puck ? 1 : 0
+    return { w: pose.gripW, incoming, armSwing: Math.sin(pose.stridePhase), bend, puck }
   }
 
   private updateGoaliePose(

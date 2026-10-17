@@ -22,6 +22,9 @@ import { CLIPS, envelope, maskWeight, isArmBone, type ClipMask, type ClipMeta } 
 
 type Bones = Record<string, THREE.Bone>
 
+/** How much of the stickhandle loop's stick a carrier on the sim's puck gives up (W3 S4). */
+export const STICKHANDLE_HOLD = 0.8
+
 const _q = new THREE.Quaternion()
 const _v = new THREE.Vector3()
 
@@ -231,8 +234,18 @@ export class ActionLayer {
   }
 
   blendStick(bones: Bones): void {
-    for (const a of this.active) if (!a.meta.bodyOnly) blendClip(bones, a.clip, this.time(a), !!a.meta.loop, this.weight(a), a.meta.mask, 'stick')
+    for (const a of this.active) {
+      if (a.meta.bodyOnly) continue
+      // W3 S4: a carrier stickhandling keeps his blade on the SIM's puck (the
+      // sim's puck wobbles side to side as he handles it): the loop's own
+      // sweep only shades the stick; the hands then lock onto the shaft.
+      const k = a.name === 'stickhandle' ? 1 - STICKHANDLE_HOLD * this.puckHold : 1
+      blendClip(bones, a.clip, this.time(a), !!a.meta.loop, this.weight(a) * k, a.meta.mask, 'stick')
+    }
   }
+
+  /** 0..1: how much the carrier's blade holds the sim's puck over the stickhandle loop's own stick (set per frame by the renderer). */
+  puckHold = 0
 
   /**
    * Every clip drives the arms with its own baked arm motion: the Blender
@@ -241,7 +254,13 @@ export class ActionLayer {
    * TOUCHED UP onto the shaft (gripWeights → athlete.ts lockGrips).
    */
   blendArms(bones: Bones): void {
-    for (const a of this.active) if (!a.meta.bodyOnly) blendClip(bones, a.clip, this.time(a), !!a.meta.loop, this.weight(a), a.meta.mask, 'arms')
+    for (const a of this.active) {
+      if (a.meta.bodyOnly) continue
+      // (W3 S4: the arms follow the stick the carrier holds on the sim's puck,
+      // not the loop's own - its baked hands sat on a stick that is not there)
+      const k = a.name === 'stickhandle' ? 1 - STICKHANDLE_HOLD * this.puckHold : 1
+      blendClip(bones, a.clip, this.time(a), !!a.meta.loop, this.weight(a) * k, a.meta.mask, 'arms')
+    }
   }
 
   /** Weight of active clips driving the arms (upper / full body). */

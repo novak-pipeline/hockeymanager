@@ -99,6 +99,28 @@ describe('grip poses on the rig', () => {
       expect(m.topY).toBeLessThan(3.6)
     })
   }
+  // W3 S4 (VT18 carry-over): the drawn puck is the SIM's puck, ~2.3 ft ahead of
+  // the body; the carry used to hold the blade ~5.5 ft out (3 ft off the sim's
+  // puck on the reel S3 clips). The blade bends to the puck, both hands on.
+  for (const right of [false, true]) {
+    it(`the carry puts the blade on the sim's puck in close (${right ? 'R' : 'L'})`, () => {
+      for (const pk of [{ x: 1.0, z: 2.3 }, { x: 0.3, z: 2.3 }, { x: 1.7, z: 2.6 }, { x: 0.6, z: 3.0 }]) {
+        const rig = new AthleteRig(false, 0, new THREE.MeshStandardMaterial())
+        rig.rightHanded = right
+        rig.mirrorW = right ? 1 : 0
+        const w = oneHot('carry')
+        rig.apply(0, 0, 0, skaterPose(1.3, 0.6, 0), { mode: 'carry' }, null, { w, bend: gripBend(w), armSwing: 0.4, puck: pk })
+        rig.root.updateMatrixWorld(true)
+        const b = rig.bladeWorld()!
+        const m = measureGrip(rig)!
+        const want = { x: right ? -pk.x : pk.x, z: pk.z }
+        expect(Math.hypot(b.x - want.x, b.z - want.z), `${JSON.stringify(pk)} blade at ${b.x.toFixed(2)}, ${b.z.toFixed(2)}`).toBeLessThan(0.6)
+        expect(isOneHanded(m), JSON.stringify(m)).toBe(false)
+        expect(isLance(m), JSON.stringify(m)).toBe(false)
+        expect(m.bladeY).toBeLessThan(0.25)
+      }
+    })
+  }
   // (`incoming` is in the AUTHORED left-handed frame: the renderer mirrors it for a right shot,
   // so the same authored input is a pass from the mirrored side)
   it('the right-handed grip is the mirror of the left', () => {

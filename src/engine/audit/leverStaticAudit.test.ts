@@ -42,6 +42,13 @@ export const WIRED_TACTICS = [
   // draws. Not yet priced by the lever harness (it runs the default engines).
   'offensiveFaceoff',
   'defensiveFaceoff',
+  // W3 S4: read by the agent engine's playbook (coachProfile.ts playbookFor):
+  // where the tactics carry them they override the coach's system. No UI
+  // writes them yet; not priced by the lever harness.
+  'breakout',
+  'nzOffensive',
+  'ozEntry',
+  'dZoneStructure',
 ] as const
 
 /**
@@ -54,12 +61,8 @@ export const UNREAD_TACTICS = [
   'mentality',
   'backchecking',
   'tempoStyle',
-  'breakout',
-  'nzOffensive',
   'nzDefensive',
-  'ozEntry',
   'forecheckVariant',
-  'dZoneStructure',
   'shotTargeting',
   'personalTactics',
 ] as const

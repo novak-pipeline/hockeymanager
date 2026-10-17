@@ -264,12 +264,12 @@ updated; if a wired lever loses its last consumer, the test says so.
 | `tactics.mentality` | **DEAD** — unread |
 | `tactics.backchecking` | **DEAD** — unread |
 | `tactics.tempoStyle` | **DEAD** — unread |
-| `tactics.breakout` | **DEAD** — unread |
-| `tactics.nzOffensive` | **DEAD** — unread |
+| `tactics.breakout` | **AGENT ENGINE ONLY** (W3 S4) — where set, overrides the coach system's breakout weights in the watched-game playbook (wheel / rim / reverse); no UI writes it yet; not yet priced |
+| `tactics.nzOffensive` | **AGENT ENGINE ONLY** (W3 S4) — where set, overrides the system's neutral-zone regroup (stretch → a man held at the far blue line; controlled / overload → the swing-back regroup); not yet priced |
 | `tactics.nzDefensive` | **DEAD** — unread |
-| `tactics.ozEntry` | **DEAD** — unread |
+| `tactics.ozEntry` | **AGENT ENGINE ONLY** (W3 S4) — where set, overrides the system's entry style (dump / carry tilt on the dump-in option); not yet priced |
 | `tactics.forecheckVariant` | **DEAD** — unread |
-| `tactics.dZoneStructure` | **DEAD** — unread |
+| `tactics.dZoneStructure` | **AGENT ENGINE ONLY** (W3 S4) — where set, overrides the system's D-zone coverage (collapse / contain = zone / aggressive = man); not yet priced |
 | `tactics.offensiveFaceoff` | **AGENT ENGINE ONLY** — read by the flagged agent engine's directed draws (standard → back to a D, wheel → to the wall, tie-up → scrum, quick-strike → at the net); the default director engine ignores it; not yet priced |
 | `tactics.defensiveFaceoff` | **AGENT ENGINE ONLY** — as above, for defensive-zone draws; not yet priced |
 | `tactics.shotTargeting` | **DEAD** — unread |

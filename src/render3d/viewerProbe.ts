@@ -38,7 +38,21 @@ export interface ProbeRig {
    * `swing` = an action clip is playing (shot, pass, deke, poke, the draw, a
    * check or hit reaction, a celebration).
    */
-  grip?: { lance: boolean; oneHand: boolean; bladeY: number; carrying: boolean; swing: boolean; state: string }
+  grip?: { lance: boolean; oneHand: boolean; bladeY: number; carrying: boolean; swing: boolean; state: string; puckGap?: number }
+  /** W3 S4: his name plate was drawn this frame (optional: older probes). */
+  label?: boolean
+}
+
+/**
+ * W3 S4: name plates only over men ON the ice. A man within this many feet of
+ * the boards' line or past it (at the bench, hopping over the dasher) gets no
+ * plate: it floated above the boards (reel S3 offsideCall).
+ */
+export const LABEL_BOARDS_FT = 1
+
+/** Whether a skater at world z (across the rink) may carry a name plate. */
+export function plateOnIce(z: number, rinkHalfW: number): boolean {
+  return Math.abs(z) <= rinkHalfW - LABEL_BOARDS_FT
 }
 
 export interface ProbeViewerState {

@@ -606,3 +606,121 @@ export function nudgeProfileForDirection(profile: CoachProfile, direction: strin
   }
   return assemble(axes)
 }
+
+/* ─────────────────── W3 S4: the system on the ice (the agent engine) ─────────────────── */
+//
+// A coach's system is a PLAYBOOK the watched-game engine runs (W3-DESIGN item
+// 3): which forecheck, which D-zone coverage, which breakouts (weighted, so a
+// team still varies), how it regroups in the neutral zone, how it enters, and
+// how hard its net-front man takes the goalie's eyes. The team's own tactics
+// (the GM's choices, or the coach's own adaptation of them) override the
+// system where they are set (owner-approved, W3-DESIGN §5 decision 4).
+
+/** Forecheck: two deep (2-1-2), one deep and two at the hash marks (1-2-2), the neutral-zone trap (1-3-1), or one man and four back (1-4). */
+export type ForecheckPlan = '1-2-2' | '2-1-2' | '1-3-1' | '1-4'
+/** D-zone coverage: zone (box +1), man-to-man, or the collapse (the shell: five men in the house). */
+export type DZonePlan = 'zone' | 'man' | 'collapse'
+/** Breakouts: the strong-side winger up the wall, the D-to-D reverse behind the net, the D wheeling the net, the stretch pass, the rim off the boards. */
+export type BreakoutPlan = 'up' | 'reverse' | 'wheel' | 'stretch' | 'rim'
+/** Neutral-zone regroup: back through the D and attack with speed, hit a stretch man, or dump it in and change. */
+export type RegroupPlan = 'controlled' | 'stretch' | 'dumpChange'
+export type EntryPlan = 'carry' | 'dump' | 'mixed'
+
+export const BREAKOUT_PLANS: readonly BreakoutPlan[] = ['up', 'reverse', 'wheel', 'stretch', 'rim']
+
+export interface Playbook {
+  /** The coach's system it came from (null: read off the tactics alone). */
+  system: CoachSystemId | null
+  forecheck: ForecheckPlan
+  dZone: DZonePlan
+  /** Relative weights: the breakout a possession runs is drawn from these. */
+  breakout: Readonly<Record<BreakoutPlan, number>>
+  regroup: RegroupPlan
+  entry: EntryPlan
+  /** 0..1: how far the strong-side D pinches down the wall on the forecheck. */
+  pinch: number
+  /** 0..1: how hard the net-front man screens a point shot. */
+  screen: number
+  /** The plays the team's tactics set over the system's own (forecheck, dZone, breakout, regroup, entry). */
+  overrides: readonly string[]
+}
+
+const BO = (up: number, reverse: number, wheel: number, stretch: number, rim: number): Record<BreakoutPlan, number> => ({ up, reverse, wheel, stretch, rim })
+
+/** Each system's playbook (our own reading of the standard NHL identities; the numbers are design, not measured). */
+export const SYSTEM_PLAYBOOK: Record<CoachSystemId, Omit<Playbook, 'system' | 'overrides'>> = {
+  lowEventTrap: { forecheck: '1-3-1', dZone: 'zone', breakout: BO(0.3, 0.5, 0.2, 0, 0), regroup: 'controlled', entry: 'dump', pinch: 0.15, screen: 0.4 },
+  aggressiveForecheck: { forecheck: '2-1-2', dZone: 'man', breakout: BO(0.6, 0, 0, 0, 0.4), regroup: 'dumpChange', entry: 'dump', pinch: 0.8, screen: 0.7 },
+  speedTransition: { forecheck: '1-2-2', dZone: 'zone', breakout: BO(0.3, 0, 0.2, 0.5, 0), regroup: 'stretch', entry: 'carry', pinch: 0.4, screen: 0.5 },
+  cyclePossession: { forecheck: '2-1-2', dZone: 'zone', breakout: BO(0.3, 0.4, 0.3, 0, 0), regroup: 'controlled', entry: 'carry', pinch: 0.5, screen: 0.8 },
+  structuredTwoWay: { forecheck: '1-2-2', dZone: 'zone', breakout: BO(0.5, 0.3, 0.2, 0, 0), regroup: 'controlled', entry: 'mixed', pinch: 0.35, screen: 0.5 },
+  runAndGun: { forecheck: '2-1-2', dZone: 'man', breakout: BO(0.4, 0, 0, 0.6, 0), regroup: 'stretch', entry: 'carry', pinch: 0.9, screen: 0.5 },
+  defensiveShell: { forecheck: '1-4', dZone: 'collapse', breakout: BO(0.4, 0, 0, 0, 0.6), regroup: 'dumpChange', entry: 'dump', pinch: 0.05, screen: 0.3 },
+}
+
+const FORECHECK_PLAN: Record<ForecheckSystem, ForecheckPlan> = { '1-2-2': '1-2-2', '2-1-2': '2-1-2', trap: '1-3-1' }
+
+/**
+ * The playbook a team runs tonight: its coach's system, with the team's own
+ * tactics on top wherever they are set. The forecheck and the man/zone choice
+ * always come from the tactics (the coach writes them from his system and the
+ * GM can change them; the system only adds its flavour: the trap a shell sits
+ * back in becomes a 1-4, its zone coverage the collapse). Breakout, regroup,
+ * entry and D-zone structure override the system only when the tactics carry
+ * them. Pure; the agent engine reads it.
+ */
+export function playbookFor(system: CoachSystemId | string | null | undefined, tactics: TeamTactics): Playbook {
+  const sys = system && system in SYSTEM_PLAYBOOK ? (system as CoachSystemId) : null
+  const base = sys ? SYSTEM_PLAYBOOK[sys] : null
+  const overrides: string[] = []
+  let forecheck: ForecheckPlan = FORECHECK_PLAN[tactics.forecheck] ?? '1-2-2'
+  if (sys && base && tactics.forecheck === SYSTEM_FORECHECK[sys]) forecheck = base.forecheck
+  else if (sys) overrides.push('forecheck')
+  let dZone: DZonePlan = tactics.dZoneCoverage === 'man' ? 'man' : base?.dZone === 'collapse' ? 'collapse' : 'zone'
+  if (base && dZone !== base.dZone) overrides.push('dZone')
+  if (tactics.dZoneStructure) {
+    dZone = tactics.dZoneStructure === 'collapse' ? 'collapse' : tactics.dZoneStructure === 'aggressive' ? 'man' : 'zone'
+    overrides.push('dZone')
+  }
+  let breakout: Record<BreakoutPlan, number> = { ...(base?.breakout ?? BO(0.5, 0.3, 0.2, 0, 0)) }
+  if (tactics.breakout) {
+    breakout = BO(0, 0, 0, 0, 0)
+    breakout[tactics.breakout === 'rim' ? 'rim' : tactics.breakout === 'reverse' ? 'reverse' : 'wheel'] = 1
+    overrides.push('breakout')
+  }
+  let regroup: RegroupPlan = base?.regroup ?? 'controlled'
+  if (tactics.nzOffensive) {
+    regroup = tactics.nzOffensive === 'stretch' ? 'stretch' : 'controlled'
+    overrides.push('regroup')
+  }
+  let entry: EntryPlan = base?.entry ?? 'mixed'
+  if (tactics.ozEntry) {
+    entry = tactics.ozEntry
+    overrides.push('entry')
+  }
+  // the pinch also reads the risk slider (profileToTactics writes it from riskTolerance)
+  const pinch = clamp01(((base?.pinch ?? 0.35) + tactics.tempo.defensivePinch) / 2)
+  return { system: sys, forecheck, dZone, breakout, regroup, entry, pinch, screen: base?.screen ?? 0.5, overrides: [...new Set(overrides)] }
+}
+
+/** The tactics a system's own playbook reads back unchanged (tests, dev scenarios): its forecheck and its man / zone choice. */
+export function tacticsForSystem(system: CoachSystemId, base: TeamTactics): TeamTactics {
+  return { ...base, forecheck: SYSTEM_FORECHECK[system], dZoneCoverage: SYSTEM_PLAYBOOK[system].dZone === 'man' ? 'man' : 'zone' }
+}
+
+/**
+ * The playbook a coach's profile runs with the tactics his system writes (no
+ * GM changes). With a roster, the roster adaptation profileToTactics makes (a
+ * 1-2-2 a slow team cannot skate becomes a 2-1-2) is included.
+ */
+export function systemPlaybook(profile: CoachProfile, roster?: Player[]): Playbook {
+  const t: TeamTactics = roster
+    ? profileToTactics(profile, roster, NEUTRAL_TACTICS)
+    : {
+        ...NEUTRAL_TACTICS,
+        forecheck: SYSTEM_FORECHECK[profile.system],
+        dZoneCoverage: dZoneFromStructure(profile.structure),
+        tempo: { ...NEUTRAL_TACTICS.tempo, defensivePinch: knob(profile.riskTolerance, OFFENCE_GAIN) },
+      }
+  return playbookFor(profile.system, t)
+}

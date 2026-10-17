@@ -2750,6 +2750,7 @@ export class Career {
       if (!profile) continue
       const roster = team.roster.map((id) => this.resolve(id))
       team.tactics = profileToTactics(profile, roster, team.tactics)
+      team.coachSystem = profile.system
       // How well the coach's system suits this roster → small on-ice edge in the sim.
       team.coachFit = coachFit(profile, roster)
       // The bench's matchup habit (home last change): an imported coach with a
@@ -9415,7 +9416,25 @@ export class Career {
    * The classic engine stays as code (quick-sim reference, dev reel compare),
    * off the watched path.
    */
-  private watchSim(): typeof fullSimGame { return agentSimGame }
+  private watchSim(): typeof fullSimGame {
+    return (home, away, resolve, opts) => {
+      this.ensureCoachSystem(home)
+      this.ensureCoachSystem(away)
+      return agentSimGame(home, away, resolve, opts)
+    }
+  }
+
+  /**
+   * W3 S4: the watched engine runs the head coach's system (Team.coachSystem).
+   * Saves from before S4 carry none until the next rollover: fill it from the
+   * coach's profile (the tactics are left alone).
+   */
+  private ensureCoachSystem(team: Team): void {
+    if (team.coachSystem !== undefined) return
+    const ts = this.teamStaffMap.get(team.id as string)
+    const profile = ts?.headCoach.profile
+    if (profile) team.coachSystem = profile.system
+  }
   getLineManagementMode(): 'coach' | 'fillGaps' { return this.lineManagementMode }
   setLineManagementMode(mode: 'coach' | 'fillGaps'): void { this.lineManagementMode = mode }
 
@@ -11403,7 +11422,7 @@ export class Career {
     const away = this.data.teams.get(asTeamId(awayId))
     if (!home || !away) throw new Error(`devExhibition: unknown team ${home ? awayId : homeId}`)
     this.lastBroadcast = this.buildBroadcastContext(home.id, away.id, this.currentDay, false)
-    const sim = engine === 'agent' ? agentSimGame : fullSimGame
+    const sim = engine === 'agent' ? this.watchSim() : fullSimGame
     const res = sim(home, away, this.storyResolve(), { seed })
     return this.buildWatched(home.id, away.id, res.stream)
   }
@@ -25240,6 +25259,7 @@ export class Career {
     // The new man's system takes hold immediately — that is the point of the change.
     const roster = team.roster.map((id) => this.resolve(id))
     team.tactics = profileToTactics(replacement.profile, roster, team.tactics)
+    team.coachSystem = replacement.profile.system
     team.coachFit = coachFit(replacement.profile, roster)
     this.pushNews(f.category, f.headline, `${f.body} ${replacement.name} takes over behind the bench.`, {
       teamId: f.teamId,
@@ -26253,6 +26273,7 @@ export class Career {
 
     const roster = team.roster.map((id) => this.resolve(id))
     team.tactics = profileToTactics(ts.headCoach.profile, roster, team.tactics)
+    team.coachSystem = ts.headCoach.profile.system
     team.coachFit = styleMatch(roster, team.tactics).fit
 
     this.pushNews(
@@ -26293,6 +26314,7 @@ export class Career {
 
     const roster = team.roster.map((id) => this.resolve(id))
     team.tactics = profileToTactics(caretaker.profile, roster, team.tactics)
+    team.coachSystem = caretaker.profile.system
     team.coachFit = styleMatch(roster, team.tactics).fit
 
     this.pushNews(

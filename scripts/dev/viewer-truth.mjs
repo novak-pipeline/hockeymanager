@@ -27,11 +27,20 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFi
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { buildReelHtml } from './viewer-truth-reel.mjs'
+import { readFlag, strayArgs, unCaret } from './cliFlags.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
-const flag = (k, d) => {
-  const f = process.argv.find((a) => a.startsWith(`--${k}=`))
-  return f ? f.slice(k.length + 3) : process.argv.includes(`--${k}`) ? true : d
+// `--k=v`, `--k v` and npm's `npm_config_k` (a flag npm ate without `--`):
+// see cliFlags.mjs; npm's cmd caret escaping undone first (unCaret: the real S3 bug).
+const BOOL_FLAGS = new Set(['record'])
+const ARGV = unCaret(process.argv)
+const flag = (k, d) => readFlag(ARGV, process.env, k, d, BOOL_FLAGS)
+{
+  const stray = strayArgs(ARGV, BOOL_FLAGS)
+  if (stray.length) {
+    console.error(`✖ unrecognised argument(s) ${stray.map((s) => JSON.stringify(s)).join(', ')}: did npm eat a flag? Use \`npm run reel -- --out=<dir>\``)
+    process.exit(2)
+  }
 }
 const ENGINES = String(flag('engines', 'agent')).split(',').filter(Boolean)
 const RECORD = flag('record', false) === true
@@ -73,6 +82,12 @@ export const CHECKLIST = {
   offsideCall: ['Was a man over the blue line ahead of the puck when it crossed?', 'Did the whistle go at the right moment (or the men tag up on a delayed call)?', 'Faceoff outside the zone?'],
   faceoffNeutral: ['Puck dropped ON the painted dot?', 'The right dot for that stoppage?', 'Everyone set before the drop?'],
   faceoffDefensive: ['Puck dropped ON the painted dot?', 'The right dot for that stoppage?', 'Everyone set before the drop?'],
+  // W3 S4: 5-on-5 systems from the coach
+  breakoutPlay: ['Can you name the breakout (up the wall, reverse, wheel, stretch, rim)?', 'Is the outlet man where the pass goes?', 'Does it get out cleanly?'],
+  forecheckTurnover: ['Is it clear who goes in first and who comes second?', 'Is the D-to-D / the wall outlet taken away?', 'Does the turnover come from the pressure?'],
+  nzRegroup: ['Do the forwards swing back to come again with speed?', 'D-to-D through the middle?', 'An entry with speed after it?'],
+  systemHome: ['Can you tell how deep this team forechecks (two in / one in / sitting back)?', 'Does it look different from the other team\'s clip?'],
+  systemAway: ['Can you tell how deep this team forechecks (two in / one in / sitting back)?', 'Does it look different from the other team\'s clip?'],
 }
 
 const sha1 = (file) => createHash('sha1').update(readFileSync(file)).digest('hex')

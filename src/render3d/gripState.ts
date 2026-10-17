@@ -117,6 +117,12 @@ export interface GripInput {
    * is what lets the bottom hand reach a third of the way down the shaft.
    */
   bend?: number
+  /**
+   * W3 S4: the carrier's puck where the SIM has it, on the ice in his root
+   * frame (authored left-handed, like `incoming`). The carry grip puts the
+   * blade on it: the sim's puck wins, the drawn blade bends to it.
+   */
+  puck?: { x: number; z: number } | null
 }
 
 /** The waist bend each grip asks for (rad), before an action clip takes the torso. */
