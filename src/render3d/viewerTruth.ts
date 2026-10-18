@@ -15,6 +15,8 @@ import { judgeOffside, OFFSIDE } from '@engine/analysis/offside'
 import { ACTION_FLOOR } from '@engine/agent/constraints'
 import { DRAWN_DOTS, dotXY, type DotSpec } from '@engine/analysis/faceoffRule'
 import { crossesMouth, GOAL_GEOM } from '@engine/analysis/goalGeometry'
+import { judgePuckPlay, PUCK_PLAY_RULE, type PPEvent, type PPFrame, type PuckPlayReport } from '@engine/analysis/puckPlay'
+import { PUCK_SPEED } from '@engine/agent/constraints'
 
 /** A non-frame stream event on the absolute clock, positions in world feet. */
 export interface VTEvent {
@@ -43,6 +45,8 @@ export interface VTEvent {
   detail?: string
   /** faceoffs: the dot it belongs on by the stoppage before it (faceoffRule, NHL rule 76; W3 S3). The loser is `target`. */
   dot?: DotSpec
+  /** shots: release speed, ft/s (W3 S6, VT20). */
+  speed?: number
 }
 
 /** A spoken / captioned booth line as fired (channel 'commentary'). */
@@ -880,7 +884,7 @@ export function vt18Offside(inp: VTInput): VTResult {
   const goalieTeam = new Map<string, 'home' | 'away'>()
   for (const f of inp.frames) for (const r of f.rigs) if (r.goalie && r.id !== null) goalieTeam.set(r.id, r.team)
   const touches = inp.events
-    .filter((e) => e.actor !== undefined && ((e.type === 'pokeCheck' && e.success) || e.type === 'blockedShot' || e.type === 'save' || e.type === 'battle'))
+    .filter((e) => e.actor !== undefined && ((e.type === 'pokeCheck' && e.success) || e.type === 'blockedShot' || e.type === 'save' || e.type === 'battle' || e.type === 'puckTouch'))
     .map((e) => {
       const team = goalieTeam.get(e.actor!)
       return team ? { t: e.absT, team } : { t: e.absT, id: e.actor! }
@@ -895,7 +899,82 @@ export function vt18Offside(inp: VTInput): VTResult {
   }
 }
 
-export const DETECTORS = [vt1Bodies, vt2Divergence, vt3Shots, vt4Motion, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt9Framing, vt10Commentary, vt11Hits, vt12ActionFloor, vt13Aimless, vt14Coverage, vt15Systems, vt16Camping, vt17Grip, vt18Offside, vt19GoalGeometry] as const
+/* ── W3 S6: VT20 puck speed and continuity, VT21 the loose puck is played ── */
+// Owner: "puck is zipping around too fast", "skate through the puck",
+// "players ignoring a puck right in front of them". The rules live in
+// @engine/analysis/puckPlay (the same judge gates the sim stream); here they
+// read the DRAWN puck and bodies, resampled to >= 0.1 s of game time.
+// (outsideFt: the sim keeps the puck's centre 0.3 ft inside the boards and the drawn puck
+// rides the kickplate; past 1 ft it is drawn through the boards)
+export const VT_PUCK = { stepS: 0.1, cornerR: 28, outsideFt: 1 } as const
+function puckPlayInput(inp: VTInput): { frames: PPFrame[]; events: PPEvent[]; outside: string[] } {
+  const brk = seekBreaks(inp.frames)
+  const frames: PPFrame[] = []
+  const outside: string[] = []
+  const L = inp.geometry.rinkHalfL
+  const W = inp.geometry.rinkHalfW
+  let last = -Infinity
+  inp.frames.forEach((f, i) => {
+    const live = isLive(f) && !inReplay(f) && !f.dead && f.goalSeq === null
+    if (live) {
+      // the drawn puck inside the boards (a rounded rectangle)
+      const ax = Math.abs(f.puck.x)
+      const az = Math.abs(f.puck.z)
+      const cx = L - VT_PUCK.cornerR
+      const cz = W - VT_PUCK.cornerR
+      const out = ax > cx && az > cz ? Math.hypot(ax - cx, az - cz) - VT_PUCK.cornerR : Math.max(ax - L, az - W)
+      if (out > VT_PUCK.outsideFt && outside.length < 5) outside.push(`${clk(f.clock)} puck drawn ${f1(out)} ft outside the boards at (${f1(f.puck.x)}, ${f1(f.puck.z)})`)
+    }
+    if (brk[i]) last = -Infinity
+    if (f.clock - last < VT_PUCK.stepS && !brk[i]) return
+    last = f.clock
+    frames.push({
+      t: f.clock,
+      live: live && !brk[i],
+      puck: { x: f.puck.x, y: f.puck.z, z: f.puck.y },
+      carrier: f.carrier,
+      // (the drawn stick: a swing playing is a stick on the puck - a pass, a dump or a rim has no
+      // event of its own - and a man drawn carrying has it on his blade)
+      skaters: f.rigs.filter((r) => !r.goalie && r.visible && r.id !== null && r.mode === 'play').map((r) => ({ id: r.id!, team: r.team, x: r.x, y: r.z, ...(r.grip?.swing ? { act: 'pass' } : {}), ...(r.grip?.carrying ? { job: 'carry' } : {}) })),
+    })
+  })
+  const events: PPEvent[] = inp.events.map((e) => ({ t: e.absT, type: e.type, ...(e.speed !== undefined ? { speed: e.speed } : {}) }))
+  return { frames, events, outside }
+}
+const ppCache = new WeakMap<VTInput, { r: PuckPlayReport; outside: string[] }>()
+function puckPlayOf(inp: VTInput): { r: PuckPlayReport; outside: string[] } {
+  let c = ppCache.get(inp)
+  if (!c) {
+    const pi = puckPlayInput(inp)
+    c = { r: judgePuckPlay(pi.frames, pi.events), outside: pi.outside }
+    ppCache.set(inp, c)
+  }
+  return c
+}
+export function vt20PuckSpeed(inp: VTInput): VTResult {
+  const { r, outside } = puckPlayOf(inp)
+  const n = r.overCap.length + r.gained.length + r.reboundFast.length + outside.length
+  return {
+    id: 'VT20', name: 'Puck speed and continuity (drawn)',
+    status: r.intervals === 0 ? 'n/a' : n === 0 ? 'green' : 'red',
+    rule: `between drawn frames (≥ ${VT_PUCK.stepS} s game time) the puck moves no faster than the action that sent it (shot ≤ ${PUCK_SPEED.shot}, pass / rim / loose ≤ ${PUCK_SPEED.pass}, carried ≤ ${PUCK_SPEED.carried} ft/s, + ${PUCK_PLAY_RULE.slackFt} ft); a free puck with no stick on it never speeds up (> ${PUCK_PLAY_RULE.gainFtS} ft/s); a rebound or a block leaves at ≤ ${PUCK_PLAY_RULE.reboundShare} × the shot + ${PUCK_PLAY_RULE.reboundSlack} ft/s; the drawn puck never outside the boards`,
+    value: `${r.overCap.length} over the cap, ${r.gained.length} sped up, ${r.reboundFast.length} rebounds too fast, ${outside.length} outside the boards in ${r.intervals} intervals; fastest free ${f1(r.maxSpeed.free)}, shot ${f1(r.maxSpeed.shot)}, carried ${f1(r.maxSpeed.carried)} ft/s`,
+    evidence: [...r.overCap, ...r.gained, ...r.reboundFast].slice(0, 5).map((c) => c.what).concat(outside).slice(0, 6),
+  }
+}
+export function vt21LoosePuck(inp: VTInput): VTResult {
+  const { r } = puckPlayOf(inp)
+  return {
+    id: 'VT21', name: 'The loose puck is played (drawn)',
+    status: r.intervals === 0 ? 'n/a' : r.skateThrough.length + r.ignored.length === 0 ? 'green' : 'red',
+    rule: `no drawn skater passes within ${PUCK_PLAY_RULE.throughFt} ft of a free puck's path while it carries on unchanged; no slow (< ${PUCK_PLAY_RULE.slowFtS} ft/s) free puck sits within ${PUCK_PLAY_RULE.nearFt} ft of the nearest man, uncontested (nobody of theirs within ${PUCK_PLAY_RULE.contestFt} ft) and not closing on it, for ≥ ${PUCK_PLAY_RULE.ignoreS} s`,
+    value: `${r.skateThrough.length} skated through, ${r.ignored.length} ignored in ${f1(r.liveMin * 60)} live s`,
+    evidence: [...r.skateThrough, ...r.ignored].slice(0, 5).map((c) => c.what),
+  }
+}
+
+export const DETECTORS = [vt1Bodies, vt2Divergence, vt3Shots, vt4Motion, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt9Framing, vt10Commentary, vt11Hits, vt12ActionFloor, vt13Aimless, vt14Coverage, vt15Systems, vt16Camping, vt17Grip, vt18Offside, vt19GoalGeometry, vt20PuckSpeed, vt21LoosePuck] as const
+
 
 export function runViewerTruth(inp: VTInput): VTResult[] {
   return DETECTORS.map((d) => d(inp))
