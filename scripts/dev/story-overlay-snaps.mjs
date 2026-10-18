@@ -124,8 +124,14 @@ try {
     const events = await win.evaluate(() => window.__viewerProbe.events())
     const end = events.filter((e) => e.type === 'periodEnd')[firstRoom - 1]
     if (end && st.clock < end.absT) {
-      await win.evaluate((t) => window.__viewerProbe.jumpTo(t), end.absT - 3)
-      await playTo(end.absT + 30, 40000)
+      // An earlier break on the way (a period with nothing said in the room)
+      // stops the cut first: continue it and cut again.
+      for (let tries = 0; tries < 3; tries++) {
+        await win.evaluate((t) => window.__viewerProbe.jumpTo(t), end.absT - 3)
+        await playTo(end.absT + 30, 40000)
+        if (await win.locator('.md-room').count()) break
+        if (await win.evaluate(() => window.__viewerProbe.state().phase === 'intermission')) await win.evaluate(() => window.__viewerProbe.continueIntermission())
+      }
     }
     const ok = await win.waitForSelector('.md-room', { timeout: 8000 }).then(() => true).catch(() => false)
     if (ok) await still('room-intermission')
