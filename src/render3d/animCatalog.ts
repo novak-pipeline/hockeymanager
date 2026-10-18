@@ -51,6 +51,11 @@ export interface ClipMeta {
    */
   ownerOnly?: boolean
   fallback?: string
+  /**
+   * Video-mocap clip (scripts/blender/mocap.py, docs/MOCAP-PIPELINE.md): the
+   * slot it can stand in for. Off by default; withMocapClips() swaps it in.
+   */
+  mocapFor?: string
 }
 
 const f = (frame: number) => frame / 30
@@ -131,6 +136,29 @@ export const CLIPS: Record<string, ClipMeta> = {
   g_skate_back: { mask: 'lower', hands: 'clip', loop: true, fadeIn: 0.3, fadeOut: 0.3, goalie: true, ownerOnly: true },
   g_shuffle_L: { mask: 'lower', hands: 'clip', loop: true, fadeIn: 0.25, fadeOut: 0.25, goalie: true, ownerOnly: true },
   g_shuffle_R: { mask: 'lower', hands: 'clip', loop: true, fadeIn: 0.25, fadeOut: 0.25, goalie: true, ownerOnly: true },
+
+  // ── video mocap pilot (Pexels footage → MediaPipe → scripts/blender/mocap.py) ──
+  // Same layering as the slot each stands in for; contact = the measured release.
+  mocap_skate_stride: { mask: 'lower', hands: 'stick', loop: true, fadeIn: 0.2, fadeOut: 0.2, mocapFor: 'skate_stride' },
+  mocap_stickhandle: { mask: 'upper', hands: 'stick', loop: true, fadeIn: 0.2, fadeOut: 0.2, mocapFor: 'stickhandle' },
+  mocap_shot_wrist: { mask: 'upper', hands: 'stick', contact: f(13), fadeIn: 0.12, fadeOut: 0.2, mocapFor: 'shot_wrist' },
+}
+
+/**
+ * The clip map with every video-mocap clip standing in for its slot (the
+ * renderer's `mocap` option). The slot keeps its name, so every rule keyed on
+ * it (stickhandle's puck hold, grounded clips, shot selection) still applies;
+ * the mocap clip's own contact frame travels with it. Slots whose mocap clip
+ * the map lacks are left alone.
+ */
+export function withMocapClips<T extends { contact?: number }>(clips: ReadonlyMap<string, T>): Map<string, T> {
+  const out = new Map(clips)
+  for (const [name, m] of Object.entries(CLIPS)) {
+    const clip = m.mocapFor ? clips.get(name) : undefined
+    if (!clip || !m.mocapFor) continue
+    out.set(m.mocapFor, m.contact !== undefined ? { ...clip, contact: m.contact } : clip)
+  }
+  return out
 }
 
 /** Clips the Blender build authors (owner-only slots excluded). */

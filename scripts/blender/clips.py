@@ -42,13 +42,19 @@ def author(arm, name, keys, goalie):
     """keys: [(frame, pose dict)] → a Blender action on its own muted NLA track."""
     if (ONLY is not None and name not in ONLY) or name in SKIP:
         return None
+    return author_fks(arm, name, [(frame, build(pose, goalie)) for frame, pose in keys])
+
+
+def author_fks(arm, name, keys):
+    """keys: [(frame, solved posekit.Fk)] → an action on its own muted NLA track."""
+    if (ONLY is not None and name not in ONLY) or name in SKIP:
+        return None
     ad = arm.animation_data or arm.animation_data_create()
     act = bpy.data.actions.new(name)
     act.use_fake_user = True
     ad.action = act
     prev = None
-    for frame, pose in keys:
-        fk = build(pose, goalie)
+    for frame, fk in keys:
         prev = key_pose(arm, fk, frame, prev)
     # ease in/out on every key (Bezier auto-clamped is Blender's default)
     track = ad.nla_tracks.new()
@@ -493,6 +499,10 @@ def skater_clips(arm):
         (32, P(lean=0.4, L=leg(0.4, 0.15, 0.6), R=leg(0.4, 0.15, 0.6), stick=carry(0.0, 2.4))),
         (40, P(stick=carry(0.0))),
     ])
+
+    # ── video mocap (scripts/blender/mocap/*.json, docs/MOCAP-PIPELINE.md) ──
+    import mocap
+    mocap.author_all(arm, lambda n, keys: author_fks(arm, n, keys), lambda n: (ONLY is None or n in ONLY) and n not in SKIP)
 
 
 def goalie_clips(arm):

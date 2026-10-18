@@ -42,6 +42,8 @@ const Impl: typeof Rink3dRenderer =
 const r = await Impl.create(host, colors, {
   ...(q.has('model') ? { athletes: q.get('model') as 'auto' | 'owner' | 'blender' | 'procedural' } : {}),
   ...(q.has('loco') ? { locomotion: q.get('loco') as 'code' | 'clip' | 'hybrid' } : {}),
+  // ?mocap=1: the video-mocap pilot clips stand in for their slots (docs/MOCAP-PIPELINE.md)
+  ...(q.get('mocap') === '1' ? { mocap: true } : {}),
 })
 r.setEventStream(out.stream)
 // ?logo=1: generated stand-in club logos (the real ones are mod logo-pack data, never in the repo)
