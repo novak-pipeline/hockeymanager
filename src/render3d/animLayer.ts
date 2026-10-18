@@ -141,6 +141,13 @@ export class ActionLayer {
     return this.clips.has(name)
   }
 
+  /** A clip's length including its held end pose (s), null if the rig lacks it. */
+  span(name: string): number | null {
+    if (!this.clips.has(name) && CLIPS[name]?.fallback) name = CLIPS[name]!.fallback!
+    const clip = this.clips.get(name)
+    return clip ? clip.duration + (CLIPS[name]?.hold ?? 0) : null
+  }
+
   /** Currently playing clip names (top-most last). */
   get playing(): string[] {
     return this.active.map((a) => a.name)

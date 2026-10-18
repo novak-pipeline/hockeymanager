@@ -41,6 +41,17 @@ export interface ProbeRig {
   grip?: { lance: boolean; oneHand: boolean; bladeY: number; carrying: boolean; swing: boolean; state: string; puckGap?: number }
   /** W3 S4: his name plate was drawn this frame (optional: older probes). */
   label?: boolean
+  /** The drawn chest, world feet (optional: older probes) — where a check's bodies meet (VT11). */
+  chest?: { x: number; z: number }
+}
+
+/** A sim hit contact near this frame's clock (world feet, absolute t). */
+export interface ProbeContact {
+  t: number
+  by: string
+  on: string
+  x: number
+  z: number
 }
 
 /**
@@ -91,6 +102,8 @@ export interface ProbeFrame {
   goalSeq: string | null
   goalSeqT: number | null
   rigs: ProbeRig[]
+  /** The sim's hit contacts within ±0.25 s of this clock (optional: older probes). */
+  contacts?: ProbeContact[]
   viewer?: ProbeViewerState
 }
 

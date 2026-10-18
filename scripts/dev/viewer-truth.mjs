@@ -48,6 +48,8 @@ const OUT = String(flag('out', join(root, '.cache', 'viewer-truth')))
 const SEEDS = Number(flag('seeds', 12))
 const PINS = flag('pins', null)
 const ONLY = flag('only', null) // comma list of scenario kinds
+// A/B for the 3D hit physics (src/render3d/hitPhysics.ts): --hit-physics=off measures the clip-only baseline
+const HIT_PHYSICS = String(flag('hit-physics', 'on'))
 // The reel's name (its scores export as reel-<name>-scores.json): --reel=<name>,
 // else read off the output folder (.cache/reel-s3 → "s3"). It was a fixed
 // 'v0', so the S2 reel exported as "v0" unless the flag was passed (W3 S3).
@@ -64,6 +66,7 @@ const OWNER_PREFS = {
   'hockey.broadcast.commentary': 'true',
   'hockey.broadcast.presentation': 'compact',
   hockeyWatchMode: 'rink',
+  'hockey.dev.hitPhysics': HIT_PHYSICS,
 }
 
 /* ── per-kind reel checklist (ROOT-CAUSES §2.2) ───────────────────────────── */
@@ -76,6 +79,10 @@ export const CHECKLIST = {
   lineChangeOnFly: ['Right number of men?', 'Change through the bench door?', 'No ghosts / morphing through the boards?'],
   faceoffWinPlay: ['Everyone set before the drop?', 'Draw goes back?', 'A play follows?'],
   bigHit: ['Wind-up / approach visible?', 'Contact reads?', 'Reaction and puck consequence?'],
+  // hit physics (render3d/hitPhysics.ts): hand-pinned hits (--pins), one per kind of check
+  boardCheck: ['Is he pinned against the boards, chest to the glass?', 'Does the glass flex (and not shatter)?', 'Does he slide off the wall and play on?'],
+  glancingCheck: ['Does the body give a little with the bump and stay up?', 'Does the hitter carry on through?', 'Nothing floppy or rubbery?'],
+  openIceHit: ['Does the body give with the hit the way the hitter pushed him?', 'Does he go down (or stay up) and get back up without a pop?', 'Do the two bodies actually meet?'],
   saveRebound: ['Save reads?', 'Rebound visible?', 'Second chance plausible?'],
   emptyNetLate: ['Goalie to the bench?', 'Extra attacker from the gate?', 'A long-range attempt?'],
   dZoneCoverage: ['Every defender has a job (a man, the net front, a lane)?', 'Nobody standing still in the slot doing nothing?', 'One man on the puck, not two?', 'Nobody skating off to the far boards?'],
@@ -215,6 +222,7 @@ try {
       // one still per clip at ~2 s in: evidence for the eye (bench rigs, framing)
       const shotAt = Date.now() + 2000
       let stillTaken = false
+      const momentStills = [-0.4, 0, 0.25, 0.5, 0.8, 1.2, 1.8, 2.6, 3.5]
       const t0 = Date.now()
       const isGoal = sc.kind === 'goalReplay' || sc.kind === 'emptyNetLate'
       const maxWall = 90_000
@@ -224,6 +232,12 @@ try {
         await win.waitForTimeout(250)
         st = await win.evaluate(() => window.__viewerProbe.state())
         if (st.replay) replaySeen = true
+        // VT_MOMENT_STILLS=1: a burst of stills around the pinned moment (game clock), for the eye
+        if (process.env.VT_MOMENT_STILLS && momentStills.length && st.clock >= sc.absT + momentStills[0]) {
+          const off = momentStills.shift()
+          mkdirSync(join(OUT, 'stills'), { recursive: true })
+          await win.screenshot({ path: join(OUT, 'stills', `${label}@${off >= 0 ? '+' : ''}${off.toFixed(1)}.png`) }).catch(() => {})
+        }
         if (!stillTaken && Date.now() >= shotAt) {
           stillTaken = true
           mkdirSync(join(OUT, 'stills'), { recursive: true })
@@ -254,6 +268,11 @@ try {
         writeFileSync(join(OUT, clipFile), Buffer.from(b64, 'base64'))
       }
       const vt = await win.evaluate(() => window.__viewerProbe.report())
+      if (process.env.VT_HITS) {
+        // every hit of this game as the 3D renderer read it (kind/force/knockdown/pinned): to pin hits by kind
+        const hits = await win.evaluate(() => window.__hits3d ?? null)
+        writeFileSync(join(OUT, `hits-${label}.json`), JSON.stringify({ scenario: sc, hits }, null, 1))
+      }
       if (process.env.VT_DUMP && String(process.env.VT_DUMP).split(',').includes(sc.kind)) {
         const dump = await win.evaluate(() => ({ events: window.__viewerProbe.events(), frames: window.__viewerProbe.drain() }))
         writeFileSync(join(OUT, `dump-${label}.json`), JSON.stringify(dump))
