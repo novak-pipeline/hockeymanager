@@ -56,7 +56,8 @@ import { AthleteBatch, AthleteRig, athleteMaterial, type PoseOverlay } from './a
 import { plateOnIce, type ProbeGeometry, type ProbeRig, type ProbeSink } from './viewerProbe'
 import { isLance, isOneHanded, measureGrip, type GripSample } from './gripTruth'
 import { blendGrip, chooseGrip, gripBend, type GripInput, type GripState, type GripWeights } from './gripState'
-import { loadAthleteAssets, loadOwnerAssets, mergeClips, type AthleteAssets, type OwnerAssets, type OwnerTextures } from './gltfAthlete'
+import { loadAthleteAssets, loadOwnerAssets, mergeClips, type AthleteAssets, type BakedClip, type OwnerAssets, type OwnerTextures } from './gltfAthlete'
+import { withMocapClips } from './animCatalog'
 import { AtlasUploader, type Rect } from './atlasUpload'
 import { OwnerKitPainter, buildOwnerAtlasCanvas, clothesMaterial, gearMaterial, loadTexture, visorMaterial } from './ownerKit'
 
@@ -115,11 +116,13 @@ const HOP_RISE_FT = 2.2
 export interface Render3dOptions {
   athletes?: 'auto' | 'owner' | 'blender' | 'procedural'
   locomotion?: LocoMode
+  /** Video-mocap pilot clips stand in for their slots (animCatalog withMocapClips). Off by default. */
+  mocap?: boolean
 }
 // Bake-off verdict (docs/graphics/BLENDER-PIPELINE.md): the Blender body wins;
 // the code stride stays (locked to sim speed), authored cycles add crossovers +
 // backward skating, authored actions ride on top. Procedural is the fallback.
-export const RENDER3D_DEFAULTS: Required<Render3dOptions> = { athletes: 'auto', locomotion: 'hybrid' }
+export const RENDER3D_DEFAULTS: Required<Render3dOptions> = { athletes: 'auto', locomotion: 'hybrid', mocap: false }
 
 // Near regulation (3" across, 1" thick) — a touch big so it reads; the halo does the rest at distance.
 const PUCK_R = 0.14
@@ -479,6 +482,7 @@ export class Rink3dRenderer implements MatchRenderer {
   private ownerAtlasUp: AtlasUploader | null = null
   private ownerGearMats: THREE.MeshStandardMaterial[] = []
   private locoMode: LocoMode = 'code'
+  private mocap = false
   private choreo: Choreographer | null = null
   private choreoClock = 0
 
@@ -509,6 +513,7 @@ export class Rink3dRenderer implements MatchRenderer {
     if (o.athletes === 'owner' || o.athletes === 'auto') await inst.loadOwner()
     inst.assets = o.athletes !== 'procedural' ? await loadAthleteAssets() : null
     inst.locoMode = inst.owner && !opts.locomotion ? 'clip' : o.locomotion
+    inst.mocap = o.mocap
 
     inst.camera.aspect = w / h
     inst.camera.updateProjectionMatrix()
@@ -898,10 +903,11 @@ export class Rink3dRenderer implements MatchRenderer {
       this.updateOwnerAccents()
       ownerMats = (team, goalie) => [clothes[goalie ? 'goalie' : 'skater'], gear[`${team}:${goalie ? 'goalie' : 'skater'}`]!, visor]
     }
-    const blenderClips = { skater: this.assets?.skater.clips ?? null, goalie: this.assets?.goalie.clips ?? null }
+    const mocap = (m: Map<string, BakedClip> | null): Map<string, BakedClip> | null => (m && this.mocap ? withMocapClips(m) : m)
+    const blenderClips = { skater: mocap(this.assets?.skater.clips ?? null), goalie: this.assets?.goalie.clips ?? null }
     const ownClips = own
       ? {
-          skater: mergeClips(own.skater.clips, blenderClips.skater),
+          skater: mocap(mergeClips(own.skater.clips, this.assets?.skater.clips))!,
           goalie: own.goalie ? mergeClips(own.goalie.clips, blenderClips.goalie) : blenderClips.goalie,
         }
       : null
@@ -909,7 +915,7 @@ export class Rink3dRenderer implements MatchRenderer {
       const ownT = own ? (goalie ? own.goalie : own.skater) : null
       const template = ownT ?? (this.assets ? (goalie ? this.assets.goalie : this.assets.skater) : null)
       const rig = new AthleteRig(goalie, slot, ownT && ownerMats ? ownerMats(team, goalie) : material, template)
-      const clips = ownT && ownClips ? (goalie ? ownClips.goalie : ownClips.skater) : (template?.clips ?? null)
+      const clips = ownT && ownClips ? (goalie ? ownClips.goalie : ownClips.skater) : goalie ? (template?.clips ?? null) : this.assets ? blenderClips.skater : (template?.clips ?? null)
       rig.kit = team === 'home' ? this.homeKit : this.awayKit
       rigs.push(rig)
       return {
@@ -981,7 +987,7 @@ export class Rink3dRenderer implements MatchRenderer {
         // the left net is defended by whichever goalie stands on the left
         (side) => [this.homeGoaliePose, this.awayGoaliePose].find((g) => g !== null && (side === 'left') === g.worldX.pos < 0) ?? null,
         this.locoMode,
-        ownClips ? { skater: ownClips.skater, goalie: own?.goalie ? ownClips.goalie : null } : { skater: this.assets.skater.clips },
+        ownClips ? { skater: ownClips.skater, goalie: own?.goalie ? ownClips.goalie : null } : { skater: blenderClips.skater ?? this.assets.skater.clips },
         PLAYER_FOLLOW_HL,
         !!own
       )

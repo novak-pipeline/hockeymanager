@@ -224,7 +224,13 @@ def build(pose, goalie=False):
     else:
         fk.pos_local['hips'].y = hip[1]
     fk.solve()
+    return solve_stick_arms(fk, P)
 
+
+def solve_stick_arms(fk, P):
+    """Place the stick (P['stick']) and solve both arms onto it / their free
+    targets, on an Fk whose body (hips, spine, legs) is already posed. Shared by
+    the key-pose clips (build) and the mocap solver (mocap.py)."""
     # ── stick ──
     st = P.get('stick', 'carry')
     shR = fk.wpos['shoulder_R']

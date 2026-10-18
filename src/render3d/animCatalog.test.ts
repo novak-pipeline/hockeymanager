@@ -18,6 +18,7 @@ import {
   celebrationFor,
   locomotionWeights,
   wantsHockeyStop,
+  withMocapClips,
   hash01,
   BOARDS_PIN_FT,
 } from './animCatalog'
@@ -326,5 +327,36 @@ describe('cue planning (choreographer)', () => {
     const plan = planCues(pokes)
     expect(plan.every((p) => p.clip === 'poke')).toBe(true)
     expect(plan[0]!.lead).toBeCloseTo(CLIPS.poke!.contact!)
+  })
+})
+
+describe('video-mocap pilot clips', () => {
+  const mocap = Object.keys(CLIPS).filter((k) => CLIPS[k]!.mocapFor)
+  it('each stands in for a real slot with the same layering', () => {
+    expect(mocap.length).toBeGreaterThanOrEqual(2)
+    for (const k of mocap) {
+      const slot = CLIPS[CLIPS[k]!.mocapFor!]
+      expect(slot, k).toBeDefined()
+      expect(CLIPS[k]!.mask, k).toBe(slot!.mask)
+      expect(CLIPS[k]!.hands, k).toBe(slot!.hands)
+      expect(!!CLIPS[k]!.loop, k).toBe(!!slot!.loop)
+      expect(SKATER_CLIPS).toContain(k)
+    }
+  })
+  it('withMocapClips swaps them in under the slot name, with their own contact', () => {
+    const base = new Map<string, { id: string; contact?: number }>([
+      ['skate_stride', { id: 'authored stride' }],
+      ['shot_wrist', { id: 'authored wrist' }],
+      ['mocap_skate_stride', { id: 'mocap stride' }],
+      ['mocap_shot_wrist', { id: 'mocap wrist' }],
+    ])
+    const m = withMocapClips(base)
+    expect(m.get('skate_stride')!.id).toBe('mocap stride')
+    expect(m.get('shot_wrist')!.id).toBe('mocap wrist')
+    expect(m.get('shot_wrist')!.contact).toBeCloseTo(CLIPS.mocap_shot_wrist!.contact!)
+    // the source map is untouched (the loaded templates are shared)
+    expect(base.get('skate_stride')!.id).toBe('authored stride')
+    // a slot without its mocap clip keeps the authored one
+    expect(withMocapClips(new Map<string, { id: string; contact?: number }>([['stickhandle', { id: 'authored' }]])).get('stickhandle')!.id).toBe('authored')
   })
 })
