@@ -574,10 +574,14 @@ export function vt10Commentary(inp: VTInput): VTResult {
 }
 
 /* ── VT11 hits: visible contact, and the hit man moves with the hit ──────── */
+export const VT11 = { chestGapFt: 4, meetFt: 3 } as const
 export function vt11Hits(inp: VTInput): VTResult {
   const frames = inp.frames
   let judged = 0
   let bad = 0
+  let chestJudged = 0
+  const gaps: number[] = []
+  const meets: number[] = []
   const ev: string[] = []
   for (const h of inp.events.filter((e) => e.type === 'hit' && e.actor && e.target)) {
     const at = frames.findIndex((f) => f.clock >= h.absT && isLive(f) && !inReplay(f))
@@ -606,18 +610,31 @@ export function vt11Hits(inp: VTInput): VTResult {
       rel = hl ? along - ((hl.x - hitter.x) * px + (hl.z - hitter.z) * pz) / n : along
       if (tl.simX !== null && tgt.simX !== null && tl.simZ !== null && tgt.simZ !== null) simAlong = ((tl.simX - tgt.simX) * px + (tl.simZ - tgt.simZ) * pz) / n
     }
+    // (hit physics) the drawn BODIES meet at the sim's contact point: the two
+    // chests close together, their midpoint on the engine's contact (optional
+    // fields: older probes have no chests / contacts and skip this part)
+    const con = f.contacts?.find((c) => c.by === h.actor && c.on === h.target && Math.abs(c.t - h.absT) < 0.05)
+    let chestGap = NaN
+    let meetOff = NaN
+    if (con && hitter.chest && tgt.chest) {
+      chestGap = Math.hypot(hitter.chest.x - tgt.chest.x, hitter.chest.z - tgt.chest.z)
+      meetOff = Math.hypot((hitter.chest.x + tgt.chest.x) / 2 - con.x, (hitter.chest.z + tgt.chest.z) / 2 - con.z)
+      chestJudged++
+    }
+    const bodiesMeet = !(chestGap > VT11.chestGapFt || meetOff > VT11.meetFt)
     judged++
-    const ok = gap <= 4.5 && (along >= -0.5 || rel >= -0.5)
+    const ok = gap <= 4.5 && (along >= -0.5 || rel >= -0.5) && bodiesMeet
     if (!ok) {
       bad++
-      if (ev.length < 5) ev.push(`${clk(h.absT)} ${h.actor} → ${h.target}${h.knockdown ? ' (knockdown)' : ''}: drawn ${f1(gap)} ft apart at contact; hit man moved ${f1(along)} ft along the push in 0.4 s (sim: ${f1(simAlong)})`)
+      if (ev.length < 5) ev.push(`${clk(h.absT)} ${h.actor} → ${h.target}${h.knockdown ? ' (knockdown)' : ''}: drawn ${f1(gap)} ft apart at contact (chests ${f1(chestGap)} ft, meeting ${f1(meetOff)} ft off the sim's contact); hit man moved ${f1(along)} ft along the push in 0.4 s (sim: ${f1(simAlong)})`)
     }
+    if (Number.isFinite(chestGap)) { gaps.push(chestGap); meets.push(meetOff) }
   }
   return {
     id: 'VT11', name: 'Hits: visible contact, reaction with the push',
     status: judged === 0 ? 'n/a' : bad === 0 ? 'green' : 'red',
-    rule: 'at the hit the drawn hitter and target are ≤ 4.5 ft apart, and the target does not slide on against the push in the next 0.4 s (over the ice and toward the hitter both)',
-    value: `${judged - bad}/${judged} hits read`,
+    rule: `at the hit the drawn hitter and target are ≤ 4.5 ft apart, their chests ≤ ${VT11.chestGapFt} ft apart and meeting ≤ ${VT11.meetFt} ft from the sim's contact point, and the target does not slide on against the push in the next 0.4 s (over the ice and toward the hitter both)`,
+    value: `${judged - bad}/${judged} hits read; chests at contact p50 ${f2(pct(gaps, 0.5))} ft apart, meeting p50 ${f2(pct(meets, 0.5))} / max ${f2(meets.length ? Math.max(...meets) : NaN)} ft off the contact (${chestJudged} judged)`,
     evidence: ev,
   }
 }

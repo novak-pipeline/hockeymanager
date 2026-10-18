@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ProbeFrame, ProbeGeometry, ProbeRig } from './viewerProbe'
-import { runViewerTruth, vt13Aimless, vt14Coverage, vt15Systems, vt17Grip, vt18Offside, vt1Bodies, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt19GoalGeometry, type VTInput } from './viewerTruth'
+import { runViewerTruth, vt13Aimless, vt14Coverage, vt15Systems, vt17Grip, vt18Offside, vt1Bodies, vt11Hits, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt19GoalGeometry, type VTInput } from './viewerTruth'
 
 const GEO: ProbeGeometry = { rinkHalfL: 100, rinkHalfW: 42.5, benchGates: { home: { x: -26, z: 41 }, away: { x: 26, z: 41 } } }
 
@@ -199,6 +199,25 @@ describe('viewer-truth detectors', () => {
     expect(vt19GoalGeometry(input(sharp, { events: ev(sharp) })).status).toBe('red')
     const front = path([[70, 6], [78, 4], [86, 2], [90.5, 1]])
     expect(vt19GoalGeometry(input(front, { events: ev(front) })).status).toBe('green')
+  })
+
+  it('VT11 (hit physics): the drawn chests meet at the sim contact; a body thrown off it is red', () => {
+    // hitter h0 at x 0 → target a0 at x 3, contact at x 1.5; 30 frames (1 s)
+    const run = (targetChestX: (i: number) => number) => {
+      const frames = Array.from({ length: 30 }, (_, i) => frame(i, [
+        rig('home', 'h0', 0, 0, { chest: { x: 0.4, z: 0 } }),
+        rig('away', 'a0', 3, 0, { chest: { x: targetChestX(i), z: 0 } }),
+      ], { speed: 1, clock: 100 + i / 30, contacts: [{ t: 100.5, by: 'h0', on: 'a0', x: 1.5, z: 0 }] }))
+      return vt11Hits(input(frames, { events: [{ type: 'hit', absT: 100.5, actor: 'h0', target: 'a0' }] }))
+    }
+    const good = run(() => 2.6)
+    expect(good.status).toBe('green')
+    expect(good.value).toContain('1 judged')
+    // the man hit's chest drawn 6 ft past him at contact: the bodies never met
+    expect(run(() => 9).status).toBe('red')
+    // older probes (no chests / contacts) are judged on the roots alone
+    const old = Array.from({ length: 30 }, (_, i) => frame(i, [rig('home', 'h0', 0, 0), rig('away', 'a0', 3, 0)], { speed: 1, clock: 100 + i / 30 }))
+    expect(vt11Hits(input(old, { events: [{ type: 'hit', absT: 100.5, actor: 'h0', target: 'a0' }] })).status).toBe('green')
   })
 
   it('runs every detector and reports n/a with nothing to judge', () => {

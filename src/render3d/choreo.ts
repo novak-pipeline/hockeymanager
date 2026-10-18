@@ -65,6 +65,8 @@ export interface ActionCue {
   knockdown?: boolean
   /** hit (agent engine, additive): pinned against the boards for a beat (a board battle) */
   pinned?: boolean
+  /** hit (agent engine, W3 S2): seconds the man hit is committed (stagger, fall + get-up, or pinned) */
+  receiverS?: number
   /** faceoff (agent engine, additive): the centre who lost the draw */
   loserId?: string
   /** shot (agent engine): the release type */
@@ -79,6 +81,29 @@ export interface ActionCue {
   setT?: number
   /** faceoff (agent engine, additive): the centres tied up sticks before the draw was won */
   tieUp?: boolean
+}
+
+/** A hit at its contact moment, as the choreographer resolved it (world feet). */
+export interface HitLanded {
+  cue: ActionCue
+  hitter: ChoreoActor | null
+  target: ChoreoActor
+  /** The push over the ice (hitter → man hit), any length. */
+  dirX: number
+  dirZ: number
+  /** The sim's contact point. */
+  x: number
+  z: number
+  /** 0..1 impact (the sim's force, else the closing speed). */
+  hardness: number
+  /** The fall clip plays (the sim put him down). */
+  knockdown: boolean
+  /** Pinned on the boards. */
+  pinned: boolean
+  /** A board battle / shove (no drive-through). */
+  battle: boolean
+  /** Seconds the physics owns his body before it hands back to the clip. */
+  holdS: number
 }
 
 /** The deke clip for each move the engine names (additive 'deke' event). */
@@ -116,6 +141,7 @@ export function extractActionCues(stream: GameStream): ActionCue[] {
         ...(ev.force !== undefined ? { force: ev.force } : {}), ...(ev.kind ? { hitKind: ev.kind } : {}), ...(typeof kd === 'boolean' ? { knockdown: kd } : ev.force !== undefined ? { knockdown: false } : {}),
         // the agent engine says outright whether he was pinned (absent on its hits = not pinned)
         ...(typeof pn === 'boolean' ? { pinned: pn } : ev.force !== undefined ? { pinned: false } : {}),
+        ...(ev.receiverS !== undefined ? { receiverS: ev.receiverS } : {}),
       })
     } else if ((ev as { type: string }).type === 'knockdown') {
       // additive agent-engine event (tolerant read): { player | on, by?, pos?, force? } — marks
@@ -354,6 +380,8 @@ export class Choreographer {
   clock = 0
   /** Lateral offset (ft, + = goalie's left) of the last save planned. */
   private lastLateral = 0
+  /** A hit landed (at contact): the renderer blends the physics reaction over the clip (hitPhysics.ts). */
+  onHit: ((h: HitLanded) => void) | null = null
 
   constructor(
     private readonly find: (id: string) => ChoreoActor | null,
@@ -551,6 +579,14 @@ export class Choreographer {
     if (c.force === undefined && plan.target !== 'hit_stagger') {
       target.followHL = plan.target.startsWith('hit_fall') ? 0.9 : 0.35
       this.pending.push({ at: this.clock + len, run: () => (target.followHL = this.baseFollowHL) })
+    }
+    if (this.onHit) {
+      // how long the physics owns the body: a fall until the get-up takes over,
+      // a pin for the whole pin, a stagger for its clip (or the sim's commitment)
+      const span = target.layer.span(plan.target) ?? 0.8
+      const down = plan.target.startsWith('hit_fall')
+      const holdS = down ? Math.max(0.5, span - 0.15) : plan.pinned ? Math.max(0.6, span) : Math.max(0.35, Math.min(span, c.receiverS ?? span) * 0.8)
+      this.onHit({ cue: c, hitter, target, dirX: dx, dirZ: dz, x: wx, z: wz, hardness: plan.hardness, knockdown: down, pinned: plan.pinned, battle: c.hitKind === 'battle', holdS })
     }
   }
 
