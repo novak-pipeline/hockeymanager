@@ -34,12 +34,14 @@ export type ScenarioKind =
   | 'nzRegroup'
   | 'systemHome'
   | 'systemAway'
+  | 'trailingPush'
 
 export const SCENARIO_KINDS: readonly ScenarioKind[] = [
   'breakaway', 'twoOnOne', 'ozCycleShot', 'ppSetPlay', 'goalReplay',
   'lineChangeOnFly', 'faceoffWinPlay', 'bigHit', 'saveRebound', 'emptyNetLate',
   'dZoneCoverage', 'offsideCall', 'faceoffNeutral', 'faceoffDefensive',
   'breakoutPlay', 'forecheckTurnover', 'nzRegroup', 'systemHome', 'systemAway',
+  'trailingPush',
 ]
 
 /** Human label + how much game time to show around the moment (lead before, tail after).
@@ -70,6 +72,8 @@ export const SCENARIO_META: Record<ScenarioKind, { label: string; lead: number; 
   nzRegroup:       { label: 'Neutral-zone regroup',           lead: 3,  tail: 9 },
   systemHome:      { label: 'Our system: the forecheck',      lead: 2,  tail: 10 },
   systemAway:      { label: 'Their system: the forecheck',    lead: 2,  tail: 10 },
+  // W3 S5 (the carrier's score tilt): down a goal or two in the last five minutes, a shot
+  trailingPush:    { label: 'Trailing late: the push',        lead: 16, tail: 5 },
 }
 
 export interface ScenarioHit {
@@ -169,11 +173,23 @@ export function findScenarios(
     return t - puckTrack[k]!.abs
   }
 
+  // the score as the stream runs (W3 S5 trailingPush)
+  let goalsH = 0
+  let goalsA = 0
   evs.forEach((x, i) => {
     const ev = x.ev
     const t = x.abs
+    if (ev.type === 'goal') {
+      if (sideOf(ev.scorer) === 'home') goalsH++
+      else goalsA++
+    }
     if (ev.type === 'shot') {
       const side = sideOf(ev.shooter)
+      // W3 S5: down one or two in the last five minutes of the third
+      const lead = side === 'home' ? goalsH - goalsA : goalsA - goalsH
+      if (ev.period === 3 && ev.t >= REG - 300 && lead < 0 && lead >= -2) {
+        push({ kind: 'trailingPush', absT: t, period: 3, side, note: `down ${-lead} with ${Math.round((REG - ev.t) / 60)} min left, ${ev.origin ?? 'shot'}`, quality: 1 + (REG - ev.t < 150 ? 0.3 : 0) + (ev.origin === 'cycle' || ev.origin === 'rush' ? 0.2 : 0) })
+      }
       const sign = Math.sign(ev.target.x) || 1
       const res = outcome(i)
       const scored = res === 'goal' ? 1 : 0

@@ -246,3 +246,87 @@ Eleven clips (`npm run reel -- "--out=K:/Hockey Game/.cache/reel-s4"`): ozCycleS
 - The box-out pair emits a `battle` per shove (~25 a team-game): any reader that counts net-front battles sees them.
 - The four tactics fields are wired in the agent engine only and no UI writes them; the lever harness does not price them.
 - The sim's 2.3 ft blade point against the owner rigs' 5.6 ft stick (above): owner decision.
+
+## S5 the puck carrier (2026-10-17)
+
+The owner's standing notes for the slice: "pass ping-pong", "breakaway skated into the corner", "brainless toddler hockey".
+
+### What changed (W3-DESIGN item 4)
+
+- **The situation tilt** (`src/engine/agent/carrierTilt.ts`). `decideCarrier` still values shoot / pass / carry / dump / chip / protect / deke as expected goal value; a small weight vector from one data table (`CARRIER_TILT`) now sits on top. A weight multiplies an option's value when it is positive and divides it when it is negative, so "up" always means more attractive; `risk` multiplies the turnover cost inside every option. Rows (directions from the design, sizes calibrate):
+  - trailing late (lateness ramps from the start of the third to its last five minutes; a 1-2 goal game counts in full): shoot ×1.3, risk ×0.7, dump ×0.75;
+  - leading late: risk ×1.4, chip ×1.3, dump ×1.25, deke ×0.7, shoot ×0.9;
+  - power play: seam ×1.4, less no-gain cost, risk ×0.9, and **patience**: the shot's weight follows the quality of the chance (xG / 0.06, within 0.75-1.35), so he passes up the low-percentage shot and takes the good one (`PP_PATIENCE`);
+  - penalty kill: chip / clear ×1.4, carry ×0.85, deke ×0.5, risk ×1.3;
+  - pressure (scaled by the pressure on him): deke ×0.55, chip ×1.25, pass ×1.08, protect ×1.15;
+  - own zone: risk ×1.5, chip ×1.15, deke ×0.6;
+  - neutral zone: the playbook's entry (S4's `entryK`), with the GM's sliders on top as before.
+- **The score effect lives in the tilt.** `scoreEffectMult` was imported by the agent engine and never used (`void scoreEffectMult`); the import is gone. The quick sim keeps its own.
+- **The in-tight time cap** is `IN_TIGHT.capS` (1 s, it was `INCLOSE.deadline`). Past it he shoots, passes or walks it out: away from the net by a stride (8 ft), never behind the goal line. The old walk-out was any spot 30 ft from the net, and from below the dots that was the far corner.
+- **A pass has to gain something** (`PROGRESS` in brain.ts). It gains if it moves the puck 10 ft toward their net, or puts it on a stick where it is worth 8% more than on his own (his own worth is the better of holding it and his shot), or gets it to a man 6 ft more open while he is being closed down, or bails him out of real pressure, or is the one-timer feed. Handing it straight back to the man who fed him within 4 s and gaining none of these costs 60% of the pass's value (`pingBackK`); the world remembers who fed the carrier (`World.fedBy`). A general no-gain cost (`noGainK`) was tried at 0.22 and 0.08: it cut more passing than the owner's note asked for and every possession it saved became a shot (+4 shots a team-game), so it is 0: the requirement is on the return.
+- **Rushes attack the net** (`RUSH_PLAY`). A breakaway is now "no opponent nearer their net than him" (by distance, not by x: by x a man cycling below their D read as alone) and coming in. On a breakaway his carry headings aim at the slot (24 ft out, not the post he is wide of), he never drifts wider, a destination below the dots out wide or behind the goal line is not a carry, the move on the goalie is open to him with a chaser behind and weighs ×1.5, and inside 24 ft he shoots or makes his move rather than skating on. The value of each heading includes the chance waiting at the end of it, read at the finishing range (so it rewards the lane to the middle, not skating the puck into the goalie). An odd-man rush (more of us in on it than them back, on the way in) gets the same aim with a lighter weight and a cost on a corner destination.
+- **VT12 (the S3/S4 backhand drawn with no wind-up, nzRegroup).** The case on reel S4: a 0.5 s wind-up (the slapper's row, so from 45+ ft) released as a backhand because the man was skating away from the net while he loaded it. Through a wind-up from the slapper's range he now opens up to the net (`shooterGlide` faces it), so a long set is a forehand shot. (Facing the net on every wind-up was tried first: in tight it held men in the slot and added ~180 jams in 60 games; it is the long set only.)
+- **VT3 (the 5 ft jam that went in unreadably, goalReplay).** A jam from 5 ft left at ~46 ft/s, so the drawn puck crossed the last 2 ft to the goalie in under 3 frames at 60 Hz. The in-tight release curve is a power of the distance now (`ACTION_FLOOR.shot.inTightPow` 2, `inTightMin` 0.35 → 0.25, `CONSTRAINTS_VERSION` 3): a tuck from 5 ft leaves at ~30 ft/s (0.06 s for the last 2 ft), a 10 ft snap at ~43. Speed is flight time only; the outcome is decided at the release.
+- **Contract** (additive only): none. `World.progress` / `World.fedBy` are engine state, not events.
+- New golden scenario **`trailingPush`** (a shot by a team down one or two in the last five minutes of the third), with a reel checklist.
+- Dev switches `S5_DEV` (tilt, progress, rush, walkOut, face, tightSpeed) and `TP_SET=OBJ.key=value` in the measure harness, for the ablations below; all on in play.
+
+### Detectors (`src/engine/analysis/carrierPlay.ts`, in the measure harness and as a stream gate in `agentSim.test`)
+
+- **Ping-pong**: A passes to B, B hands it straight back within 4 s, and the puck is no nearer the net (8 ft) and on no better a shooting spot. Share of completed passes.
+- **Breakaways**: a carrier between the red line and the top of their circles, no opponent goal-side of him or within 8 ft, skating at the net at 10 ft/s (two frames). Outcome: a shot or a move on the goalie (attacked), a pass that becomes a shot (fed), lost, or nothing; `corner`: before any shot he carried it below the dots out wide or behind the goal line; `caught`: a defender got back goal-side before any outcome (counted apart; a carrier who slows or drifts wide is caught).
+- **Odd-man rushes**: a carried entry with more of them in on the play than defenders goal-side; a shot attempt within 5 s.
+- **Score state**: the trailing team's share of 5-on-5 shot attempts (all game, and in the third).
+- Shots and goals by release distance (a calibration aid: where the goals come from).
+
+Imported league, 480 games, seeds 7000-7479 (before = the S4 head, same detector):
+
+| | S4 DB | S5 DB | S4 coach | S5 coach |
+|---|---|---|---|---|
+| ping-pong (share of completed passes) | 16.5% | **7.3%** | 16.7% | **7.3%** |
+| breakaways that attack the net (shot, move or feed) | 0.863 | **0.931** | 0.871 | **0.940** |
+| breakaways taken to the corner first | 0.142 | **0.085** | 0.146 | **0.083** |
+| breakaways caught from behind before anything | 0.416 | **0.178** | 0.394 | **0.161** |
+| odd-man entries with a shot attempt in 5 s | 0.244 | **0.351** | 0.236 | **0.353** |
+| trailing team's share of 5v5 attempts (third period) | 0.485 (0.481) | 0.506 (0.538) | 0.476 (0.474) | 0.500 (0.529) |
+| VT16 crease camping /60 | 0.028 | 0.035 | 0.045 | 0.025 |
+| VT13 aimless /60, VT14 doubles + far side /60 | 14.0, 3.9 | 14.6, 4.2 | 13.3, 4.1 | 13.7, 4.5 |
+| shots on goal from inside 10 ft (480 games) | 4,112 | **3,210** | 4,473 | **3,389** |
+| VT12 short, illegal goals, faceoffs off the dot, offside missed | 0, 0, 0, 27 | 0, 0, 0, 16 | 0, 0, 0, 22 | 0, 0, 0, 27 |
+
+Generated league, the stream gate (8 games, seeds 1200-1207; red on the S4 head, green after): ping-pong 16.1% → **7.2%** (bound 10%); breakaways attacking the net 0.864 → **0.951** (bound 0.9); to the corner 0.182 → **0.024** (bound 0.12); caught first 0.44 → **0.21** (bound 0.33); VT16 0 → 0. The generated-league band test (96 games) still passes.
+
+The NHL score effect (trailing teams take ~54-56% of attempts) was inverted before S5 (47-48%: the leading teams are the better teams and nothing pushed the trailing side) and is now even, 53-54% in the third. Short of the NHL's all-game figure; the late push is the tilt's.
+
+### Calibration (imported league, 480 games)
+
+| | S4 DB | S5 DB | S4 coach | S5 coach | NHL band |
+|---|---|---|---|---|---|
+| goals / team-game | 3.29 | **2.89** | 3.49 (over) | **3.11** | 2.70-3.43 |
+| shots on goal | 29.2 | 27.7 | 30.7 | 28.9 | 26.4-33.6 |
+| shooting % | 11.3 | 10.4 | 11.35 | 10.8 | 9.0-11.4 |
+| PP goals (PP goals per penalty) | 0.50 (11.7%) | 0.43 (11.0%) | 0.57 (13.3%) | 0.51 (12.5%) | |
+| SH goals | 0.15 | 0.10 | 0.16 | 0.09 | |
+| hits | 25.2 | 23.8 | 24.3 | 23.3 | 19.4-26.2 |
+| penalties | 4.25 | 3.95 | 4.26 | 4.07 | 2.97-4.46 |
+| rebound-shot share | 0.085 | 0.061 | 0.083 | 0.058 | 0.035-0.110 |
+
+**One scalar changed: `VAL.shoot` 0.66 → 0.43** (brain.ts, the carrier's value of his own finish, the design's shot-volume lever). It compensates for two things: (1) the S5 carrier no longer burning his possessions in ping-pong and attacking the net on rushes - with every S5 decision in and the scalar unchanged the coach-systems run read 3.79 goals and 34.4 shots a team-game on 240 games, both over the band; (2) the coach systems' own excess found in S4 (3.49 on the S4 engine). With it the carrier passes up the marginal chance in the slot and keeps the puck: the goals came off the in-tight shots (4,473 → 3,389 from inside 10 ft), the long-range volume barely moved (14,212 → 13,935 from 35 ft out). `AGENT_TUNING.finishK` 0.8 was tried instead (240 games: 3.47 goals, 34.6 shots: shots stay over the band) and not used.
+
+Where the S5 goals came from (60-game ablations, coach systems, each part switched on alone from the S4 engine): the progress requirement at 0.22 +0.56 (every saved possession a shot), facing the net on every wind-up +0.33 (now long sets only), the rush +0.25-0.45 (breakaways that used to be caught are finished), the tilt -0.38, the walk-out -0.18, the release curve +0.1 (noise). The sample error at 60 games is ~0.17 goals, so only the large ones are real; the final numbers are the 480-game runs above.
+
+### Reel S5
+
+`K:/Hockey Game/.cache/reel-s5/reel.html`, recorded with `npm run reel -- "--out=K:/Hockey Game/.cache/reel-s5" --only=breakaway,twoOnOne,ozCycleShot,trailingPush,ppSetPlay,goalReplay,nzRegroup` (labelled s5). Seven clips: breakaway, twoOnOne, ozCycleShot, trailingPush, ppSetPlay, goalReplay, nzRegroup.
+
+- Green: VT1, VT2, VT4-VT8, VT10, **VT12 (4/4 clips with a wind-up, 6/6 wind-ups drawn in full; nzRegroup, red on reel S4, has none this time)**, VT13, VT14, VT16-VT19. VT3 is green on goalReplay (the S4 5 ft jam class).
+- Red: VT9 framing (6 of 7, S7). VT3 on twoOnOne: one of its two shots, a snap (a release inside 25 ft; its distance was not traced), flew 3.0 frames at 60 Hz against the rule's 3 (rounded, so just under). From inside ~5 ft the drawn puck reaches VT3's 3 ft circle almost at once whatever its speed, so the release curve cannot clear every jam. VT11 on ozCycleShot: one hit drawn 3.8 ft apart with the man hit moving 0.8 ft back along the push (sim 0.2): the renderer hit path (the S2-S4 class), not the carrier's.
+- VT15 n/a on every clip (one sequence a clip, as in S4; the stream gate carries it).
+- Owner saves backed up and SHA1-verified unchanged (2 files) by the script and again by hand. The app ran from this worktree's own `out/` with a node_modules junction, `HOCKEY_USER_DATA` on a scratch copy and `HOCKEY_OFFSCREEN=1`. The owner's rig assets were copied in for the build and removed afterwards with `out/`; nothing of them is committed.
+
+### Left for later
+
+- PP% stays where S4 left it (12.5% per penalty on the coach run, NHL ~20%): S8.
+- The breakaway is decided well but there are many of them (2,800 episodes in 480 games, ~2.9 a team-game by this detector's loose definition, far more than the NHL sees): the rush defence lets men behind it. That is S1/S4 rush-defence work, not the carrier's.
+- The all-game score effect is even (0.50), not the NHL's 0.54: the trailing tilt only starts in the third.
+- The no-gain pass rule covers the straight return only; a three-man ring (A-B-C-A) with nothing in it is not penalised.

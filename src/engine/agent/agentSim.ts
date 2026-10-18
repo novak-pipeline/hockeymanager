@@ -41,7 +41,9 @@ import type {
 } from '@domain'
 import type { Rng } from '@engine/shared/rng'
 import type { GameOutcome } from '@engine/shared/outcome'
-import { benchTilt, scoreEffectMult } from '@engine/shared/scoreEffects'
+// (W3 S5: the score effect is the carrier's tilt now - carrierTilt.ts; scoreEffectMult stays the quick sim's)
+import { benchTilt } from '@engine/shared/scoreEffects'
+import { S5_DEV } from './carrierTilt'
 import { FIGHT_MAJOR_SECONDS } from '@engine/shared/fights'
 import { fragilityWeight } from '@engine/shared/inGameInjury'
 import { coachFitMultiplier, playbookFor } from '@engine/league/coachProfile'
@@ -347,7 +349,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     possSince: 0,
     possStartAdv: 0,
     nearSince: -1,
-    nearBy: null
+    nearBy: null,
+    progress: 0,
+    fedBy: null
   }
   let flight = null as Flight | null
   // Two clocks (W3 S3, owner-approved): `now` is sim time within the period
@@ -1069,6 +1073,10 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const prevSide = w.control ?? w.lastTouch
     flightKindAtGain = flight ? (flight.kind === 'pass' && flight.side === s ? 'pass' : flight.kind === 'shot' ? 'shotDeflect' : flight.side === s ? 'ownLoose' : 'oppLoose') : 'none'
     const gainKind = `${flightKindAtGain}:${flight?.kind ?? "-"}${poke ? "+poke" : ""}${fumble ? "+fumble" : ""}`
+    // W3 S5: who fed him, from where (the carrier's no-gain return check)
+    w.fedBy = flightKindAtGain === 'pass' && flight?.from && flight.from !== b
+      ? { b: flight.from, t: now, x: flight.passEv ? flight.passEv.a.x * HALF_X : flight.from.x, y: flight.passEv ? flight.passEv.a.y * HALF_Y : flight.from.y }
+      : null
     w.carrier = b
     puck.carrier = b
     w.control = s
@@ -1327,7 +1335,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     // not what is scored.
     const RS = ACTION_FLOOR.shot
     const speed = ((slap ? 118 : 96) + acc * 30 + (oneTimer ? 8 : 0)) *
-      (oneTimer || slap ? 1 : clamp(RS.inTightMin + (1 - RS.inTightMin) * (dist / RS.inTightFt), RS.inTightMin, 1)) *
+      (oneTimer || slap ? 1 : S5_DEV.tightSpeed ? clamp(RS.inTightMin + (1 - RS.inTightMin) * Math.pow(Math.min(1, dist / RS.inTightFt), RS.inTightPow), RS.inTightMin, 1) : clamp(0.35 + 0.65 * (dist / RS.inTightFt), 0.35, 1)) *
       (!oneTimer && !slap && shotType() === 'backhand' ? RS.backhand : 1)
     const shotOrigin = (): ShotOrigin => {
       if (now - lastSaveAt < 2.5) return 'rebound'
@@ -1789,11 +1797,16 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     let tx = c.x + c.vx * 0.6
     const ty = c.y + c.vy * 0.6
     const lim = GOAL_X - 3
+    // W3 S5 (VT12): through a long set he opens up to the net (his forehand).
+    // A man loading a slapper's wind-up while skating away from the net
+    // released it as a backhand from 45+ ft, and the picture drew no wind-up.
+    // (from the slapper's range only: in tight a man jams or tucks it from where he is)
+    const face = S5_DEV.face && Math.hypot(s.a * GOAL_X - c.x, c.y) > ACTION_FLOOR.shot.farFt ? { faceX: s.a * GOAL_X, faceY: 0 } : {}
     if (tx * s.a > lim) {
       tx = s.a * Math.min(Math.max(lim, c.x * s.a), GOAL_X - SHOT_GEOM.behindFt - 0.7)
-      return { tx, ty, speed: speedOf(c) * f * 0.5, arrive: true, urgency: 0.5 }
+      return { tx, ty, speed: speedOf(c) * f * 0.5, arrive: true, urgency: 0.5, ...face }
     }
-    return { tx, ty, speed: speedOf(c) * f, arrive: false, urgency: 0.5 }
+    return { tx, ty, speed: speedOf(c) * f, arrive: false, urgency: 0.5, ...face }
   }
   function stepDeke(d: Deke, s: Side): void {
     const c = d.c
@@ -1838,6 +1851,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     updatePull(A)
     if (!flight || flight.kind !== 'shot') syncStrength()
     w.t = now
+    w.progress = (period - 1 + clock / lengthSeconds) / 3
 
     // Line changes on the fly: a tired/long shift goes when it's safe — the
     // puck is up the ice or the team has it.
@@ -2933,7 +2947,6 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   game.playBase = Math.round((game.playBase + now) * 100) / 100
   void HALF_Y
   void realPressure
-  void scoreEffectMult
   return { ended }
 }
 

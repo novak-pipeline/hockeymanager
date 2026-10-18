@@ -88,6 +88,8 @@ export const CHECKLIST = {
   nzRegroup: ['Do the forwards swing back to come again with speed?', 'D-to-D through the middle?', 'An entry with speed after it?'],
   systemHome: ['Can you tell how deep this team forechecks (two in / one in / sitting back)?', 'Does it look different from the other team\'s clip?'],
   systemAway: ['Can you tell how deep this team forechecks (two in / one in / sitting back)?', 'Does it look different from the other team\'s clip?'],
+  // W3 S5: the carrier's score tilt
+  trailingPush: ['Does the trailing team push (shoots more, takes chances)?', 'Does the carrier go at the net rather than cycle it back?', 'Does the leading team sit back and chip it out?'],
 }
 
 const sha1 = (file) => createHash('sha1').update(readFileSync(file)).digest('hex')

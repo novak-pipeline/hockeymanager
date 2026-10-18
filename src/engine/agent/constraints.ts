@@ -23,7 +23,7 @@
 import type { PassKind, ShotType } from '@domain'
 
 /** Bump when a row changes: an old match input replays with the table that made it (SPEC §1.5). */
-export const CONSTRAINTS_VERSION = 2
+export const CONSTRAINTS_VERSION = 3
 
 export const ACTION_FLOOR = {
   shot: {
@@ -39,9 +39,14 @@ export const ACTION_FLOOR = {
      * full one at the crease (so the drawn puck travels to the pads on screen:
      * VT3 flight). A backhand leaves at `backhand` of a forehand (NHL EDGE
      * shot-speed pages: backhands well under wristers). Calibrate.
+     * W3 S5 (version 3): the in-tight curve is a power inTightPow of the
+     * distance (it was linear from 0.35): a jam from 5 ft left at ~46 ft/s and
+     * crossed the last 2 ft to the goalie in under 3 drawn frames (VT3, reel S4
+     * goalReplay); a tuck now leaves at ~30 ft/s, a 10-ft snap at ~43.
      */
     inTightFt: 25,
-    inTightMin: 0.35,
+    inTightMin: 0.25,
+    inTightPow: 2,
     backhand: 0.75,
   },
   pass: {
