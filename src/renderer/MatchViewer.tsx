@@ -44,6 +44,9 @@ import {
 } from './lib/commentaryAudio'
 import { fallbackBroadcastContext, ppRemaining } from './lib/broadcastContext'
 import { BroadcastOverlayLayer, Scorebug } from './components/broadcast/BroadcastOverlays'
+import { BenchCam, BigChanceAlert, FlowStrip, StoryLowerThird } from './components/broadcast/StoryOverlays'
+import { planLiveStory, type LiveBeat, type LiveStoryPlan } from '@engine/story/liveStory'
+import { buildGameFlow, chancesBetween, momentumAt, shotsUpTo, type BigChance, type GameFlow } from './lib/gameFlow'
 import { teamLogoUrl } from './components/Crest'
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -55,6 +58,37 @@ const CAMERA_PRESETS: CameraPreset[] = ['broadcast', 'overhead', 'endzone', 'fol
 const LS_RENDERER = 'hockeyMatchRenderer'
 const LS_REPLAYS = 'hockeyMatchReplays'
 const LS_PANEL = 'hockeyMatchPanel'
+const LS_STORY = 'hockeyMatchStory'
+const LS_CHANCES = 'hockeyMatchBigChances'
+
+/** The story layer (story lower-thirds, bench cam, flow strip): on by default. */
+function readFlag(key: string): boolean {
+  try { return localStorage.getItem(key) !== 'off' } catch { return true }
+}
+function writeFlag(key: string, on: boolean): void {
+  try { localStorage.setItem(key, on ? 'on' : 'off') } catch { /* ignore */ }
+}
+/** Condensed modes pull at most this many skipped big chances into the cut. */
+const CHANCE_PULLS_MAX = 4
+/** A pulled chance plays from this many seconds before the shot … */
+const CHANCE_LEAD_S = 6
+/** … to this many after it. */
+const CHANCE_TAIL_S = 3
+/** Lower-thirds are caught up after a cut only if this fresh (bench beats: 40 s). */
+const STORY_CATCHUP_LT_S = 15
+const STORY_CATCHUP_BENCH_S = 40
+const EMPTY_STORY: LiveStoryPlan = { beats: [], room: {} }
+
+/** Director overlay windows (absolute s) a story graphic must stay out of. */
+function overlayBusy(plan: BroadcastPlan): Array<[number, number]> {
+  const out: Array<[number, number]> = []
+  for (const c of plan.game) {
+    if (c.channel !== 'overlay' || c.data.kind === 'powerPlay' || c.data.kind === 'playerTag') continue
+    const from = c.at + (c.delayMs ?? 0) / 1000
+    out.push([from, from + c.holdMs / 1000])
+  }
+  return out
+}
 
 /**
  * Goal replays are a SETTING, never a "Watch replay" button (the owner's rule:
@@ -367,6 +401,59 @@ export function MatchViewer(props: {
   )
   const compactPlanRef = useRef<BroadcastPlan>(compactPlan)
   compactPlanRef.current = compactPlan
+
+  // ── Live story layer: lower-thirds, bench cam, the room, the flow strip ──────
+  const [storyOn, setStoryOn] = useState<boolean>(() => readFlag(LS_STORY))
+  const [chancePulls, setChancePulls] = useState<boolean>(() => readFlag(LS_CHANCES))
+  const [storyLT, setStoryLT] = useState<LiveBeat | null>(null)
+  const [benchBeat, setBenchBeat] = useState<LiveBeat | null>(null)
+  const [chanceBanner, setChanceBanner] = useState<BigChance | null>(null)
+  const storyOnRef = useRef(storyOn)
+  storyOnRef.current = storyOn
+  const chancePullsRef = useRef(chancePulls)
+  chancePullsRef.current = chancePulls
+  const storyFiredRef = useRef<Set<string>>(new Set())
+  const storyAbsRef = useRef<number>(-1)
+  const storyTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([])
+  /** While the clock is under this, a pulled big chance plays at 1×. */
+  const pullUntilRef = useRef<number>(-Infinity)
+  const pulledRef = useRef<Set<number>>(new Set())
+  const flow: GameFlow = useMemo(() => {
+    const homeIds = new Set(game.homePlayerIds)
+    return buildGameFlow(game.stream, (id) => homeIds.has(id))
+  }, [game])
+  const flowRef = useRef<GameFlow>(flow)
+  flowRef.current = flow
+  // Story graphics stay clear of the director's own overlays (goal lower
+  // thirds, penalty calls, period summaries) — planned once per night.
+  const livePlan: LiveStoryPlan = useMemo(
+    () => (bctx.liveStory ? planLiveStory(game.stream, bctx.liveStory, { busy: overlayBusy(plan) }) : EMPTY_STORY),
+    [game, bctx, plan],
+  )
+  const livePlanRef = useRef<LiveStoryPlan>(livePlan)
+  livePlanRef.current = livePlan
+  const showBroadcastRef = useRef(true)
+
+  /** Put one story beat up for its hold (one per channel; a new one replaces it). */
+  const showStoryBeat = useCallback((b: LiveBeat): void => {
+    if (!storyOnRef.current) return
+    if (b.channel === 'lowerThird') {
+      if (!showBroadcastRef.current) return
+      setStoryLT(b)
+    } else {
+      setBenchBeat(b)
+    }
+    const set = b.channel === 'lowerThird' ? setStoryLT : setBenchBeat
+    storyTimersRef.current.push(setTimeout(() => set((cur) => (cur && cur.id === b.id ? null : cur)), b.holdS * 1000))
+  }, [])
+  const clearStory = useCallback((): void => {
+    for (const t of storyTimersRef.current) clearTimeout(t)
+    storyTimersRef.current = []
+    setStoryLT(null)
+    setBenchBeat(null)
+    setChanceBanner(null)
+  }, [])
+  useEffect(() => clearStory, [clearStory])
   const firedCuesRef = useRef<Set<string>>(new Set())
   const cueTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([])
   const pregameTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -514,7 +601,8 @@ export function MatchViewer(props: {
     pregameTimerRef.current = null
     setLiveOverlays([])
     schedulerRef.current?.cancel()
-  }, [])
+    clearStory()
+  }, [clearStory])
   useEffect(() => clearBroadcast, [clearBroadcast])
 
   // ── Build/rebuild renderer when game or rendererMode changes ─────────────────
@@ -550,6 +638,9 @@ export function MatchViewer(props: {
     cursorRef.current         = new EventCursor(game.stream)
     lastCommentaryAbsT.current = -1
     lastGoalEventRef.current  = null
+    storyAbsRef.current       = -1
+    storyFiredRef.current     = new Set()
+    pullUntilRef.current      = -Infinity
     setGoalBanner(null)
     setReplayActive(false)
     replayActiveRef.current = false
@@ -632,6 +723,8 @@ export function MatchViewer(props: {
           for (const b of matchIndexRef.current.intermissions) if (b.absT <= at) shownBreaksRef.current.add(b.period)
           lastCommentaryAbsT.current = at
           lastAbsTRef.current = at
+          storyAbsRef.current = at
+          for (const b of livePlanRef.current.beats) if (b.at <= at) storyFiredRef.current.add(b.id)
           cursorRef.current?.seek(at)
           setVisibleLines(lines.filter((l) => l.absT <= at).slice(-50))
           r.setSpeed(currentSpeed(planRef.current, at) * nudgeRef.current)
@@ -734,6 +827,31 @@ export function MatchViewer(props: {
       }
     }
 
+    // ── Live story beats crossed this frame ───────────────────────────────────
+    // Own read head, so a cut / fast-forward shows up as a jump: the beats it
+    // passed are spent, and the freshest one is caught up on landing (a bench
+    // vignette about the goal we cut to is still worth seeing).
+    if (!replayActiveRef.current && !ffActiveRef.current) {
+      const prev = storyAbsRef.current
+      storyAbsRef.current = currentAbsT
+      const beats = livePlanRef.current.beats
+      const fired = storyFiredRef.current
+      if (prev >= 0 && currentAbsT < prev - 1) {
+        for (const b of beats) if (b.at > currentAbsT) fired.delete(b.id)
+      } else {
+        const jumped = prev >= 0 && currentAbsT - prev > CUE_JUMP_S
+        let catchUp: LiveBeat | null = null
+        for (const b of beats) {
+          if (b.at > currentAbsT) break
+          if (b.at <= prev || fired.has(b.id)) continue
+          fired.add(b.id)
+          if (!jumped) showStoryBeat(b)
+          else if (currentAbsT - b.at <= (b.channel === 'bench' ? STORY_CATCHUP_BENCH_S : STORY_CATCHUP_LT_S)) catchUp = b
+        }
+        if (catchUp) showStoryBeat(catchUp)
+      }
+    }
+
     // ── SFX cue map + stoppage chip ───────────────────────────────────────────
     // One walk of the events that actually crossed this frame — the cursor keeps
     // its place, so this is a couple of iterations rather than a 20k-event scan.
@@ -827,7 +945,14 @@ export function MatchViewer(props: {
     }
 
     // ── Playback speed from plan / fast-forward between highlights ─────────────
-    if (!replayActiveRef.current && !ffActiveRef.current) {
+    if (!replayActiveRef.current && !ffActiveRef.current && currentAbsT < pullUntilRef.current) {
+      // A big chance pulled into the cut plays at 1× until its tail.
+      rendererRef.current?.setSpeed(nudgeRef.current)
+    } else if (!replayActiveRef.current && !ffActiveRef.current) {
+      if (pullUntilRef.current > -Infinity) {
+        pullUntilRef.current = -Infinity
+        setChanceBanner(null)
+      }
       // In extended/key modes, when we reach dead air between highlights we
       // DON'T play it — we fast-forward the clock and cut into the next one.
       const jump = nextActiveJump(planRef.current, currentAbsT)
@@ -866,6 +991,28 @@ export function MatchViewer(props: {
     if (brk) {
       _enterIntermission(brk.period, toAbsT)
       return
+    }
+
+    // A big chance the cut would skip: with the setting on, the fast-forward
+    // stops short of it and plays it at 1× under a BIG CHANCE banner, then
+    // carries on to the next highlight (no button — play just advances).
+    if (chancePullsRef.current && pulledRef.current.size < CHANCE_PULLS_MAX) {
+      const segs = planRef.current
+      const shown = (t: number): boolean => segs.some((s) => s.fromAbsT <= t && t < s.toAbsT && s.speed < SKIP_SPEED)
+      const best = chancesBetween(flowRef.current, fromAbsT + 0.5, toAbsT - 0.5)
+        .filter((c) => !shown(c.absT) && !pulledRef.current.has(c.absT))
+        .sort((a, b) => b.danger - a.danger)[0]
+      if (best) {
+        pulledRef.current.add(best.absT)
+        pullUntilRef.current = best.absT + CHANCE_TAIL_S
+        setChanceBanner(best)
+        const startAt = best.absT - CHANCE_LEAD_S
+        if (startAt <= fromAbsT + 0.5) {
+          rendererRef.current?.setSpeed(nudgeRef.current)
+          return
+        }
+        toAbsT = startAt
+      }
     }
 
     ffActiveRef.current = true
@@ -915,7 +1062,7 @@ export function MatchViewer(props: {
       const r = rendererRef.current
       if (r) {
         r.seekFraction(toAbsT / dur)
-        const planSpd = currentSpeed(planRef.current, toAbsT)
+        const planSpd = toAbsT < pullUntilRef.current ? 1 : currentSpeed(planRef.current, toAbsT)
         r.setSpeed(planSpd * nudgeRef.current)
         r.play()
       }
@@ -1063,6 +1210,8 @@ export function MatchViewer(props: {
     setLiveOverlays([])
     // Build speed plan for chosen mode
     planRef.current = planFor(game.stream, mode)
+    pulledRef.current = new Set()
+    pullUntilRef.current = -Infinity
     setPlaybackMode(mode)
     setPhase('playing')
 
@@ -1160,6 +1309,21 @@ export function MatchViewer(props: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [game])
 
+  // DEV (probe builds only): the live story plan, for the overlay stills runner.
+  useEffect(() => {
+    if (!probeRef.current) return
+    const api = {
+      plan: (): LiveStoryPlan => livePlanRef.current,
+      chances: (): BigChance[] => flowRef.current.chances,
+      facts: (): unknown => bctx.liveStory ?? null,
+    }
+    ;(window as unknown as { __story?: unknown }).__story = api
+    return () => {
+      const w = window as unknown as { __story?: unknown }
+      if (w.__story === api) delete w.__story
+    }
+  }, [bctx])
+
   // ── Controls ──────────────────────────────────────────────────────────────────
   function handleToggleRenderer(): void {
     const next = rendererMode === '3d' ? '2d' : '3d'
@@ -1216,6 +1380,19 @@ export function MatchViewer(props: {
     sfx.setEnabled(next)
   }
 
+  function handleStoryToggle(): void {
+    const next = !storyOn
+    setStoryOn(next)
+    writeFlag(LS_STORY, next)
+    if (!next) clearStory()
+  }
+
+  function handleChanceToggle(): void {
+    const next = !chancePulls
+    setChancePulls(next)
+    writeFlag(LS_CHANCES, next)
+  }
+
   function handleNudge(mult: number): void {
     setNudge(mult)
     nudgeRef.current = mult
@@ -1237,6 +1414,7 @@ export function MatchViewer(props: {
   function handleSeek(fraction: number): void {
     rendererRef.current?.seekFraction(fraction)
     clearBroadcast()
+    pullUntilRef.current = -Infinity
     const dur = gameDurationRef.current
     if (dur > 0) {
       const at = fraction * dur
@@ -1282,6 +1460,7 @@ export function MatchViewer(props: {
   const absNow = view ? view.progress * gameDurationRef.current : 0
   const ppNow = ppWindows.find((w) => w.fromAbsT <= absNow && absNow < w.toAbsT) ?? null
   const showBroadcast = presentation !== 'off'
+  showBroadcastRef.current = showBroadcast
 
   const userSide = game.userIsHome ? 'home' : 'away'
 
@@ -1301,6 +1480,14 @@ export function MatchViewer(props: {
     () => (liveBucket < 0 ? null : computeMatchStats(matchIndex, liveBucket)),
     [matchIndex, liveBucket],
   )
+  // Flow strip: momentum + the shots so far, on the same 2-second bucket.
+  const flowShots = useMemo(() => (liveBucket < 0 ? [] : shotsUpTo(flow, liveBucket)), [flow, liveBucket])
+  const flowMomentum = liveBucket < 0 ? 0 : momentumAt(flow, liveAbsT)
+  const flowFlash = useMemo(
+    () => (liveBucket < 0 ? null : chancesBetween(flow, liveBucket - 4, liveBucket + 2)[0] ?? null),
+    [flow, liveBucket],
+  )
+  const milestoneUp = liveOverlays.some((c) => c.data.kind === 'milestone')
 
   // The final horn → the postgame screen (F-5), once any goal replay is done.
   const ended = !!view?.ended
@@ -1393,6 +1580,22 @@ export function MatchViewer(props: {
             <Icon size={14}><Icons.Chart /></Icon> Match panel
           </button>
 
+          {/* Story layer: story lower-thirds, bench cam, flow strip */}
+          <button className="btn btn-ghost" onClick={handleStoryToggle}
+            title={storyOn ? 'Hide the story graphics, bench cam and momentum strip' : 'Show the story graphics, bench cam and momentum strip'}
+            style={storyOn ? modeActiveStyle : { opacity: 0.5 }}>
+            <Icon size={14}><Icons.Interview /></Icon> Story
+          </button>
+
+          {/* Condensed modes: pull skipped big chances into the cut */}
+          {playbackMode !== 'full' && (
+            <button className="btn btn-ghost" onClick={handleChanceToggle}
+              title={chancePulls ? 'Stop pulling big chances into the highlights' : 'Pull big chances the cut skips into the highlights'}
+              style={chancePulls ? modeActiveStyle : { opacity: 0.5 }}>
+              <Icon size={14}><Icons.Hot /></Icon> Big chances
+            </button>
+          )}
+
           {/* SFX toggle */}
           <button className="btn btn-ghost" onClick={handleSfxToggle}
             title={sfxEnabled ? 'Mute SFX' : 'Enable SFX'}
@@ -1428,6 +1631,20 @@ export function MatchViewer(props: {
               {showBroadcast && (
                 <BroadcastOverlayLayer ctx={bctx} live={liveOverlays}
                   projector={projectorOf(rendererRef.current)} bounds={hostSize} />
+              )}
+              {/* Live story layer: the career on screen, the bench, the flow */}
+              {storyOn && phase === 'playing' && !ffClock && !replayActive && !milestoneUp && hostSize.w >= 640 && (
+                <FlowStrip ctx={bctx} momentum={flowMomentum} shots={flowShots} absT={liveAbsT}
+                  flash={playbackMode === 'full' ? flowFlash : null} />
+              )}
+              {storyOn && showBroadcast && phase === 'playing' && storyLT && !ffClock && (
+                <div className="st-in" key={storyLT.id}><StoryLowerThird ctx={bctx} beat={storyLT} /></div>
+              )}
+              {storyOn && phase === 'playing' && benchBeat && !ffClock && (
+                <div className="st-in" key={benchBeat.id}><BenchCam ctx={bctx} beat={benchBeat} /></div>
+              )}
+              {phase === 'playing' && chanceBanner && !ffClock && (
+                <BigChanceAlert ctx={bctx} chance={chanceBanner} />
               )}
             </div>
           )}
@@ -1615,6 +1832,7 @@ export function MatchViewer(props: {
       {phase === 'intermission' && intermission && (
         <IntermissionScreen report={intermission} abbrs={abbrs} inks={inks} userSide={userSide}
           onContinue={continueFromIntermission}
+          {...(storyOn && livePlan.room[intermission.period] ? { room: livePlan.room[intermission.period] } : {})}
           {...(props.intermissionDecisions ? { decisions: props.intermissionDecisions } : {})} />
       )}
       {phase === 'postgame' && postgame && (

@@ -22,6 +22,7 @@ import { validateModDatabase, loadModDatabase } from '@data'
 import { isBreakingNews } from '@domain'
 import { Career } from '../career/career'
 import { runAutopilot } from '../career/autopilot/autopilot'
+import { planLiveStory } from './liveStory'
 
 const SEED = Number(process.env.PA_SEED ?? 2029)
 const SEASONS = Number(process.env.PA_SEASONS ?? 4)
@@ -80,6 +81,74 @@ function ngrams(words: string[], n: number): string[] {
   for (let i = 0; i + n <= words.length; i++) out.push(words.slice(i, i + n).join(' '))
   return out
 }
+
+/**
+ * The watched game's live story layer (liveStory.ts): lower-thirds, bench-cam
+ * vignettes and the intermission room, planned on real streams of real games
+ * against real facts. Same gates as the inbox audit. PA_LIVE_GAMES (default 24).
+ */
+describe.skipIf(!process.env.PA_RUN)('prose audit — live story layer', () => {
+  it('measures the live pools on watched games', () => {
+    const { data, source } = loadLeague()
+    const teamIdx = Math.min(3, data.league.teams.length - 1)
+    const career = new Career(data, SEED, data.league.teams[teamIdx]!)
+    // Into the season, so streaks, series and contract years exist.
+    career.advance(40)
+    const { user, others } = career.devClubIds()
+    const games = Number(process.env.PA_LIVE_GAMES ?? 24)
+    const lines: Array<{ kind: string; text: string }> = []
+    for (let i = 0; i < games; i++) {
+      const opp = others[(i * 7) % others.length]!
+      const home = i % 2 === 0 ? user : opp
+      const away = i % 2 === 0 ? opp : user
+      const game = career.devExhibition(home, away, 5000 + i, i % 3 === 0 ? 'agent' : 'classic')
+      const f = career.getBroadcastContext()?.liveStory
+      if (!f) continue
+      const plan = planLiveStory(game.stream, f)
+      for (const b of plan.beats) lines.push({ kind: `${b.channel}:${b.kind}`, text: b.text })
+      for (const beats of Object.values(plan.room)) for (const r of beats) lines.push({ kind: `room:${r.kind}`, text: r.text })
+    }
+    const texts = lines.map((l) => l.text)
+    const words = texts.reduce((n, t) => n + (t.match(/\S+/g)?.length ?? 0), 0)
+    const dashes = texts.reduce((n, t) => n + (t.match(/—/g)?.length ?? 0), 0)
+    const countRe = (re: RegExp): number => texts.reduce((n, t) => n + (t.match(new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g'))?.length ?? 0), 0)
+    const gates: Array<[string, number]> = [
+      ...BANNED_TELLS.map(([label, re]) => [`tell: ${label}`, countRe(re)] as [string, number]),
+      ['bug: unfilled {slot}', countRe(/\{[a-zA-Z.]+\}/)],
+      ['bug: undefined / NaN', countRe(/\bundefined\b|\bNaN\b|\[object/)],
+      ['bug: a/an before 8, 11, 18, A', countRe(/\b[Aa] (?:8\d*|11|18|A[+-]?)(?=[\s\-.,])/)],
+      ['bug: "1 points"-style plural', countRe(/(?<![\d.,])\b1 (?:points|goals|games|assists|wins|seasons|days|weeks)\b/)],
+    ]
+    const sent = new Map<string, { n: number; sample: string }>()
+    for (const t of texts) for (const s of sentences(t)) {
+      const k = skeleton(s)
+      const prev = sent.get(k)
+      if (prev) prev.n++
+      else sent.set(k, { n: 1, sample: s })
+    }
+    const total = [...sent.values()].reduce((n, v) => n + v.n, 0)
+    const byKind = new Map<string, number>()
+    for (const l of lines) byKind.set(l.kind, (byKind.get(l.kind) ?? 0) + 1)
+
+    const L: string[] = []
+    L.push(`# Prose audit (live story layer) — ${source} · seed ${SEED} · ${games} watched games`, '')
+    L.push(`- lines: **${lines.length}** (${(lines.length / Math.max(1, games)).toFixed(1)}/game), sentences **${total}**, distinct skeletons **${sent.size}**`)
+    L.push(`- repetition index: **${(total / Math.max(1, sent.size)).toFixed(2)}**`)
+    L.push(`- em-dashes: **${dashes}** in ${words} words`, '')
+    L.push('| kind | n |', '|---|---:|')
+    for (const [k, n] of [...byKind].sort((a, b) => b[1] - a[1])) L.push(`| ${k} | ${n} |`)
+    L.push('', '| gate | hits |', '|---|---:|')
+    for (const [g, n] of gates) L.push(`| ${g} | ${n} |`)
+    L.push('', '## Most repeated sentences (names/numbers masked)', '', '| n | sentence |', '|---:|---|')
+    for (const [, v] of [...sent].sort((a, b) => b[1].n - a[1].n).slice(0, 25)) L.push(`| ${v.n} | ${v.sample.replace(/\|/g, '\\|')} |`)
+    L.push('', '## Every line', '')
+    for (const l of lines) L.push(`- \`${l.kind}\` ${l.text}`)
+    mkdirSync(join(process.cwd(), 'docs', 'autopilot'), { recursive: true })
+    writeFileSync(join(process.cwd(), 'docs', 'autopilot', `prose-audit-live-${process.env.PA_TAG ?? 'latest'}.md`), L.join('\n') + '\n')
+    console.log('\n' + L.slice(0, 40).join('\n'))
+    for (const [g, n] of gates) expect(n, g).toBe(0)
+  }, 3_600_000)
+})
 
 describe.skipIf(!process.env.PA_RUN)('prose audit', () => {
   it(`measures repetition across ${SEASONS} season(s)`, () => {

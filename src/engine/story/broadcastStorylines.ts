@@ -117,6 +117,13 @@ export interface BroadcastContext {
   /** Every dressed player on both benches, by id. */
   players: Record<string, BroadcastPlayer>
   storylines: BroadcastStoryline[]
+  /**
+   * Additive (live story layer, liveStory.ts): the facts behind tonight's
+   * in-game lower-thirds, bench vignettes and intermission room — gathered
+   * before the sim ran. Absent on older workers and fallback contexts, which
+   * then simply show none.
+   */
+  liveStory?: import('./liveStory').LiveStoryFacts
 }
 
 /* ─────────────────────────── facts → storylines ─────────────────────────── */
@@ -154,6 +161,9 @@ export interface PlayerStoryFacts {
     leftYear: number
     firstVisitSinceLeaving: boolean
     via: 'trade' | 'signing'
+    /** From the imported past only: we know the club, not when or how he left
+     *  (leftYear / via are guesses — never print them). */
+    inexact?: true
   }
 }
 
@@ -260,7 +270,9 @@ export function detectStorylines(f: StorylineFacts): BroadcastStoryline[] {
           side: p.side,
           playerId: p.id,
           title: 'FIRST MEETING',
-          detail: `${p.name} faces the ${fc.teamName}, who traded him ${fc.leftYear === f.year ? 'this season' : `in ${fc.leftYear}`}`,
+          detail: fc.inexact
+            ? `${p.name} faces the ${fc.teamName}, his former club`
+            : `${p.name} faces the ${fc.teamName}, who traded him ${fc.leftYear === f.year ? 'this season' : `in ${fc.leftYear}`}`,
           priority: 50,
           formerTeamName: fc.teamName,
         })

@@ -76,6 +76,9 @@ export function IntermissionScreen(props: {
    * rendered when a segmented sim supplies a LIVE port — never faked.
    */
   decisions?: IntermissionDecisionPort
+  /** The room between periods (live story layer): a veteran's word, the
+   *  trainer's update. Read-only; absent when nothing was earned. */
+  room?: Array<{ speaker: string; text: string }>
 }): JSX.Element {
   const r = props.report
   const [scope, setScope] = useState<'period' | 'game'>('period')
@@ -133,6 +136,16 @@ export function IntermissionScreen(props: {
             <Card title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Icon size={14}><Icons.Interview /></Icon>Assistant coach</span>}>
               <AssistantCard read={r.assistant} />
             </Card>
+            {props.room && props.room.length > 0 && (
+              <Card title="In the room">
+                {props.room.map((b, i) => (
+                  <div key={i} className="md-room">
+                    <div className="who">{b.speaker}</div>
+                    <div className="line">{b.text}</div>
+                  </div>
+                ))}
+              </Card>
+            )}
           </div>
         </div>
 
