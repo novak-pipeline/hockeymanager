@@ -143,3 +143,8 @@
 .md-ff .strip span { font-size: 10px; color: var(--muted); letter-spacing: 0.7px; text-transform: uppercase; font-weight: 700; }
 .md-ff .quote { max-width: 560px; font-size: 13.5px; line-height: 1.5; color: var(--text); }
 .md-ff .quote .who { display: block; font-size: 10px; color: var(--violet-h); letter-spacing: 0.8px; text-transform: uppercase; font-weight: 800; margin-bottom: 3px; }
+
+/* The room between periods (live story layer). */
+.md-room + .md-room { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.md-room .who { font-size: 10px; color: var(--violet-h); letter-spacing: 0.8px; text-transform: uppercase; font-weight: 800; margin-bottom: 3px; }
+.md-room .line { font-size: 13px; line-height: 1.5; color: var(--text); }

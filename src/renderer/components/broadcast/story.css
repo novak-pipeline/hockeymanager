@@ -1,0 +1,103 @@
+/*
+ * Story overlays (StoryOverlays.tsx): the bench cam, the flow strip, the
+ * big-chance alert. Sits in the broadcast layer (.bc-layer tokens) except the
+ * alert, which takes clicks and lives above the fast-forward screen.
+ */
+
+/* ── bench cam (bottom-left) ── */
+.st-bench {
+  position: absolute;
+  left: 14px;
+  bottom: 18px;
+  width: min(360px, 46%);
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(10, 12, 18, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55), inset 3px 0 0 var(--st-team, #7aa2ff);
+}
+.st-bench .tag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 4px 12px;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  color: rgba(230, 236, 250, 0.7);
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.st-bench .rec {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e5484d;
+  box-shadow: 0 0 6px rgba(229, 72, 77, 0.8);
+  animation: st-rec 1.4s ease-in-out infinite;
+}
+@keyframes st-rec { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+.st-bench .body { display: flex; align-items: flex-end; gap: 10px; padding: 8px 12px 10px; }
+.st-bench .face { width: 54px; height: 58px; flex-shrink: 0; }
+.st-bench .txt { font-size: 14px; line-height: 1.4; font-weight: 600; color: #eef2fb; }
+
+/* ── flow strip (top-right) ── */
+.st-flow {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  width: 212px;
+  padding: 7px 6px 6px;
+  border-radius: 8px;
+  background: rgba(10, 12, 20, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+.st-flow .hd { display: flex; justify-content: space-between; align-items: baseline; padding: 0 3px 4px; }
+.st-flow .hd .t { font-size: 9.5px; font-weight: 900; letter-spacing: 0.22em; color: rgba(230, 236, 250, 0.6); }
+.st-flow .hd .lean { font-size: 11px; font-weight: 900; letter-spacing: 0.08em; color: rgba(230, 236, 250, 0.8); }
+.st-flow .mbar { display: flex; align-items: center; gap: 6px; padding: 0 3px 6px; }
+.st-flow .mbar .ab { font-size: 10px; font-weight: 900; letter-spacing: 0.06em; width: 28px; text-align: center; }
+.st-flow .track { position: relative; flex: 1; height: 7px; border-radius: 4px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.st-flow .fill { position: absolute; top: 0; bottom: 0; transition: width 0.6s ease; }
+.st-flow .fill.away { right: 50%; border-radius: 4px 0 0 4px; }
+.st-flow .fill.home { left: 50%; border-radius: 0 4px 4px 0; }
+.st-flow .mid { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: rgba(255, 255, 255, 0.55); }
+.st-flow .rink { display: block; margin: 0 auto; }
+.st-flow .rink .boards { fill: rgba(255, 255, 255, 0.05); stroke: rgba(255, 255, 255, 0.28); stroke-width: 1; }
+.st-flow .rink .red { stroke: rgba(229, 72, 77, 0.55); stroke-width: 1; }
+.st-flow .rink .blue { stroke: rgba(96, 140, 255, 0.55); stroke-width: 1; }
+.st-flow .rink .goal { stroke: rgba(229, 72, 77, 0.4); stroke-width: 0.8; }
+.st-flow .foot { display: flex; justify-content: space-between; padding: 4px 3px 0; font-size: 9.5px; font-weight: 800; letter-spacing: 0.06em; }
+.st-flow .foot .muted { color: rgba(230, 236, 250, 0.4); font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; }
+.st-flow .foot .flash { color: #f2c14e; animation: st-flash 0.9s ease-in-out infinite alternate; }
+@keyframes st-flash { from { opacity: 1; } to { opacity: 0.5; } }
+
+/* ── big-chance banner (top centre, over a chance pulled into the cut) ── */
+.st-chance {
+  position: absolute;
+  left: 50%;
+  top: 54px;
+  transform: translateX(-50%);
+  z-index: 2;
+  width: min(460px, 80%);
+  padding: 8px 14px 9px;
+  border-radius: 10px;
+  background: rgba(12, 16, 26, 0.96);
+  border: 1px solid rgba(242, 193, 78, 0.5);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6), inset 4px 0 0 var(--st-team, #f2c14e);
+  color: #f4f6fb;
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+}
+.st-chance .k { font-size: 10px; font-weight: 900; letter-spacing: 0.22em; color: #f2c14e; }
+.st-chance .d { font-size: 15px; margin-top: 4px; }
+.st-chance .d .clk { color: rgba(230, 236, 250, 0.6); font-size: 12px; margin-left: 6px; }
+
+/* Story lower-thirds fade in like the director's cards. */
+.st-in { position: absolute; inset: 0; animation: st-in 0.32s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes st-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .st-bench .rec, .st-flow .foot .flash { animation: none; }
+  .st-flow .fill { transition: none; }
+}

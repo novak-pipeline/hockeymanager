@@ -322,6 +322,8 @@ import {
   type BroadcastPlayer,
   type PlayerStoryFacts,
 } from '@engine/story/broadcastStorylines'
+import { planLiveStory, type BenchFacts, type LivePlayerFacts, type LiveStoryFacts, type SeriesGame } from '@engine/story/liveStory'
+import { rivalryBetween } from '@engine/league/rivalries'
 import {
   buildBiography,
   splitClubName,
@@ -996,6 +998,9 @@ export interface NextGame {
 }
 
 /** The user's watched fixture: render metadata + the positional event stream. */
+/** Watched games a standing live-story card rests after it has been on screen. */
+const LIVE_STORY_REST_GAMES = 6
+
 export interface WatchedGame {
   homeName: string
   awayName: string
@@ -1516,6 +1521,12 @@ export class Career {
   private tentpoles!: TentpolesState
   /** Per-player consecutive games-with-a-point / scoreless counters (skaters). */
   private readonly pointStreaks = new Map<string, number>()
+  /** Live story: standing cards planned on a watched game → the watched-game
+   *  count when they went up (they rest a few games; transient). */
+  private readonly liveStoryRest = new Map<string, number>()
+  private liveStoryWatched = 0
+  /** Live story: per-goalie consecutive shutouts (regular season; transient). */
+  private readonly shutoutRuns = new Map<string, number>()
   private readonly scorelessStreaks = new Map<string, number>()
   /** Per-team consecutive losses (for locker-room ticks). */
   private readonly losingStreaks = new Map<string, number>()
@@ -8577,6 +8588,16 @@ export class Career {
           this.shutouts.set(best.id, (this.shutouts.get(best.id) ?? 0) + 1)
         }
       }
+      // Live story: consecutive shutouts. Any appearance that isn't a credited
+      // shutout ends the run (a relief stint included) — the card only ever
+      // claims straight shutouts. Not saved: a load restarts at zero, which can
+      // only under-claim.
+      for (const id of team.roster) {
+        const s = res.playerStats.get(id)
+        if (!s || s.toi <= 0 || this.resolve(id).position !== 'G') continue
+        const shutout = won && id === best.id && s.goalsAgainst === 0
+        this.shutoutRuns.set(id as string, shutout ? (this.shutoutRuns.get(id as string) ?? 0) + 1 : 0)
+      }
     }
     credit(res.homeTeamId, homeWon)
     credit(res.awayTeamId, !homeWon)
@@ -11424,6 +11445,7 @@ export class Career {
     this.lastBroadcast = this.buildBroadcastContext(home.id, away.id, this.currentDay, false)
     const sim = engine === 'agent' ? this.watchSim() : fullSimGame
     const res = sim(home, away, this.storyResolve(), { seed })
+    this.noteLiveStoryShown(res.stream)
     return this.buildWatched(home.id, away.id, res.stream)
   }
 
@@ -11478,6 +11500,7 @@ export class Career {
         seed: this.gameSeedFor(game),
         intensity: this.gameHeat(game),
       })
+      if (isUser) this.noteLiveStoryShown(res.stream)
       this.applyOutcome(game, res)
       outcomes.push(res)
       for (const pid of this.postGame(res, this.rngFor(7003, nextDay, game.id.length), nextDay)) {
@@ -11721,6 +11744,7 @@ export class Career {
         intensity: gameIntensity(this.rivalriesState, g.homeTeamId as string, g.awayTeamId as string).factor,
       })
       if (res.decidedBy === 'shootout') throw new Error('playoff game decided by shootout')
+      if (isUser && watchUser) this.noteLiveStoryShown(res.stream)
       this.accumulatePlayoffLines(res)
       const result: SeriesGameResult = {
         gameId: asGameId(`${g.seriesId}-g${g.gameNumber}`),
@@ -14458,6 +14482,7 @@ export class Career {
     this.goalieWins.clear()
     this.goalieLosses.clear()
     this.shutouts.clear()
+    this.shutoutRuns.clear()
     this.ppGoals.clear()
     this.ppAssists.clear()
     this.shGoals.clear()
@@ -23170,6 +23195,8 @@ export class Career {
     let leftTeamId: string | null = null
     let leftYear = -1
     let via: 'trade' | 'signing' = 'trade'
+    // The imported past names the club he left, not when or how he left it.
+    let inexact = false
     const prov = this.chronicle.provenance.find(([id]) => id === (p.id as string))?.[1]
     if (prov && prov.acquisitions.length > 0) {
       const last = prov.acquisitions[prov.acquisitions.length - 1]!
@@ -23190,6 +23217,7 @@ export class Career {
         leftTeamId = oppId as string
         leftYear = this.year
         via = 'trade'
+        inexact = true
       }
     }
     if (leftTeamId !== (oppId as string)) return undefined
@@ -23214,6 +23242,7 @@ export class Career {
       leftYear,
       firstVisitSinceLeaving,
       via,
+      ...(inexact ? { inexact: true as const } : {}),
     }
   }
 
@@ -23326,6 +23355,148 @@ export class Career {
         ...(lastSeason && homeIsDefendingChampion ? { championshipYear: lastSeason.year } : {}),
         players: facts,
       }),
+      liveStory: this.buildLiveStoryFacts(home, away, day, playoff, facts),
+    }
+  }
+
+  /**
+   * Live story layer (liveStory.ts): the facts behind tonight's in-game
+   * lower-thirds, bench vignettes and intermission room, gathered BEFORE the
+   * sim so every count is "before tonight". Only what the save actually knows:
+   * streak counters, contracts, the draft record, the old club, the record
+   * book, rivalries, the feud arcs, morale memory and the injury list.
+   */
+  /**
+   * The watched game's plan is pure, so the career can tell which standing
+   * cards (contract year, the draft, the old club, the rookie line) it put on
+   * screen, and rest them for the next few watched games. Otherwise a player in
+   * his contract year would get the same graphic every night of the season.
+   */
+  private noteLiveStoryShown(stream: GameStream): void {
+    const f = this.lastBroadcast?.liveStory
+    if (!f) return
+    this.liveStoryWatched++
+    for (const b of planLiveStory(stream, f).beats) {
+      if (b.channel === 'lowerThird') this.liveStoryRest.set(b.id.replace(/^lt:/, ''), this.liveStoryWatched)
+    }
+  }
+
+  private buildLiveStoryFacts(home: Team, away: Team, day: number, playoff: boolean, story: PlayerStoryFacts[]): LiveStoryFacts {
+    const userSide = home.id === this.userTeamId ? 'home' : away.id === this.userTeamId ? 'away' : null
+    const players: LivePlayerFacts[] = []
+    for (const sf of story) {
+      const p = this.data.players.get(asPlayerId(sf.id))
+      if (!p) continue
+      const team = sf.side === 'home' ? home : away
+      const opp = sf.side === 'home' ? away : home
+      const t = this.totals.get(p.id)
+      const isG = p.position === 'G'
+      const lp: LivePlayerFacts = {
+        id: sf.id,
+        name: p.name,
+        side: sf.side,
+        position: p.position,
+        age: p.age,
+        ...(team.captainId === p.id ? { captain: true } : {}),
+        // Streak counters track the regular season; a playoff night doesn't quote them.
+        pointStreak: playoff ? 0 : this.pointStreaks.get(sf.id) ?? 0,
+        scorelessStreak: playoff ? 0 : this.scorelessStreaks.get(sf.id) ?? 0,
+        seasonGames: this.gp.get(p.id) ?? 0,
+        seasonGoals: t?.goals ?? 0,
+        seasonAssists: t?.assists ?? 0,
+        ...(!playoff && !isG && p.contract.yearsRemaining <= 1 && p.contract.salary > 0 ? { contractYear: { capHit: p.contract.salary } } : {}),
+        ...(p.draftYear !== undefined && p.draftRound !== undefined && p.draftOverall !== undefined && p.draftClub
+          ? { drafted: { year: p.draftYear, round: p.draftRound, overall: p.draftOverall, club: p.draftClub } }
+          : {}),
+        clubName: team.name,
+        opponentName: opp.name,
+        ...(isTrueRookieSeason({ age: p.age, simSeasons: p.stats.length, imported: this.importedCareerOf(p) }) ? { rookieSeason: true } : {}),
+        ...(sf.formerClub ? { formerClub: {
+          teamName: sf.formerClub.teamName, leftYear: sf.formerClub.leftYear, via: sf.formerClub.via,
+          ...(sf.formerClub.inexact ? { inexact: true as const } : {}),
+        } } : {}),
+        careerKnown: sf.careerKnown,
+        career: sf.career,
+        ...(isG ? {
+          goalie: {
+            starter: sf.isStartingGoalie === true,
+            shutoutRun: playoff ? 0 : this.shutoutRuns.get(sf.id) ?? 0,
+            seasonShutouts: this.shutouts.get(p.id) ?? 0,
+            saves: t?.saves ?? 0,
+            shotsAgainst: t?.shotsAgainst ?? 0,
+          },
+        } : {}),
+      }
+      players.push(lp)
+    }
+
+    // This season's completed meetings, oldest first.
+    const seasonSeries: SeriesGame[] = playoff ? [] : this.data.league.schedule
+      .filter((g) => g.result !== undefined && g.result !== null && g.day < day &&
+        ((g.homeTeamId === home.id && g.awayTeamId === away.id) || (g.homeTeamId === away.id && g.awayTeamId === home.id)))
+      .sort((a, b) => a.day - b.day)
+      .map((g) => ({
+        homeAbbr: this.data.teams.get(g.homeTeamId)?.abbreviation ?? '',
+        awayAbbr: this.data.teams.get(g.awayTeamId)?.abbreviation ?? '',
+        homeGoals: g.result!.homeGoals,
+        awayGoals: g.result!.awayGoals,
+        decidedBy: g.result!.decidedBy,
+      }))
+
+    const heat = gameIntensity(this.rivalriesState, home.id as string, away.id as string)
+    const riv = heat.label ? rivalryBetween(this.rivalriesState, home.id as string, away.id as string) : null
+    const h2h = chronicleHeadToHead(this.chronicle, home.id as string, away.id as string)
+
+    let bench: BenchFacts | undefined
+    if (userSide) {
+      const team = userSide === 'home' ? home : away
+      const dressed = new Set(story.filter((s) => s.side === userSide).map((s) => s.id))
+      const sore: BenchFacts['sore'] = []
+      for (const id of dressed) {
+        const p = this.data.players.get(asPlayerId(id))
+        if (!p || !p.moraleMemory) continue
+        // Still raw or lingering, about his minutes.
+        const m = p.moraleMemory
+          .filter((x) => (x.kind === 'scratched' || x.kind === 'buried') && x.weight < 0 && x.peak !== 0 && x.weight / x.peak > 0.33)
+          .sort((a, b) => a.weight - b.weight)[0]
+        if (m) sore.push({ id, kind: m.kind as 'scratched' | 'buried', note: m.note })
+      }
+      const live = this.feud.arcs.filter((a) =>
+        (a.status === 'raised' || a.status === 'cooling' || a.status === 'escalated') && dressed.has(a.aId) && dressed.has(a.bId))
+      bench = {
+        side: userSide,
+        captainId: team.captainId && dressed.has(team.captainId as string) ? (team.captainId as string) : null,
+        debutIds: story.filter((s) => s.side === userSide && s.careerKnown && s.career.gamesPlayed === 0 && s.position !== 'G').map((s) => s.id),
+        injured: team.roster
+          .map((id) => this.data.players.get(id))
+          .filter((p): p is Player => !!p && p.injuryStatus !== null && p.injuryStatus.gamesRemaining > 0 && !dressed.has(p.id as string))
+          .sort((a, b) => (b.injuryStatus!.gamesRemaining - a.injuryStatus!.gamesRemaining))
+          .map((p) => ({ id: p.id as string, name: p.name, injury: p.injuryStatus!.description, gamesRemaining: p.injuryStatus!.gamesRemaining })),
+        sore,
+        feuds: live.map((a) => ({ aId: a.aId, bId: a.bId, since: feudDate(a.escalatedDate ?? a.raisedDate) })),
+        veterans: story
+          .filter((s) => s.side === userSide && s.position !== 'G')
+          .map((s) => ({ id: s.id, gamesPlayed: s.careerKnown ? s.career.gamesPlayed : null, age: s.age })),
+      }
+    }
+
+    return {
+      gameKey: `${this.year}:${day}:${home.id as string}:${away.id as string}`,
+      year: this.year,
+      playoff,
+      homeName: home.name,
+      awayName: away.name,
+      homeAbbr: home.abbreviation,
+      awayAbbr: away.abbreviation,
+      userSide,
+      seasonSeries,
+      ...(riv && heat.label ? { rivalry: { label: heat.label, reasons: [...riv.reasons], meetings: riv.meetings } } : {}),
+      ...(h2h && h2h.wins + h2h.losses > 0
+        ? { allTime: { homeWins: h2h.wins, awayWins: h2h.losses, homeSeriesWins: h2h.seriesWins, awaySeriesWins: h2h.seriesLosses } }
+        : {}),
+      players,
+      ...(bench ? { bench } : {}),
+      resting: [...this.liveStoryRest].filter(([, n]) => this.liveStoryWatched - n < LIVE_STORY_REST_GAMES).map(([id]) => id),
     }
   }
 
