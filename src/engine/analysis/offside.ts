@@ -268,6 +268,11 @@ export function touchesFromStream(stream: GameStream): OffsideTouch[] {
     if (e.type === 'frame') {
       goalies.set(e.homeGoalie.player as string, 'home')
       goalies.set(e.awayGoalie.player as string, 'away')
+      // W3 S6: the puck bounced off a body since the last frame (just before this one)
+      if (e.puckTouch !== undefined) {
+        const team = goalies.get(e.puckTouch as string)
+        out.push(team ? { t: t - 1e-3, team } : { t: t - 1e-3, id: e.puckTouch as string })
+      }
     } else if (e.type === 'pokeCheck' && e.success) out.push({ t, id: e.by as string })
     else if (e.type === 'blockedShot') out.push({ t, id: e.blocker as string })
     else if (e.type === 'save') {

@@ -90,6 +90,11 @@ export const CHECKLIST = {
   systemAway: ['Can you tell how deep this team forechecks (two in / one in / sitting back)?', 'Does it look different from the other team\'s clip?'],
   // W3 S5: the carrier's score tilt
   trailingPush: ['Does the trailing team push (shoots more, takes chances)?', 'Does the carrier go at the net rather than cycle it back?', 'Does the leading team sit back and chip it out?'],
+  // W3 S6: puck path and bounces
+  rimAround: ['Does the rim keep its pace round the corner and behind the net?', 'Does the winger on the far side read it and get to where it comes out?', 'Nobody skates through it?'],
+  offGlass: ['Does the puck die off the glass (deader than the boards) and drop near the wall?', 'Does somebody go to where it lands?'],
+  looseRace: ['Do the men race to where the puck will be, not where it is?', 'Does the closer man get it?', 'Nobody ignores a puck at his feet?'],
+  dumpInRace: ['Does the dump come off the end boards believably (a hard dump dies, a rim keeps going)?', 'Does the forechecker skate to where it will come out?', 'Does the D get back to it in time?'],
 }
 
 const sha1 = (file) => createHash('sha1').update(readFileSync(file)).digest('hex')

@@ -20,7 +20,10 @@ import { loadModDatabase, validateModDatabase } from '@data'
 import { framesFromStream, judgeTeamPlay, per60, SIM_GATES } from '@engine/analysis/teamPlay'
 import { judgeOffsideStream } from '@engine/analysis/offside'
 import { judgeActionFloor, judgeContacts } from '@engine/analysis/actions'
-import { AGENT_TUNING, agentSimGame } from './agentSim'
+import { AGENT_TUNING, GOALIE_READ, REBOUND, agentSimGame, emptyAgentTelemetry } from './agentSim'
+import { PUCK_PLAY, S6_DEV } from './brain'
+import { S6_PHYS } from './physics'
+import { judgePuckPlayStream, puckPlayLine } from '@engine/analysis/puckPlay'
 import { DEKE, PROGRESS, RUSH_PLAY, SCREEN, VAL } from './brain'
 import { DZ_GAP, MAN_COVER, S4_DEV } from './systems'
 import { IN_TIGHT, S5_DEV } from './carrierTilt'
@@ -53,13 +56,21 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
   const res = (id: PlayerId): Player => data.players.get(id)!
   const teams = data.league.teams
   // TP_ABLATE=screen,boxOut,... (W3 S4): turn S4 parts off to see what each does to goals
-  for (const k of (process.env.TP_ABLATE ?? '').split(',').filter(Boolean)) ((k in S5_DEV ? S5_DEV : S4_DEV) as Record<string, boolean>)[k] = false
+  for (const k of (process.env.TP_ABLATE ?? '').split(',').filter(Boolean)) {
+    // W3 S6: TP_ABLATE=s6 turns every S6 part off (the S5 puck), or name parts (path, atFeet, bodies, swept, rebound, misses, goalieRead, phys)
+    if (k === 's6') {
+      S6_PHYS.on = false
+      for (const j of Object.keys(S6_DEV)) (S6_DEV as Record<string, boolean>)[j] = false
+    } else if (k === 'phys') S6_PHYS.on = false
+    else if (k in S6_DEV) (S6_DEV as Record<string, boolean>)[k] = false
+    else ((k in S5_DEV ? S5_DEV : S4_DEV) as Record<string, boolean>)[k] = false
+  }
   // TP_MAN=k,cap,pointFt,urgency: man-coverage variants (systems.ts DZ_GAP.man / MAN_COVER)
   // TP_SET=PROGRESS.noGainK=0.1,RUSH_PLAY.netK=0.5 (W3 S5): try a value without editing the source
   for (const kv of (process.env.TP_SET ?? '').split(',').filter(Boolean)) {
     const [path, v] = kv.split('=') as [string, string]
     const [obj, key] = path.split('.') as [string, string]
-    const tbl = ({ PROGRESS, RUSH_PLAY, IN_TIGHT, AGENT_TUNING, SCREEN, VAL, DEKE } as Record<string, Record<string, number>>)[obj]
+    const tbl = ({ PROGRESS, RUSH_PLAY, IN_TIGHT, AGENT_TUNING, SCREEN, VAL, DEKE, REBOUND, GOALIE_READ, PUCK_PLAY } as Record<string, Record<string, number>>)[obj]
     if (tbl && key in tbl) tbl[key] = Number(v)
   }
   if (process.env.TP_SCREEN) SCREEN.minShotFt = Number(process.env.TP_SCREEN)
@@ -130,13 +141,42 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
   const sysBo: SeqCase<string>[] = []
   // W3 S5: the carrier detectors (ping-pong, breakaways, odd-man rushes, score state)
   const cps: CarrierPlayReport[] = []
+  // W3 S6: the puck detectors and telemetry
+  const pp = { liveMin: 0, overCap: 0, gained: 0, reboundFast: 0, skateThrough: 0, ignored: 0, intervals: 0 }
+  const ppEx: string[] = []
+  const s6 = { races: 0, won: 0, sideWon: 0, gained: 0, overCap: 0, swept: 0, freezes: 0, saves: 0, overGlass: 0, icings: 0, contacts: {} as Record<string, number>, maxSpeed: {} as Record<string, number>, rebound: {} as Record<string, number> }
   for (let i = 0; i < games; i++) {
     const k = i + Number(process.env.TP_SEED0 ?? 7000) - 7000
     // TP_PAIR=band: the pairing of agentSim.test's NHL-band sample (team k v k+1, seed 5000+k)
     const band = process.env.TP_PAIR === 'band'
     const home = data.teams.get(teams[(band ? k : k * 7) % teams.length])!
     const away = data.teams.get(teams[(band ? k + 1 : k * 7 + 3 + (k % 5)) % teams.length])!
-    const out = agentSimGame(home, away, res, { seed: (process.env.TP_PAIR === 'band' ? 5000 + k : Number(process.env.TP_SEED0 ?? 7000) + i) })
+    const tmx = emptyAgentTelemetry()
+    const out = agentSimGame(home, away, res, { seed: (process.env.TP_PAIR === 'band' ? 5000 + k : Number(process.env.TP_SEED0 ?? 7000) + i), agentTelemetry: tmx })
+    {
+      s6.races += tmx.puck.races
+      s6.won += tmx.puck.raceWonPredicted
+      s6.sideWon += tmx.puck.raceSideWon
+      s6.gained += tmx.puck.gained
+      s6.overCap += tmx.puck.overCap
+      s6.swept += tmx.puck.swept
+      s6.freezes += tmx.stoppages.goalieFreeze
+      s6.saves += tmx.saves
+      s6.overGlass += tmx.overGlass
+      s6.icings += tmx.icings
+      for (const [k2, v] of Object.entries(tmx.puck.contacts)) s6.contacts[k2] = (s6.contacts[k2] ?? 0) + v
+      for (const [k2, v] of Object.entries(tmx.puck.maxSpeed)) s6.maxSpeed[k2] = Math.max(s6.maxSpeed[k2] ?? 0, v)
+      for (const [k2, v] of Object.entries(tmx.dbg)) if (k2.startsWith('rebound:')) s6.rebound[k2] = (s6.rebound[k2] ?? 0) + v
+      const r6 = judgePuckPlayStream(out.stream)
+      pp.liveMin += r6.liveMin
+      pp.intervals += r6.intervals
+      pp.overCap += r6.overCap.length
+      pp.gained += r6.gained.length
+      pp.reboundFast += r6.reboundFast.length
+      pp.skateThrough += r6.skateThrough.length
+      pp.ignored += r6.ignored.length
+      for (const c of [...r6.overCap.slice(0, 1), ...r6.gained.slice(0, 1), ...r6.reboundFast.slice(0, 1), ...r6.skateThrough.slice(0, 1), ...r6.ignored.slice(0, 1)]) if (ppEx.length < 14) ppEx.push(`g${i} ${c.what}`)
+    }
     let lastShotT = -99
     let lastPer = 0
     let lastFrame: (typeof out.stream)[number] | null = null
@@ -222,6 +262,10 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
     `goal geometry: ${geoBad} illegal in ${geoGoals} goals - faceoff dots: ${foWrong} off the right painted dot in ${foJudged} judged (${foUnjudged} unjudged)`,
     ...(['forecheck', 'D zone', 'breakouts'] as const).map((k, i) => { const l = legibility([sysFc, sysDz, sysBo][i]!); return `VT15 ${k}: ${l.matched}/${l.judged} family (${l.exact} exact) ${JSON.stringify(l.table)}` }),
     carrierPlayLine(sumCarrierPlay(cps), liveMin),
+    puckPlayLine(pp),
+    `S6 sim: races ${s6.races} wonPredicted ${(s6.won / Math.max(1, s6.races)).toFixed(3)} sideWon ${(s6.sideWon / Math.max(1, s6.races)).toFixed(3)} gained ${s6.gained} overCap ${s6.overCap} swept ${s6.swept} freezeShare ${(s6.freezes / Math.max(1, s6.saves)).toFixed(3)} outOfPlay ${(s6.overGlass / games).toFixed(2)} icings ${(s6.icings / tg).toFixed(2)}`,
+    `S6 contacts/game: ${Object.entries(s6.contacts).map(([k2, v]) => `${k2} ${(v / games).toFixed(1)}`).join(' ')} - rebounds ${JSON.stringify(s6.rebound)} - max speed ${JSON.stringify(s6.maxSpeed)}`,
+    ...ppEx,
     ...sumCarrierPlay(cps).breakEx.slice(0, 8),
     ...sumCarrierPlay(cps).pingEx.slice(0, 4),
     ...offEx,

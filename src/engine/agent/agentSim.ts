@@ -68,26 +68,39 @@ import type { Ctx, RSkater } from '@engine/full/types'
 import {
   bladePoint,
   constrainBody,
+  lastPuckContact,
   makeBody,
+  puckBounce,
+  puckOffBodies,
   resolveBodies,
   speedOf,
   stepBody,
   stepPuck,
   type Body,
+  type PuckContact,
   type Contact,
   type MoveCmd,
   type Puck
 } from './physics'
 import { BLUE_X, DOT_EZ_X, DOT_NZ_X, DOT_Y, GOAL_X, HALF_X, HALF_Y, NET_HALF_W, boardsClamp, distToBoards } from './rink'
-import { NET_ROLES, SHAPE_TUNING, DEKE, DEKE_LEVEL, REACH, blockChance, decideCarrier, dekeDefRead, dekeGoalieRead, dekeSkill, pressureOn, realPressure, thinkSide, xgAt, type ThinkOut } from './brain'
+import { NET_ROLES, SHAPE_TUNING, DEKE, DEKE_LEVEL, REACH, S6_DEV, raceLeader, sharedPath, blockChance, decideCarrier, dekeDefRead, dekeGoalieRead, dekeSkill, pressureOn, realPressure, thinkSide, xgAt, type ThinkOut } from './brain'
 import { decideHit, resolveHit, type HitIntent } from './physical'
 import { jobName, newTeamPlan, setJob } from './plans'
 import { emptyAgentTelemetry, type AgentTelemetry } from './telemetry'
-import { ACTION_FLOOR, settleFloor, windupFloor, type ActName } from './constraints'
+import { ACTION_FLOOR, PUCK_SPEED, settleFloor, windupFloor, type ActName } from './constraints'
+import { pathAt } from './puckPath'
 import { LEVEL, levelDefOffset, levelOffset, rDef, rLevel, type CarrierAction, type Side, type World } from './world'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
 const r01 = rLevel
+/** Distance from the origin to the segment (ax, ay)-(bx, by). */
+function segDist(ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax
+  const dy = by - ay
+  const L2 = dx * dx + dy * dy
+  const t = L2 < 1e-12 ? 0 : clamp(-(ax * dx + ay * dy) / L2, 0, 1)
+  return Math.hypot(ax + dx * t, ay + dy * t)
+}
 
 export const FRAME_DT = 0.25
 const SUBSTEPS = 5
@@ -138,7 +151,10 @@ export const AGENT_TUNING = {
   /** Per-think stick-foul chance when beaten (penalties). */
   // 1.9 → 1.6 (W3 S3): compensates for the stopped dead-time clock - 16% more
   // live play per game put penalties at 4.55 a team-game, over the band (4.46).
-  stickFoulK: 1.6,
+  // 1.6 → 1.3 (W3 S6): compensates for the S6 puck - more loose pucks played
+  // at the feet and in races (at-feet chasers, the swept pickup, pucks dying on
+  // bodies) put penalties at 4.71 a team-game, over the band (W3-LOG S6).
+  stickFoulK: 1.3,
   /** Misc stoppages per second of live play ("other": net off, high stick…). */
   miscStopPerSec: 0.0028
 }
@@ -189,6 +205,24 @@ const ZONE_EDGE_FT = 0.625
 /** Seconds a carrier and a checker can lean on each other before one wins it. */
 /** A skater who fumbles a touch gets another try this much later. */
 const RETRY_S = 0.3
+/**
+ * W3 S6, the physical rebound (resolveShot): the share of non-frozen saves off
+ * the chest and the blocker (the rest off a pad), and how far (degrees) each
+ * angles the puck off square toward the boards - a pad by `padDeg` plus
+ * `padCtrlDeg` × rebound control, the blocker `blockerDeg`; `sd` the spread.
+ * Directions are ours (standard goaltending: pads kick to the corners, the
+ * blocker steers wide, a chest save drops in front); sized so the rebound-shot
+ * share stays in the NHL band (matchTargets shots.reboundShareProxy).
+ */
+/**
+ * W3 S6, the goalie's read of a pass across his slot (stepGoalie): a pass of
+ * theirs whose predicted path enters the slot (within `slotFt` of his net and
+ * `slotHalfW` of the middle) inside `withinS` s; he tracks the predicted puck
+ * `leadS + leadReadS × read` s ahead (no further than `beyondS` past where it
+ * enters the slot), instead of a lagged read of where it is.
+ */
+export const GOALIE_READ = { withinS: 1.0, slotFt: 34, slotHalfW: 16, leadS: 0.1, leadReadS: 0.3, beyondS: 0.35 }
+export const REBOUND = { chest: 0.15, blocker: 0.25, padDeg: 6, padCtrlDeg: 30, blockerDeg: 32, sd: 14, chestSd: 18, maxDeg: 40 }
 /** Loose-puck pickup: base chance, relative speed (ft/s) that is still easy, how fast it gets hard. */
 export const LOOSE_PICK = { base: 0.85, easyRel: 22, relScale: 70 }
 
@@ -258,6 +292,10 @@ interface ShotPlan {
   from: XY
   xg: number
   rebound: boolean
+  /** W3 S6: a miss off the post / over the net / wide (as the missedShot event says). */
+  miss?: 'post' | 'high' | 'wide' | undefined
+  /** Release speed, ft/s (W3 S6: the rebound comes off the pads from it). */
+  speed?: number
 }
 
 interface DelayedPenalty {
@@ -388,6 +426,12 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   // also a blocker, a goalie's rebound, a poke or a tie-up. An entry the
   // defenders put in their own zone puts nobody offside, whatever moved it.
   let propelledBy: Side | null = null
+  /** When the last pass / dump left a stick (W3 S6: the passer's own skates do not stop it). */
+  let releasedAt = -99
+  /** W3 S6: the last body a free puck bounced off since the last frame (FrameEvent.puckTouch). */
+  let bodyTouch: Body | null = null
+  /** W3 S6: the open loose-puck race and the man the predicted path said would win it. */
+  let race: { b: Body; side: Side | null } | null = null
   // The carrier took the puck while he was already over the line (see gainControl).
   let aheadAtGain: Body | null = null
   const hitIntent = new Map<Body, HitIntent>()
@@ -504,7 +548,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
 
   /** Re-read the side's on-ice bodies after a deploy. */
   /** Shift energy of skaters on the bench (recovers while sitting). */
-  const benchEnergy = new Map<PlayerId, { e: number; at: number }>()
+  const benchEnergy = new Map<PlayerId, { e: number; at: number; x?: number; y?: number }>()
   const BENCH_RECOVER_PER_S = 0.012
 
   /**
@@ -528,10 +572,13 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       // while people are still on the ice"). Several at once spread along it.
       void src
       const k = newAtGate++
-      const gate = { x: gateOf(s).x + (k % 3 - 1) * 3, y: BENCH_GATE.y + INTO_ICE * (1.5 + Math.floor(k / 3) * 2) }
-      const b = makeBody(r.player, gate.x, gate.y, s.a)
-      b.vy = 6 * INTO_ICE
       const rest = benchEnergy.get(r.player.id)
+      // (W3 S6) a man who went off at the door a moment ago and is sent straight
+      // back out comes on where he left the ice, not 10 ft along the boards
+      const back = rest && rest.x !== undefined && rest.y !== undefined && now - rest.at < 2
+      const gate = back ? { x: rest.x!, y: rest.y! } : { x: gateOf(s).x + (k % 3 - 1) * 3, y: BENCH_GATE.y + INTO_ICE * (1.5 + Math.floor(k / 3) * 2) }
+      const b = makeBody(r.player, gate.x, gate.y, s.a)
+      b.vy = back ? 0 : 6 * INTO_ICE
       if (rest) b.energy = clamp(rest.e + (now - rest.at) * BENCH_RECOVER_PER_S, 0, 1)
       bodies.set(r.player.id, b)
       return b
@@ -609,7 +656,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         }
         if (sw.inId === null) {
           // through the door and off: one man fewer out there
-          benchEnergy.set(b.player.id, { e: b.energy, at: now })
+          benchEnergy.set(b.player.id, { e: b.energy, at: now, x: b.x, y: b.y })
           bodies.delete(b.player.id)
           s.skaters.splice(idx, 1)
           s.sim.unit.skaters.splice(idx, 1)
@@ -629,7 +676,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         nb.vy = 8 * INTO_ICE
         const rest = benchEnergy.get(p.id)
         if (rest) nb.energy = clamp(rest.e + (now - rest.at) * BENCH_RECOVER_PER_S, 0, 1)
-        benchEnergy.set(b.player.id, { e: b.energy, at: now })
+        benchEnergy.set(b.player.id, { e: b.energy, at: now, x: b.x, y: b.y })
         bodies.delete(b.player.id)
         bodies.set(p.id, nb)
         s.skaters[idx] = nb
@@ -705,7 +752,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     for (const b of old) {
       if (staying.has(b.player.id)) continue
       bodies.delete(b.player.id)
-      benchEnergy.set(b.player.id, { e: b.energy, at: now })
+      benchEnergy.set(b.player.id, { e: b.energy, at: now, x: b.x, y: b.y })
     }
     bindSide(s, old)
     if (w.carrier && !s.skaters.includes(w.carrier) && old.includes(w.carrier)) {
@@ -816,6 +863,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   // Stoppages and faceoffs
   // -------------------------------------------------------------------------
   const stopPlay = (dot: XY, zone: 'offensive' | 'defensive' | 'neutral', zoneFor: Side | null, reason: 'offside' | 'icing' | 'goalieFreeze' | 'penalty' | 'other', detail: StoppageDetail, by: Side | null = null): void => {
+    race = null
     endBattle(null)
     deke = null
     windup = null
@@ -1082,6 +1130,12 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     w.control = s
     w.lastTouch = s
     propelledBy = s
+    if (race && tm) {
+      tm.puck.races++
+      if (race.b === b) tm.puck.raceWonPredicted++
+      if (race.side === s) tm.puck.raceSideWon++
+    }
+    race = null
     // He took it while already over the blue line, the puck still outside:
     // he is ahead of it, and carrying it in does not put him onside (the
     // possession exception is for a carrier who crosses WITH the puck).
@@ -1218,7 +1272,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const dy = at.y - puck.y
     const L = Math.max(Math.hypot(dx, dy), 0.1)
     const ang = Math.atan2(dy, dx) + rng.normal(0, sigma)
-    const sp = speed * (1 + rng.normal(0, 0.05))
+    // W3 S6: never harder than a pass / rim can physically be sent (constraints.ts PUCK_SPEED)
+    const sp = Math.min(speed * (1 + rng.normal(0, 0.05)), S6_DEV.bodies ? PUCK_SPEED.pass : Infinity)
+    releasedAt = now
     puck.vx = Math.cos(ang) * sp
     puck.vy = Math.sin(ang) * sp
     if (lift > 0) {
@@ -1429,6 +1485,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     let outcome: ShotPlan['outcome']
     let at: XY
     let travel: number
+    let missKind: 'post' | 'high' | 'wide' | undefined
     const g = opp.goalie
     if (blocker) {
       outcome = 'block'
@@ -1455,6 +1512,12 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         travel = Math.hypot(at.x - from.x, at.y - from.y)
         if (tm) tm.missed++
         const r = rng.next()
+        missKind = r < 0.08 ? 'post' : r < 0.38 ? 'high' : 'wide'
+        // W3 S6: off the post it rings off the iron (resolveShot), so it goes to the post
+        if (S6_DEV.misses && missKind === 'post' && geo.onNet) {
+          at = { x: netX, y: Math.sign(wide) * (NET_HALF_W + 0.15) }
+          travel = Math.hypot(at.x - from.x, at.y - from.y)
+        }
         ev({
           t: T(),
           period,
@@ -1499,7 +1562,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         const goal = rng.chance(pGoal)
         outcome = goal ? 'goal' : 'save'
         at = goal
-          ? goalPath(from, a, clamp(rng.normal(0, 1.4), -NET_HALF_W + 0.4, NET_HALF_W - 0.4))
+          // (a tip goes in on the line from the tip, W3 S6: from the shooter's
+          // spot a tip at a sharp angle read as crossing outside the post)
+          ? goalPath(shotFrom, a, clamp(rng.normal(0, 1.4), -NET_HALF_W + 0.4, NET_HALF_W - 0.4))
           : { x: g.x, y: g.y }
         travel = Math.hypot(at.x - from.x, at.y - from.y)
         // Shot on goal: the stream's 'shot' event (danger drives renderer drama).
@@ -1562,8 +1627,78 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       releaseAdv: puck.x * a,
       untouched: true,
       tried: tries(c),
-      shot: { outcome, shooter: shooterB, side: s, blocker, at, travel, travelled: 0, from: shotFrom, xg, rebound: now - lastSaveAt < 1.6 }
+      shot: { outcome, shooter: shooterB, side: s, blocker, at, travel, travelled: 0, from: shotFrom, xg, rebound: now - lastSaveAt < 1.6, miss: missKind, speed }
     }
+  }
+
+  /**
+   * W3 S6: a rebound comes off the goalie physically. The save itself was
+   * decided at the release (xG); here the puck meets the save surface - a pad
+   * (most saves), the blocker (steered wide) or the chest (dies in front of
+   * him), each a row of constraints.ts PUCK_SURFACE - squared to the shooter
+   * and angled by the goalie's rebound control toward the boards, and leaves
+   * with the speed the shot and the surface give it (a hard shot off a pad
+   * kicks out further than a soft one; never faster than it came in).
+   */
+  function physicalRebound(sp: ShotPlan, g: Body, rc: number, opp: Side): void {
+    const a = sp.side.a
+    let vx = puck.vx
+    let vy = puck.vy
+    let V = Math.hypot(vx, vy)
+    // the face squared to the shooter
+    let nx = sp.from.x - g.x
+    let ny = sp.from.y - g.y
+    const nl = Math.max(Math.hypot(nx, ny), 1e-6)
+    nx /= nl
+    ny /= nl
+    if (V < 1) {
+      V = sp.speed ?? 60
+      vx = -nx * V
+      vy = -ny * V
+    }
+    const u = rng.next()
+    const surface = u < REBOUND.chest ? 'chest' : u < REBOUND.chest + REBOUND.blocker ? 'blocker' : 'pad'
+    // steer toward the boards on the side the shot came from (a shot from the middle: either way)
+    const away = Math.abs(sp.from.y) > 4 ? Math.sign(sp.from.y) : rng.chance(0.5) ? 1 : -1
+    const deg = surface === 'chest'
+      ? rng.normal(0, REBOUND.chestSd)
+      : surface === 'blocker'
+        ? REBOUND.blockerDeg + rng.normal(0, REBOUND.sd)
+        : REBOUND.padDeg + rc * REBOUND.padCtrlDeg + rng.normal(0, REBOUND.sd * (1.3 - rc * 0.6))
+    // (a reflection turns the puck twice the face's angle: past 40° it would kick back at the goal line)
+    const th = (clamp(deg, -15, REBOUND.maxDeg) * Math.PI) / 180
+    // rotate the face normal by th, the sense that turns it toward `away` (in y)
+    const c0 = Math.cos(th)
+    const s0 = Math.sin(th)
+    const p1 = { x: nx * c0 - ny * s0, y: nx * s0 + ny * c0 }
+    const p2 = { x: nx * c0 + ny * s0, y: -nx * s0 + ny * c0 }
+    const f0 = p1.y * away >= p2.y * away ? p1 : p2
+    const fx = f0.x
+    const fy = f0.y
+    puck.vx = vx
+    puck.vy = vy
+    puck.z = 0
+    puck.vz = 0
+    const c = puckBounce(puck, -fx, -fy, surface)
+    if (c) notePuckContact(c)
+    if (!c) {
+      // a glancing touch it hardly changed: it dies off him
+      puck.vx = fx * 4
+      puck.vy = fy * 4
+    }
+    const ox = puck.vx
+    const oy = puck.vy
+    const ol = Math.max(Math.hypot(ox, oy), 1e-6)
+    // it leaves from where it met him (no jump to a spot off his pads: VT20)
+    let x = puck.x
+    const y = puck.y
+    // never inside the net
+    if (x * a > GOAL_X - 0.6 && Math.abs(y) < NET_HALF_W + 0.6) x = a * (GOAL_X - 0.6)
+    puck.x = x
+    puck.y = y
+    loosen(ox, oy, null, opp)
+    if (tm) tm.puck.maxSpeed['rebound'] = Math.max(tm.puck.maxSpeed['rebound'] ?? 0, Math.round(ol * 10) / 10)
+    if (tm) tm.dbg['rebound:' + surface] = (tm.dbg['rebound:' + surface] ?? 0) + 1
   }
 
   const resolveShot = (f: Flight): void => {
@@ -1585,6 +1720,29 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     if (sp.outcome === 'miss') {
       // Wide: the puck carries on, live, around the boards.
       flight = { kind: 'loose', side: s, from: sp.shooter, releaseAdv: sp.from.x * a, untouched: true, tried: tries() }
+      if (S6_DEV.misses && sp.miss === 'post' && Math.abs(Math.abs(sp.at.y) - NET_HALF_W) < 0.5) {
+        // W3 S6: off the post. The iron is a 2.4-inch pipe: the normal at the
+        // contact points from the post to where the puck met it (the far side
+        // of the pipe from the shooter, a little outside it), and it rings out.
+        const py = Math.sign(sp.at.y) * NET_HALF_W
+        let nx = sp.from.x - a * GOAL_X
+        let ny = sp.from.y - py
+        const nl = Math.max(Math.hypot(nx, ny), 1e-6)
+        nx /= nl
+        ny /= nl
+        // the puck catches the outside half of the pipe (it missed): turn the normal outward
+        const qx = nx
+        const qy = ny + Math.sign(sp.at.y) * 0.45
+        const ql = Math.hypot(qx, qy)
+        const c = puckBounce(puck, -qx / ql, -qy / ql, 'post')
+        if (c) notePuckContact(c)
+        puck.x = a * GOAL_X - a * 0.4
+        puck.y = py + Math.sign(sp.at.y) * 0.3
+      } else if (S6_DEV.misses && sp.miss === 'high') {
+        // over the net: in the air into the glass behind it (deader), then it drops
+        puck.z = rng.float(4.2, 6.5)
+        puck.vz = rng.float(-2, 3)
+      }
       return
     }
     // A shot on goal during a delayed offside: the play is stopped (rule 83.3),
@@ -1671,6 +1829,11 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       puck.x = g.x
       puck.y = g.y
       stopPlay(dzDot(opp, puck.y), zoneOf(dzDot(opp, puck.y), s), opp, 'goalieFreeze', 'goalieFreeze', opp)
+      return
+    }
+    if (S6_DEV.rebound) {
+      physicalRebound(sp, g, rc, opp)
+      if (flight) flight.tried = tries(g)
       return
     }
     // Rebound: into the slot (a poor rebound) or steered to a corner.
@@ -1944,6 +2107,11 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       for (const s of sides) {
         s.leaving.clear()
         for (const sw of changing.get(s)?.swaps ?? []) s.leaving.add(sw.out)
+      }
+      // W3 S6: a race for a free puck opens with the man the predicted path favours
+      if (tm && !race && !w.carrier && flight && (flight.kind === 'loose' || flight.kind === 'dump') && puck.z <= 3) {
+        const lead = raceLeader(w, [...H.skaters, ...A.skaters].filter((b) => b.stun <= 0 && !H.leaving.has(b) && !A.leaving.has(b)))
+        if (lead) race = { b: lead.b, side: sideOf(lead.b) }
       }
       for (const s of sides) thinkSide(w, s, out)
       boxOuts()
@@ -2403,7 +2571,12 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           if (blueLines()) continue
         }
       } else {
+        // W3 S6: where the puck was before this step (the body contact and the
+        // swept pickup check read its path, not just where it ends up)
+        const px0 = puck.x
+        const py0 = puck.y
         const res = stepPuck(puck, DT)
+        if (lastPuckContact.c) notePuckContact(lastPuckContact.c)
         if (res === 'outOfPlay') {
           if (tm) tm.overGlass++
           // Shot over the glass from your own zone: delay of game.
@@ -2433,8 +2606,12 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         // Pickups and interceptions.
         // A loose puck at the goalie's pads: he smothers it (whistle) unless
         // an attacker gets a stick on it first.
+        notePuckSpeed()
         if (coverByGoalie()) continue
-        pickup()
+        pickup(px0, py0)
+        // W3 S6: a puck no stick took this substep meets skates, shins, bodies
+        // and pads (a man cannot skate through a puck, nor a pass slide through him)
+        if (S6_DEV.bodies && !w.carrier && flight && flight.kind !== 'shot' && puck.z <= 5.5) puckOnBodies(px0, py0)
         // Puck pinned on the boards in a scrum: whistle.
         if (!w.carrier && Math.hypot(puck.vx, puck.vy) < 3 && distToBoards(puck.x, puck.y) < 3.5) {
           let hN = 0
@@ -2575,8 +2752,11 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       puck: { x: clamp(pk.x / HALF_X, -1, 1), y: clamp(pk.y / HALF_Y, -1, 1) },
       puckCarrier: deadAt === null && !pending && w.carrier && recv !== w.carrier ? w.carrier.player.id : null,
       ...(deadAt === null && puck.z > 0.05 ? { puckZ: Math.round(puck.z * 10) / 10 } : {}),
+      ...(bodyTouch ? { puckTouch: bodyTouch.player.id } : {}),
+      ...(w.delayedOffside ? { delayedOffside: w.delayedOffside === H ? 'home' as const : 'away' as const } : {}),
       ...sysSnap()
     })
+    bodyTouch = null
     lastFrameT = now
     if (tm) tm.frames++
   }
@@ -2612,11 +2792,15 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       const adv = puck.x * s.a
       if (zoneIn.get(s)) {
         // out only once it has completely left (over the line's far edge)
-        if (adv < BLUE_X - ZONE_EDGE_FT) zoneIn.set(s, false)
+        if (adv < BLUE_X - ZONE_EDGE_FT) {
+          zoneIn.set(s, false)
+          lineKeyframe()
+        }
         continue
       }
       if (adv < BLUE_X + ZONE_EDGE_FT) continue
       zoneIn.set(s, true)
+      lineKeyframe()
       const carried = w.carrier !== null && w.control === s
       // the defenders put it in their own zone: nobody is offside
       if (!carried && propelledBy !== s) continue
@@ -2652,6 +2836,16 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       }
     }
     return false
+  }
+
+  /**
+   * W3 S6: a keyframe when the puck enters or leaves a zone, so the stream (and
+   * the offside judge, VT18) sees every crossing - a carried puck that dips over
+   * the line and back between two 4 Hz frames was an entry the frames never
+   * showed (the judge then read the next crossing as the entry).
+   */
+  function lineKeyframe(): void {
+    if (S6_DEV.bodies && !pending && !celebration && deadAt === null && now > lastFrameT + 1e-6) emitFrame()
   }
 
   function callOffside(s: Side, carried: boolean): void {
@@ -2784,7 +2978,46 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     if (tm) tm.battles++
   }
 
-  function pickup(): void {
+  // --- W3 S6: the puck against bodies, and its speed sanity ----------------
+  function notePuckContact(c: PuckContact): void {
+    if (!tm) return
+    tm.puck.contacts[c.surface] = (tm.puck.contacts[c.surface] ?? 0) + 1
+    if (c.vOut > c.vIn + 0.5) tm.puck.gained++
+  }
+  /** Skates, shins, bodies and goalie pads in the free puck's path this substep. */
+  function puckOnBodies(px0: number, py0: number): void {
+    const f = flight
+    const list: { b: Body; goalie: boolean }[] = []
+    for (const s of sides) {
+      for (const b of s.skaters) {
+        // his own release (the blade is in front of him; a drop pass goes by his skates)
+        if (f && f.from === b && now - releasedAt < 0.3) continue
+        list.push({ b, goalie: false })
+      }
+      if (!s.sim.pulled) list.push({ b: s.goalie, goalie: true })
+    }
+    const hit = puckOffBodies(puck, px0, py0, DT, list)
+    if (!hit) return
+    notePuckContact(hit.c)
+    bodyTouch = hit.b
+    const hs = sideOf(hit.b) ?? (H.goalie === hit.b ? H : A.goalie === hit.b ? A : null)
+    if (f) f.untouched = false
+    if (hs) propelledBy = hs
+    // a delayed offside: an attacker it bounced off in the zone has touched it (whistle)
+    if (hs && w.delayedOffside === hs && zoneIn.get(hs) && hit.b !== hs.goalie) callOffside(hs, false)
+  }
+  /** Fastest free puck by what sent it, and any over the plausible cap for that action (constraints.ts PUCK_SPEED). */
+  function notePuckSpeed(): void {
+    if (!tm) return
+    const v = Math.hypot(puck.vx, puck.vy)
+    const k = flight ? flight.kind : 'none'
+    if (v > (tm.puck.maxSpeed[k] ?? 0)) tm.puck.maxSpeed[k] = Math.round(v * 10) / 10
+    // a wide shot carries on at shot speed (it came off a shooter's stick); anything else is a pass / rim / loose puck
+    const shotBorn = flight?.kind === 'loose' && flight.from !== null && flight.untouched
+    if (v > (shotBorn ? PUCK_SPEED.shot : PUCK_SPEED.pass) + 0.5) tm.puck.overCap++
+  }
+
+  function pickup(px0 = puck.x, py0 = puck.y): void {
     if (!flight) return
     const f = flight
     const pvx = puck.vx
@@ -2796,7 +3029,12 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     for (const s of sides) {
       for (const b of s.skaters) {
         if (b.stun > 0 || handsFull(b)) continue
-        const d = Math.hypot(b.x - puck.x, b.y - puck.y)
+        const dEnd = Math.hypot(b.x - puck.x, b.y - puck.y)
+        // W3 S6: the closest the puck came to his stick over this substep (the
+        // relative path, swept): a fast puck that went through his reach
+        // between two substeps is his to try, not a puck he skated through
+        const d = S6_DEV.swept ? Math.min(dEnd, segDist(px0 - (b.x - b.vx * DT), py0 - (b.y - b.vy * DT), puck.x - b.x, puck.y - b.y)) : dEnd
+        if (tm && d <= REACH && dEnd > REACH) tm.puck.swept++
         if (d > REACH) {
           if (d > REACH + 1.5) f.tried.delete(b)
           continue
@@ -2901,8 +3139,28 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const read = r01(gr?.positioningG ?? g.player.composites.goaltending)
     const lag = 0.16 - read * 0.1
     const src = deadAt ?? puck
-    const px = src.x - puck.vx * lag * (deadAt ? 0 : 1)
-    const py = src.y - puck.vy * lag * (deadAt ? 0 : 1)
+    let px = src.x - puck.vx * lag * (deadAt ? 0 : 1)
+    let py = src.y - puck.vy * lag * (deadAt ? 0 : 1)
+    // W3 S6: a pass of theirs whose predicted path crosses his slot: he reads
+    // it and starts across with it, as far ahead as his read allows, instead
+    // of trailing a lagged read of the puck (better goalies get there first).
+    if (S6_DEV.goalieRead && !deadAt && flight?.kind === 'pass' && flight.side === oppOf(s) && puck.z <= 1) {
+      const own = -s.a * GOAL_X
+      const pp = sharedPath(w)
+      let tCross = -1
+      for (let t = 0; t <= GOALIE_READ.withinS; t += 0.05) {
+        const q = pathAt(pp, t)
+        if ((q.x - own) * s.a > 0 && Math.hypot(q.x - own, q.y) < GOALIE_READ.slotFt && Math.abs(q.y) < GOALIE_READ.slotHalfW) {
+          tCross = t
+          break
+        }
+      }
+      if (tCross >= 0) {
+        const q = pathAt(pp, Math.min(tCross + GOALIE_READ.beyondS, GOALIE_READ.leadS + read * GOALIE_READ.leadReadS))
+        px = q.x
+        py = q.y
+      }
+    }
     const ideal0 = goalieIdeal(s, px, py)
     // He bit on a deke: he goes with the fake, out across his crease.
     const bit = bite !== null && bite.side === s && now < bite.until

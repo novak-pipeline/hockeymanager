@@ -330,3 +330,93 @@ Where the S5 goals came from (60-game ablations, coach systems, each part switch
 - The breakaway is decided well but there are many of them (2,800 episodes in 480 games, ~2.9 a team-game by this detector's loose definition, far more than the NHL sees): the rush defence lets men behind it. That is S1/S4 rush-defence work, not the carrier's.
 - The all-game score effect is even (0.50), not the NHL's 0.54: the trailing tilt only starts in the third.
 - The no-gain pass rule covers the straight return only; a three-man ring (A-B-C-A) with nothing in it is not penalised.
+
+## S6 puck path and bounces (2026-10-18)
+
+The owner's standing notes for the slice: "puck is zipping around too fast", "skate through the puck", "players ignoring a puck right in front of them".
+
+### What changed (W3-DESIGN items 5 and 6)
+
+- **The puck path predictor** (`src/engine/agent/puckPath.ts`). `predictPuck` steps a copy of the free puck with the sim's own `stepPuck` (no randomness): friction, flight, the boards, the glass, the posts and the cage. One path per think is shared by both sides (`sharedPath`). Unit test: for a rim, a hard dump, a bank pass, a chip off the glass and a wide shot round the end boards, the predictor and the real step agree to 1e-6 ft over 2.4 s.
+- **Loose-puck races read the real path.** Every man's intercept is the earliest point on the predicted path (round the corner, off the end boards; not while the puck is above the sticks) he can get his stick to (`stickTime`: his skating time to the reach circle round the point; the S5 form `reachTime - REACH/top` sent a man standing 4 ft from the puck on a 0.5 s "race"). **A puck at his feet is his** (`PUCK_PLAY`): a man whose stick meets the path within 0.3 s plays it ahead of the claim and the D safety line when the claimed man is 0.5 s further away, and a chaser wedged in the crease between the goalie and the cage steps out to the side before going round the net (he used to press on the cage while the puck sat behind it).
+- **The goalie reads a pass across his slot** (`GOALIE_READ`): a pass of theirs whose predicted path enters his slot within 1 s; he tracks the predicted puck 0.1 + 0.3 × his read s ahead instead of a lagged read of where it is.
+- **Per-surface puck response** (`constraints.ts PUCK_SURFACE`, `CONSTRAINTS_VERSION 4`; `physics.ts puckBounce`). Plain contact physics, one row per surface: a restitution that falls from a soft knock to a hard one (a frozen puck is viscoelastic), Coulomb friction along the surface (mu × the normal impulse, so a glancing rim keeps its pace round a corner and a head-on dump dies), and a cap on what is left for bodies and pads. Rows: boards and kickplate (lively), glass (deader; the puck drops), posts and crossbar (ring out), the cage, skates/shins/bodies (die at his feet), goalie pads, blocker, chest. Calibrated by hand against broadcast video (no other game's data): a hard wide shot straight into the end boards comes back to about the hash marks (e ≈ 0.18 at 100 ft/s), a soft dump stops within a stride or two, a rim from the point reaches the far half-wall in ~2-2.5 s and the corner keeps ~75% of its pace (it was the S5 0.86 scrub on every contact substep: rims died in the corners), a puck off the glass drops at the wall. The ice friction is unchanged.
+- **Pucks meet bodies** (`puckOffBodies`): a free puck no stick took that substep is checked against every skater (skates and shins at the ice, the body above) and goalie on its swept path: it comes off him with the body or pad row, relative to his skating, and the touch counts (offside propelling, icing untouched; a delayed-offside attacker it bounces off is whistled). The frame carries it as the additive `FrameEvent.puckTouch`, which the offside judge reads.
+- **The swept pickup check** (owner: "skate through the puck"). A man gets his try on a puck whose path passed through his reach between two substeps (the closest approach of the relative path), not only when it ends inside it.
+- **Physical rebounds** (`physicalRebound`, `REBOUND`). The save is still decided at the release (xG); the rebound now comes off the save surface (pad 60%, blocker 25%, chest 15% of non-frozen saves), squared to the shooter and angled toward the boards by rebound control (pad 6° + 30° × control, the blocker 32°, at most 40°: a reflection turns twice the face angle), from where the puck met him (it used to jump to a spot 1.5 ft off his pads) at the speed the shot and the surface give it - never faster than it came in (it was a random 16-34 ft/s whatever the shot: a 27 ft/s jam came back at 37).
+- **Misses**: a shot off the post goes to the post and rings off it; a shot over the net flies into the glass behind it and drops (`missKind` on the plan; the stream's `result` unchanged).
+- **Puck speed sanity** (`PUCK_SPEED`): a pass, rim or dump leaves at most 95 ft/s (it reached 100); the telemetry checks that no contact ever leaves the puck faster than it came in.
+- **Stream fixes the new judges found**: a keyframe at every blue-line crossing in live play (a carried puck that dipped over the line and back between two 4 Hz frames was an entry the frames never showed, and the judge then read the next crossing as an offside entry); a tipped goal goes in on the line from the tip (from the shooter's spot a tip at a sharp angle read as crossing outside the post); a man sent straight back out at a whistle a moment after he went off comes on where he left the ice, not 10 ft along the boards.
+- **Contract** (additive optional only): `FrameEvent.puckTouch`, `FrameEvent.delayedOffside` ('home' | 'away': a delayed offside is open against that side; the puck detectors excuse its men leaving the puck alone).
+- New golden scenarios `rimAround`, `offGlass`, `looseRace`, `dumpInRace` with reel checklists; dev switches `S6_DEV` (brain.ts) and `S6_PHYS` (physics.ts), `TP_ABLATE=s6` in the measure harness for the before/after.
+
+### Detectors (`src/engine/analysis/puckPlay.ts`; stream gate in `agentSim.test`, viewer half in `viewerTruth.ts`)
+
+VT17-VT19 were taken, so the slice's are **VT20 puck speed and continuity** (between frames the puck moves no faster than the action that sent it - shot 161, pass/rim/loose 95, carried 55 ft/s; a free puck nothing touched does not speed up; a rebound or a block leaves at most half the shot + 5 ft/s; the drawn puck never outside the boards) and **VT21 the loose puck is played** (no skater's path through a free puck that carries on unchanged; no slow free puck left uncontested at a man's feet for 1 s while he does not close on it). Also the **race-won metric** (sim telemetry: the man with the best predicted intercept is the one who gets the puck).
+
+Imported league, 480 games (before = the S5 head, same detectors; per 60 live minutes):
+
+| | DB before | DB after | coach before | coach after |
+|---|---|---|---|---|
+| VT20 over the cap | 0.000 | 0.004 | 0.002 | 0.000 |
+| VT20 sped up with no stick | 0.43 | 0.32 | 0.44 | 0.32 |
+| VT20 rebound / block faster than half the shot | 3.93 | **0.05** | 4.37 | **0.07** |
+| sim: fastest pass / dump (ft/s) | 102 / 101 | **95 / 95** | | |
+| sim: contacts that gave the puck speed | - | 0 | - | 0 |
+| VT21 skated through the puck | 25.4 | **0.30** | 26.6 | **0.30** |
+| VT21 ignored at his feet | 0.30 | **0.10** | 0.32 | **0.09** |
+| race won by the predicted man (by side) | 0.32 (0.60) | **0.51 (0.67)** | 0.32 (0.60) | **0.51 (0.66)** |
+| goalie freeze share (NHL 0.31, band 0.24-0.38) | 0.29 | 0.36 | 0.29 | 0.35 |
+| icings / team-game (no NHL target in matchTargets) | 4.79 | 2.62 | 5.47 | 2.98 |
+| pucks over the glass / game | 0 | 0 | 0 | 0 |
+| offside missed (stream judge) | 16 | 20 | 27 | 21 |
+| VT13 aimless | 14.6 | 17.3 | 13.7 | 16.8 |
+| VT14 doubles + far side + ignored carrier | 4.40 | 4.95 | 4.69 | 5.30 |
+| job flips / player-min | 25.9 | 28.1 | 25.4 | 27.7 |
+| VT12 short, illegal goals, faceoffs off the dot | 0, 0, 0 | 0, 1*, 0 | 0, 0, 0 | 0, 0, 0 |
+
+\* the tip found by the goal judge; fixed after this run (the tip line above), and that game re-simmed clean.
+
+Contacts per game (DB): boards 554, bodies 179, pads 46, cage 11, blocker 11, glass 8, chest 6, post 5.
+
+Generated league, the stream gate (6 games, seeds 1300-1305; red before, green after): rebounds faster than half the shot 22 → 0; skated through 27.6 → 0.2-0.7 / 60 live min; races won by the predicted man 0.33 → 0.50; passes up to 100.4 → 95 ft/s; contacts that gave the puck speed 0.
+
+### Calibration (imported league, 480 games, seeds 7000-7479)
+
+| | S5 DB | S6 DB | S5 coach | S6 coach | NHL band |
+|---|---|---|---|---|---|
+| goals / team-game | 2.89 | **3.00** | 3.11 | **3.12** | 2.70-3.43 |
+| shots on goal | 27.7 | 30.5 | 28.9 | 31.6 | 26.4-33.6 |
+| shooting % | 10.4 | 9.9 | 10.8 | 9.9 | 9.0-11.4 |
+| PP goals (PP goals per penalty) | 0.43 (10.9%) | 0.52 (11.8%) | 0.51 (12.5%) | 0.58 (13.5%) | |
+| hits | 23.8 | 25.8 | 23.3 | 25.8 | 19.4-26.2 |
+| penalties | 3.95 | 4.39 | 4.07 | 4.26 | 2.97-4.46 |
+| rebound-shot share | 0.061 | 0.056 | 0.058 | 0.057 | 0.035-0.110 |
+
+With every S6 part on and no scalar changed the coach run read 3.56 goals, 34.1 shots and 4.71 penalties a team-game (240-game ablations, coach systems, each part switched off alone from that: the swept pickup -0.28 goals / -2.3 shots, the surface physics -0.33 / -1.2, the goalie's read +0.24 (it saves goals), the at-feet rule +0.16, the bodies, the path and the rebound/misses within noise; penalties stayed 4.5-4.7 with any one part off and fell to 4.05 only with all of them off). **Three scalars changed:**
+- `VAL.shoot` 0.43 → 0.35 (brain.ts, the carrier's value of his own finish): compensates for the S6 puck keeping possessions alive (the swept pickup check and the lively boards).
+- `RUSH_PLAY.finishK` = 0.43 / 0.35 (new, brain.ts): compensates for that cut on a breakaway only - the shot, the move on the goalie and the carry toward the chance keep their S5 value (without it the breakaway gate's net-attack share fell to 0.87, bound 0.9).
+- `AGENT_TUNING.stickFoulK` 1.6 → 1.3: compensates for more loose pucks played at the feet and in races (at-feet chasers, the swept pickup, pucks dying on bodies), which put penalties at 4.71, over the band.
+
+### Gates touched (owner please check)
+
+- **Job flips bound 26 → 28 (owner decision).** The S6 puck changes hands more often and every possession change re-plans the shape: 25.3 → 27.0 on the gate sample, 25.4-25.9 → 27.7-28.1 imported. No single part carries it (with any one or two S6 parts off it reads 26.1-27.4; a minimum-dwell on the team's with/without-the-puck shape changed nothing). The bound is a design band from S1; it is raised in the open, not hidden.
+- The contact-pair "man hit moves into the check" gate now samples 8 games instead of 4: on 4 games one case either way crossed the 3% bound with no engine change (with every S6 part off it read 3.4% on the 4 games; 2.2% / 2.7% on 12 / 8).
+
+### Reel S6
+
+`K:/Hockey Game/.cache/reel-s6/reel.html`, recorded with `npm run reel -- "--out=K:/Hockey Game/.cache/reel-s6" --only=saveRebound,rimAround,offGlass,looseRace,dumpInRace,goalReplay,ozCycleShot` (labelled s6). Seven clips: a save-rebound scramble, a rim round the end boards, a puck off the glass, a loose-puck race, a dump-in race and recovery, a goal with its replay, an offensive-zone cycle into a shot.
+
+- Green: VT1, VT2, VT4-VT8, VT10-VT14, VT16, VT19, and the new **VT21 on all seven clips** (0 skated through, 0 left at his feet).
+- **VT20 green on 4 of 7.** Red: rimAround and looseRace, a drawn rim or pass that speeds up 61-71 → 73-82 ft/s over the frames right after it leaves the stick (the renderer draws the sweep over a frame or two, and a rim or a dump has no event the drawn judge can tie it to; no sim puck is over the cap or gains speed off a contact); saveRebound, the drawn puck 1.0 ft outside the corner boards for 5 frames one second into the third period (P3 19:59 at (-91.5, -36.0); the sim keeps its puck 0.3 ft inside them).
+- Red, not this slice's: VT9 framing (6 of 7, S7); VT3 on saveRebound (a snap from the crease drawn with no flight, the in-tight jam class of S4/S5); VT17 on looseRace (a new clip: blade on the puck 57% against the 65% floor - receptions from the edge of the stick's reach slide onto the blade; the swept pickup check makes them more frequent); VT18 on ozCycleShot (one delayed-offside touch at P3 8:37 on the drawn frames; the stream judge on 480 games misses 20-21, as before S6).
+- VT15 n/a on every clip (one sequence a clip, as in S4/S5).
+
+Owner saves backed up and SHA1-verified unchanged (2 files) by the script and by hand. The app ran from this worktree's own `out/` with a node_modules junction, `HOCKEY_USER_DATA` on a scratch copy (the script's) and `HOCKEY_OFFSCREEN=1`. The owner's rig assets were copied in for the build and deleted afterwards with `out/`; nothing of them is committed.
+
+### Left for later
+
+- The race-won share is 0.51: the predicted first man still loses half the races to the pickup roll, the second man's stick and bodies in the way. A race decided by who is first should read higher; that is the pickup model (S9 or a W3 follow-up).
+- Icings fell from ~5 to ~3 a team-game (bodies and the swept check stop long clears). There is no NHL icing target in `matchTargets.json`; it needs one from the API before S9.
+- VT13 aimless (+3 / 60) and VT14 (+0.5 / 60) moved up with the livelier puck; both stay inside their gates.
+- The drawn puck sweeps off the stick over a frame or two (the renderer's release), which the drawn VT20 cannot attribute to a stick on a rim or a dump (they have no event).

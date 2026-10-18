@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ProbeFrame, ProbeGeometry, ProbeRig } from './viewerProbe'
-import { runViewerTruth, vt13Aimless, vt14Coverage, vt15Systems, vt17Grip, vt18Offside, vt1Bodies, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt19GoalGeometry, type VTInput } from './viewerTruth'
+import { runViewerTruth, vt13Aimless, vt14Coverage, vt15Systems, vt17Grip, vt18Offside, vt1Bodies, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt19GoalGeometry, vt20PuckSpeed, vt21LoosePuck, type VTInput } from './viewerTruth'
 
 const GEO: ProbeGeometry = { rinkHalfL: 100, rinkHalfW: 42.5, benchGates: { home: { x: -26, z: 41 }, away: { x: 26, z: 41 } } }
 
@@ -201,9 +201,35 @@ describe('viewer-truth detectors', () => {
     expect(vt19GoalGeometry(input(front, { events: ev(front) })).status).toBe('green')
   })
 
+  // W3 S6: the drawn puck. frame(i) runs 1/30 game-s per frame.
+  const puckAt = (x: number, z: number) => ({ x, y: 0, z, sx: 800, sy: 450, onScreen: true, simX: x, simZ: z })
+  it('VT20 flags a free puck faster than any pass and a rebound faster than the shot (owner: "puck is zipping around too fast")', () => {
+    const run = (v: number) => Array.from({ length: 30 }, (_, i) => frame(i, five('home'), { puck: puckAt(-40 + (v * i) / 30, 30) }))
+    expect(vt20PuckSpeed(input(run(250))).status).toBe('red')
+    expect(vt20PuckSpeed(input(run(60))).status).toBe('green')
+    // a 40 ft/s shot saved at clock 100.2 (frame 6), the rebound leaving at 70 ft/s
+    const reb = Array.from({ length: 18 }, (_, i) => frame(i, five('home'), { puck: puckAt(i < 6 ? -86 : -86 + (70 * (i - 6)) / 30, 0) }))
+    const ev = [{ type: 'shot', absT: 100, speed: 40 }, { type: 'save', absT: 100.2 }]
+    expect(vt20PuckSpeed(input(reb, { events: ev })).status).toBe('red')
+    const soft = reb.map((f, i) => ({ ...f, puck: puckAt(i < 6 ? -86 : -86 + (12 * (i - 6)) / 30, 0) }))
+    expect(vt20PuckSpeed(input(soft, { events: ev })).status).toBe('green')
+  })
+
+  it('VT21 flags a skater going through a free puck that carries on, and a puck left at his feet (owner: "skate through the puck")', () => {
+    // the puck slides +x at 30 ft/s; a man skates -x through it at 20 ft/s and it carries on unchanged
+    const through = Array.from({ length: 30 }, (_, i) => frame(i, [rig('home', 'h1', 20 - (20 * i) / 30, 30)], { puck: puckAt(-10 + (30 * i) / 30, 30) }))
+    expect(vt21LoosePuck(input(through)).status).toBe('red')
+    // a free puck at rest 3 ft from a man standing still for 2 s, nobody of theirs near
+    const left = Array.from({ length: 60 }, (_, i) => frame(i, [rig('home', 'h1', 3, 0), rig('away', 'a1', 40, 20)], { puck: puckAt(0, 0) }))
+    expect(vt21LoosePuck(input(left)).status).toBe('red')
+    // he skates onto it and it stops at his feet
+    const played = Array.from({ length: 60 }, (_, i) => frame(i, [rig('home', 'h1', Math.max(1.2, 12 - i), 0), rig('away', 'a1', 40, 20)], { puck: puckAt(0, 0), carrier: 12 - i <= 1.2 ? 'h1' : null }))
+    expect(vt21LoosePuck(input(played)).status).toBe('green')
+  })
+
   it('runs every detector and reports n/a with nothing to judge', () => {
     const res = runViewerTruth(input([]))
-    expect(res.map((r) => r.id)).toEqual(['VT1', 'VT2', 'VT3', 'VT4', 'VT5', 'VT6', 'VT7', 'VT8', 'VT9', 'VT10', 'VT11', 'VT12', 'VT13', 'VT14', 'VT15', 'VT16', 'VT17', 'VT18', 'VT19'])
+    expect(res.map((r) => r.id)).toEqual(['VT1', 'VT2', 'VT3', 'VT4', 'VT5', 'VT6', 'VT7', 'VT8', 'VT9', 'VT10', 'VT11', 'VT12', 'VT13', 'VT14', 'VT15', 'VT16', 'VT17', 'VT18', 'VT19', 'VT20', 'VT21'])
     expect(res.every((r) => r.status === 'n/a')).toBe(true)
   })
 })

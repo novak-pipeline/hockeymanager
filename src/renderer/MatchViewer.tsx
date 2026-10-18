@@ -1745,13 +1745,15 @@ function probeEventsOf(stream: WatchedGame['stream']): VTEvent[] {
           out.push({ type: 'system', absT: playAbsT(ev, bases), actor: side, detail: lab })
         }
       }
+      // W3 S6: the free puck bounced off a body since the last frame (a touch for VT18; VT20/21 context)
+      if (ev.puckTouch !== undefined) out.push({ type: 'puckTouch', absT: playAbsT(ev, bases) - 1e-3, actor: ev.puckTouch })
       continue
     }
     const absT = playAbsT(ev, bases)
     const e: VTEvent = { type: ev.type, absT }
     switch (ev.type) {
-      case 'shot': e.actor = ev.shooter; e.x = ev.from.x * 100; e.z = ev.from.y * 42.5; e.netX = Math.sign(ev.target.x || 1) * 89; if (ev.shotType) e.shotType = ev.shotType; if (ev.windupS !== undefined) e.windupS = ev.windupS; break
-      case 'missedShot': e.actor = ev.shooter; e.netX = Math.sign(ev.target.x || 1) * 89; if (ev.shotType) e.shotType = ev.shotType; if (ev.windupS !== undefined) e.windupS = ev.windupS; break
+      case 'shot': e.actor = ev.shooter; e.x = ev.from.x * 100; e.z = ev.from.y * 42.5; e.netX = Math.sign(ev.target.x || 1) * 89; if (ev.shotType) e.shotType = ev.shotType; if (ev.windupS !== undefined) e.windupS = ev.windupS; if (ev.speedMph !== undefined) e.speed = ev.speedMph / 0.6818; break
+      case 'missedShot': e.actor = ev.shooter; e.netX = Math.sign(ev.target.x || 1) * 89; if (ev.shotType) e.shotType = ev.shotType; if (ev.windupS !== undefined) e.windupS = ev.windupS; if (ev.speedMph !== undefined) e.speed = ev.speedMph / 0.6818; break
       case 'goal': e.actor = ev.scorer; e.scorer = ev.scorer; break
       case 'save': e.actor = ev.goalie; e.rebound = ev.rebound; break
       case 'faceoff': { e.actor = ev.winner; e.x = ev.pos.x * 100; e.z = ev.pos.y * 42.5; if (ev.loser) e.target = ev.loser; const exp = foExp[foK++]; if (exp) e.dot = exp; break }
