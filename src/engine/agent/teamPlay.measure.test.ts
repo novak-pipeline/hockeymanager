@@ -21,14 +21,16 @@ import { framesFromStream, judgeTeamPlay, per60, SIM_GATES } from '@engine/analy
 import { judgeOffsideStream } from '@engine/analysis/offside'
 import { judgeActionFloor, judgeContacts } from '@engine/analysis/actions'
 import { AGENT_TUNING, agentSimGame } from './agentSim'
-import { SCREEN } from './brain'
+import { DEKE, PROGRESS, RUSH_PLAY, SCREEN, VAL } from './brain'
 import { DZ_GAP, MAN_COVER, S4_DEV } from './systems'
+import { IN_TIGHT, S5_DEV } from './carrierTilt'
 import { judgeGoalGeometry } from '@engine/analysis/goalGeometry'
 import { judgeFaceoffDots } from '@engine/analysis/faceoffRule'
 import { judgeSystems, legibility, systemFramesFromStream, type SeqCase } from '@engine/analysis/systemPlay'
 import { buildCoachProfile, coachFit, profileToTactics } from '@engine/league/coachProfile'
 import { generateTeamStaff } from '@engine/league/staff'
 import { Rng, deriveSeed } from '@engine/shared/rng'
+import { carrierPlayLine, judgeCarrierPlay, sumCarrierPlay, type CarrierPlayReport } from '@engine/analysis/carrierPlay'
 
 function findModDb(): string | null {
   if (process.env.TP_VANILLA) return null
@@ -51,8 +53,15 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
   const res = (id: PlayerId): Player => data.players.get(id)!
   const teams = data.league.teams
   // TP_ABLATE=screen,boxOut,... (W3 S4): turn S4 parts off to see what each does to goals
-  for (const k of (process.env.TP_ABLATE ?? '').split(',').filter(Boolean)) (S4_DEV as Record<string, boolean>)[k] = false
+  for (const k of (process.env.TP_ABLATE ?? '').split(',').filter(Boolean)) ((k in S5_DEV ? S5_DEV : S4_DEV) as Record<string, boolean>)[k] = false
   // TP_MAN=k,cap,pointFt,urgency: man-coverage variants (systems.ts DZ_GAP.man / MAN_COVER)
+  // TP_SET=PROGRESS.noGainK=0.1,RUSH_PLAY.netK=0.5 (W3 S5): try a value without editing the source
+  for (const kv of (process.env.TP_SET ?? '').split(',').filter(Boolean)) {
+    const [path, v] = kv.split('=') as [string, string]
+    const [obj, key] = path.split('.') as [string, string]
+    const tbl = ({ PROGRESS, RUSH_PLAY, IN_TIGHT, AGENT_TUNING, SCREEN, VAL, DEKE } as Record<string, Record<string, number>>)[obj]
+    if (tbl && key in tbl) tbl[key] = Number(v)
+  }
   if (process.env.TP_SCREEN) SCREEN.minShotFt = Number(process.env.TP_SCREEN)
   if (process.env.TP_SCREENXG) AGENT_TUNING.screenXg = Number(process.env.TP_SCREENXG)
   if (process.env.TP_MAN) {
@@ -119,6 +128,8 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
   const sysFc: SeqCase<string>[] = []
   const sysDz: SeqCase<string>[] = []
   const sysBo: SeqCase<string>[] = []
+  // W3 S5: the carrier detectors (ping-pong, breakaways, odd-man rushes, score state)
+  const cps: CarrierPlayReport[] = []
   for (let i = 0; i < games; i++) {
     const k = i + Number(process.env.TP_SEED0 ?? 7000) - 7000
     // TP_PAIR=band: the pairing of agentSim.test's NHL-band sample (team k v k+1, seed 5000+k)
@@ -156,6 +167,7 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
       else if (e.type === 'penalty') pens++
       else if (e.type === 'hit') hits++
     }
+    cps.push(judgeCarrierPlay(out.stream))
     const gg = judgeGoalGeometry(out.stream)
     geoGoals += gg.goals
     geoBad += gg.bad.length
@@ -203,12 +215,15 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
   const tg = games * 2
   const lines = [
     `league: ${dbPath ? 'imported' : 'generated'} - ${games} games (seeds 7000-${7000 + games - 1})${process.env.TP_COACH ? ` - coach systems ${JSON.stringify(systems)}` : ''}`,
-    `calibration/team-game: goals ${(goals / tg).toFixed(2)} shots ${(shots / tg).toFixed(1)} ppGoals ${(ppGoals / tg).toFixed(2)} shGoals ${(shGoals / tg).toFixed(2)} penalties ${(pens / tg).toFixed(2)} hits ${(hits / tg).toFixed(1)} PP% ${(pens ? (ppGoals / pens) * 100 : 0).toFixed(1)} rebound-share ${(rebounds / Math.max(1, shots)).toFixed(3)} blocked-share ${(blocked / Math.max(1, shots + blocked + missed)).toFixed(3)} at-save near-net atk ${(atkNear / Math.max(1, saves)).toFixed(2)} def ${(defNear / Math.max(1, saves)).toFixed(2)}`,
+    `calibration/team-game: goals ${(goals / tg).toFixed(2)} shots ${(shots / tg).toFixed(1)} ppGoals ${(ppGoals / tg).toFixed(2)} shGoals ${(shGoals / tg).toFixed(2)} penalties ${(pens / tg).toFixed(2)} hits ${(hits / tg).toFixed(1)} sh% ${((goals / Math.max(1, shots)) * 100).toFixed(2)} PP% ${(pens ? (ppGoals / pens) * 100 : 0).toFixed(1)} rebound-share ${(rebounds / Math.max(1, shots)).toFixed(3)} blocked-share ${(blocked / Math.max(1, shots + blocked + missed)).toFixed(3)} at-save near-net atk ${(atkNear / Math.max(1, saves)).toFixed(2)} def ${(defNear / Math.max(1, saves)).toFixed(2)}`,
     `team play per 60 live min: VT13 aimless ${per60(aimless, liveMin).toFixed(2)} (own net ${per60(aimOwn, liveMin).toFixed(2)}) - VT14 doubles ${per60(doubles, liveMin).toFixed(2)} farSide ${per60(farSide, liveMin).toFixed(2)} ignored ${per60(ignored, liveMin).toFixed(2)} - VT16 camping ${per60(camping, liveMin).toFixed(2)} - job flips ${(flips / Math.max(jobMin, 1e-9)).toFixed(2)}/player-min (live ${liveMin.toFixed(0)} min)`,
     `offside: entries ${entries} offside-entries ${offEntries} whistles ${offCalls} (${(offCalls / tg).toFixed(2)}/team-game) MISSED ${offMissed} (carried ${offMissedCarried}, delayed touch ${offMissed - offMissedCarried})`,
     `VT12 action floor: ${floorShort} short in ${floorRuns} acts/shots/passes - contact pairs: ${contactApart} apart in ${contactPairs} (tie-ups ${(tieUpEvents / tg).toFixed(1)}/team-game)`,
     `goal geometry: ${geoBad} illegal in ${geoGoals} goals - faceoff dots: ${foWrong} off the right painted dot in ${foJudged} judged (${foUnjudged} unjudged)`,
     ...(['forecheck', 'D zone', 'breakouts'] as const).map((k, i) => { const l = legibility([sysFc, sysDz, sysBo][i]!); return `VT15 ${k}: ${l.matched}/${l.judged} family (${l.exact} exact) ${JSON.stringify(l.table)}` }),
+    carrierPlayLine(sumCarrierPlay(cps), liveMin),
+    ...sumCarrierPlay(cps).breakEx.slice(0, 8),
+    ...sumCarrierPlay(cps).pingEx.slice(0, 4),
     ...offEx,
     ...ex
   ]

@@ -70,6 +70,7 @@ import {
   S4_DEV
 } from './systems'
 import type { BreakoutPlan } from '@engine/league/coachProfile'
+import { IN_TIGHT, PP_PATIENCE, S5_DEV, carrierTilt, tilted } from './carrierTilt'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
 const r01 = rLevel
@@ -91,7 +92,13 @@ const r01 = rLevel
  * a carrier who drives into a crowded house risks the whole continuation
  * value on a low-retention carry. That is what brings shots out to range.
  */
-export const VAL = { keepRoute: 3, minCarry: 4, oneTimerV: 1.8, otMinX: 50, otMinY: 14, otMaxY: 32, nzBack: 0.0015, carryKeep: 0.004, oz: 0.11, kPos: 0.15, shoot: 0.66, keep: 0.18, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 1.2, laneRead: 0.95, angleZero: 90, behindNet: 0.85, transMaxX: 70, transBack: 0.003, rushNoBackX: 0, regroupMaxX: 20, ozBack: 0.008 }
+// W3 S5: VAL.shoot 0.66 -> 0.43 (the one scalar this slice changes; see W3-LOG S5).
+// Compensates for the S5 carrier no longer burning his possessions in ping-pong
+// and for rushes that now attack the net (+3.6 shots, +0.45 goals a team-game on
+// the coach-systems run), on top of the coach systems' own excess found in S4
+// (3.49). The carrier values his own finish lower, so he passes up the
+// marginal chance in the slot and keeps the puck.
+export const VAL = { keepRoute: 3, minCarry: 4, oneTimerV: 1.8, otMinX: 50, otMinY: 14, otMaxY: 32, nzBack: 0.0015, carryKeep: 0.004, oz: 0.11, kPos: 0.15, shoot: 0.43, keep: 0.18, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 1.2, laneRead: 0.95, angleZero: 90, behindNet: 0.85, transMaxX: 70, transBack: 0.003, rushNoBackX: 0, regroupMaxX: 20, ozBack: 0.008 }
 /**
  * D safety (gap discipline): how far ahead a defenceman reads an attacker
  * coming at him (s), the base gap (ft) plus gap per ft/s of the attacker's
@@ -106,7 +113,30 @@ export const SHAPE_TUNING = { breakoutX: -25, smooth: 0.45 }
  * the seconds he may hold it there before he must act, the per-second cost of
  * holding, and his minimum carry speed there (share of top speed).
  */
-export const INCLOSE = { radius: 30, deadline: 1.0, holdCost: 0.02, minSpeed: 0.8, protectSpeed: 0.72 }
+export const INCLOSE = { radius: IN_TIGHT.radiusFt, deadline: IN_TIGHT.capS, holdCost: 0.02, minSpeed: 0.8, protectSpeed: 0.72 }
+/**
+ * W3 S5, the carrier's pass has to GAIN something (owner: "pass ping-pong").
+ * A pass gains if it moves the puck `gainFt` toward their net, or puts it on a
+ * stick where it is worth `valueGain` more than on his own (a shot, the seam),
+ * or gets it to a man `openGainFt` more open than he is, or bails him out of
+ * real pressure. A pass that gains none of these costs `noGainK` of what it is
+ * worth; handing it straight back to the man who fed him (within `backS`) and
+ * gaining nothing costs `pingBackK` more. The carrier still makes the pass when
+ * it is clearly his best play; the sideways give-and-take with nothing in it
+ * goes.
+ */
+export const PROGRESS = { gainFt: 10, valueGain: 0.08, openGainFt: 6, reliefPressure: 0.55, noGainK: 0, pingBackK: 0.6, backS: 4 }
+/**
+ * W3 S5, rushes (owner: "breakaway skated into the corner"). On a breakaway
+ * (nobody goal-side) and an odd-man rush the carrier attacks the net: his
+ * carry headings aim at the slot from the red line on, each worth `netK` of the
+ * chance waiting where it ends; a destination below the dots out wide
+ * (`cornerAdv`, `cornerY`) or behind the goal line costs `cornerCost` (and on a
+ * breakaway is not a carry at all); the move on the goalie is open to him with
+ * a chaser behind (not goal-side) and is worth `dekeK` more; inside `finishFt`
+ * of the net on a breakaway he finishes (shoot or deke) rather than skating on.
+ */
+export const RUSH_PLAY = { slotFt: 24, netK: 0.6, oddNetK: 0.25, cornerCost: 0.03, cornerY: 22, cornerAdv: 69, dekeK: 1.5, finishFt: 24, window: 4.5, trailFt: 15 }
 /** Defending the house: the on-puck man engages (no containing) inside this radius of our net (ft). */
 export const DZ = { engageFt: 30 }
 /** Seconds after a zone entry that play is still a "rush". */
@@ -407,6 +437,25 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
   const stretchTable = S4_DEV.tilts && table === TRANSITION_STRETCH
   const pb = me.playbook
   const entryK = !S4_DEV.tilts ? 1 : pb.entry === 'dump' ? SYSTEM_TILT.entryDump : pb.entry === 'carry' ? SYSTEM_TILT.entryCarry : 1
+  // W3 S5: the situation tilt (score and time, PP/PK, pressure, zone: carrierTilt.ts)
+  const tilt = carrierTilt({ lead: me.sim.goals - opp.sim.goals, progress: w.progress, powerPlay: me.powerPlay, shorthanded: me.shorthanded, pressure, adv }, pb)
+  // W3 S5: the rush read. A breakaway: nobody of theirs goal-side of him past
+  // the red line. An odd-man rush: more of us in on it than them back, on the
+  // way in or just in.
+  // (goal-side: nearer their net than he is - by x alone, a man cycling in the
+  // corner below their D read as "alone")
+  let goalSideN = 0
+  for (const o of opps) if (o.x * a > c.x * a) goalSideN++
+  const dNetMe = Math.hypot(a * GOAL_X - c.x, c.y)
+  let netSideN = 0
+  for (const o of opps) if (Math.hypot(a * GOAL_X - o.x, o.y) < dNetMe + 2) netSideN++
+  let inOnIt = 1
+  for (const b of me.skaters) if (b !== c && b.x * a >= adv - RUSH_PLAY.trailFt && b.x * a > 0) inOnIt++
+  // a rush: from the red line to the top of their circles, coming in (not a set play in their zone)
+  const live = S5_DEV.rush && !opp.pulled && !me.powerPlay && adv > -10 && adv < GOAL_X - 4 && c.vx * a > 4
+  const breakaway = live && netSideN === 0 && goalSideN === 0
+  const oddMan = live && !breakaway && adv < GOAL_X - RUSH_PLAY.slotFt && netSideN <= 2 && inOnIt > netSideN && (adv < BLUE_X || w.t - me.entryAt < RUSH_PLAY.window)
+  const inCorner = (x: number, y: number): boolean => (x * a > RUSH_PLAY.cornerAdv && Math.abs(y) > RUSH_PLAY.cornerY) || x * a > GOAL_X - 2
 
   // Teammates still offside: don't take the puck over the line yet.
   // (A mate gliding at the line counts: he will be over it before the puck.)
@@ -436,14 +485,21 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
 
   // --- Shoot ---
   if (adv > BLUE_X && adv < GOAL_X - 1 && !opp.pulled) {
-    opts.push({ ev: shotValue(me, opps, c, c.x, c.y, eager, true, opp.goalie), act: { kind: 'shoot' } })
+    // (the power play's patience: the weight follows the quality of the chance)
+    const patience = me.powerPlay && S5_DEV.tilt ? clamp(xgAt(c.x, c.y, a) / PP_PATIENCE.xgRef, PP_PATIENCE.lo, PP_PATIENCE.hi) : 1
+    opts.push({ ev: tilted(shotValue(me, opps, c, c.x, c.y, eager, true, opp.goalie), tilt.shoot * patience), act: { kind: 'shoot' } })
   }
 
   // --- Carry (8 headings) ---
   {
-    const toNet = adv > BLUE_X
-    const baseAng = toNet ? Math.atan2(0 - c.y, a * GOAL_X - c.x) : Math.atan2(0, a)
-    const angs = [0, 0.5, -0.5, 1.05, -1.05, 1.7, -1.7, Math.PI]
+    // (W3 S5: on a rush he goes at the net from the red line on, not up his own lane into the corner)
+    const toNet = adv > BLUE_X || breakaway || oddMan
+    // (alone, he cuts to the middle: his line is at the slot, not the post he is wide of)
+    const aimX = breakaway && adv < GOAL_X - RUSH_PLAY.slotFt ? a * (GOAL_X - RUSH_PLAY.slotFt) : a * GOAL_X
+    const aimY = breakaway ? clamp(c.y * 0.25, -6, 6) : 0
+    const baseAng = toNet ? Math.atan2(aimY - c.y, aimX - c.x) : Math.atan2(0, a)
+    const angs = breakaway ? [0, 0.3, -0.3, 0.6, -0.6] : [0, 0.5, -0.5, 1.05, -1.05, 1.7, -1.7, Math.PI]
+    const netK = breakaway ? RUSH_PLAY.netK : oddMan ? RUSH_PLAY.oddNetK : 0
     const look = clamp(sp * 0.9 + 8, 10, 22)
     const puckSkill = r01(c.player.composites.puckControl)
     // In close (within 30 ft of their net) there is no dawdling: he keeps his
@@ -469,15 +525,34 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       const ret = retention(c, { x: qx, y: qy }, tc, opps)
       const protect = da === Math.PI
       const qClose = Math.hypot(a * GOAL_X - qx, qy) < INCLOSE.radius
-      if (mustAct && (protect || qClose)) continue
+      const qCorner = inCorner(qx, qy)
+      // Past the in-tight cap he shoots, passes or WALKS OUT: away from the
+      // net by a stride, never behind the goal line (W3 S5: it used to be any
+      // spot 30 ft out, and from below the dots that was the far corner).
+      const dq = Math.hypot(a * GOAL_X - qx, qy)
+      if (mustAct && (S5_DEV.walkOut ? protect || (qClose && dq < dNetC + IN_TIGHT.walkOutFt) || qx * a > GOAL_X - 2 || (qCorner && dq < dNetC + IN_TIGHT.walkOutFt) : protect || qClose)) continue
+      // A breakaway is not taken to the corner, and inside the finish range he
+      // shoots or makes his move on the goalie rather than skating on (W3 S5).
+      if (breakaway && (qCorner || dNetC < RUSH_PLAY.finishFt)) continue
+      // ... and he never drifts wider on one: every stride is toward the middle
+      if (breakaway && Math.abs(c.y) > 8 && Math.abs(qy) > Math.abs(c.y) + 1) continue
       let retEff = protect ? clamp(ret + 0.25 * puckSkill, 0, 0.97) : ret
       // Skating the puck into the crease is skating it into the goalie: he
       // pokes it or smothers it. In close you deke him or you shoot.
       if (!opp.pulled && Math.hypot(a * GOAL_X - qx, qy) < 9) retEff *= DEKE.creaseRet
-      const v = posValue(qx, qy, a)
+      // (on a rush the chance waiting at the end of the carry is part of its
+      // value - read at the finishing range, so it rewards the lane to the
+      // middle, not skating the puck into the goalie)
+      let rushV = 0
+      if (netK > 0 && !qCorner) {
+        const k = dq < RUSH_PLAY.finishFt ? RUSH_PLAY.finishFt / Math.max(dq, 0.5) : 1
+        rushV = netK * xgAt(a * GOAL_X - (a * GOAL_X - qx) * k, qy * k, a) * VAL.shoot
+      }
+      const v = posValue(qx, qy, a) + rushV
       const cost = posValue(qx, qy, -a)
       // Holding it in close costs a little more every moment (the box closes).
-      const ev = retEff * v - (1 - retEff) * cost * 0.9 - (inClose && qClose ? INCLOSE.holdCost * heldClose : 0)
+      let ev = retEff * v - (1 - retEff) * cost * 0.9 * tilt.risk - (inClose && qClose ? INCLOSE.holdCost * heldClose : 0)
+      ev = tilted(ev, protect ? tilt.protect : tilt.carry) - (oddMan && qCorner ? RUSH_PLAY.cornerCost : 0)
       const urg = me.tactics.tempo.pace * 0.4 + (adv < BLUE_X ? 0.55 : 0.35) + (pressure > 0.5 ? 0.2 : 0) + (inClose ? 0.3 : 0)
       // Momentum: a man skating with it keeps going the way he is going
       // (a new heading every look is a man who never gets up to speed).
@@ -534,7 +609,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       // Players trust their hands: the READ of a move is braver than its odds
       // (more so for the ones with the hands), so dekes get tried and fail too.
       const pb = clamp(p + DEKE.belief * (0.5 + dekeSkill(c)), 0, 0.97)
-      const ev = (pb * posValue(bx, by, a) - (1 - pb) * posValue(c.x, c.y, -a) * 0.9) * DEKE.valueS
+      const ev = tilted((pb * posValue(bx, by, a) - (1 - pb) * posValue(c.x, c.y, -a) * 0.9 * tilt.risk) * DEKE.valueS, tilt.deke)
       // The move fits the space: wide around a man who is inside him with
       // room on the outside; a toe drag on a man in stick reach; otherwise a
       // shoulder fake or the forehand-backhand.
@@ -548,12 +623,13 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
     const dNet = Math.hypot(a * GOAL_X - c.x, c.y)
     let nearAny = Infinity
     for (const o of opps) nearAny = Math.min(nearAny, Math.hypot(o.x - c.x, o.y - c.y))
-    if (inZone && dNet < 22 && dNet > 7 && Math.abs(c.y) < 20 && nearAny > DEKE.goalieRoom) {
+    // (W3 S5: alone with a chaser behind him - nobody goal-side - the move is still on)
+    if (inZone && dNet < 22 && dNet > 7 && Math.abs(c.y) < 20 && (nearAny > DEKE.goalieRoom || breakaway)) {
       const p = dekeChance(c, g, true)
       // A goalie who bit is out of his net: the finish is from the doorstep.
       const xgIn = xgAt(a * (GOAL_X - 7), c.y >= 0 ? -3 : 3, a)
       const pb = clamp(p + DEKE.belief * (0.5 + dekeSkill(c)), 0, 0.97)
-      const ev = (pb * xgIn * DEKE.beatG * VAL.shoot + (1 - pb) * 0.15 * VAL.oz) * DEKE.valueG
+      const ev = tilted((pb * xgIn * DEKE.beatG * VAL.shoot + (1 - pb) * 0.15 * VAL.oz) * DEKE.valueG * (breakaway ? RUSH_PLAY.dekeK : 1), tilt.deke)
       const move: DekeKind = w.rng.next() < 0.6 ? 'forehandBackhand' : 'shoulderFake'
       opts.push({ ev, act: { kind: 'deke', on: g, goalie: true, move, p, dir: c.y >= 0 ? -1 : 1 } })
     }
@@ -565,6 +641,9 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
     // blue line — when it is not the rush.
     const backOkBase = adv <= VAL.regroupMaxX
     const mates = me.skaters.filter((b) => b !== c)
+    // W3 S5: what the puck is worth on HIS stick (the bar a pass has to clear) and how open he is
+    const curV = adv > BLUE_X && adv < GOAL_X - 1 && !opp.pulled ? Math.max(cur, shotValue(me, opps, c, c.x, c.y, eager, false, opp.goalie) * VAL.passShot) : cur
+    const myOpen = nearestTo(opps, c.x, c.y).d
     const infos = mates.map((r) => {
       const d0 = Math.hypot(r.x - c.x, r.y - c.y)
       const speed = clamp(38 + d0 * 0.6 + r01(c.player.ratings.technical.passing) * 10, 40, 88)
@@ -587,20 +666,18 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
     // ft up ice — a D-to-D right after a retrieval is still allowed.)
     const transition = w.t - w.possSince < 8 && w.possStartAdv < BLUE_X && adv > w.possStartAdv + 12 && adv < VAL.transMaxX
     // In alone / numbers: nobody (or fewer of them) goal-side of the carrier.
-    let goalSide = 0
-    for (const o of opps) if (o.x * a > c.x * a) goalSide++
-    const breakaway = goalSide === 0 && adv > -BLUE_X
+    const alone = goalSideN === 0 && adv > -BLUE_X
     // Settled in their zone (not a rush), low-to-high to an open point man is
     // a real play (the scorecard's OZ back-pass band is 12–40%); on the rush
     // and in transition it is only the pressured bail-out.
     const settledOz = adv > BLUE_X && !transition
     // Past the red line on the rush there is no bail-out back pass at all:
     // a pressured carrier protects it, chips it in or takes the hit.
-    const backOk = (backOkBase && !transition) || settledOz || (pressed && !hasForward && !breakaway && !(transition && adv > VAL.rushNoBackX))
+    const backOk = (backOkBase && !transition) || settledOz || (pressed && !hasForward && !alone && !(transition && adv > VAL.rushNoBackX))
     for (const f of infos) {
       if (f.back && !backOk) continue
       // On a breakaway only a clearly forward pass (the 2-on-0 feed) is a play.
-      if (breakaway && (f.R.x - c.x) * a < 4) continue
+      if (alone && (f.R.x - c.x) * a < 4) continue
       // Offside: never feed a man already over the line ahead of the puck.
       if (f.R.x * a > BLUE_X && adv < BLUE_X - 0.5) continue
       if (f.d0 < 7) continue
@@ -619,13 +696,29 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       const royal =
         f.R.x * a > VAL.otMinX && Math.abs(f.R.y) >= VAL.otMinY && Math.abs(f.R.y) < VAL.otMaxY && Math.sign(f.R.y || 1) !== Math.sign(c.y || 1) && Math.abs(c.y) > 8
       const oneTimer = royal && f.open > 7
-      if (oneTimer) v *= VAL.oneTimerV
+      if (oneTimer) v *= VAL.oneTimerV * tilt.seam
+      // W3 S5: does this pass GAIN anything (PROGRESS)? Territory, a better
+      // stick for the puck to be on, a man more open than he is while he is
+      // being closed down, or the bail-out under real pressure.
+      const gains =
+        !S5_DEV.progress ||
+        (f.R.x - c.x) * a >= PROGRESS.gainFt ||
+        v >= curV * (1 + PROGRESS.valueGain) + 0.001 ||
+        (myOpen < 12 && f.open - myOpen >= PROGRESS.openGainFt) ||
+        (pressure >= PROGRESS.reliefPressure && f.open > 10) ||
+        oneTimer
       // Open ice at the receiver is worth more (time to make the next play).
       // A covered man (a defender on his hip) is not really open: he'll be
       // tied up or stripped before he can do anything with it.
       v *= clamp(f.open / 11, 0.2, 1.2)
       const cost = posValue(f.R.x, f.R.y, -a)
-      let ev = comp * v - (1 - comp) * cost * 0.8
+      let ev = comp * v - (1 - comp) * cost * 0.8 * tilt.risk
+      if (!gains) {
+        ev -= PROGRESS.noGainK * tilt.progress * Math.max(v, 0)
+        // straight back to the man who just gave it to him: the ping-pong
+        if (w.fedBy && w.fedBy.b === f.r && w.t - w.fedBy.t < PROGRESS.backS) ev -= PROGRESS.pingBackK * tilt.progress * Math.max(v, 0)
+      }
+      ev = tilted(ev, tilt.pass)
       if (f.back) ev -= transition ? VAL.transBack : adv > BLUE_X ? VAL.ozBack : VAL.nzBack
       // W3 S4: the system's play — the breakout's outlet, the stretch man
       const role = me.roles.get(f.r)
@@ -647,7 +740,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       const ev = (0.25 + chase * 0.25) * posValue(a * 80, side * 30, a) - 0.45 * posValue(a * 80, side * 30, -a) * 0.6
       // (W3 S4: the system's entry style and its dump-and-change regroup)
       const sysK = entryK * (S4_DEV.tilts && pb.regroup === 'dumpChange' ? SYSTEM_TILT.dumpChange : 1)
-      opts.push({ ev: ev * (0.8 + dumping * 0.4) * (ev > 0 ? sysK : 1 / sysK), act: { kind: 'dump', at, speed: rimSpeed(c, at, 1.35), lift: 0 } })
+      opts.push({ ev: tilted(ev * (0.8 + dumping * 0.4) * (ev > 0 ? sysK : 1 / sysK), tilt.dump), act: { kind: 'dump', at, speed: rimSpeed(c, at, 1.35), lift: 0 } })
     }
     if (adv >= -BLUE_X - 5 && adv <= 2 && pressure > 0.35 && !offsideMate) {
       // Met in the neutral zone: chip it past the man into the space behind
@@ -657,7 +750,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       let chase = 0
       for (const r of me.skaters) chase = Math.max(chase, 1 - clamp(reachTime(r, at.x, at.y) / 3, 0, 1))
       const ev = (0.3 + chase * 0.35) * posValue(at.x, at.y, a) - 0.5 * posValue(at.x, at.y, -a)
-      opts.push({ ev, act: { kind: 'dump', at, speed: rimSpeed(c, at, 1.2), lift: 4 } })
+      opts.push({ ev: tilted(ev, tilt.chip), act: { kind: 'dump', at, speed: rimSpeed(c, at, 1.2), lift: 4 } })
     }
     if (adv < -BLUE_X) {
       // Get it out: chip it off the glass to the neutral-zone boards; a PK
@@ -666,10 +759,10 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       const chipAt = { x: a * 8, y: side * 40 }
       const ev = 0.4 * posValue(chipAt.x, chipAt.y, a) - 0.5 * posValue(chipAt.x, chipAt.y, -a) * 0.8
       // (W3 S4: the rim breakout takes it off the boards up the strong side)
-      opts.push({ ev: ev - (pressure < 0.4 ? 0.004 : 0) + (bo === 'rim' ? SYSTEM_TILT.rim : 0), act: { kind: 'dump', at: chipAt, speed: rimSpeed(c, chipAt, 0.9), lift: 9 } })
+      opts.push({ ev: tilted(ev - (pressure < 0.4 ? 0.004 : 0), tilt.chip) + (bo === 'rim' ? SYSTEM_TILT.rim : 0), act: { kind: 'dump', at: chipAt, speed: rimSpeed(c, chipAt, 0.9), lift: 9 } })
       if (me.shorthanded) {
         const at = { x: a * 90, y: clamp(c.y, -20, 20) }
-        opts.push({ ev: 0.012, act: { kind: 'dump', at, speed: 85, lift: 0 } })
+        opts.push({ ev: tilted(0.012, tilt.chip), act: { kind: 'dump', at, speed: 85, lift: 0 } })
       }
     }
   }

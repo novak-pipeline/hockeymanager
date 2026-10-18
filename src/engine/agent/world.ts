@@ -69,6 +69,10 @@ export interface World {
   /** Since when the current carrier has had the puck within 30 ft of the net he attacks (-1: not in close). */
   nearSince: number
   nearBy: Body | null
+  /** W3 S5: share of regulation played on the period clock (0 at the opening draw, 1 at the end of the third), for the carrier's score and time tilt. */
+  progress: number
+  /** W3 S5: the team-mate who passed the carrier the puck, when (sim time) and from where the pass left (the no-gain return check). */
+  fedBy: { b: Body; t: number; x: number; y: number } | null
 }
 
 export type CarrierAction =

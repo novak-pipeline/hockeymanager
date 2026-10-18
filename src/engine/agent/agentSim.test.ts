@@ -26,9 +26,13 @@ import { judgeGoalGeometry } from '@engine/analysis/goalGeometry'
 import { streamPeriodBases } from '@domain'
 import { judgeSystems, legibility, systemFramesFromStream, type SeqCase } from '@engine/analysis/systemPlay'
 import { tacticsForSystem, type CoachSystemId } from '@engine/league/coachProfile'
+import { carrierPlayLine, judgeCarrierPlay, sumCarrierPlay } from '@engine/analysis/carrierPlay'
 
 /** W3 S4 VT15 gate (design band, measured on the S4 engine: see W3-LOG S4). */
 const VT15_GATE = { forecheckFamily: 0.5, collapseLead: 0.12, pressureLead: 0.3 }
+
+/** W3 S5 carrier gate (design band; before/after in W3-LOG S5). */
+const CARRIER_GATE = { games: 8, pingShare: 0.1, netAttack: 0.9, corner: 0.12, caught: 0.33 }
 
 /** W3 S1 design band for the stream gates (per 60 live minutes / per player-minute). */
 const TEAM_PLAY_BAND = { aimlessPer60: 30, coveragePer60: 5, flipsPerPlayerMin: 26 }
@@ -463,6 +467,32 @@ describe('agent engine', () => {
     // settled cycle is hockey; on the rush it isn't — see the scorecard).
     expect(ozBack / Math.max(1, ozPasses)).toBeLessThan(0.4)
   }, 900000)
+
+  it('the carrier makes plays (W3 S5, owner: "pass ping-pong", "breakaway skated into the corner")', () => {
+    // src/engine/analysis/carrierPlay.ts on the sim stream. Bounds are the
+    // design band (W3-LOG S5 has the before/after on both leagues).
+    const rs = []
+    let liveMin = 0
+    let camping = 0
+    for (let i = 0; i < CARRIER_GATE.games; i++) {
+      const out = agentSimGame(team(i), team(i + 3), resolve, { seed: 1200 + i })
+      rs.push(judgeCarrierPlay(out.stream))
+      const tp = judgeTeamPlay(framesFromStream(out.stream), { gates: SIM_GATES })
+      liveMin += tp.liveMin
+      camping += tp.camping.length
+    }
+    const t = sumCarrierPlay(rs)
+    // eslint-disable-next-line no-console
+    console.log(carrierPlayLine(t, liveMin) + ` | VT16 camping ${camping}`)
+    expect(t.passes).toBeGreaterThan(1000)
+    expect(t.pingPong / t.passes).toBeLessThan(CARRIER_GATE.pingShare)
+    expect(t.breakaways).toBeGreaterThan(10)
+    expect((t.attacked + t.fed) / t.breakaways).toBeGreaterThan(CARRIER_GATE.netAttack)
+    expect(t.corner / t.breakaways).toBeLessThan(CARRIER_GATE.corner)
+    // a breakaway that slows or drifts wide is caught from behind before it ends in anything
+    expect(t.caught / (t.caught + t.breakaways)).toBeLessThan(CARRIER_GATE.caught)
+    expect(camping).toBe(0)
+  }, 300000)
 
   it('VT15: the coach system is legible on the ice (W3 S4)', () => {
     // Contrasting coaches (the heavy forecheck against the shell, the trap
