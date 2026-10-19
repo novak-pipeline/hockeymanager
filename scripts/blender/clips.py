@@ -454,6 +454,55 @@ def skater_clips(arm):
                handL=(0.9, hipY + 0.4, 0.4), handR=(-0.9, hipY + 0.3, 0.8), **no_stick)),
         (22, P(lean=0.35, handL=(0.95, hipY + 0.55, 0.35), handR=(-0.95, hipY + 0.55, 0.35), **no_stick)),
     ])
+    # the linesmen part a fight: in between the two men, both arms out and pushing
+    sep = lambda f, push: (f, P(lean=0.55 + push * 0.1, look=(-0.15, 0.0), handL=(0.75, hipY + 1.55, 1.7 + push * 0.3), handR=(-0.75, hipY + 1.5, 1.75 + push * 0.3), **no_stick))  # noqa: E731
+    A('official_separate', [sep(0, 0.0), sep(10, 1.0), sep(20, 0.3), sep(30, 0.0)])
+
+    # ── fights (upper body over the skating legs; gloves off, the renderer hides
+    #    the stick and drops gloves + stick on the ice as props). Two men face to
+    #    face ~2.6 ft apart (the sim's locked gap): his man's sweater is ~2 ft in
+    #    front of him at chest height. Key poses: video mocap from Pexels boxing
+    #    footage was tried and not usable (docs/MOCAP-PIPELINE.md, fights). ──
+    guard = lambda f, sw, bob: (f, P(lean=0.3 + bob, yaw=-0.2, look=(-0.2, 0.1), shrugL=0.1, shrugR=0.1,  # noqa: E731
+                                     handL=(0.35 + sw, hipY + 2.15, 1.25), handR=(-0.45 + sw, hipY + 2.0, 0.8), **no_stick))
+    A('fight_stance', [guard(0, 0.0, 0.0), guard(12, 0.12, 0.05), guard(24, 0.0, 0.0), guard(36, -0.12, 0.05), guard(48, 0.0, 0.0)])
+    A('fight_drop', [
+        (0, P(stick=carry(0.0))),
+        (5, P(lean=0.45, look=(-0.3, 0.0), handL=(1.25, hipY + 0.35, 0.7), handR=(-1.25, hipY + 0.3, 0.7), **no_stick)),
+        (9, P(lean=0.4, look=(-0.2, 0.0), handL=(1.1, hipY + 0.55, 0.5), handR=(-1.1, hipY + 0.5, 0.5), **no_stick)),
+        guard(18, 0.0, 0.0),
+    ])
+    # the grab: left fist full of his sweater, the right cocked by the ear
+    grab = lambda f, pull, cock: (f, P(lean=0.32, yaw=-0.25 - cock * 0.1, roll=-0.04, look=(-0.15, 0.05),  # noqa: E731
+                                       handL=(0.2, hipY + 1.7 - pull * 0.1, 1.95 - pull * 0.3), handR=(-0.75, hipY + 2.1 + cock * 0.1, 0.3 - cock * 0.15), **no_stick))
+    A('fight_grab', [grab(0, 0.0, 0.0), grab(10, 0.7, 0.5), grab(20, 0.2, 0.2), grab(30, 0.0, 0.0)])
+    # the overhand right: load back, drive the right shoulder through, over his grip arm
+    A('fight_punch_R', [
+        grab(0, 0.0, 0.0),
+        (5, P(lean=0.3, yaw=-0.4, look=(-0.15, 0.1), handL=(0.2, hipY + 1.65, 1.8), handR=(-0.85, hipY + 2.3, -0.1), **no_stick)),
+        (8, P(lean=0.5, yaw=0.35, roll=0.1, look=(-0.2, -0.1), shrugR=0.15, handL=(0.25, hipY + 1.6, 1.6), handR=(0.05, hipY + 2.3, 2.5), **no_stick)),
+        (12, P(lean=0.48, yaw=0.25, roll=0.06, look=(-0.2, -0.05), handL=(0.25, hipY + 1.6, 1.65), handR=(0.1, hipY + 2.0, 2.2), **no_stick)),
+        grab(21, 0.2, 0.0),
+    ])
+    # a short left: let go of the sweater, jab up the middle, grab on again
+    A('fight_punch_L', [
+        grab(0, 0.0, 0.0),
+        (4, P(lean=0.32, yaw=0.05, look=(-0.15, 0.0), handL=(0.55, hipY + 2.05, 0.7), handR=(-0.75, hipY + 2.15, 0.3), **no_stick)),
+        (7, P(lean=0.45, yaw=-0.35, roll=-0.06, look=(-0.2, 0.05), shrugL=0.15, handL=(0.0, hipY + 2.3, 2.45), handR=(-0.7, hipY + 2.1, 0.45), **no_stick)),
+        (11, P(lean=0.4, yaw=-0.28, look=(-0.15, 0.0), handL=(0.15, hipY + 2.0, 2.1), handR=(-0.75, hipY + 2.1, 0.35), **no_stick)),
+        grab(19, 0.0, 0.0),
+    ])
+    # hit: the head snaps back and away, the shoulders follow, he hangs on
+    A('fight_hit_react', [
+        grab(0, 0.0, 0.0),
+        (4, P(lean=0.08, yaw=0.3, roll=0.15, look=(0.35, 0.35), handL=(0.3, hipY + 1.75, 1.75), handR=(-0.9, hipY + 1.9, 0.5), **no_stick)),
+        (10, P(lean=0.18, yaw=0.12, roll=0.07, look=(0.12, 0.15), handL=(0.25, hipY + 1.7, 1.85), handR=(-0.8, hipY + 2.0, 0.4), **no_stick)),
+        grab(18, 0.0, 0.0),
+    ])
+    # the clinch: tied up, heads down, both arms wrapped over his shoulders, swaying
+    clinch = lambda f, sw: (f, P(lean=0.62, yaw=sw * 0.15, roll=sw * 0.06, look=(-0.45, 0.25),  # noqa: E731
+                                 handL=(-0.05 + sw * 0.1, hipY + 2.0, 1.95), handR=(0.35 + sw * 0.1, hipY + 1.85, 1.85), **no_stick))
+    A('fight_clinch', [clinch(0, 0.0), clinch(15, 1.0), clinch(30, 0.0), clinch(45, -1.0), clinch(60, 0.0)])
 
     # ── celebrations ──
     fist_stick = dict(hand='L', dir=(-0.3, 0.6, -0.74), grip=3.2)

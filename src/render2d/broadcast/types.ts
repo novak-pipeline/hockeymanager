@@ -98,6 +98,7 @@ export type OverlayKind =
   | 'periodSummary'   // end of period / intermission
   | 'momentCaption'   // caption for a MomentCue
   | 'powerPlay'       // PP strip under the scorebug
+  | 'fightCard'       // FIGHT lower-third: both fighters and the result
 
 export interface GoalDetail {
   scorerId: string
@@ -133,6 +134,8 @@ export type OverlayData =
   | { kind: 'powerPlay'; side: 'home' | 'away'; offenderId: string; infraction: string }
   /** The call (W2, owner: "there's a penalty and I don't know what it's for"): who, what, how long. */
   | { kind: 'penaltyCall'; playerId: string; infraction: string; minutes: number }
+  /** A fight (agent engine): both men, and the result line (fightCard.ts), up as the linesmen part them. */
+  | { kind: 'fightCard'; homeId: string; awayId: string; winnerId: string | null; result: string }
 
 export interface OverlayCue {
   channel: 'overlay'

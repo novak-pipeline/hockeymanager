@@ -171,6 +171,11 @@ export function buildGameFlow(stream: GameStream, isHome: (playerId: string) => 
         if (ev.zone === 'offensive') push(absT, sideOf(ev.winner as string), 0.3)
         break
       }
+      case 'fight': {
+        // Winning a fight lifts the bench (when the linesmen part them); a draw lifts nobody.
+        if (ev.winner) push(absT + ev.separateAt, sideOf(ev.winner as string), ev.down ? 1.8 : 1.2)
+        break
+      }
     }
   }
 

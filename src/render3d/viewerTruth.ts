@@ -48,6 +48,10 @@ export interface VTEvent {
   detail?: string
   /** faceoffs: the dot it belongs on by the stoppage before it (faceoffRule, NHL rule 76; W3 S3). The loser is `target`. */
   dot?: DotSpec
+  /** fights (actor = home fighter, target = away): when they grabbed hold, were parted, were led off (absolute s). */
+  fightGrab?: number
+  fightSep?: number
+  fightBox?: number
   /** shots: release speed, ft/s (W3 S6, VT20). */
   speed?: number
 }
@@ -1009,6 +1013,48 @@ export function vt18Offside(inp: VTInput): VTResult {
   }
 }
 
+/* ── VT22 fights: the pair drawn together, everyone else off them, the camera in ── */
+/** A fight on screen (fight.ts / fightChoreo.ts): locked-on men within this of each other … */
+export const VT_FIGHT = { pairFt: 5, clearFt: 6, camFt: 45, badShare: 0.1 }
+export function vt22Fights(inp: VTInput): VTResult {
+  let judged = 0
+  let bad = 0
+  let camIn = 0
+  let camN = 0
+  const ev: string[] = []
+  for (const e of inp.events) {
+    if (e.type !== 'fight' || !e.actor || !e.target || e.fightGrab === undefined || e.fightSep === undefined) continue
+    for (const f of inp.frames) {
+      if (inReplay(f) || f.clock < e.fightGrab + 1 || f.clock > e.fightSep) continue
+      const h = f.rigs.find((r) => r.id === e.actor && r.visible)
+      const a = f.rigs.find((r) => r.id === e.target && r.visible)
+      if (!h || !a) continue
+      judged++
+      const gap = Math.hypot(h.x - a.x, h.z - a.z)
+      const mx = (h.x + a.x) / 2
+      const mz = (h.z + a.z) / 2
+      const crowd = f.rigs.filter((r) => !r.goalie && r.visible && r.id !== null && r !== h && r !== a && Math.hypot(r.x - mx, r.z - mz) < VT_FIGHT.clearFt)
+      if (f.cam.preset === 'broadcast') {
+        camN++
+        if (Math.hypot(f.cam.x - mx, f.cam.z - mz) <= VT_FIGHT.camFt) camIn++
+      }
+      if (gap > VT_FIGHT.pairFt || crowd.length > 0) {
+        bad++
+        if (ev.length < 5) ev.push(`${clk(f.clock)} fighters drawn ${f1(gap)} ft apart${crowd.length ? `, ${crowd.length} other skater(s) within ${VT_FIGHT.clearFt} ft` : ''}`)
+      }
+    }
+  }
+  const camOk = camN === 0 || camIn / camN >= 0.8
+  if (!camOk && ev.length < 5) ev.push(`camera within ${VT_FIGHT.camFt} ft of the fight on ${camIn}/${camN} broadcast frames`)
+  return {
+    id: 'VT22', name: 'Fights: the pair together, the rest off them, the camera in',
+    status: judged === 0 ? 'n/a' : bad / judged <= VT_FIGHT.badShare && camOk ? 'green' : 'red',
+    rule: `from a second after the grab until the linesmen part them, the two fighters are drawn ≤ ${VT_FIGHT.pairFt} ft apart with no other skater within ${VT_FIGHT.clearFt} ft (≤ ${VT_FIGHT.badShare * 100}% of frames off), and the broadcast camera sits within ${VT_FIGHT.camFt} ft of them on ≥ 80% of frames`,
+    value: `${judged - bad}/${judged} frames held; camera in ${camIn}/${camN}`,
+    evidence: ev,
+  }
+}
+
 /* ── W3 S6: VT20 puck speed and continuity, VT21 the loose puck is played ── */
 // Owner: "puck is zipping around too fast", "skate through the puck",
 // "players ignoring a puck right in front of them". The rules live in
@@ -1083,7 +1129,7 @@ export function vt21LoosePuck(inp: VTInput): VTResult {
   }
 }
 
-export const DETECTORS = [vt1Bodies, vt2Divergence, vt3Shots, vt4Motion, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt9Framing, vt10Commentary, vt11Hits, vt12ActionFloor, vt13Aimless, vt14Coverage, vt15Systems, vt16Camping, vt17Grip, vt18Offside, vt19GoalGeometry, vt20PuckSpeed, vt21LoosePuck] as const
+export const DETECTORS = [vt1Bodies, vt2Divergence, vt3Shots, vt4Motion, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt9Framing, vt10Commentary, vt11Hits, vt12ActionFloor, vt13Aimless, vt14Coverage, vt15Systems, vt16Camping, vt17Grip, vt18Offside, vt19GoalGeometry, vt20PuckSpeed, vt21LoosePuck, vt22Fights] as const
 
 
 export function runViewerTruth(inp: VTInput): VTResult[] {
