@@ -402,6 +402,19 @@ export type FrameEvent = GameEventBase & {
    */
   homeSystem?: string
   awaySystem?: string
+  /**
+   * Additive (agent engine, W3 S6): the player (skater or goalie) a free puck
+   * bounced off since the previous frame - skates, shins, a body, the pads. A
+   * touch the frame's carrier cannot show (offside: who propelled it over the
+   * line; icing: it was touched).
+   */
+  puckTouch?: PlayerRef
+  /**
+   * Additive (agent engine, W3 S6): a delayed offside is open against this
+   * side (its attackers must not touch the puck in the zone until they tag up).
+   * Detectors: a man leaving a free puck alone then is obeying the linesman.
+   */
+  delayedOffside?: 'home' | 'away'
 }
 
 export type GameEvent =

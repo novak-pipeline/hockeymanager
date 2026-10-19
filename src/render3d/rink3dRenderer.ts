@@ -53,7 +53,7 @@ import {
 import { advanceStridePhase, skaterPose, goaliePose, celebrationWeight, crowdExcitement, facingTarget } from './pose'
 import { Arena, NET_X, REFLECT_LAYER } from './arena'
 import { AthleteBatch, AthleteRig, athleteMaterial, type PoseOverlay } from './athlete'
-import { plateOnIce, type ProbeGeometry, type ProbeRig, type ProbeSink } from './viewerProbe'
+import { plateOnIce, viewerProbeEnabled, type ProbeGeometry, type ProbeRig, type ProbeSink } from './viewerProbe'
 import { isLance, isOneHanded, measureGrip, type GripSample } from './gripTruth'
 import { blendGrip, chooseGrip, gripBend, type GripInput, type GripState, type GripWeights } from './gripState'
 import { loadAthleteAssets, loadOwnerAssets, mergeClips, type AthleteAssets, type BakedClip, type OwnerAssets, type OwnerTextures } from './gltfAthlete'
@@ -73,7 +73,9 @@ interface OwnerRoleTex {
   gearN: THREE.Texture
 }
 import { ActionLayer } from './animLayer'
-import { Choreographer, extractActionCues, FACEOFF_LEAD_S, type LocoMode } from './choreo'
+import { Choreographer, extractActionCues, FACEOFF_LEAD_S, type HitLanded, type LocoMode } from './choreo'
+import { HitPhysics } from './hitPhysics'
+import { nearestBoards } from './rinkShape'
 import { FightStager, extractFights, fightAt, fightFraming, fightProps, linesmenSpots, type FightProp, type StagedFight } from './fightChoreo'
 import { kitFor, type Kit } from './palette'
 import { ATLAS_GRID, buildAtlasCanvas, paintJerseySlot, paintOfficialSlot } from './textures'
@@ -173,6 +175,15 @@ const GROUNDED_CLIPS = new Set(['hockey_stop', 'skate_start', 'stickhandle'])
 const EVENT_GRIPS = new Set<GripState>(['carry', 'receive', 'faceoff'])
 const GRIP_DWELL_S = 0.35
 /** Clips that swing the stick on purpose (shots, passes, dekes, pokes, the draw). */
+/** localStorage read that never throws (private windows, previews). */
+function safeLocal(k: string): string | null {
+  try {
+    return window.localStorage.getItem(k)
+  } catch {
+    return null
+  }
+}
+
 const SWING_CLIP = /^(shot_|pass$|deke_|poke$|faceoff_draw$|faceoff_tieup$)/
 /** … and clips where the body is thrown about on purpose (a check given or taken, a fall, a celebration): VT17 doesn't judge the grip through them. */
 const ACTION_CLIP = /^(shot_|pass$|deke_|poke$|faceoff_draw$|faceoff_tieup$|check|hit_|pinned_|getup|celly_)/
@@ -402,6 +413,33 @@ export class Rink3dRenderer implements MatchRenderer {
     return { x: tx, z: tz }
   }
 
+  /**
+   * A hit at its contact moment (choreo.ts): the man hit blends into a powered
+   * ragdoll kicked along the sim's push, the hitter drives on through, and a man
+   * driven into the boards flexes the glass. The sim already chose the clip
+   * (stays up / stumbles / goes down / pinned); physics only shapes it.
+   */
+  private hitLanded(h: HitLanded): void {
+    const phys = this.hitPhys
+    const tgt = h.target as unknown as PlayerPose
+    if (phys && tgt.rig.visible && !tgt.rig.goalie) {
+      phys.begin(tgt.rig, (tgt.playerId as string | null) ?? null, {
+        force: h.hardness, dirX: h.dirX, dirZ: h.dirZ, x: h.x, z: h.z,
+        knockdown: h.knockdown, boards: h.pinned, holdS: h.holdS, vx: tgt.vx, vz: tgt.vz,
+      })
+    }
+    const hitter = h.hitter as unknown as PlayerPose | null
+    if (phys && hitter && hitter.rig.visible && !h.battle) phys.followThrough(hitter.rig, h.dirX, h.dirZ, h.hardness)
+    const b = nearestBoards(h.x, h.z)
+    if (b.dist < 5 && (h.pinned || h.cue.hitKind === 'boards')) this.arena.flexGlass(h.x, h.z, h.pinned ? h.hardness : 0.5 * h.hardness)
+  }
+
+  /** The drawn chest (world x/z) — where a check's shoulders meet (VT11). */
+  private chestOf(rig: AthleteRig): { x: number; z: number } {
+    const m = rig.bones.chest.matrixWorld.elements
+    return { x: m[12]!, z: m[14]! }
+  }
+
   /** The faceoff whose set/drop window holds `t` (the linesman has the puck over the dot). */
   private faceoffAround(t: number): (typeof this.faceoffs)[number] | null {
     for (const f of this.faceoffs) {
@@ -493,6 +531,8 @@ export class Rink3dRenderer implements MatchRenderer {
   private mocap = false
   private choreo: Choreographer | null = null
   private choreoClock = 0
+  /** Physics-blended hit reactions (Rapier, visual only; null until the WASM is up or if it failed). */
+  private hitPhys: HitPhysics | null = null
 
   static async create(parent: HTMLElement, colors?: RinkColors, opts: Render3dOptions = {}): Promise<Rink3dRenderer> {
     const o = { ...RENDER3D_DEFAULTS, ...opts }
@@ -520,6 +560,9 @@ export class Rink3dRenderer implements MatchRenderer {
     if (colors) inst.setKits(colors)
     if (o.athletes === 'owner' || o.athletes === 'auto') await inst.loadOwner()
     inst.assets = o.athletes !== 'procedural' ? await loadAthleteAssets() : null
+    // hit physics needs the authored clips' hit reactions to blend over
+    // (dev A/B: the viewer-truth runner can switch it off to measure the clip-only baseline)
+    if (inst.assets && !(viewerProbeEnabled() && safeLocal('hockey.dev.hitPhysics') === 'off')) inst.hitPhys = await HitPhysics.create()
     inst.locoMode = inst.owner && !opts.locomotion ? 'clip' : o.locomotion
     inst.mocap = o.mocap
 
@@ -1006,6 +1049,7 @@ export class Rink3dRenderer implements MatchRenderer {
         !!own
       )
       for (const p of all()) p.overlay = this.choreo.overlayFor(p)
+      this.choreo.onHit = (h) => this.hitLanded(h)
       if (this.linesman) this.linesman.overlay = this.choreo.overlayFor(this.linesman)
       if (this.linesman2) this.linesman2.overlay = this.choreo.overlayFor(this.linesman2)
       const fightClips = ownClips ? ownClips.skater : (blenderClips.skater ?? this.assets.skater.clips)
@@ -1276,6 +1320,7 @@ export class Rink3dRenderer implements MatchRenderer {
 
     this.choreo?.reset()
     this.fightStager?.reset()
+    this.hitPhys?.reset()
     this.choreoClock = 0
     // Reset per-slot state so jerseys/labels repaint for the new game
     for (const p of this.allPoses()) {
@@ -1343,6 +1388,7 @@ export class Rink3dRenderer implements MatchRenderer {
     }
     this.choreo?.reset()
     this.fightStager?.reset()
+    this.hitPhys?.reset()
     this.choreoClock = this.clockPos
 
     this.renderAt(this.clockPos)
@@ -1439,6 +1485,8 @@ export class Rink3dRenderer implements MatchRenderer {
   destroy(): void {
     this.renderer.setAnimationLoop(null)
     this.batch.dispose()
+    this.hitPhys?.dispose()
+    this.hitPhys = null
     this.arena.dispose()
     this.atlasTex.dispose()
     this.ownerAtlasTex?.dispose()
@@ -1495,6 +1543,17 @@ export class Rink3dRenderer implements MatchRenderer {
     this.hits = cues
       .filter((c) => c.kind === 'hit' && c.actorId && c.targetId)
       .map((c) => ({ t: c.absT, x: normXtoWorld(c.nx), z: normYtoWorld(c.ny), by: c.actorId, on: c.targetId! }))
+    if (viewerProbeEnabled()) {
+      // DEV (viewer-truth runner): every hit with what the sim said about it, so the
+      // reel can pin one of each kind (open ice / boards / glancing)
+      try {
+        ;(window as unknown as { __hits3d?: unknown }).__hits3d = cues
+          .filter((c) => c.kind === 'hit')
+          .map((c) => ({ t: c.absT, by: c.actorId, on: c.targetId, kind: c.hitKind, force: c.force, knockdown: c.knockdown, pinned: c.pinned, x: normXtoWorld(c.nx), z: normYtoWorld(c.ny) }))
+      } catch {
+        /* no window (tests) */
+      }
+    }
     this.faceoffs = cues
       .filter((c) => c.kind === 'faceoff')
       .map((c) => ({ t: c.absT, set: c.setT ?? c.absT - FACEOFF_LEAD_S, x: normXtoWorld(c.nx), z: normYtoWorld(c.ny) }))
@@ -1783,9 +1842,11 @@ export class Rink3dRenderer implements MatchRenderer {
       })
       this.probePrevQ.set(rig, cur)
       const grip = !goalie && rig.visible && p.mode !== 'idle' ? this.gripOf(p) : null
+      const off = this.hitPhys?.offsetOf(rig) ?? { x: 0, z: 0 }
       rigs.push({
         team: p.team, goalie, id, mode: goalie ? 'play' : p.mode, visible: rig.visible,
-        x: p.worldX.pos, z: p.worldZ.pos, sx: pr.sx, sy: pr.sy, onScreen: pr.onScreen,
+        x: p.worldX.pos + off.x, z: p.worldZ.pos + off.z, sx: pr.sx, sy: pr.sy, onScreen: pr.onScreen,
+        chest: this.chestOf(rig),
         simX: sp ? sp.x : null, simZ: sp ? sp.z : null, boneW,
         label: this.labelRects.some((l) => l.key === `${p.team}:${rig.slot}`),
         ...(grip ? { grip: { lance: grip.lance, oneHand: grip.oneHand, bladeY: grip.sample.bladeY, carrying: grip.carrying, swing: grip.swing, state: grip.state, ...(grip.carrying ? { puckGap: this.bladeGap(p) } : {}) } } : {}),
@@ -1802,6 +1863,11 @@ export class Rink3dRenderer implements MatchRenderer {
       goalSeq: this.goalSeq ? this.goalSeq.phase : null,
       goalSeqT: this.goalSeq ? this.goalSeq.t : null,
       rigs,
+      ...(() => {
+        // the sim's contact points of hits right at this clock (VT11: the drawn bodies meet there)
+        const c = this.hits.filter((x) => Math.abs(x.t - this.clockPos) <= 0.25).map((x) => ({ t: x.t, by: x.by, on: x.on, x: x.x, z: x.z }))
+        return c.length ? { contacts: c } : {}
+      })(),
     })
   }
 
@@ -1912,6 +1978,7 @@ export class Rink3dRenderer implements MatchRenderer {
     const clock = this.boardHold?.clock ?? this.timeline.displayClockAt(this.clockPos)
     if (this.playing) this.sinceGoal += dt
     const goalFlash = this.sinceGoal < 3.5 ? 3.5 - this.sinceGoal : 0
+    this.arena.updateFlex(this.playing ? dt * Math.min(this.speed, 4) : 0)
     this.arena.update(this.wallTime, {
       homeScore: score.home,
       awayScore: score.away,
@@ -2537,6 +2604,8 @@ export class Rink3dRenderer implements MatchRenderer {
     const mw = pose.rig.rightHanded ? 1 : 0
     pose.rig.mirrorW = dt === 0 ? mw : pose.rig.mirrorW + (mw - pose.rig.mirrorW) * (1 - Math.exp(-dt / 0.08))
     pose.rig.apply(pose.worldX.pos, pose.worldZ.pos, pose.angle, body, stick, pose.overlay, this.gripFor(pose, dt, simDt))
+    // a hit reaction: the physics bends the animated pose (never the root; hitPhysics.ts)
+    this.hitPhys?.afterApply(pose.rig, (pose.playerId as string | null) ?? null, simDt, dt === 0)
 
     pose.labelY = body.hipHeight + 3.4
     if (pose.mode === 'play' || pose.mode === 'arriving') pose.labelOn = true

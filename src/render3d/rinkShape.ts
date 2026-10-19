@@ -141,3 +141,32 @@ export function stationsAlong(outline: OutlinePoint[], spacing: number, phase = 
   }
   return out
 }
+
+/**
+ * The nearest point of a rounded-rectangle boards line to (x, z), with its
+ * outward unit normal — exact for the straights and the corner arcs.
+ */
+export function nearestBoards(x: number, z: number, halfL = 100, halfW = 42.5, r = 28): { x: number; z: number; nx: number; nz: number; dist: number } {
+  const rr = Math.max(0, Math.min(r, halfL, halfW))
+  const cx = Math.max(-(halfL - rr), Math.min(halfL - rr, x))
+  const cz = Math.max(-(halfW - rr), Math.min(halfW - rr, z))
+  const dx = x - cx
+  const dz = z - cz
+  const d = Math.hypot(dx, dz)
+  let nx: number
+  let nz: number
+  if (d > 1e-6) {
+    nx = dx / d
+    nz = dz / d
+  } else if (halfL - Math.abs(x) < halfW - Math.abs(z)) {
+    nx = Math.sign(x) || 1
+    nz = 0
+  } else {
+    nx = 0
+    nz = Math.sign(z) || 1
+  }
+  // the centre-relative arc point (in a straight the normal is an axis, so this is the side)
+  const px = nx !== 0 && nz !== 0 ? cx + nx * rr : nx !== 0 ? Math.sign(nx) * halfL : x
+  const pz = nx !== 0 && nz !== 0 ? cz + nz * rr : nz !== 0 ? Math.sign(nz) * halfW : z
+  return { x: px, z: pz, nx, nz, dist: Math.hypot(px - x, pz - z) }
+}

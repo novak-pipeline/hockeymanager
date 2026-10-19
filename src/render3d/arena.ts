@@ -8,7 +8,7 @@
 
 import * as THREE from 'three'
 import { buildIceCanvas, buildIceRoughnessCanvas, RINK_CORNER_R, RINK_HALF_L, RINK_HALF_W } from './iceCanvas'
-import { rinkOutline, stationsAlong, sweepProfile, type ProfilePoint } from './rinkShape'
+import { nearestBoards, rinkOutline, stationsAlong, sweepProfile, type ProfilePoint } from './rinkShape'
 import { buildBenchBannerCanvas, buildBlobCanvas, buildDasherCanvas, buildNetCanvas, buildRibbonCanvas, DASHER_PERIOD_FT, paintJumbotron, type LogoImage } from './textures'
 import { mulberry32 } from './rng'
 import { kitFor } from './palette'
@@ -16,6 +16,8 @@ import { kitFor } from './palette'
 export const BOARD_H = 3.5
 export const GLASS_H = 6
 export const NET_X = 89
+/** Width (ft) of the glass pane that flexes when a man is driven into the boards. */
+const FLEX_W = 10
 
 const OUTLINE = rinkOutline(RINK_HALF_L, RINK_HALF_W, RINK_CORNER_R, 14)
 
@@ -313,6 +315,7 @@ export class Arena {
     glass.renderOrder = 2
     this.group.add(glass)
     const edgeMat = new THREE.MeshStandardMaterial({ color: 0xcfd8e0, roughness: 0.3, metalness: 0.4, side: THREE.DoubleSide })
+    this.buildGlassFlex(glassMat, edgeMat)
     this.group.add(sweptMesh([{ o: 0.28, y: BOARD_H + GLASS_H }, { o: 0.42, y: BOARD_H + GLASS_H }, { o: 0.42, y: BOARD_H + GLASS_H - 0.1 }], edgeMat))
 
     // stanchions every ~8 ft (skip the bench doors on the far side)
@@ -326,6 +329,80 @@ export class Arena {
       posts.setMatrixAt(i, m)
     })
     this.group.add(posts)
+  }
+
+  // ── glass flex (a body driven into the boards) ─────────────────────────
+  // One 10 ft pane laid over the glass where the man hit the boards: it bows
+  // out and rings down (the glass is near-invisible, so its bright top rail
+  // carries the read). Hidden when still. Visual only; never shatters.
+  private flex: { pane: THREE.Mesh; rail: THREE.Mesh; base: Float32Array; baseRail: Float32Array; t: number; amp: number } | null = null
+
+  private buildGlassFlex(glassMat: THREE.MeshPhysicalMaterial, edgeMat: THREE.MeshStandardMaterial): void {
+    const H = GLASS_H - 0.12
+    const paneGeo = new THREE.PlaneGeometry(FLEX_W, H, 12, 4)
+    paneGeo.translate(0, H / 2, 0)
+    const railGeo = new THREE.BoxGeometry(FLEX_W, 0.1, 0.14, 12, 1, 1)
+    railGeo.translate(0, H, 0)
+    const paneMat = glassMat.clone()
+    paneMat.opacity = 0.16
+    const pane = new THREE.Mesh(paneGeo, paneMat)
+    pane.renderOrder = 2
+    const rail = new THREE.Mesh(railGeo, edgeMat)
+    const g = new THREE.Group()
+    g.add(pane, rail)
+    g.visible = false
+    this.group.add(g)
+    this.flex = {
+      pane, rail,
+      base: (paneGeo.getAttribute('position').array as Float32Array).slice(),
+      baseRail: (railGeo.getAttribute('position').array as Float32Array).slice(),
+      t: 0, amp: 0,
+    }
+  }
+
+  /** A man driven into the boards at (x, z) with impact 0..1: the glass there flexes. */
+  flexGlass(x: number, z: number, impact: number): void {
+    const f = this.flex
+    if (!f) return
+    const b = nearestBoards(x, z, RINK_HALF_L, RINK_HALF_W, RINK_CORNER_R)
+    const g = f.pane.parent!
+    g.position.set(b.x + b.nx * 0.33, BOARD_H + 0.12, b.z + b.nz * 0.33)
+    g.rotation.set(0, Math.atan2(b.nx, b.nz), 0)
+    f.t = 0
+    f.amp = 0.12 + 0.28 * Math.min(1, Math.max(0, impact))
+    g.visible = true
+  }
+
+  /** Advance the flex on game time (0 while paused). */
+  updateFlex(dt: number): void {
+    const f = this.flex
+    if (!f || !f.pane.parent!.visible || dt <= 0) return
+    f.t += dt
+    // a stiff pane: bows out at once, rings at ~6 Hz, settles in under a second
+    const k = Math.exp(-f.t / 0.22) * Math.cos(2 * Math.PI * 6 * f.t) * (1 - Math.exp(-f.t / 0.02))
+    if (Math.abs(k) * f.amp < 0.003 && f.t > 0.2) {
+      f.pane.parent!.visible = false
+      return
+    }
+    const H = GLASS_H - 0.12
+    const bend = (pos: THREE.BufferAttribute, base: Float32Array): void => {
+      const a = pos.array as Float32Array
+      for (let i = 0; i < a.length; i += 3) {
+        const u = (base[i]! + FLEX_W / 2) / FLEX_W
+        const v = Math.min(1, Math.max(0, base[i + 1]! / H))
+        a[i + 2] = base[i + 2]! + f.amp * k * Math.sin(Math.PI * u) * Math.pow(v, 0.8)
+      }
+      pos.needsUpdate = true
+    }
+    bend(f.pane.geometry.getAttribute('position') as THREE.BufferAttribute, f.base)
+    bend(f.rail.geometry.getAttribute('position') as THREE.BufferAttribute, f.baseRail)
+  }
+
+  /** Current flex displacement (ft) at the pane's middle top — for tests/probes. */
+  get flexNow(): number {
+    const f = this.flex
+    if (!f || !f.pane.parent!.visible) return 0
+    return f.amp * Math.exp(-f.t / 0.22) * Math.cos(2 * Math.PI * 6 * f.t) * (1 - Math.exp(-f.t / 0.02))
   }
 
   // ── nets ────────────────────────────────────────────────────────────────

@@ -76,6 +76,14 @@ export interface AgentTelemetry {
   codeAnswers: number
   /** Per-attempt diagnostics: distance, nearest defender, defenders in the house, seconds since the side won the puck. */
   shotLog: { dist: number; nearest: number; house: number; poss: number; sinceEntry: number; held: number; carried: number; src: string }[]
+  /**
+   * W3 S6, the puck: contacts by surface; contacts that left the puck faster
+   * than it came in (no energy source: must be 0); the fastest free puck by
+   * what sent it (ft/s); loose-puck races and how many the man with the best
+   * predicted intercept won; free pucks that passed through a skater's stick
+   * reach between two substeps (the swept pickup check caught them).
+   */
+  puck: { contacts: Record<string, number>; gained: number; maxSpeed: Record<string, number>; overCap: number; races: number; raceWonPredicted: number; raceSideWon: number; swept: number }
   noteAccel(acc: number, speed: number): void
   noteOverlap(bodies: readonly Body[]): void
   noteHit(r: HitResult): void
@@ -145,6 +153,7 @@ export function emptyAgentTelemetry(): AgentTelemetry {
     dbgLog: [],
     codeAnswers: 0,
     shotLog: [],
+    puck: { contacts: {}, gained: 0, maxSpeed: {}, overCap: 0, races: 0, raceWonPredicted: 0, raceSideWon: 0, swept: 0 },
     noteAccel(acc, speed) {
       this.accelHist[Math.min(40, Math.floor(acc))]++
       this.speedHist[Math.min(40, Math.floor(speed))]++

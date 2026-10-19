@@ -18,7 +18,7 @@ import { analyzeGame } from '@engine/analysis'
 import { framesFromStream, judgeTeamPlay, SIM_GATES } from '@engine/analysis/teamPlay'
 import { judgeOffsideStream } from '@engine/analysis/offside'
 import { judgeActionFloor, judgeContacts } from '@engine/analysis/actions'
-import { ACTION_FLOOR } from './constraints'
+import { ACTION_FLOOR, PUCK_SPEED, PUCK_SURFACE } from './constraints'
 import { goalPath, shotGeometry } from './agentSim'
 import { DOT_EZ_X, DOT_NZ_X, DOT_Y } from './rink'
 import { DRAWN_DOTS, judgeFaceoffDots } from '@engine/analysis/faceoffRule'
@@ -27,6 +27,7 @@ import { streamPeriodBases } from '@domain'
 import { judgeSystems, legibility, systemFramesFromStream, type SeqCase } from '@engine/analysis/systemPlay'
 import { tacticsForSystem, type CoachSystemId } from '@engine/league/coachProfile'
 import { carrierPlayLine, judgeCarrierPlay, sumCarrierPlay } from '@engine/analysis/carrierPlay'
+import { judgePuckPlayStream } from '@engine/analysis/puckPlay'
 
 /** W3 S4 VT15 gate (design band, measured on the S4 engine: see W3-LOG S4). */
 const VT15_GATE = { forecheckFamily: 0.5, collapseLead: 0.12, pressureLead: 0.3 }
@@ -34,8 +35,16 @@ const VT15_GATE = { forecheckFamily: 0.5, collapseLead: 0.12, pressureLead: 0.3 
 /** W3 S5 carrier gate (design band; before/after in W3-LOG S5). */
 const CARRIER_GATE = { games: 8, pingShare: 0.1, netAttack: 0.9, corner: 0.12, caught: 0.33 }
 
+/** W3 S6 puck gate (design band; before/after in W3-LOG S6). */
+const S6_GATE = { games: 6, reboundFast: 2, gainedPer60: 1.5, throughPer60: 5, ignoredPer60: 1, raceWon: 0.45 }
+
 /** W3 S1 design band for the stream gates (per 60 live minutes / per player-minute). */
-const TEAM_PLAY_BAND = { aimlessPer60: 30, coveragePer60: 5, flipsPerPlayerMin: 26 }
+// W3 S6: flipsPerPlayerMin 26 -> 28 (OWNER DECISION, see W3-LOG S6): the S6 puck
+// changes hands more often (pickups through a man's reach, pucks dying at feet and
+// off the boards, races to the predicted spot), and every possession change
+// re-plans the shape - 25.3 -> 27.0 on this sample (imported league 25.4 -> 27.7);
+// no single S6 part carries it (ablations: 26.1-27.4 with any one or two off).
+const TEAM_PLAY_BAND = { aimlessPer60: 30, coveragePer60: 5, flipsPerPlayerMin: 28 }
 
 const data = generateLeague({ seed: 99 })
 const resolve = (id: PlayerId): Player => {
@@ -204,7 +213,9 @@ describe('agent engine', () => {
     let hitsWithReceiver = 0
     let streamHits = 0
     let passesTimed = 0
-    for (let i = 0; i < 4; i++) {
+    // (8 games, W3 S6: the against-the-push share is a ~2.5% rate; on 4 games one
+    // case either way moved it across the 3% bound with no engine change)
+    for (let i = 0; i < 8; i++) {
       const out = agentSimGame(team(i), team(i + 6), resolve, { seed: 970 + i })
       const fl = judgeActionFloor(out.stream)
       const ct = judgeContacts(out.stream)
@@ -544,5 +555,51 @@ describe('agent engine', () => {
     expect(pressure('aggressiveForecheck') - pressure('defensiveShell')).toBeGreaterThan(VT15_GATE.pressureLead)
     // D zone: the shell's collapse reads as a collapse far more often than a box team's coverage
     expect(share(dz, 'defensiveShell', 'collapse') - share(dz, 'structuredTwoWay', 'collapse')).toBeGreaterThan(VT15_GATE.collapseLead)
+  }, 600000)
+
+  it('plays the puck: a plausible speed, real bounces, nobody skates through it (W3 S6, VT20 / VT21)', () => {
+    // src/engine/analysis/puckPlay.ts on the sim stream, plus the sim's own
+    // puck telemetry. Before S6 (generated league, these 6 games): rebounds
+    // leaving faster than half the shot 22, skated through 168 (27.6 / 60 live
+    // min), passes and dumps up to 100 ft/s, the man with the best predicted
+    // intercept winning the race 0.33. See W3-LOG S6.
+    let live = 0
+    let overCap = 0
+    let gained = 0
+    let reboundFast = 0
+    let through = 0
+    let ignored = 0
+    let races = 0
+    let won = 0
+    let contactGain = 0
+    const maxS: Record<string, number> = {}
+    for (let i = 0; i < S6_GATE.games; i++) {
+      const tm = emptyAgentTelemetry()
+      const out = agentSimGame(team(i), team(i + 4), resolve, { seed: 1300 + i, agentTelemetry: tm })
+      const r = judgePuckPlayStream(out.stream)
+      live += r.liveMin
+      overCap += r.overCap.length
+      gained += r.gained.length
+      reboundFast += r.reboundFast.length
+      through += r.skateThrough.length
+      ignored += r.ignored.length
+      races += tm.puck.races
+      won += tm.puck.raceWonPredicted
+      contactGain += tm.puck.gained
+      for (const [k, v] of Object.entries(tm.puck.maxSpeed)) maxS[k] = Math.max(maxS[k] ?? 0, v)
+    }
+    const p60 = (n: number): number => (n / live) * 60
+    // eslint-disable-next-line no-console
+    console.log(`puck /60 live min: over cap ${p60(overCap).toFixed(2)} sped up ${p60(gained).toFixed(2)} fast rebounds ${reboundFast} skated through ${p60(through).toFixed(2)} ignored ${p60(ignored).toFixed(2)}; races won by the predicted man ${(won / races).toFixed(3)}; max ${JSON.stringify(maxS)}`)
+    expect(overCap).toBe(0)
+    expect(contactGain).toBe(0)
+    expect(reboundFast).toBeLessThanOrEqual(S6_GATE.reboundFast)
+    expect(p60(gained)).toBeLessThan(S6_GATE.gainedPer60)
+    expect(p60(through)).toBeLessThan(S6_GATE.throughPer60)
+    expect(p60(ignored)).toBeLessThan(S6_GATE.ignoredPer60)
+    expect(won / races).toBeGreaterThan(S6_GATE.raceWon)
+    expect(maxS['pass'] ?? 0).toBeLessThanOrEqual(PUCK_SPEED.pass + 1e-6)
+    expect(maxS['dump'] ?? 0).toBeLessThanOrEqual(PUCK_SPEED.pass + 1e-6)
+    expect(maxS['rebound'] ?? 0).toBeLessThanOrEqual(PUCK_SURFACE.blocker.cap)
   }, 600000)
 })

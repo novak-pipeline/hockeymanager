@@ -27,7 +27,8 @@
  * and clears that can leave the rink.
  */
 import type { Player } from '@domain'
-import { boardsClamp, netPush } from './rink'
+import { boardsClamp, GOAL_X, NET_HALF_W, netPush } from './rink'
+import { PUCK_SURFACE, surfaceE, type PuckSurface, type PuckSurfaceName } from './constraints'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
 const r100 = (v: number | undefined): number => clamp(v ?? 50, 0, 100)
@@ -428,11 +429,179 @@ export function bladePoint(b: Body, t: number, wobble = 1): { x: number; y: numb
 
 export type PuckStepResult = 'ok' | 'outOfPlay'
 
+/** What the puck hit on its last step (W3 S6), for telemetry and the predictor. */
+export interface PuckContact {
+  surface: PuckSurfaceName
+  /** Speed (ft/s, relative to the surface) into and out of the contact. */
+  vIn: number
+  vOut: number
+}
+
 /**
- * Advance a free puck: friction, board bounces (restitution + tangential
- * scrub, so rims ride the boards around the corners), net bounces, flight.
+ * W3 S6: one contact of the puck with a surface (constraints.ts PUCK_SURFACE).
+ * `nx, ny`: unit normal pointing INTO the surface (the way the puck is
+ * travelling when it hits it); `ux, uy`: the surface's own velocity (a body).
+ * The normal part bounces back with the surface's restitution, the part along
+ * it loses Coulomb friction (mu × the normal impulse), and the result is capped.
+ * Returns the contact, or null when the puck was not moving into it.
+ */
+export function puckBounce(p: Puck, nx: number, ny: number, surface: PuckSurfaceName, ux = 0, uy = 0): PuckContact | null {
+  const s: PuckSurface = PUCK_SURFACE[surface]
+  const rx = p.vx - ux
+  const ry = p.vy - uy
+  const vn = rx * nx + ry * ny
+  if (vn <= 0) return null
+  const vIn = Math.hypot(rx, ry)
+  const e = surfaceE(s, vn)
+  let tx = rx - vn * nx
+  let ty = ry - vn * ny
+  const vt = Math.hypot(tx, ty)
+  if (vt > 1e-9) {
+    const k = 1 - Math.min(s.mu * (1 + e) * vn, vt) / vt
+    tx *= k
+    ty *= k
+  }
+  let ox = tx - e * vn * nx
+  let oy = ty - e * vn * ny
+  let vOut = Math.hypot(ox, oy)
+  if (s.cap !== undefined && vOut > s.cap) {
+    ox *= s.cap / vOut
+    oy *= s.cap / vOut
+    vOut = s.cap
+  }
+  p.vx = ox + ux
+  p.vy = oy + uy
+  return { surface, vIn, vOut }
+}
+
+/** The surface a puck hits on the net box at a push-out with normal (nx, ny) (W3 S6). */
+function netSurface(px: number, py: number, sign: number, nx: number, ny: number): PuckSurfaceName {
+  const ax = px * sign
+  // the front face: the posts at the ends of the mouth, the goalie's pads in it
+  if (nx === -sign) return Math.abs(py) > NET_HALF_W - 0.3 ? 'post' : 'pad'
+  // the side of the cage: the post near the front, the mesh and frame behind it
+  if (ny !== 0) return ax < GOAL_X + 0.6 ? 'post' : 'cage'
+  return 'cage'
+}
+
+/** Body sizes the puck can hit (W3 S6): skates and shin pads at the ice, the body above them. */
+export const PUCK_BODY = { skateR: 1.0, skateH: 1.5, bodyR: 1.25, bodyH: 5.5, goalieR: 1.6 } as const
+
+/**
+ * W3 S6: the puck against bodies over its last step, from (x0, y0) to where it
+ * is now. A skater is a circle (skates and shins at the ice, the body above);
+ * the relative path is swept, so a fast puck cannot pass through a man between
+ * two substeps. The first body the path meets moving into it takes the
+ * contact: the puck is put back on his edge and comes off him with the body or
+ * pad row. Returns the body hit and the contact, or null.
+ */
+export function puckOffBodies(p: Puck, x0: number, y0: number, dt: number, bodies: readonly { b: Body; goalie: boolean }[]): { b: Body; c: PuckContact } | null {
+  if (p.z > PUCK_BODY.bodyH) return null
+  let best: { b: Body; goalie: boolean; t: number; r: number } | null = null
+  for (const it of bodies) {
+    const b = it.b
+    const r = it.goalie ? PUCK_BODY.goalieR : p.z <= PUCK_BODY.skateH ? PUCK_BODY.skateR : PUCK_BODY.bodyR
+    // the puck relative to the body over the step
+    const sx = x0 - (b.x - b.vx * dt)
+    const sy = y0 - (b.y - b.vy * dt)
+    const ex = p.x - b.x
+    const ey = p.y - b.y
+    if (Math.min(Math.abs(sx), Math.abs(ex)) > r + 8 && Math.sign(sx) === Math.sign(ex)) continue
+    const dx = ex - sx
+    const dy = ey - sy
+    const L2 = dx * dx + dy * dy
+    // first time on the segment the relative path is within r (entering the circle)
+    let t: number
+    const c0 = sx * sx + sy * sy - r * r
+    if (c0 <= 0) continue // started inside him: moving off him (a rebound leaving the pads) - not a new contact
+    if (L2 < 1e-12) continue
+    const bq = sx * dx + sy * dy
+    const disc = bq * bq - L2 * c0
+    if (disc < 0) continue
+    t = (-bq - Math.sqrt(disc)) / L2
+    if (t < 0 || t > 1) continue
+    if (!best || t < best.t) best = { b, goalie: it.goalie, t, r }
+  }
+  if (!best) return null
+  const b = best.b
+  // where the puck touched him (relative), then on his edge now
+  const sx = x0 - (b.x - b.vx * dt)
+  const sy = y0 - (b.y - b.vy * dt)
+  const cx = sx + (p.x - b.x - sx) * best.t
+  const cy = sy + (p.y - b.y - sy) * best.t
+  const cl = Math.max(Math.hypot(cx, cy), 1e-6)
+  const nx = cx / cl
+  const ny = cy / cl
+  const c = puckBounce(p, -nx, -ny, best.goalie ? 'pad' : 'body', b.vx, b.vy)
+  if (!c) return null
+  p.x = b.x + nx * (best.r + 0.05)
+  p.y = b.y + ny * (best.r + 0.05)
+  return { b, c }
+}
+
+/** The last contact stepPuck made (W3 S6): read right after the call. */
+export const lastPuckContact: { c: PuckContact | null } = { c: null }
+
+/**
+ * Advance a free puck: friction, board and glass bounces, the net's posts and
+ * cage, flight. W3 S6: each surface is a row of PUCK_SURFACE (restitution by
+ * impact speed + Coulomb friction along the surface): rims ride the boards
+ * around the corners at pace, hard head-on dumps die, glass is dead, posts
+ * ring. Deterministic (no randomness): the path predictor (puckPath.ts) steps
+ * a copy of the puck with this same function.
  */
 export function stepPuck(p: Puck, dt: number): PuckStepResult {
+  lastPuckContact.c = null
+  if (!S6_PHYS.on) return stepPuckS5(p, dt)
+  // Flight.
+  if (p.z > 0 || p.vz > 0) {
+    p.vz -= 32 * dt
+    p.z += p.vz * dt
+    if (p.z <= 0) {
+      p.z = 0
+      // Lands and skips: lose some speed.
+      p.vz = 0
+      p.vx *= 0.8
+      p.vy *= 0.8
+    }
+  }
+  const sp = Math.hypot(p.vx, p.vy)
+  if (sp > 0) {
+    const dec = Math.min(sp, (p.z > 0 ? 0.3 : PUCK_FRICTION) * dt)
+    p.vx -= (p.vx / sp) * dec
+    p.vy -= (p.vy / sp) * dec
+  }
+  p.x += p.vx * dt
+  p.y += p.vy * dt
+  const h = boardsClamp(p.x, p.y, 0.3)
+  if (h.hit) {
+    if (p.z > GLASS_H) return 'outOfPlay'
+    p.x = h.x
+    p.y = h.y
+    const glass = p.z > BOARD_H
+    const c = puckBounce(p, h.nx, h.ny, glass ? 'glass' : 'boards')
+    if (c) lastPuckContact.c = c
+    // off the glass it drops (it does not climb over it)
+    if (glass) p.vz = Math.min(p.vz, 0)
+  }
+  for (const s of [1, -1]) {
+    if (p.z > 4) continue
+    const np = netPush(p.x, p.y, s, 0.2)
+    if (np) {
+      p.x = np.x
+      p.y = np.y
+      const c = puckBounce(p, -np.nx, -np.ny, netSurface(np.x, np.y, s, np.nx, np.ny))
+      if (c) lastPuckContact.c = c
+    }
+  }
+  return 'ok'
+}
+
+/** W3 S6 dev switch: off = the S5 puck (one restitution for boards and glass, a 0.86 scrub on every contact). For before/after measurement only. */
+export const S6_PHYS = { on: true }
+
+/** The S5 puck step, kept only for the S6 before/after measurement (S6_PHYS.on = false). */
+function stepPuckS5(p: Puck, dt: number): PuckStepResult {
   // Flight.
   if (p.z > 0 || p.vz > 0) {
     p.vz -= 32 * dt

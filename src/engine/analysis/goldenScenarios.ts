@@ -35,6 +35,10 @@ export type ScenarioKind =
   | 'systemHome'
   | 'systemAway'
   | 'trailingPush'
+  | 'rimAround'
+  | 'offGlass'
+  | 'looseRace'
+  | 'dumpInRace'
   | 'fightDown'
   | 'fightDecision'
 
@@ -43,7 +47,7 @@ export const SCENARIO_KINDS: readonly ScenarioKind[] = [
   'lineChangeOnFly', 'faceoffWinPlay', 'bigHit', 'saveRebound', 'emptyNetLate',
   'dZoneCoverage', 'offsideCall', 'faceoffNeutral', 'faceoffDefensive',
   'breakoutPlay', 'forecheckTurnover', 'nzRegroup', 'systemHome', 'systemAway',
-  'trailingPush', 'fightDown', 'fightDecision',
+  'trailingPush', 'rimAround', 'offGlass', 'looseRace', 'dumpInRace', 'fightDown', 'fightDecision',
 ]
 
 /** Human label + how much game time to show around the moment (lead before, tail after).
@@ -76,6 +80,11 @@ export const SCENARIO_META: Record<ScenarioKind, { label: string; lead: number; 
   systemAway:      { label: 'Their system: the forecheck',    lead: 2,  tail: 10 },
   // W3 S5 (the carrier's score tilt): down a goal or two in the last five minutes, a shot
   trailingPush:    { label: 'Trailing late: the push',        lead: 16, tail: 5 },
+  // W3 S6 (puck path and bounces): the puck off the boards and the glass, and the races for it
+  rimAround:       { label: 'Rim around the boards',          lead: 4,  tail: 6 },
+  offGlass:        { label: 'Puck off the glass',             lead: 4,  tail: 6 },
+  looseRace:       { label: 'Loose-puck race',                lead: 3,  tail: 6 },
+  dumpInRace:      { label: 'Dump-in and the race to it',     lead: 4,  tail: 7 },
   // fights (agent engine `fight` event): one where a man goes down, one that ends with both spent
   fightDown:       { label: 'Fight: a man goes down',         lead: 3,  tail: 42 },
   fightDecision:   { label: 'Fight: both spent, linesmen in', lead: 3,  tail: 48 },
@@ -343,6 +352,72 @@ export function findScenarios(
           }
         }
       }
+    }
+  }
+
+  // W3 S6: the free puck along the boards, off the glass, and the races to it
+  {
+    const fr: { abs: number; period: number; x: number; y: number; z: number; carrier: string | null; live: boolean }[] = []
+    let live = false
+    for (const ev of stream) {
+      if (ev.type === 'faceoff') live = true
+      else if (ev.type === 'whistle' || ev.type === 'goal' || ev.type === 'periodEnd') live = false
+      else if (ev.type === 'frame') fr.push({ abs: playAbsT(ev, bases), period: ev.period, x: ev.puck.x * 100, y: ev.puck.y * 42.5, z: ev.puckZ ?? 0, carrier: (ev.puckCarrier as string | null) ?? null, live })
+    }
+    const lastSide = (i: number): 'home' | 'away' | null => {
+      for (let k = i; k >= 0 && fr[i]!.abs - fr[k]!.abs < 6; k--) if (fr[k]!.carrier) return sideOf(fr[k]!.carrier!)
+      return null
+    }
+    const boardsD = (x: number, y: number): number => {
+      const ax = Math.abs(x)
+      const ay = Math.abs(y)
+      if (ax > 72 && ay > 14.5) return 28 - Math.hypot(ax - 72, ay - 14.5)
+      return Math.min(100 - ax, 42.5 - ay)
+    }
+    for (let i = 1; i < fr.length; i++) {
+      const f = fr[i]!
+      if (!f.live || f.carrier) continue
+      // a rim: a free puck riding the boards from one side of the net round to the other (behind the goal line)
+      if (Math.abs(f.x) > 89 && boardsD(f.x, f.y) < 4) {
+        let j = i
+        while (j > 0 && i - j < 12 && fr[j - 1]!.live && !fr[j - 1]!.carrier && boardsD(fr[j - 1]!.x, fr[j - 1]!.y) < 5) j--
+        let k = i
+        while (k + 1 < fr.length && k - i < 12 && fr[k + 1]!.live && !fr[k + 1]!.carrier && boardsD(fr[k + 1]!.x, fr[k + 1]!.y) < 5) k++
+        const a = fr[j]!
+        const b = fr[k]!
+        if (Math.abs(a.y) > 14 && Math.abs(b.y) > 14 && Math.sign(a.y) !== Math.sign(b.y)) {
+          const side = lastSide(j) ?? 'home'
+          push({ kind: 'rimAround', absT: a.abs, period: f.period, side, note: `rim round the end boards (${(b.abs - a.abs).toFixed(1)} s from the half-wall to the other side)`, quality: 1 + Math.min(0.5, (b.abs - a.abs) / 4) })
+          i = k
+          continue
+        }
+      }
+      // off the glass: in the air at the boards
+      if (f.z > 3.5 && boardsD(f.x, f.y) < 4) {
+        push({ kind: 'offGlass', absT: f.abs, period: f.period, side: lastSide(i) ?? 'home', note: `puck off the glass ${f.z.toFixed(1)} ft up`, quality: 1 + Math.min(0.4, (f.z - 3.5) / 5) })
+        while (i + 1 < fr.length && !fr[i + 1]!.carrier && fr[i + 1]!.abs - f.abs < 2) i++
+      }
+    }
+    // races: a free puck (not a pass or a shot) for >= 1 s, ending in a carrier; a dump-in when it went in over the blue line free
+    for (let i = 1; i < fr.length; i++) {
+      const f = fr[i]!
+      if (!f.live || f.carrier || !fr[i - 1]!.carrier) continue
+      const t0 = fr[i - 1]!.abs
+      const flightEv = evs.find((x) => x.abs >= t0 - 0.05 && x.abs <= f.abs + 0.05 && (x.ev.type === 'pass' || x.ev.type === 'shot' || x.ev.type === 'missedShot'))
+      let k = i
+      while (k + 1 < fr.length && fr[k + 1]!.live && !fr[k + 1]!.carrier) k++
+      const end = fr[k + 1]
+      if (!end || !end.live || !end.carrier) { i = k; continue }
+      const dur = end.abs - f.abs
+      const from = lastSide(i - 1)
+      const won = sideOf(end.carrier)
+      const enterZone = Math.abs(fr[i - 1]!.x) < 25 && fr.slice(i, k + 1).some((q) => Math.abs(q.x) > 26)
+      if (enterZone && dur >= 1 && dur <= 8) {
+        push({ kind: 'dumpInRace', absT: f.abs, period: f.period, side: from ?? won, note: `dump-in, ${won === from ? 'recovered by the dumping side' : 'the defenders got there first'} ${dur.toFixed(1)} s later`, quality: 1 + (won === from ? 0.3 : 0) + Math.min(0.3, dur / 10) })
+      } else if (!flightEv && dur >= 1 && dur <= 6) {
+        push({ kind: 'looseRace', absT: f.abs, period: f.period, side: won, note: `loose puck, ${dur.toFixed(1)} s to a stick (${won === from ? 'kept' : 'turned over'})`, quality: 1 + Math.min(0.4, dur / 6) })
+      }
+      i = k
     }
   }
 

@@ -53,6 +53,7 @@ import {
 import { other, rDef, rLevel, type CarrierAction, type Side, type World } from './world'
 import { PLAN, planOf, setJob, type JobKind, type Plan } from './plans'
 import { ACTION_FLOOR } from './constraints'
+import { pathAt, pathZ, predictPuck, type PuckPath } from './puckPath'
 import {
   BREAKOUT_OUTLET,
   BREAKOUT_TABLES,
@@ -93,12 +94,16 @@ const r01 = rLevel
  * value on a low-retention carry. That is what brings shots out to range.
  */
 // W3 S5: VAL.shoot 0.66 -> 0.43 (the one scalar this slice changes; see W3-LOG S5).
+// W3 S6: VAL.shoot 0.43 -> 0.35, compensates for the S6 puck keeping possessions
+// alive: the swept pickup check (a puck through a man's reach between two
+// substeps is his to try) and the lively boards (rims keep their pace) took the
+// coach-systems run to 34.1 shots and 3.56 goals a team-game (see W3-LOG S6).
 // Compensates for the S5 carrier no longer burning his possessions in ping-pong
 // and for rushes that now attack the net (+3.6 shots, +0.45 goals a team-game on
 // the coach-systems run), on top of the coach systems' own excess found in S4
 // (3.49). The carrier values his own finish lower, so he passes up the
 // marginal chance in the slot and keeps the puck.
-export const VAL = { keepRoute: 3, minCarry: 4, oneTimerV: 1.8, otMinX: 50, otMinY: 14, otMaxY: 32, nzBack: 0.0015, carryKeep: 0.004, oz: 0.11, kPos: 0.15, shoot: 0.43, keep: 0.18, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 1.2, laneRead: 0.95, angleZero: 90, behindNet: 0.85, transMaxX: 70, transBack: 0.003, rushNoBackX: 0, regroupMaxX: 20, ozBack: 0.008 }
+export const VAL = { keepRoute: 3, minCarry: 4, oneTimerV: 1.8, otMinX: 50, otMinY: 14, otMaxY: 32, nzBack: 0.0015, carryKeep: 0.004, oz: 0.11, kPos: 0.15, shoot: 0.35, keep: 0.18, noise: 0.5, nz: 0.009, nzExp: 1, passShot: 0.5, tip: 0.012, tipKeep: 0.3, pointKeep: 1.2, laneRead: 0.95, angleZero: 90, behindNet: 0.85, transMaxX: 70, transBack: 0.003, rushNoBackX: 0, regroupMaxX: 20, ozBack: 0.008 }
 /**
  * D safety (gap discipline): how far ahead a defenceman reads an attacker
  * coming at him (s), the base gap (ft) plus gap per ft/s of the attacker's
@@ -136,13 +141,77 @@ export const PROGRESS = { gainFt: 10, valueGain: 0.08, openGainFt: 6, reliefPres
  * a chaser behind (not goal-side) and is worth `dekeK` more; inside `finishFt`
  * of the net on a breakaway he finishes (shoot or deke) rather than skating on.
  */
-export const RUSH_PLAY = { slotFt: 24, netK: 0.6, oddNetK: 0.25, cornerCost: 0.03, cornerY: 22, cornerAdv: 69, dekeK: 1.5, finishFt: 24, window: 4.5, trailFt: 15 }
+export const RUSH_PLAY = { slotFt: 24, netK: 0.6, oddNetK: 0.25, cornerCost: 0.03, cornerY: 22, cornerAdv: 69, dekeK: 1.5, finishFt: 24, window: 4.5, trailFt: 15, finishK: 0.43 / 0.35 }
+// W3 S6: RUSH_PLAY.finishK = 0.43 / 0.35 keeps the S5 value of the finish on a
+// breakaway (shot, move, the carry toward the chance) while VAL.shoot 0.43 -> 0.35
+// trims the marginal in-zone shot: it compensates for that cut, so the S5
+// breakaway play is unchanged (W3-LOG S6).
 /** Defending the house: the on-puck man engages (no containing) inside this radius of our net (ft). */
 export const DZ = { engageFt: 30 }
 /** Seconds after a zone entry that play is still a "rush". */
 const RUSH_WINDOW = 4.5
 /** Stick reach from the body centre, ft. */
 export const REACH = 5
+
+/**
+ * W3 S6: the loose puck. `atFeetS`: a man whose intercept on the puck's path
+ * is this close in time has it at his feet and plays it (ahead of the claim
+ * and the D safety line) when the claimed man is `atFeetMargin` s later.
+ */
+export const PUCK_PLAY = { atFeetS: 0.3, atFeetMargin: 0.5 }
+/** W3 S6 dev switches (measurement only; all on in play). */
+export const S6_DEV = { path: true, atFeet: true, bodies: true, swept: true, rebound: true, misses: true, goalieRead: true }
+
+/**
+ * W3 S6: the man who wins the race to a free puck by the predicted path (the
+ * earliest intercept, stick reach included, over every skater offered), for
+ * the race-won metric.
+ */
+export function raceLeader(w: World, bodies: readonly Body[]): { b: Body; t: number } | null {
+  const pp = sharedPath(w)
+  let best: { b: Body; t: number } | null = null
+  for (const b of bodies) {
+    let tb = Infinity
+    for (let t = 0; t <= 2.4; t += 0.15) {
+      if (pathZ(pp, t) > 3) continue
+      const p = boardsClamp(pathAt(pp, t).x, pathAt(pp, t).y, 1.5)
+      if (stickTime(b, p.x, p.y) <= t) {
+        tb = t
+        break
+      }
+    }
+    if (tb === Infinity) {
+      const p = pathAt(pp, 2.4)
+      tb = 2.4 + reachTime(b, p.x, p.y)
+    }
+    if (!best || tb < best.t) best = { b, t: tb }
+  }
+  return best
+}
+
+/**
+ * W3 S6: seconds for a body to get his stick (REACH) on point (x, y): his
+ * skating time to the nearest point of the reach circle round it, so a man
+ * already within reach is there now (the S5 form, reachTime - REACH/top, sent a
+ * man standing 4 ft from the puck on a 0.5 s "race").
+ */
+export function stickTime(b: Body, x: number, y: number): number {
+  const d = Math.hypot(x - b.x, y - b.y)
+  if (d <= REACH) return 0
+  const k = (d - REACH) / d
+  return reachTime(b, b.x + (x - b.x) * k, b.y + (y - b.y) * k)
+}
+
+/** One predicted path per world tick (both sides think on the same puck). */
+const pathCache = new WeakMap<World, { t: number; x: number; y: number; vx: number; vy: number; p: PuckPath }>()
+export function sharedPath(w: World): PuckPath {
+  const pk = w.puck
+  const c = pathCache.get(w)
+  if (c && c.t === w.t && c.x === pk.x && c.y === pk.y && c.vx === pk.vx && c.vy === pk.vy) return c.p
+  const p = predictPuck(pk)
+  pathCache.set(w, { t: w.t, x: pk.x, y: pk.y, vx: pk.vx, vy: pk.vy, p })
+  return p
+}
 
 // ---------------------------------------------------------------------------
 // Value model
@@ -487,7 +556,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
   if (adv > BLUE_X && adv < GOAL_X - 1 && !opp.pulled) {
     // (the power play's patience: the weight follows the quality of the chance)
     const patience = me.powerPlay && S5_DEV.tilt ? clamp(xgAt(c.x, c.y, a) / PP_PATIENCE.xgRef, PP_PATIENCE.lo, PP_PATIENCE.hi) : 1
-    opts.push({ ev: tilted(shotValue(me, opps, c, c.x, c.y, eager, true, opp.goalie), tilt.shoot * patience), act: { kind: 'shoot' } })
+    opts.push({ ev: tilted(shotValue(me, opps, c, c.x, c.y, eager, true, opp.goalie) * (breakaway ? RUSH_PLAY.finishK : 1), tilt.shoot * patience), act: { kind: 'shoot' } })
   }
 
   // --- Carry (8 headings) ---
@@ -546,7 +615,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       let rushV = 0
       if (netK > 0 && !qCorner) {
         const k = dq < RUSH_PLAY.finishFt ? RUSH_PLAY.finishFt / Math.max(dq, 0.5) : 1
-        rushV = netK * xgAt(a * GOAL_X - (a * GOAL_X - qx) * k, qy * k, a) * VAL.shoot
+        rushV = netK * xgAt(a * GOAL_X - (a * GOAL_X - qx) * k, qy * k, a) * VAL.shoot * (breakaway ? RUSH_PLAY.finishK : 1)
       }
       const v = posValue(qx, qy, a) + rushV
       const cost = posValue(qx, qy, -a)
@@ -629,7 +698,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       // A goalie who bit is out of his net: the finish is from the doorstep.
       const xgIn = xgAt(a * (GOAL_X - 7), c.y >= 0 ? -3 : 3, a)
       const pb = clamp(p + DEKE.belief * (0.5 + dekeSkill(c)), 0, 0.97)
-      const ev = tilted((pb * xgIn * DEKE.beatG * VAL.shoot + (1 - pb) * 0.15 * VAL.oz) * DEKE.valueG * (breakaway ? RUSH_PLAY.dekeK : 1), tilt.deke)
+      const ev = tilted((pb * xgIn * DEKE.beatG * VAL.shoot * (breakaway ? RUSH_PLAY.finishK : 1) + (1 - pb) * 0.15 * VAL.oz) * DEKE.valueG * (breakaway ? RUSH_PLAY.dekeK : 1), tilt.deke)
       const move: DekeKind = w.rng.next() < 0.6 ? 'forehandBackhand' : 'shoulderFake'
       opts.push({ ev, act: { kind: 'deke', on: g, goalie: true, move, p, dir: c.y >= 0 ? -1 : 1 } })
     }
@@ -1096,7 +1165,16 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
     // can get to first (an intercept — cutting off a rim, stepping up to keep
     // a chip in at the line), and the man with the earliest intercept goes.
     const psp = Math.hypot(puck.vx, puck.vy)
+    // W3 S6: the real path (puckPath.ts: the sim's own puck physics, round the
+    // corners and off the end boards and the glass), not a straight slide
+    // clamped at the boards. The S5 straight path is kept behind S6_DEV.path.
+    const pp = S6_DEV.path ? sharedPath(w) : null
     const path = (t: number): XY => {
+      if (pp) {
+        const q = pathAt(pp, t)
+        const h = boardsClamp(q.x, q.y, 1.5)
+        return { x: h.x, y: h.y }
+      }
       if (psp < 0.5) return { x: puck.x, y: puck.y }
       const tt = Math.min(t, psp / 4.5)
       const d = psp * tt - 0.5 * 4.5 * tt * tt
@@ -1105,8 +1183,10 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
     }
     const intercept = (b: Body): { t: number; p: XY } => {
       for (let t = 0; t <= 2.4; t += 0.15) {
+        // a puck in the air above the sticks cannot be played there (S6)
+        if (pp && pathZ(pp, t) > 3) continue
         const p = path(t)
-        if (reachTime(b, p.x, p.y) - REACH / Math.max(b.caps.top, 1) <= t) return { t, p }
+        if ((pp ? stickTime(b, p.x, p.y) : reachTime(b, p.x, p.y) - REACH / Math.max(b.caps.top, 1)) <= t) return { t, p }
       }
       const p = path(2.4)
       return { t: 2.4 + reachTime(b, p.x, p.y), p }
@@ -1133,6 +1213,35 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
       // The race is claimed: the man already going keeps it unless another is clearly first.
       const prev = tp.chaser
       if (first && prev && prev !== first && icpt.has(prev) && mayChase(prev) && icpt.get(prev)!.t <= icpt.get(first)!.t + PLAN.chaseKeepS) first = prev
+      // W3 S6 (owner: "players ignoring a puck right in front of them"): a
+      // puck he can have on his stick in a beat is his to play, whoever had
+      // the claim and whatever the D safety line says - nobody skates past a
+      // puck at his feet.
+      if (S6_DEV.atFeet) {
+        // at his feet: the puck's path comes within stick reach of where he
+        // is going within atFeetS (by distance - the intercept time's reach
+        // correction is too crude for a man standing next to it)
+        const feetT = (b: Body): number => {
+          for (let t = 0; t <= PUCK_PLAY.atFeetS + 1e-9; t += 0.1) {
+            if (pp && pathZ(pp, t) > 3) continue
+            const q = path(t)
+            if (Math.hypot(b.x + b.vx * t - q.x, b.y + b.vy * t - q.y) <= REACH) return t
+          }
+          return Infinity
+        }
+        let feet: Body | undefined
+        let ft = Infinity
+        for (const b of eligible) {
+          const t = feetT(b)
+          if (t < ft || (t === ft && feet && Math.hypot(b.x - puck.x, b.y - puck.y) < Math.hypot(feet.x - puck.x, feet.y - puck.y))) {
+            ft = t
+            feet = b
+          }
+        }
+        // the man already on it keeps it while the puck is at his feet too (no flip-flopping claim)
+        if (prev && prev === first && feetT(prev) < Infinity) feet = prev
+        if (feet && feet !== first && ft < Infinity && (!first || icpt.get(first)!.t > ft + PUCK_PLAY.atFeetMargin)) first = feet
+      }
       // Their pass in flight: race it only when we get there about when their
       // receiver does. Otherwise nobody chases a puck that is already his — we
       // play the man (W3-LOG: a D skating off to the far boards after a pass
@@ -1169,7 +1278,11 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
       const gx = Math.sign(h.x) * GOAL_X
       if (Math.abs(h.x) > GOAL_X - 0.5 && Math.abs(b.x) < GOAL_X + 0.5 && Math.sign(b.x) === Math.sign(h.x) && Math.abs(h.y) < 7 && Math.abs(b.y) < 9) {
         const sy = Math.abs(b.y) > 1 ? Math.sign(b.y) : Math.sign(h.y || 1)
-        const wp = { x: gx + Math.sign(gx) * 1.5, y: sy * 7.5 }
+        let wp = { x: gx + Math.sign(gx) * 1.5, y: sy * 7.5 }
+        // W3 S6: wedged in the crease between the goalie and the cage: step out
+        // to the side in front of the goal line first (he pressed on the cage
+        // while the puck sat behind it)
+        if (S6_DEV.atFeet && Math.abs(b.y) < 5.5 && Math.abs(b.x) > GOAL_X - 4) wp = { x: gx - Math.sign(gx) * 2.5, y: sy * 8 }
         if (Math.hypot(wp.x - b.x, wp.y - b.y) > 2) h = wp
       }
       const far = Math.hypot(h.x - b.x, h.y - b.y) > 45
