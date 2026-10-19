@@ -17,6 +17,9 @@ import { DRAWN_DOTS, dotXY, type DotSpec } from '@engine/analysis/faceoffRule'
 import { crossesMouth, GOAL_GEOM } from '@engine/analysis/goalGeometry'
 import { judgePuckPlay, PUCK_PLAY_RULE, type PPEvent, type PPFrame, type PuckPlayReport } from '@engine/analysis/puckPlay'
 import { PUCK_SPEED } from '@engine/agent/constraints'
+import { BROADCAST_LIMITS } from './camera/broadcast'
+import { projectNdc } from './camera/project'
+import { nearBoardsPoint } from './camera/nearBoards'
 
 /** A non-frame stream event on the absolute clock, positions in world feet. */
 export interface VTEvent {
@@ -521,32 +524,136 @@ export function vt8Changes(inp: VTInput): VTResult {
 }
 
 /* ── VT9 framing ─────────────────────────────────────────────────────────── */
+/**
+ * VT9 framing (W1; strict since W3 S7). On live broadcast frames:
+ *  - the drawn puck inside the safe area (5% in from every screen edge) on ≥ 99%;
+ *  - the carrier in the middle third on ≥ 90% of carried frames;
+ *  - the pan never accelerates past the camera's limit (BROADCAST_LIMITS, +25%
+ *    for the frame-timing noise of a finite difference): 0 samples over;
+ *  - no cut in live play (a cut the renderer declares, or the look point
+ *    jumping > 8 ft in one frame): 0;
+ *  - board play is visible: with the puck within 7 ft of the near boards, the
+ *    boards at the puck are in the frame and the near dasher is softened, ≥ 95%;
+ *  - replays: the puck on screen on ≥ 95% of replay frames.
+ * The acceleration, cut and board rules need the S7 probe fields (look point,
+ * nearCut); older probes skip them.
+ */
+export const VT9_RULE = {
+  safe: 0.05,
+  puckSafe: 0.99,
+  carrierMid: 0.9,
+  panAmax: BROADCAST_LIMITS.pan.amax * 1.25,
+  tiltAmax: BROADCAST_LIMITS.tilt.amax * 1.25,
+  cutFt: 8,
+  nearBoardsFt: 7,
+  nearVisible: 0.95,
+  replayOn: 0.95,
+} as const
+
 export function vt9Framing(inp: VTInput): VTResult {
+  const R = VT9_RULE
+  const half = inp.geometry.rinkHalfW
   let n = 0
-  let puckOn = 0
+  let puckSafe = 0
   let carried = 0
   let centred = 0
-  // a fight is a declared window (fightChoreo: the close shot, then the walk to the box): the dead puck may lie out of frame
-  const fights = inp.events.filter((e) => e.type === 'fight' && e.fightBox !== undefined)
-  const inFight = (t: number): boolean => fights.some((e) => t >= e.absT + 0.5 && t <= e.fightBox! + 5)
+  let nearN = 0
+  let nearOk = 0
+  let replayN = 0
+  let replayOn = 0
+  let cuts = 0
+  const ev: string[] = []
+  // live broadcast runs (for the acceleration and the cuts)
+  const runs: ProbeFrame[][] = []
+  let run: ProbeFrame[] = []
+  const endRun = (): void => {
+    if (run.length) runs.push(run)
+    run = []
+  }
   for (const f of inp.frames) {
-    if (!isLive(f) || inReplay(f) || f.cam.preset !== 'broadcast' || f.goalSeq !== null || inFight(f.clock)) continue
+    if (inReplay(f) && f.playing) {
+      replayN++
+      if (f.puck.onScreen) replayOn++
+    }
+    if (!isLive(f) || inReplay(f) || f.cam.preset !== 'broadcast' || f.goalSeq !== null || f.dead) {
+      endRun()
+      continue
+    }
     n++
-    if (f.puck.onScreen) puckOn++
+    const mx = f.w * R.safe
+    const my = f.h * R.safe
+    if (f.puck.onScreen && f.puck.sx >= mx && f.puck.sx <= f.w - mx && f.puck.sy >= my && f.puck.sy <= f.h - my) puckSafe++
+    else if (ev.length < 4) ev.push(`${clk(f.clock)} puck outside the safe area at (${f1(f.puck.x)}, ${f1(f.puck.z)}) → screen (${Math.round(f.puck.sx)}, ${Math.round(f.puck.sy)}) of ${f.w}×${f.h}`)
     const c = f.carrier ? f.rigs.find((r) => r.id === f.carrier && r.visible) : undefined
     if (c) {
       carried++
       if (c.onScreen && c.sx >= f.w / 3 && c.sx <= (2 * f.w) / 3) centred++
     }
+    const cam = f.cam
+    const nb = cam.lx !== undefined && cam.lz !== undefined ? nearBoardsPoint(f.puck.x, f.puck.z, inp.geometry.rinkHalfL, half) : null
+    if (nb && nb.d <= R.nearBoardsFt) {
+      nearN++
+      const pose = { px: cam.x, py: cam.y, pz: cam.z, lx: cam.lx!, ly: cam.ly ?? 0, lz: cam.lz!, fov: cam.fov }
+      const b = projectNdc(pose, f.w / f.h, nb.x, 0.3, nb.z)
+      if (b.front && Math.abs(b.x) <= 1 && Math.abs(b.y) <= 1 && (cam.nearCut ?? 0) >= 0.5) nearOk++
+      else if (ev.length < 8) ev.push(`${clk(f.clock)} board play at (${f1(f.puck.x)}, ${f1(f.puck.z)}): boards ${b.front && Math.abs(b.y) <= 1 ? 'in frame' : 'cropped'}, near boards softened ${f2(cam.nearCut ?? 0)}`)
+    }
+    if (run.length) {
+      const p = run[run.length - 1]!
+      const jumped = cam.lx !== undefined && p.cam.lx !== undefined && Math.hypot(cam.lx - p.cam.lx, (cam.lz ?? 0) - (p.cam.lz ?? 0)) > R.cutFt
+      const seek = Math.abs(f.clock - p.clock) > SEEK_JUMP_S
+      if (seek) endRun()
+      else if (cam.cut || jumped) {
+        cuts++
+        if (ev.length < 8) ev.push(`${clk(f.clock)} camera cut in live play`)
+        endRun()
+      }
+    }
+    run.push(f)
   }
-  const pOn = n ? puckOn / n : 0
+  endRun()
+  // acceleration of the look point in game time, over ≥ 0.1 s windows
+  let panMax = 0
+  let tiltMax = 0
+  let over = 0
+  let accN = 0
+  for (const r of runs) {
+    if (r[0]!.cam.lx === undefined) continue
+    const vs: Array<{ t: number; vx: number; vz: number }> = []
+    let i = 0
+    while (i < r.length) {
+      let j = i + 1
+      while (j < r.length && r[j]!.clock - r[i]!.clock < 0.1) j++
+      if (j >= r.length) break
+      const dtc = r[j]!.clock - r[i]!.clock
+      vs.push({ t: (r[i]!.clock + r[j]!.clock) / 2, vx: (r[j]!.cam.lx! - r[i]!.cam.lx!) / dtc, vz: (r[j]!.cam.lz! - r[i]!.cam.lz!) / dtc })
+      i = j
+    }
+    for (let k = 1; k < vs.length; k++) {
+      const dtv = vs[k]!.t - vs[k - 1]!.t
+      if (dtv <= 0) continue
+      const ax = Math.abs(vs[k]!.vx - vs[k - 1]!.vx) / dtv
+      const az = Math.abs(vs[k]!.vz - vs[k - 1]!.vz) / dtv
+      accN++
+      panMax = Math.max(panMax, ax)
+      tiltMax = Math.max(tiltMax, az)
+      if (ax > R.panAmax || az > R.tiltAmax) {
+        over++
+        if (ev.length < 8) ev.push(`${clk(vs[k]!.t)} pan ${f1(ax)} / tilt ${f1(az)} ft/s² (limit ${f1(R.panAmax)} / ${f1(R.tiltAmax)})`)
+      }
+    }
+  }
+  const pSafe = n ? puckSafe / n : 0
   const cMid = carried ? centred / carried : 1
+  const nVis = nearN ? nearOk / nearN : 1
+  const rOn = replayN ? replayOn / replayN : 1
+  const ok = pSafe >= R.puckSafe && cMid >= R.carrierMid && over === 0 && cuts === 0 && nVis >= R.nearVisible && rOn >= R.replayOn
   return {
     id: 'VT9', name: 'Framing (broadcast camera)',
-    status: n === 0 ? 'n/a' : pOn >= 0.99 && cMid >= 0.9 ? 'green' : 'red',
-    rule: 'puck on screen ≥ 99% of live broadcast frames; carrier in the middle third ≥ 90% of carried frames',
-    value: `puck on screen ${(pOn * 100).toFixed(1)}%; carrier in the middle third ${(cMid * 100).toFixed(1)}% (${carried} carried frames)`,
-    evidence: [],
+    status: n === 0 ? 'n/a' : ok ? 'green' : 'red',
+    rule: `live broadcast frames: puck inside the safe area (${R.safe * 100}% margins) ≥ ${R.puckSafe * 100}%; carrier in the middle third ≥ ${R.carrierMid * 100}%; pan/tilt acceleration ≤ ${f1(R.panAmax)}/${f1(R.tiltAmax)} ft/s² (0 over); no cut in live play; board play (puck ≤ ${R.nearBoardsFt} ft from the near boards) framed with the boards in and softened ≥ ${R.nearVisible * 100}%; replays: puck on screen ≥ ${R.replayOn * 100}%`,
+    value: `puck in the safe area ${(pSafe * 100).toFixed(1)}%; carrier in the middle third ${(cMid * 100).toFixed(1)}% (${carried} carried frames); max pan ${f1(panMax)} / tilt ${f1(tiltMax)} ft/s², ${over} of ${accN} over; ${cuts} live cuts; board play visible ${(nVis * 100).toFixed(1)}% (${nearN} frames); replay puck on screen ${(rOn * 100).toFixed(1)}% (${replayN} frames)`,
+    evidence: ev,
   }
 }
 

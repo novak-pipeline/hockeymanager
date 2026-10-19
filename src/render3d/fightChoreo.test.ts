@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { FightBeat, GameStream } from '@domain'
 import { CLIPS } from './animCatalog'
-import { FightStager, extractFights, fightAt, fightFraming, fightProps, fightShots, linesmenSpots, loopAt, type StagedFight } from './fightChoreo'
+import { FightStager, extractFights, fightAt, fightProps, fightShots, linesmenSpots, loopAt, type StagedFight } from './fightChoreo'
 
 const beats: FightBeat[] = [
   { kind: 'drop', at: 0 },
@@ -22,21 +22,13 @@ const fight: StagedFight = {
 }
 
 describe('fight choreography', () => {
-  it('reads each man\'s spot at the drop from the first frame of the bout (gear lands there, the camera squares to it)', () => {
+  it('reads each man\'s spot at the drop from the first frame of the bout (the gear lands there)', () => {
     const ev = { type: 'fight', t: 100, period: 1, home: 'h', away: 'a', pos: { x: 0.2, y: 0 }, beats, separateAt: 9.25, boxAt: 11.45, durationS: 16.45, ending: 'knockdown', winner: 'h', down: 'a', thrown: { home: 2, away: 1 }, landed: { home: 2, away: 0 }, injured: null, cause: 'boilover' }
     const fr = { type: 'frame', t: 100, period: 1, home: [{ player: 'h', pos: { x: 0.1, y: 0.2 } }], away: [{ player: 'a', pos: { x: 0.3, y: -0.2 } }], homeGoalie: { player: 'g1', pos: { x: -0.9, y: 0 } }, awayGoalie: { player: 'g2', pos: { x: 0.9, y: 0 } }, puck: { x: 0, y: 0 }, puckCarrier: null }
     const fo = { type: 'faceoff', t: 100, playT: 130, period: 1, zone: 'neutral', winner: 'h', pos: { x: 0.2, y: 0 } }
     const [f] = extractFights([ev, fr, fo] as unknown as GameStream)
     expect(f!.dropAt.home.x).not.toBeCloseTo(f!.dropAt.away.x, 1)
     expect(f!.clearAt).toBe(130)
-    // the camera sits off the pair's axis (side-on), on the main camera's side
-    const c = fightFraming(f!, f!.absT + 3, f!.dropAt.home, f!.dropAt.away)!
-    const ax = f!.dropAt.home.x - f!.dropAt.away.x
-    const az = f!.dropAt.home.z - f!.dropAt.away.z
-    const vx = c.px - c.lx
-    const vz = c.pz - c.lz
-    expect(Math.abs(ax * vx + az * vz) / (Math.hypot(ax, az) * Math.hypot(vx, vz))).toBeLessThan(0.5)
-    expect(vz).toBeLessThan(0)
   })
 
   it('every clip it plays is in the catalogue', () => {
@@ -82,13 +74,7 @@ describe('fight choreography', () => {
     expect(linesmenSpots(fight, 30, h, a)).toBeNull()
   })
 
-  it('the camera cuts in for the bout only; gear lies on the ice from the drop to the faceoff', () => {
-    const h = { x: 18.7, z: 0 }
-    const a = { x: 21.3, z: 0 }
-    expect(fightFraming(fight, 100.2, h, a)).toBeNull()
-    const c = fightFraming(fight, 104, h, a)!
-    expect(Math.hypot(c.px - c.lx, c.pz - c.lz)).toBeLessThan(35)
-    expect(fightFraming(fight, 112, h, a)).toBeNull()
+  it('gear lies on the ice from the drop to the faceoff', () => {
     const props = fightProps(fight)
     expect(props.filter((p) => p.kind === 'glove')).toHaveLength(4)
     expect(props.filter((p) => p.kind === 'stick')).toHaveLength(2)

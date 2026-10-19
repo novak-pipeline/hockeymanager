@@ -3,7 +3,8 @@
  * carries the whole sequence as beats, and the frames already put both men
  * at the spot (circling, then locked together, the others backed off to a
  * ring). This module turns the beats into clips on the two fighters, places
- * the two linesmen, the dropped gloves and sticks, and frames the close shot.
+ * the two linesmen and the dropped gloves and sticks (the close-up is a W3 S7
+ * director cut the renderer asks for: camera/cuts.ts requestCut).
  * It reads only the stream; nothing here decides an outcome.
  *
  * Clips (scripts/blender/clips.py, upper body over the skating legs):
@@ -143,9 +144,8 @@ export interface OfficialSpot {
 }
 
 /**
- * The side the camera looks from: perpendicular to the fighters' axis (both
- * men in profile, never one hiding the other), on the main camera's side of
- * the ice (-z). Returns the unit axis (home minus away) and that perpendicular.
+ * The fighters' axis (home minus away, unit) and its perpendicular on the main
+ * camera's side of the ice (-z): the linesmen hover on the far side of it.
  */
 export function fightAxes(h: { x: number; z: number }, a: { x: number; z: number }): { ax: number; az: number; cx: number; cz: number } {
   let ax = h.x - a.x
@@ -196,26 +196,6 @@ export function linesmenSpots(f: StagedFight, tau: number, h: { x: number; z: nu
     return { x, z, face: face(x, z, m.x, m.z), separating: tau < f.boxAt }
   }
   return [on(h, 1), on(a, -1)]
-}
-
-/**
- * The close shot (broadcast camera): a cut in tight on the pair, side-on to
- * them and a touch high, as TV does for a fight. Null outside the bout (the
- * game camera takes the separation and the walk to the box).
- */
-export function fightFraming(f: StagedFight, t: number, h: { x: number; z: number }, a: { x: number; z: number }): { px: number; py: number; pz: number; lx: number; ly: number; lz: number; fov: number } | null {
-  const tau = t - f.absT
-  if (tau < 0.6 || tau > f.separateAt + 1.5) return null
-  const mx = (h.x + a.x) / 2
-  const mz = (h.z + a.z) / 2
-  const { cx, cz } = fightAxes(f.dropAt.home, f.dropAt.away)
-  // eased toward the main camera's side, so the boards and the crowd sit behind them
-  let dx = cx
-  let dz = cz - 0.45
-  const dl = Math.hypot(dx, dz) || 1
-  dx /= dl
-  dz /= dl
-  return { px: mx + dx * 25, py: 8.5, pz: mz + dz * 25, lx: mx, ly: 3.6, lz: mz, fov: 30 }
 }
 
 /** Gear on the ice: two gloves and the stick for each man, from the drop until the faceoff. */

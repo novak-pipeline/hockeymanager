@@ -102,6 +102,8 @@ export const CHECKLIST = {
   offGlass: ['Does the puck die off the glass (deader than the boards) and drop near the wall?', 'Does somebody go to where it lands?'],
   looseRace: ['Do the men race to where the puck will be, not where it is?', 'Does the closer man get it?', 'Nobody ignores a puck at his feet?'],
   dumpInRace: ['Does the dump come off the end boards believably (a hard dump dies, a rim keeps going)?', 'Does the forechecker skate to where it will come out?', 'Does the D get back to it in time?'],
+  boardCheckNear: ['Can you see the hit on the near boards (both men, the pin, the glass)?', 'Does the camera rise rather than crop the boards?', 'Does the camera ease, never jerk?'],
+  endToEndRush: ['Does the camera lead the rush up the ice (never chasing the puck off the edge)?', 'Is the puck always in frame?', 'No cut or speed change mid-play?'],
   // fights: the sequence at the stoppage (fight.ts / fightChoreo.ts)
   fightDown: ['Gloves and sticks on the ice?', 'Do they square up, grab, and trade punches you can read?', 'Does the man who goes down go down on a punch or in the clinch?', 'Linesmen step in and part them?', 'Everyone else backs off?', 'FIGHT card names both men and the result?'],
   fightDecision: ['Gloves and sticks on the ice?', 'Punches, then a clinch, then both spent?', 'Linesmen step in and part them?', 'Camera cuts in close and back out?', 'FIGHT card names both men and the result?'],

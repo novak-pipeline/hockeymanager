@@ -1130,6 +1130,8 @@ export function MatchViewer(props: {
     if (!r || dur <= 0) { _endReplay(); return }
     heldViewRef.current = viewRef.current
     renderer3dRef.current?.setBoardHold(true)
+    // W3 S7: the replay camera's angles (end-zone high, then behind the net)
+    renderer3dRef.current?.setReplay(goalAbsT)
     setReplayActive(true)
     replayActiveRef.current = true
     replayEndAtRef.current = goalAbsT + REPLAY_TAIL_S
@@ -1149,6 +1151,7 @@ export function MatchViewer(props: {
     const live = replayActiveRef.current ? heldViewRef.current : null
     heldViewRef.current = null
     renderer3dRef.current?.setBoardHold(false)
+    renderer3dRef.current?.setReplay(null)
     setReplayActive(false)
     replayActiveRef.current = false
     setGoalBanner(null)
