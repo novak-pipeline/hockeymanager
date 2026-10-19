@@ -299,6 +299,52 @@ export type TacticChangeEvent = GameEventBase & {
   at: { kind: 'stop'; index: number } | { kind: 'period'; period: number }
 }
 
+/**
+ * Additive variant (agent engine): a fight, as a timed sequence at a stoppage
+ * (src/engine/agent/fight.ts). Emitted ONCE, when the gloves drop (`t` is the
+ * stopped period clock, `playT` the drop on the playback timeline), carrying
+ * the whole plan so a renderer can choreograph it: beats are seconds after the
+ * drop. The two fighting majors follow as ordinary `penalty` events when the
+ * men reach the box (`boxAt`). Consumers that do not draw fights ignore it.
+ */
+export type FightBeatKind = 'drop' | 'square' | 'helmet' | 'grab' | 'punch' | 'clinch' | 'down' | 'tired' | 'linesmen' | 'separate' | 'escort'
+export interface FightBeat {
+  kind: FightBeatKind
+  /** Seconds after the gloves dropped. */
+  at: number
+  /** Whose beat it is (helmet: whose helmet came off; down: who went down). */
+  by?: 'home' | 'away'
+  hand?: 'R' | 'L'
+  landed?: boolean
+  heavy?: boolean
+  how?: 'punch' | 'takedown'
+}
+export type FightEnding = 'knockdown' | 'takedown' | 'tired'
+export type FightEvent = GameEventBase & {
+  type: 'fight'
+  /** The home and away combatant. */
+  home: PlayerRef
+  away: PlayerRef
+  /** Where they meet (normalised rink coords, like every pos). */
+  pos: XY
+  beats: FightBeat[]
+  /** Linesmen have them apart / they are led off / both are in the box (s after the drop). */
+  separateAt: number
+  boxAt: number
+  durationS: number
+  ending: FightEnding
+  /** Who had the better of it (null = a draw). */
+  winner: PlayerRef | null
+  /** Who went to the ice, if anybody. */
+  down: PlayerRef | null
+  thrown: { home: number; away: number }
+  landed: { home: number; away: number }
+  /** Hurt in the fight: he does not return tonight. */
+  injured: PlayerRef | null
+  /** Why it started: answering a hit (the code) or a game that boiled over. */
+  cause: 'code' | 'boilover'
+}
+
 /** One skater's position at a single tick. */
 export interface SkaterSnapshot {
   player: PlayerRef
@@ -378,6 +424,7 @@ export type GameEvent =
   | DekeEvent
   | PokeCheckEvent
   | TacticChangeEvent
+  | FightEvent
 
 export type GameEventType = GameEvent['type']
 

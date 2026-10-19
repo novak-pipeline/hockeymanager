@@ -138,6 +138,7 @@ export type ActName =
   | 'boxOut' | 'boxedOut'           // the net-front box-out (W3 S4): won it (stick free) / lost it (stick tied up)
   | 'set'                           // faceoff: set on his spot
   | 'save'                          // goalie: the save reaction
+  | 'fight'                         // a fight at the stoppage (fight.ts): from the gloves dropping until he is led off
 
 /** The floor each act is held for at least (VT12): the minimum of its row. */
 export const ACT_FLOOR: Record<ActName, number> = {
@@ -158,4 +159,5 @@ export const ACT_FLOOR: Record<ActName, number> = {
   boxedOut: ACTION_FLOOR.contact.boxOut,
   set: ACTION_FLOOR.faceoff.setStill,
   save: ACTION_FLOOR.goalie.saveReaction,
+  fight: 5,
 }

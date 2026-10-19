@@ -90,6 +90,9 @@ export const CHECKLIST = {
   systemAway: ['Can you tell how deep this team forechecks (two in / one in / sitting back)?', 'Does it look different from the other team\'s clip?'],
   // W3 S5: the carrier's score tilt
   trailingPush: ['Does the trailing team push (shoots more, takes chances)?', 'Does the carrier go at the net rather than cycle it back?', 'Does the leading team sit back and chip it out?'],
+  // fights: the sequence at the stoppage (fight.ts / fightChoreo.ts)
+  fightDown: ['Gloves and sticks on the ice?', 'Do they square up, grab, and trade punches you can read?', 'Does the man who goes down go down on a punch or in the clinch?', 'Linesmen step in and part them?', 'Everyone else backs off?', 'FIGHT card names both men and the result?'],
+  fightDecision: ['Gloves and sticks on the ice?', 'Punches, then a clinch, then both spent?', 'Linesmen step in and part them?', 'Camera cuts in close and back out?', 'FIGHT card names both men and the result?'],
 }
 
 const sha1 = (file) => createHash('sha1').update(readFileSync(file)).digest('hex')

@@ -35,13 +35,15 @@ export type ScenarioKind =
   | 'systemHome'
   | 'systemAway'
   | 'trailingPush'
+  | 'fightDown'
+  | 'fightDecision'
 
 export const SCENARIO_KINDS: readonly ScenarioKind[] = [
   'breakaway', 'twoOnOne', 'ozCycleShot', 'ppSetPlay', 'goalReplay',
   'lineChangeOnFly', 'faceoffWinPlay', 'bigHit', 'saveRebound', 'emptyNetLate',
   'dZoneCoverage', 'offsideCall', 'faceoffNeutral', 'faceoffDefensive',
   'breakoutPlay', 'forecheckTurnover', 'nzRegroup', 'systemHome', 'systemAway',
-  'trailingPush',
+  'trailingPush', 'fightDown', 'fightDecision',
 ]
 
 /** Human label + how much game time to show around the moment (lead before, tail after).
@@ -74,6 +76,9 @@ export const SCENARIO_META: Record<ScenarioKind, { label: string; lead: number; 
   systemAway:      { label: 'Their system: the forecheck',    lead: 2,  tail: 10 },
   // W3 S5 (the carrier's score tilt): down a goal or two in the last five minutes, a shot
   trailingPush:    { label: 'Trailing late: the push',        lead: 16, tail: 5 },
+  // fights (agent engine `fight` event): one where a man goes down, one that ends with both spent
+  fightDown:       { label: 'Fight: a man goes down',         lead: 3,  tail: 42 },
+  fightDecision:   { label: 'Fight: both spent, linesmen in', lead: 3,  tail: 48 },
 }
 
 export interface ScenarioHit {
@@ -245,6 +250,11 @@ export function findScenarios(
       const clean = pass && !stopBetween(t, t + 6) ? 0.3 : 0
       if (ev.zone === 'neutral' && Math.abs(ev.pos.x) > 0.05) push({ kind: 'faceoffNeutral', absT: t, period: ev.period, side, note: 'neutral-zone faceoff', quality: 1 + clean })
       if (ev.zone === 'defensive') push({ kind: 'faceoffDefensive', absT: t, period: ev.period, side, note: 'defensive-zone faceoff', quality: 1 + clean })
+    } else if (ev.type === 'fight') {
+      const side = ev.winner ? sideOf(ev.winner) : 'home'
+      const how = ev.down ? `${ev.ending}, ${ev.landed.home}-${ev.landed.away} landed` : `${ev.winner ? 'decision' : 'draw'}, ${ev.landed.home}-${ev.landed.away} landed`
+      // the whole bout must fit the clip: shorter ones rank first
+      push({ kind: ev.down ? 'fightDown' : 'fightDecision', absT: t, period: ev.period, side, note: `fight (${ev.cause}): ${how}, ${ev.boxAt.toFixed(0)} s to the box`, quality: 1 + (ev.down && ev.ending === 'knockdown' ? 0.3 : 0) - Math.max(0, ev.boxAt - 35) * 0.05 })
     } else if (ev.type === 'hit') {
       const side = sideOf(ev.by)
       const q = (ev.force ?? 0.5) + (ev.knockdown ? 1 : 0) + (ev.kind === 'openIce' ? 0.3 : 0) + (ev.targetHadPuck ? 0.2 : 0)

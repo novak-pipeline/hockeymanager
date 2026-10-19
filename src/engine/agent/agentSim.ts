@@ -39,7 +39,8 @@ import type {
   Team,
   XY
 } from '@domain'
-import type { Rng } from '@engine/shared/rng'
+import { Rng } from '@engine/shared/rng'
+import { approachSeconds, fightSpot, fighterCmds, fighterOf, planFight, ringCmd, type FightPlan } from './fight'
 import type { GameOutcome } from '@engine/shared/outcome'
 // (W3 S5: the score effect is the carrier's tilt now - carrierTilt.ts; scoreEffectMult stays the quick sim's)
 import { benchTilt } from '@engine/shared/scoreEffects'
@@ -392,6 +393,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   let aheadAtGain: Body | null = null
   const hitIntent = new Map<Body, HitIntent>()
   let codeDue: { answerer: Body; hitter: Body; side: Side } | null = null
+  // A fight at this stoppage (fight.ts): due at the whistle, then the bout holds the drop until both are led off.
+  let boutDue: { h: Body; a: Body; cause: 'code' | 'boilover'; rng: Rng } | null = null
+  let bout: { plan: FightPlan; start: number; ang: number; spot: { x: number; y: number }; h: Body; a: Body } | null = null
   let battle: { start: number; x: number; y: number; kind: 'boards' | 'netFront' | 'loosePuck'; players: Set<Body>; last: number } | null = null
   let gotAt = 0
   /**
@@ -844,8 +848,10 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     if (delayed) assessDelayed()
     // THE CODE: somebody answers for the dirty hit at this whistle.
     const answered = settleTheCode()
-    // Tired lines change at the whistle.
+    if (boutDue) startBout()
+    // Tired lines change at the whistle (after a fight: when the fighters are led off, endBout).
     for (const s of sides) {
+      if (bout) break
       // The team that iced it stays out there (NHL rule 81.1).
       if (reason === 'icing' && s === zoneFor && !answered && !relined.has(s)) continue
       const shift = now - (lastShift.get(s) ?? 0)
@@ -1872,25 +1878,17 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       const fp = ctx.fights
       if (fp && fp.next < fp.times.length && fp.times[fp.next] <= absNow && !H.shorthanded && !A.shorthanded) {
         fp.next++
-        const pick = (s: Side): Player | null => {
-          const ps = s.skaters.map((b) => b.player)
-          if (ps.length === 0) return null
-          return ps[weightedIndex(fp.rng, ps.map((p) => 1 + p.composites.penaltyProne + (p.fighting ?? 0) * 0.5))]
+        const pick = (s: Side): Body | null => {
+          const bs = s.skaters
+          if (bs.length === 0) return null
+          return bs[weightedIndex(fp.rng, bs.map((b) => 1 + b.player.composites.penaltyProne + (b.player.fighting ?? 0) * 0.5))]
         }
         const hF = pick(H)
         const aF = pick(A)
         if (hF && aF) {
-          for (const [s, p] of [[H, hF], [A, aF]] as const) {
-            s.sim.sidelined.push({ expiresAt: absNow + FIGHT_MAJOR_SECONDS, playerId: p.id })
-            stat(ctx, p.id).penaltyMinutes += 5
-            ev({ t: T(), period, type: 'penalty', player: p.id, infraction: 'fighting', minutes: 5 })
-          }
-          if (tm) tm.fights++
+          // The whistle, then the fight plays out at the stoppage (startBout / endBout).
+          boutDue = { h: hF, a: aF, cause: 'boilover', rng: fp.rng }
           stopPlay(nearestDot({ x: puck.x, y: puck.y }), 'neutral', null, 'penalty', 'fight')
-          for (const s of sides) {
-            creditShift(s, now)
-            deploySide(s, true)
-          }
         }
       }
       const ij = ctx.injury
@@ -1938,7 +1936,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         }
       }
     } else if (pending) {
-      faceoffTargets()
+      if (bout) stepBout()
+      else faceoffTargets()
     } else {
       // Men on their way to the bench are the change's, not the shape's.
       for (const s of sides) {
@@ -2456,7 +2455,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       }
     }
 
-    if (pending && !celebration) conductFaceoff()
+    if (pending && !celebration && !bout) conductFaceoff()
     if (tm) {
       if (!pending && !celebration && deadAt === null) tm.liveSeconds += FRAME_DT
     }
@@ -2725,17 +2724,14 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     codeDue = null
     if (!c) return false
     const hs = sideOf(c.hitter)
-    if (!hs || !c.side.skaters.includes(c.answerer)) return false
+    if (!hs || !c.side.skaters.includes(c.answerer) || boutDue || bout) return false
     const absNow = absBase + clock
     // Gloves off, or just a shove after the whistle (roughing).
     const willing = (c.hitter.player.fighting ?? 50) + r01(c.hitter.player.ratings.mental.aggression) * 40
     if (rng.chance(clamp(willing / 120, 0.2, 0.85))) {
-      for (const [s, b] of [[c.side, c.answerer], [hs, c.hitter]] as const) {
-        s.sim.sidelined.push({ expiresAt: absNow + FIGHT_MAJOR_SECONDS, playerId: b.player.id })
-        stat(ctx, b.player.id).penaltyMinutes += 5
-        ev({ t: T(), period, type: 'penalty', player: b.player.id, infraction: 'fighting', minutes: 5 })
-      }
-      if (tm) tm.fights++
+      // (its own rng for the bout, so the fight's length is the fight's business)
+      const brng = new Rng(rng.int(0x7fffffff))
+      boutDue = c.side === H ? { h: c.answerer, a: c.hitter, cause: 'code', rng: brng } : { h: c.hitter, a: c.answerer, cause: 'code', rng: brng }
     } else {
       c.side.sim.penalties.push({ expiresAt: absNow + PENALTY_SECONDS, playerId: c.answerer.player.id })
       stat(ctx, c.answerer.player.id).penaltyMinutes += 2
@@ -2744,6 +2740,54 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     }
     if (tm) tm.codeAnswers++
     return true
+  }
+
+  // --- A fight at the stoppage (fight.ts): the whole bout is planned at the drop. ---
+  function startBout(): void {
+    const d = boutDue!
+    boutDue = null
+    const spot = fightSpot(d.h, d.a, HALF_X, HALF_Y)
+    const gap = Math.max(Math.hypot(d.h.x - spot.x, d.h.y - spot.y), Math.hypot(d.a.x - spot.x, d.a.y - spot.y))
+    const plan = planFight(fighterOf(d.h.player, d.h.energy), fighterOf(d.a.player, d.a.energy), d.rng, approachSeconds(gap))
+    bout = { plan, start: now, ang: Math.atan2(d.h.y - d.a.y, d.h.x - d.a.x), spot, h: d.h, a: d.a }
+    for (const b of [d.h, d.a]) setAct(b, 'fight', plan.boxAt)
+    const ref = (s: 'home' | 'away' | null) => (s === 'home' ? d.h.player.id : s === 'away' ? d.a.player.id : null)
+    ev({
+      t: T(), period, type: 'fight', home: d.h.player.id, away: d.a.player.id, pos: { x: spot.x / HALF_X, y: spot.y / HALF_Y },
+      beats: plan.beats, separateAt: plan.separateAt, boxAt: plan.boxAt, durationS: plan.durationS, ending: plan.ending,
+      winner: ref(plan.winner), down: ref(plan.down), thrown: plan.thrown, landed: plan.landed, injured: ref(plan.injured), cause: d.cause
+    })
+  }
+  function stepBout(): void {
+    const b = bout!
+    const tau = now - b.start
+    if (tau >= b.plan.boxAt) return endBout()
+    const fc = fighterCmds(b.plan, tau, b.ang, b.spot, b.h, b.a)
+    cmds.set(b.h, fc.home)
+    cmds.set(b.a, fc.away)
+    for (const s of sides) s.skaters.forEach((x, i) => {
+      if (x !== b.h && x !== b.a) cmds.set(x, ringCmd(b.spot, x, (i % 2 === 0) === (s === H) ? 1 : -1, HALF_X, HALF_Y))
+    })
+  }
+  function endBout(): void {
+    const b = bout!
+    bout = null
+    const absNow = absBase + clock
+    for (const [s, x, side] of [[H, b.h, 'home'], [A, b.a, 'away']] as const) {
+      const hurt = b.plan.injured === side
+      s.sim.sidelined.push({ expiresAt: hurt ? Number.MAX_SAFE_INTEGER : absNow + FIGHT_MAJOR_SECONDS, playerId: x.player.id })
+      stat(ctx, x.player.id).penaltyMinutes += 5
+      if (hurt) stat(ctx, x.player.id).leftGame = true
+      ev({ t: T(), period, type: 'penalty', player: x.player.id, infraction: 'fighting', minutes: 5 })
+      acts.delete(x)
+    }
+    if (tm) tm.fights++
+    for (const s of sides) {
+      creditShift(s, now)
+      deploySide(s, true)
+    }
+    // the draw waits while they are led off
+    if (pending) pending.since = now + 3
   }
 
   // --- Battles: a contested puck both teams are fighting for. ---------------

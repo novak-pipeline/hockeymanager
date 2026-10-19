@@ -74,6 +74,7 @@ interface OwnerRoleTex {
 }
 import { ActionLayer } from './animLayer'
 import { Choreographer, extractActionCues, FACEOFF_LEAD_S, type LocoMode } from './choreo'
+import { FightStager, extractFights, fightAt, fightFraming, fightProps, linesmenSpots, type FightProp, type StagedFight } from './fightChoreo'
 import { kitFor, type Kit } from './palette'
 import { ATLAS_GRID, buildAtlasCanvas, paintJerseySlot, paintOfficialSlot } from './textures'
 import { ICE_DOTS, RINK_HALF_W } from './iceCanvas'
@@ -358,6 +359,13 @@ export class Rink3dRenderer implements MatchRenderer {
   private faceoffs: Array<{ t: number; set: number; x: number; z: number }> = []
   /** The linesman: a stick-less skater rig in stripes who drops the puck (null without authored athletes). */
   private linesman: PlayerPose | null = null
+  /** The second linesman: he only comes out to break up a fight (fightChoreo.ts). */
+  private linesman2: PlayerPose | null = null
+  /** Fights (agent engine `fight` events): clips on the fighters, the linesmen, gear on the ice, the close shot. */
+  private fightStager: FightStager | null = null
+  private fights: StagedFight[] = []
+  private fightGear: Array<{ prop: FightProp; mesh: THREE.Mesh }> = []
+  private fightCamOn = false
   private linesmanDropped = -1
   /** The faceoff that ends the stoppage in progress at time t (null in live play). */
   /** Penalties (absolute t, offender) — a man sent off walks to the box. */
@@ -976,6 +984,12 @@ export class Rink3dRenderer implements MatchRenderer {
       l.rig.bones.stick.scale.setScalar(1e-4)
       l.rig.bones.stick_blade.scale.setScalar(1e-4)
       this.linesman = l
+      const l2 = mk('away', false, OFFICIAL_SLOT + 1, 0, -LINESMAN_BOARDS_Z)
+      l2.mode = 'play'
+      l2.rig.bones.stick.scale.setScalar(1e-4)
+      l2.rig.bones.stick_blade.scale.setScalar(1e-4)
+      l2.rig.visible = false
+      this.linesman2 = l2
       this.paintOfficial()
     }
 
@@ -993,6 +1007,12 @@ export class Rink3dRenderer implements MatchRenderer {
       )
       for (const p of all()) p.overlay = this.choreo.overlayFor(p)
       if (this.linesman) this.linesman.overlay = this.choreo.overlayFor(this.linesman)
+      if (this.linesman2) this.linesman2.overlay = this.choreo.overlayFor(this.linesman2)
+      const fightClips = ownClips ? ownClips.skater : (blenderClips.skater ?? this.assets.skater.clips)
+      this.fightStager = new FightStager(
+        (id) => all().find((p) => p.playerId === id && p.rig.visible) ?? null,
+        (clip) => fightClips?.get(clip)?.duration ?? 0.6,
+      )
     }
 
     this.batch = new AthleteBatch(rigs, material)
@@ -1024,8 +1044,11 @@ export class Rink3dRenderer implements MatchRenderer {
 
   /** The linesman's stripes (his own atlas cell; repainted with the kits). */
   private paintOfficial(): void {
-    const l = this.linesman
-    if (!l) return
+    if (this.linesman2) this.paintOfficialPose(this.linesman2)
+    if (this.linesman) this.paintOfficialPose(this.linesman)
+  }
+
+  private paintOfficialPose(l: PlayerPose): void {
     if (this.ownerPainter && this.ownerAtlas && this.owner) {
       this.ownerPainter.paintOfficial(this.ownerAtlas, l.rig.slot, OFFICIAL_KIT)
       this.ownerAtlasUp?.mark(slotRect(this.ownerAtlas, l.rig.slot))
@@ -1054,6 +1077,8 @@ export class Rink3dRenderer implements MatchRenderer {
       l.layer.clear()
       this.linesmanDropped = -1
     }
+    // a fight: both linesmen work it (updateFight places them)
+    if (this.fightOfficials(absT)) return
     // (arms at rest whenever nothing else is playing — never on top of the drop)
     if (l.layer && l.layer.playing.length === 0) l.layer.play('official_arms')
     // the faceoff he is working: the next drop within its set window, or the one just dropped
@@ -1084,6 +1109,115 @@ export class Rink3dRenderer implements MatchRenderer {
     }
     this.updatePose(l, tx, tz, dt, simDt, puckWx, puckWz, 24, face)
     this.skateHeading(l, dt, simDt)
+  }
+
+  // ── Fights (fightChoreo.ts) ───────────────────────────────────────────────
+
+  private setFights(fights: StagedFight[]): void {
+    this.fights = fights
+    this.fightStager?.setFights(fights)
+    for (const g of this.fightGear) {
+      this.scene.remove(g.mesh)
+      g.mesh.geometry.dispose()
+    }
+    this.fightGear = []
+    // the gear the two men drop: gloves in the team colour, the stick dark
+    const gloveGeo = new THREE.BoxGeometry(0.42, 0.28, 0.62)
+    const stickGeo = new THREE.BoxGeometry(0.1, 0.08, 5.2)
+    for (const f of fights) {
+      for (const prop of fightProps(f)) {
+        const kit = prop.side === 'home' ? this.homeKit : this.awayKit
+        const mat = new THREE.MeshStandardMaterial({ color: prop.kind === 'glove' ? kit.gloves : 0x1b1b1b, roughness: 0.7 })
+        const mesh = new THREE.Mesh(prop.kind === 'glove' ? gloveGeo.clone() : stickGeo.clone(), mat)
+        mesh.position.set(prop.x, prop.kind === 'glove' ? 0.14 : 0.05, prop.z)
+        mesh.rotation.y = prop.yaw
+        mesh.castShadow = true
+        mesh.visible = false
+        this.scene.add(mesh)
+        this.fightGear.push({ prop, mesh })
+      }
+    }
+    gloveGeo.dispose()
+    stickGeo.dispose()
+  }
+
+  /** The fight on at `t`, with both men drawn on the ice (null otherwise). */
+  private fightPair(t: number): { f: StagedFight; h: PlayerPose; a: PlayerPose } | null {
+    const f = fightAt(this.fights, t)
+    if (!f) return null
+    const h = this.homePoses.find((p) => p.playerId === f.home && p.rig.visible)
+    const a = this.awayPoses.find((p) => p.playerId === f.away && p.rig.visible)
+    return h && a ? { f, h, a } : null
+  }
+
+  private fightTarget(): ReturnType<typeof broadcastFraming> | null {
+    const fp = this.fightPair(this.clockPos)
+    if (!fp) return null
+    return fightFraming(fp.f, this.clockPos, { x: fp.h.worldX.pos, z: fp.h.worldZ.pos }, { x: fp.a.worldX.pos, z: fp.a.worldZ.pos })
+  }
+
+  /** Is a fight on? Then the linesmen are placed by updateFight (and the faceoff schedule waits). */
+  private fightOfficials(t: number): boolean {
+    return this.fightPair(t) !== null
+  }
+
+  /**
+   * Per frame during a fight: no sticks in the fighters' hands (theirs lie on
+   * the ice with the gloves), both linesmen hover, step in, part them and walk
+   * them off, and the gear is on the ice until the faceoff.
+   */
+  private updateFight(absT: number, dt: number, simDt: number, puckWx: number, puckWz: number): void {
+    for (const g of this.fightGear) g.mesh.visible = absT >= g.prop.from && absT < g.prop.until
+    const fp = this.fightPair(absT)
+    const fighting = new Set<PlayerPose>()
+    if (fp && absT - fp.f.absT >= 0.1 && absT - fp.f.absT < fp.f.boxAt + 6) {
+      fighting.add(fp.h)
+      fighting.add(fp.a)
+    }
+    for (const p of [...this.homePoses, ...this.awayPoses]) {
+      const s = fighting.has(p) ? 1e-4 : 1
+      if (p.rig.bones.stick.scale.x !== s) {
+        p.rig.bones.stick.scale.setScalar(s)
+        p.rig.bones.stick_blade.scale.setScalar(s)
+      }
+    }
+    const l1 = this.linesman
+    const l2 = this.linesman2
+    if (!fp || !l1) {
+      // the second linesman goes back off the ice (he skates to the far boards, then he is gone)
+      if (l2 && l2.rig.visible) {
+        const bz = -(RINK_HALF_W - 1.5)
+        if (dt === 0 || Math.abs(l2.worldZ.pos - bz) < 2) l2.rig.visible = false
+        else {
+          if (l2.layer && l2.layer.playing.length === 0) l2.layer.play('official_arms')
+          this.updatePose(l2, l2.worldX.pos, bz, dt, simDt, puckWx, puckWz, 18)
+          this.skateHeading(l2, dt, simDt)
+        }
+      }
+      return
+    }
+    const spots = linesmenSpots(fp.f, absT - fp.f.absT, { x: fp.h.worldX.pos, z: fp.h.worldZ.pos }, { x: fp.a.worldX.pos, z: fp.a.worldZ.pos })
+    if (!spots) return
+    const lines = l2 ? [l1, l2] : [l1]
+    lines.forEach((l, i) => {
+      const sp = spots[i]!
+      if (!l.rig.visible || dt === 0) {
+        // the second linesman skates in from the far boards
+        if (!l.rig.visible) {
+          l.worldX = snapSpring(sp.x)
+          l.worldZ = snapSpring(-LINESMAN_BOARDS_Z)
+        }
+        l.rig.visible = true
+      }
+      if (l.layer) {
+        const pl = l.layer.playing
+        if (sp.separating && !pl.includes('official_separate')) l.layer.play('official_separate')
+        else if (!sp.separating && pl.includes('official_separate')) l.layer.stop('official_separate')
+        if (l.layer.playing.length === 0) l.layer.play('official_arms')
+      }
+      this.updatePose(l, sp.x, sp.z, dt, simDt, puckWx, puckWz, 24, sp.face)
+      this.skateHeading(l, dt, simDt)
+    })
   }
 
   private paintSlot(p: PlayerPose): void {
@@ -1141,6 +1275,7 @@ export class Rink3dRenderer implements MatchRenderer {
     this.sinceGoal = Infinity
 
     this.choreo?.reset()
+    this.fightStager?.reset()
     this.choreoClock = 0
     // Reset per-slot state so jerseys/labels repaint for the new game
     for (const p of this.allPoses()) {
@@ -1207,6 +1342,7 @@ export class Rink3dRenderer implements MatchRenderer {
       p.shotTimer = -1
     }
     this.choreo?.reset()
+    this.fightStager?.reset()
     this.choreoClock = this.clockPos
 
     this.renderAt(this.clockPos)
@@ -1233,6 +1369,8 @@ export class Rink3dRenderer implements MatchRenderer {
     }
     const gs = this.goalSeq && this.camPreset === 'broadcast' ? this.goalSeqTarget() : null
     if (gs) return gs
+    const ft = this.camPreset === 'broadcast' ? this.fightTarget() : null
+    if (ft) return ft
     if (this.camPreset === 'broadcast') return broadcastFraming(this.playFocusX, this.playFocusZ, this.leadX, this.camera.aspect)
     const t = cameraTargetFor(this.camPreset, this.playFocusX, {
       endzoneActiveSide: this.endzoneActiveSide,
@@ -1362,6 +1500,7 @@ export class Rink3dRenderer implements MatchRenderer {
       .map((c) => ({ t: c.absT, set: c.setT ?? c.absT - FACEOFF_LEAD_S, x: normXtoWorld(c.nx), z: normYtoWorld(c.ny) }))
     this.linesmanDropped = -1
     this.choreo?.setCues(cues)
+    this.setFights(extractFights(stream))
   }
 
   /**
@@ -1685,7 +1824,10 @@ export class Rink3dRenderer implements MatchRenderer {
     // is a frozen frame (crowd keeps breathing via wallTime).
     const simDt = this.playing ? dt * Math.min(this.speed, 4) : 0
     if (this.choreo) {
-      if (this.clockPos > this.choreoClock) this.choreo.tick(this.choreoClock, this.clockPos)
+      if (this.clockPos > this.choreoClock) {
+        this.choreo.tick(this.choreoClock, this.clockPos)
+        this.fightStager?.tick(this.choreoClock, this.clockPos)
+      }
       this.choreoClock = this.clockPos
     }
     this.renderAt(this.clockPos, dt, simDt)
@@ -1823,6 +1965,7 @@ export class Rink3dRenderer implements MatchRenderer {
     }
 
     this.updateLinesman(absT, dt, simDt, puckWx, puckWz)
+    this.updateFight(absT, dt, simDt, puckWx, puckWz)
 
     // Sticks on the ice: skating poses float the blade (up to ~0.6 ft on the
     // owner clips), which puts a carried puck visibly off the blade
@@ -2103,7 +2246,7 @@ export class Rink3dRenderer implements MatchRenderer {
 
   private syncBlobs(): void {
     const m = new THREE.Matrix4()
-    const poses = this.linesman ? [...this.allPoses(), this.linesman] : this.allPoses()
+    const poses = [...this.allPoses(), ...(this.linesman ? [this.linesman] : []), ...(this.linesman2 ? [this.linesman2] : [])]
     poses.forEach((p, i) => {
       if (!p.rig.visible) {
         m.makeScale(0, 0, 0)
@@ -2633,6 +2776,12 @@ export class Rink3dRenderer implements MatchRenderer {
     // a director's shot ran its course: CUT back to the game camera (never fly)
     if (this.shot && performance.now() >= this.shot.until) {
       this.shot = null
+      this.snapCameraSprings()
+    }
+    // a fight: CUT in tight on the pair, and cut back out when it is over
+    const fightCam = !this.shot && this.camPreset === 'broadcast' && this.fightTarget() !== null
+    if (fightCam !== this.fightCamOn) {
+      this.fightCamOn = fightCam
       this.snapCameraSprings()
     }
     // A calm TV follow. Every layer only SMOOTHS; nothing here can add wobble.

@@ -1980,6 +1980,7 @@ function probeEventsOf(stream: WatchedGame['stream']): VTEvent[] {
       case 'pokeCheck': e.actor = ev.by; e.success = ev.success; break
       case 'blockedShot': e.actor = ev.blocker; break
       case 'battle': if (ev.winner) e.actor = ev.winner; break
+      case 'fight': { e.actor = ev.home; e.target = ev.away; e.x = ev.pos.x * 100; e.z = ev.pos.y * 42.5; const g = ev.beats.find((b) => b.kind === 'grab'); if (g) e.fightGrab = absT + g.at; e.fightSep = absT + ev.separateAt; e.fightBox = absT + ev.boxAt; break }
     }
     out.push(e)
   }

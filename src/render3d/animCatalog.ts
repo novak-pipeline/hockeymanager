@@ -97,6 +97,15 @@ export const CLIPS: Record<string, ClipMeta> = {
   // the linesman (a stick-less skater rig): arms at rest over the skating legs, and the drop
   official_arms: { mask: 'upper', hands: 'clip', loop: true, fadeIn: 0.3, fadeOut: 0.3 },
   official_drop: { mask: 'full', hands: 'clip', contact: f(8), fadeIn: 0.15, fadeOut: 0.3 },
+  official_separate: { mask: 'upper', hands: 'clip', loop: true, fadeIn: 0.25, fadeOut: 0.35 },
+  // ── fights (fightChoreo.ts): upper body over the skating legs, fists, no stick ──
+  fight_drop: { mask: 'upper', hands: 'clip', fadeIn: 0.1, fadeOut: 0.25 },
+  fight_stance: { mask: 'upper', hands: 'clip', loop: true, fadeIn: 0.25, fadeOut: 0.25 },
+  fight_grab: { mask: 'upper', hands: 'clip', loop: true, fadeIn: 0.2, fadeOut: 0.25 },
+  fight_punch_R: { mask: 'upper', hands: 'clip', contact: f(8), fadeIn: 0.08, fadeOut: 0.2 },
+  fight_punch_L: { mask: 'upper', hands: 'clip', contact: f(7), fadeIn: 0.08, fadeOut: 0.2 },
+  fight_hit_react: { mask: 'upper', hands: 'clip', contact: 0, fadeIn: 0.04, fadeOut: 0.25 },
+  fight_clinch: { mask: 'upper', hands: 'clip', loop: true, fadeIn: 0.3, fadeOut: 0.3 },
   // ── hitting ──
   check: { mask: 'full', hands: 'stick', contact: f(8), fadeIn: 0.1, fadeOut: 0.2 },
   check_boards: { mask: 'full', hands: 'clip', contact: f(8), fadeIn: 0.1, fadeOut: 0.3 },
