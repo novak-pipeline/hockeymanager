@@ -39,7 +39,7 @@ import type {
   Team,
   XY
 } from '@domain'
-import { Rng } from '@engine/shared/rng'
+import { Rng, deriveSeed } from '@engine/shared/rng'
 import { approachSeconds, fightSpot, fighterCmds, fighterOf, planFight, ringCmd, type FightPlan } from './fight'
 import type { GameOutcome } from '@engine/shared/outcome'
 // (W3 S5: the score effect is the carrier's tilt now - carrierTilt.ts; scoreEffectMult stays the quick sim's)
@@ -2923,8 +2923,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     // Gloves off, or just a shove after the whistle (roughing).
     const willing = (c.hitter.player.fighting ?? 50) + r01(c.hitter.player.ratings.mental.aggression) * 40
     if (rng.chance(clamp(willing / 120, 0.2, 0.85))) {
-      // (its own rng for the bout, so the fight's length is the fight's business)
-      const brng = new Rng(rng.int(0x7fffffff))
+      // (its own rng for the bout, hashed from the moment and the two men: the game's main stream is untouched)
+      const idHash = (id: string): number => { let h = 2166136261; for (let k = 0; k < id.length; k++) h = Math.imul(h ^ id.charCodeAt(k), 16777619); return h >>> 0 }
+      const brng = new Rng(deriveSeed(Math.round(absNow * 100), idHash(c.hitter.player.id as string), idHash(c.answerer.player.id as string)))
       boutDue = c.side === H ? { h: c.answerer, a: c.hitter, cause: 'code', rng: brng } : { h: c.hitter, a: c.answerer, cause: 'code', rng: brng }
     } else {
       c.side.sim.penalties.push({ expiresAt: absNow + PENALTY_SECONDS, playerId: c.answerer.player.id })
