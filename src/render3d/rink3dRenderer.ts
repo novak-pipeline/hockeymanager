@@ -82,6 +82,12 @@ import { ICE_DOTS, RINK_HALF_W } from './iceCanvas'
 import { approach, assignRigs, capStep, type RigMode } from './lineChange'
 import { layoutLabels, type LabelRequest, type PlacedLabel } from '@render2d/labelLayout'
 import { MOMENT_CHOREOGRAPHY, type MomentCue, type ShotCue } from '@render2d/broadcast/types'
+import { BroadcastCamera, fallbackFocus, type BroadcastInput } from './camera/broadcast'
+import { puckAhead } from './camera/ahead'
+import { deadWindowAt, deadWindowsOf, type DeadWindow } from './camera/stoppages'
+import { ReplayCamera } from './camera/replay'
+import { closeUpPose, CUT_END_BEFORE_DROP_S, CUT_WAIT_MS, type CameraCutConsumer, type CameraCutRequest } from './camera/cuts'
+import type { CamPose } from './camera/project'
 
 // ── Name labels (screen space, E1 / F-18) ──────────────────────────────────
 // Only the carrier and the players near the puck get a name — like FM — at a
@@ -299,7 +305,7 @@ interface GoalLight {
   side: 'left' | 'right'
 }
 
-export class Rink3dRenderer implements MatchRenderer {
+export class Rink3dRenderer implements MatchRenderer, CameraCutConsumer {
   // ── THREE objects ──────────────────────────────────────────────────────────
   private readonly renderer: THREE.WebGLRenderer
   private readonly scene = new THREE.Scene()
@@ -362,7 +368,9 @@ export class Rink3dRenderer implements MatchRenderer {
    * running): hold on the goal → cut to the scorer's celebration → the
    * scoring bench → the crowd → cut back to the game. Every change is a CUT.
    */
-  private deadTimes: Array<{ from: number; to: number; x: number; z: number }> = []
+  private deadTimes: DeadWindow[] = []
+  /** The camera's stoppages (W3 S7): the dead times plus each period's end to the next opening draw. */
+  private camDead: DeadWindow[] = []
   /** Fallback sweater numbers, unique per team (setEventStream). */
   private readonly teamNumbers = new Map<string, number>()
   /** Every faceoff (drop time, set time, dot) — the linesman's schedule. */
@@ -447,16 +455,17 @@ export class Rink3dRenderer implements MatchRenderer {
   }
 
   private deadAt(t: number): { x: number; z: number } | null {
-    const d = this.deadTimes
-    let lo = 0
-    let hi = d.length
-    while (lo < hi) {
-      const mid = (lo + hi) >> 1
-      if (d[mid]!.from <= t) lo = mid + 1
-      else hi = mid
-    }
-    const w = d[lo - 1]
-    return w && t < w.to ? w : null
+    return deadWindowAt(this.deadTimes, t)
+  }
+  /**
+   * W3 S7: the play is dead now and stays dead at least `ahead` more game
+   * seconds (a whistle until the drop, or the goal sequence) - when the
+   * director may cut away, and must be back before the drop.
+   */
+  private stoppageFor(ahead = 0): boolean {
+    if (this.goalSeq && goalPhaseAt(this.goalSeq.t) !== 'done') return true
+    const d = deadWindowAt(this.camDead, this.clockPos)
+    return d !== null && d.to - this.clockPos > ahead
   }
   /** The goal sequence runs on the GAME clock: t = clock − at (W2 one clock; VT6). */
   private goalSeq: { t: number; at: number; scorer: string; side: 'home' | 'away'; phase: GoalPhase } | null = null
@@ -486,6 +495,19 @@ export class Rink3dRenderer implements MatchRenderer {
   private prevPuckZ = 0
   /** Last rendered look yaw (null after a cut) — for the angular-speed cap. */
   private lastCamYaw: number | null = null
+  // ── W3 S7 camera (src/render3d/camera) ─────────────────────────────────────
+  /** The broadcast camera: behaviours with speed and acceleration limits. */
+  private readonly bcam = new BroadcastCamera()
+  /** The broadcast camera drew this frame (not a director's shot or the goal sequence). */
+  private bcamActive = false
+  /** The instant replay's angles (null outside a replay). */
+  private replayCam: ReplayCamera | null = null
+  /** Director cuts asked for in live play, waiting for the next stoppage. */
+  private cutQueue: Array<{ req: CameraCutRequest; expires: number }> = []
+  /** The camera hard-cut on this frame (probe: VT9 "no cut in live play"). */
+  private camCutFrame = false
+  /** Where the camera looked this frame (probe). */
+  private camLook = { x: 0, y: 0, z: 0 }
 
   // ── Wall clock for animation ───────────────────────────────────────────────
   private lastFrameTime = 0
@@ -1274,7 +1296,7 @@ export class Rink3dRenderer implements MatchRenderer {
 
   private currentTarget(): ReturnType<typeof broadcastFraming> {
     if (this.shot) {
-      const t = this.shotTarget(this.shot.cue)
+      const t = this.shot.cut ? this.cutTarget(this.shot.cut) : this.shotTarget(this.shot.cue)
       if (t) return t
     }
     const gs = this.goalSeq && this.camPreset === 'broadcast' ? this.goalSeqTarget() : null
@@ -1308,6 +1330,15 @@ export class Rink3dRenderer implements MatchRenderer {
   /** Hard-cut the camera to the current preset's target (a cut, never a fly-through). */
   private snapCameraSprings(): void {
     this.lastCamYaw = null
+    this.camCutFrame = true
+    if (this.camPreset === 'broadcast' && !this.shot && !(this.goalSeq && this.goalSeqTarget())) {
+      this.bcam.snap(this.broadcastInput(0))
+      const p = this.bcam.pose(this.camera.aspect)
+      this.syncSprings(p)
+      this.arena.setCeilingVisible(true)
+      this.applyPose(p)
+      return
+    }
     const target = this.currentTarget()
     this.camX = snapSpring(target.px)
     this.camY = snapSpring(target.py)
@@ -1388,18 +1419,8 @@ export class Rink3dRenderer implements MatchRenderer {
     }
     // stoppages (goal / whistle) and the faceoffs that end them: during the dead
     // time the game camera frames the NEXT faceoff, not the dead puck in the net
-    this.deadTimes = []
-    let pending: number | null = null
-    for (const ev of stream) {
-      const e = ev as { type: string; period?: number; t?: number; pos?: { x: number; y: number } }
-      if (e.period === undefined || e.t === undefined) continue
-      const at = playAbsT(ev)
-      if (e.type === 'goal' || e.type === 'whistle') pending ??= at
-      else if (e.type === 'faceoff' && pending !== null && e.pos) {
-        this.deadTimes.push({ from: pending, to: at, x: normXtoWorld(e.pos.x), z: normYtoWorld(e.pos.y) })
-        pending = null
-      }
-    }
+    this.deadTimes = deadWindowsOf(stream)
+    this.camDead = deadWindowsOf(stream, { periodEnds: true })
     const cues = extractActionCues(stream)
     this.penalties = stream.flatMap((e) => (e.type === 'penalty' ? [{ t: playAbsT(e), id: e.player as string }] : []))
     this.hits = cues
@@ -1443,7 +1464,7 @@ export class Rink3dRenderer implements MatchRenderer {
   // ── Broadcast hand-off (render2d/broadcast/types: BroadcastShotConsumer + BroadcastProjector) ──
   // The director's camera requests. Every shot is a CUT in and a cut back out,
   // then a locked-off (steady) frame — impact comes from the overlays, never shake.
-  private shot: { cue: ShotCue; until: number } | null = null
+  private shot: { cue: ShotCue; until: number; cut?: CameraCutRequest } | null = null
   private readonly projTmp = new THREE.Vector3()
 
   requestShot(cue: ShotCue): boolean {
@@ -1454,10 +1475,79 @@ export class Rink3dRenderer implements MatchRenderer {
       }
       return true
     }
+    // W3 S7: the goal is replayed from the replay camera's angles (setReplay);
+    // the director's fixed corner angle sat on the celebration instead
+    if (cue.shot === 'goalReplay') return false
+    // the man sent off, followed to the box (a cut, so at the stoppage)
+    if (cue.shot === 'penaltyBox') return cue.playerId ? this.requestCut({ kind: 'penalty', players: [cue.playerId], holdMs: cue.holdMs }) : false
+    // never a cut mid-play: in-game shots only while the play is dead
+    if (cue.clock === 'game' && !this.stoppageFor(CUT_END_BEFORE_DROP_S + 0.3)) return false
     if (!this.shotTarget(cue)) return false
     this.shot = { cue, until: performance.now() + cue.holdMs }
     this.snapCameraSprings()
     return true
+  }
+
+  /**
+   * W3 S7 director cuts (camera/cuts.ts CameraCutConsumer): a goal, penalty,
+   * faceoff or fight close-up, taken at a stoppage only. Asked in live play,
+   * it waits for the next stoppage (up to waitMs); declined when there is
+   * nobody to frame. The cut-away ends before the next drop.
+   */
+  requestCut(req: CameraCutRequest): boolean {
+    if (req.kind !== 'faceoff' && !req.at && !(req.players ?? []).some((id) => this.posesOf([id]).length > 0)) return false
+    if (this.stoppageFor(CUT_END_BEFORE_DROP_S + 0.3)) {
+      this.takeCut(req)
+      return true
+    }
+    const wait = req.waitMs ?? CUT_WAIT_MS
+    if (wait <= 0) return false
+    this.cutQueue.push({ req, expires: performance.now() + wait })
+    return true
+  }
+
+  private takeCut(req: CameraCutRequest): void {
+    const cue: ShotCue = { channel: 'shot', id: `cut:${req.kind}`, clock: 'game', at: this.clockPos, holdMs: req.holdMs, shot: 'broadcast' }
+    this.shot = { cue, until: performance.now() + req.holdMs, cut: req }
+    this.snapCameraSprings()
+  }
+
+  /** Queued cuts: taken at the first stoppage, dropped once they have waited too long. */
+  private serviceCuts(now: number): void {
+    if (!this.cutQueue.length) return
+    this.cutQueue = this.cutQueue.filter((c) => c.expires > now)
+    if (this.shot || !this.cutQueue.length || !this.stoppageFor(CUT_END_BEFORE_DROP_S + 0.3)) return
+    this.takeCut(this.cutQueue.shift()!.req)
+  }
+
+  private posesOf(ids: readonly string[]): PlayerPose[] {
+    return this.allPoses().filter((q) => q.playerId !== null && ids.includes(q.playerId as string) && q.rig.visible && q.mode !== 'idle')
+  }
+
+  /** Where a director's cut stands this frame (it follows its subject). */
+  private cutTarget(req: CameraCutRequest): CamPose | null {
+    let at = req.at ?? null
+    if (!at && req.kind === 'faceoff') at = this.deadAt(this.clockPos) ?? { x: 0, z: 0 }
+    if (!at) {
+      const ps = this.posesOf(req.players ?? [])
+      if (!ps.length) return null
+      at = { x: ps.reduce((a, q) => a + q.worldX.pos, 0) / ps.length, z: ps.reduce((a, q) => a + q.worldZ.pos, 0) / ps.length }
+    }
+    return closeUpPose(req.kind, at.x, at.z)
+  }
+
+  /**
+   * W3 S7: the instant replay is on (the host rewinds to the build-up); the
+   * goal it shows went in at `goalAbsT`. null = the replay is over. The replay
+   * camera shows it from end-zone high, then from behind the net.
+   */
+  setReplay(goalAbsT: number | null): void {
+    if (goalAbsT === null || !this.timeline) {
+      this.replayCam = null
+      return
+    }
+    const s = this.timeline.sampleAt(goalAbsT)
+    this.replayCam = new ReplayCamera(goalAbsT, s && s.puck.x < 0 ? -1 : 1)
   }
 
   private moment: { until: number; crowd: number } | null = null
@@ -1717,7 +1807,10 @@ export class Rink3dRenderer implements MatchRenderer {
     const pp = project(pm.x, pm.y, pm.z)
     sink({
       wall: performance.now() / 1000, dt, clock: this.clockPos, speed: this.speed, playing: this.playing, dead: this.deadAt(this.clockPos) !== null, w, h,
-      cam: { x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z, fov: this.camera.fov, preset: this.camPreset },
+      cam: {
+        x: this.camera.position.x, y: this.camera.position.y, z: this.camera.position.z, fov: this.camera.fov, preset: this.camPreset,
+        lx: this.camLook.x, ly: this.camLook.y, lz: this.camLook.z, nearCut: this.bcamActive ? this.bcam.nearCut : 0, cut: this.camCutFrame,
+      },
       puck: { x: pm.x, y: pm.y, z: pm.z, sx: pp.sx, sy: pp.sy, onScreen: pp.onScreen, simX: snap ? normXtoWorld(snap.puck.x) : NaN, simZ: snap ? normYtoWorld(snap.puck.y) : NaN },
       carrier: (snap?.carrier as string | null | undefined) ?? null,
       windup: this.choreo?.windupActor(this.clockPos) ?? null,
@@ -2699,11 +2792,32 @@ export class Rink3dRenderer implements MatchRenderer {
   // ── Camera ────────────────────────────────────────────────────────────────
 
   private updateCamera(dt: number): void {
-    // a director's shot ran its course: CUT back to the game camera (never fly)
-    if (this.shot && performance.now() >= this.shot.until) {
+    this.camCutFrame = false
+    this.bcamActive = false
+    const now = performance.now()
+    // a director's shot ran its course, or the drop is coming: CUT back to the
+    // game camera (never fly), at the stoppage - never in live play (W3 S7)
+    if (this.shot && (now >= this.shot.until || (this.shot.cue.clock === 'game' && !this.stoppageFor(CUT_END_BEFORE_DROP_S)))) {
       this.shot = null
       this.snapCameraSprings()
     }
+    this.serviceCuts(now)
+    // the camera's behaviours run on GAME time (a 2x playback is a sped-up broadcast)
+    const gameDt = this.playing ? dt * Math.min(this.speed, 4) : 0
+
+    // ── The instant replay: its own angles (camera/replay.ts) ────────────────
+    if (this.replayCam) {
+      const pm = this.puckMesh.position
+      const ahead = this.timeline ? puckAhead(this.timeline, [], this.clockPos, [0.15, 0.3]) : []
+      const pose = this.replayCam.step(gameDt, this.clockPos, this.camera.aspect, { x: this.puck.x, y: pm.y, z: this.puck.z }, ahead)
+      if (this.replayCam.cut) this.camCutFrame = true
+      this.syncSprings(pose)
+      this.applyPose(pose)
+      this.arena.setNearCut(0, 0)
+      this.applyDebugCam()
+      return
+    }
+
     // A calm TV follow. Every layer only SMOOTHS; nothing here can add wobble.
     const tune = CAMERA_TUNING[this.camPreset]
 
@@ -2725,10 +2839,6 @@ export class Rink3dRenderer implements MatchRenderer {
     let newFocusZ = emaStep(this.playFocusZ, committedZ, dt, tune.tauZ)
 
     // ── Layer 3: focus speed limit (ft/s, frame-rate independent) ────────────
-    // Applied to the TARGET, not the camera: a goal/faceoff puck teleport
-    // becomes a slow, even pan. (Replaces the old per-frame overhead clamp and
-    // the camera max-speed clamp, which kept the spring's velocity while
-    // clipping its position — that mismatch was a bounce source.)
     newFocusX = clampSpeed(this.playFocusX, newFocusX, dt, tune.maxFocusSpeed)
     newFocusZ = clampSpeed(this.playFocusZ, newFocusZ, dt, tune.maxFocusSpeed)
     this.playFocusX = Number.isFinite(newFocusX) ? newFocusX : this.playFocusX
@@ -2742,13 +2852,14 @@ export class Rink3dRenderer implements MatchRenderer {
         const vx = (rawX - this.prevPuckX) / dt
         const vz = (rawZ - this.prevPuckZ) / dt
         // A puck teleport (the stoppage reset to the next faceoff dot) is a CUT
-        // to the new faceoff, like TV — not a long pan across empty ice.
+        // to the new faceoff, like TV — not a long pan across empty ice. (The
+        // broadcast camera makes that cut itself, at the stoppage only.)
         if (Math.hypot(rawX - this.prevPuckX, rawZ - this.prevPuckZ) > 25 && this.camPreset !== 'overhead') {
           this.playFocusX = rawX
           this.playFocusZ = rawZ
           this.puckVelSmX = this.puckVelSmZ = 0
           this.leadX = 0
-          cut = true
+          if (this.camPreset !== 'broadcast') cut = true
         } else if (Math.hypot(vx, vz) < 200) {
           this.puckVelSmX = emaStep(this.puckVelSmX, vx, dt, 0.5)
           this.puckVelSmZ = emaStep(this.puckVelSmZ, vz, dt, 0.5)
@@ -2757,10 +2868,6 @@ export class Rink3dRenderer implements MatchRenderer {
       this.prevPuckX = rawX
       this.prevPuckZ = rawZ
     }
-    // Broadcast lead: the focus → spring chain trails steady play by ~0.9 s,
-    // so aim that far ahead along the play's SMOOTHED velocity (≤ 24 ft). In
-    // steady play this cancels the lag (the carrier stays mid-frame); when play
-    // stops the lead bleeds off over ~1 s — an easy settle, never a snap.
     this.leadX = emaStep(this.leadX, Math.max(-24, Math.min(24, this.puckVelSmX * 0.9)), dt, 0.6)
     if (this.camPreset === 'follow') {
       const sp = Math.hypot(this.puckVelSmX, this.puckVelSmZ)
@@ -2786,6 +2893,34 @@ export class Rink3dRenderer implements MatchRenderer {
       }
     }
     if (cut) this.snapCameraSprings()
+
+    // ── W3 S7: the broadcast camera (camera/broadcast.ts) ────────────────────
+    // When no director's shot and no goal-sequence shot is on screen, the
+    // main game camera is the behaviour camera: the sim's focus, framing
+    // rules, limited pan/tilt/lens/boom. It draws its own pose; the springs
+    // only shadow it (so a shot or the goal sequence starts from here).
+    if (this.camPreset === 'broadcast' && !this.shot && !(this.goalSeq && this.goalSeqTarget())) {
+      let pose = this.bcam.step(this.broadcastInput(gameDt))
+      if (this.bcam.cut) this.camCutFrame = true
+      // the old goal push-in (no goal sequence running: presentation off)
+      if (this.celebration && !this.goalSeq) {
+        const w = celebrationWeight(this.celebration.elapsed, GOAL_CUE_S)
+        if (w > 0) {
+          const c = celebrationTarget(this.celebration.x, this.celebration.z)
+          const mix = (a: number, b: number): number => a + (b - a) * w
+          pose = { px: mix(pose.px, c.px), py: mix(pose.py, c.py), pz: mix(pose.pz, c.pz), lx: mix(pose.lx, c.lx), ly: mix(pose.ly, c.ly), lz: mix(pose.lz, c.lz), fov: mix(pose.fov, c.fov) }
+        }
+      }
+      this.bcamActive = true
+      this.syncSprings(pose)
+      this.applyPose(pose)
+      // board play: the near dasher softens around the puck as the boom engages
+      this.arena.setNearCut(this.bcam.nearCut, this.puck.x)
+      this.applyDebugCam()
+      return
+    }
+    this.arena.setNearCut(0, 0)
+
     const target = this.currentTarget()
     let fovTarget = target.fov
 
@@ -2837,13 +2972,52 @@ export class Rink3dRenderer implements MatchRenderer {
       this.lastCamYaw = cap.yaw
     }
     this.camera.lookAt(lx, this.lookY.pos, lz)
-    if (this.debugCam) {
-      const d = this.debugCam
-      this.applyFov(d.fov ?? 35)
-      this.camera.up.set(0, 1, 0)
-      this.camera.position.set(d.px, d.py, d.pz)
-      this.camera.lookAt(d.lx, d.ly, d.lz)
-    }
+    this.camLook = { x: lx, y: this.lookY.pos, z: lz }
+    this.applyDebugCam()
+  }
+
+  /** The broadcast camera's input this frame (W3 S7). */
+  private broadcastInput(gameDt: number): BroadcastInput {
+    const dead = this.goalSeq && goalPhaseAt(this.goalSeq.t) !== 'done' ? null : deadWindowAt(this.camDead, this.clockPos)
+    const snap = this.lastSnap
+    const pm = this.puckMesh.position
+    const puck = { x: this.puck.x, y: pm.y, z: this.puck.z }
+    const carrier = snap?.carrier ? { x: this.carrierWx, z: this.carrierWz } : null
+    const focus = snap?.focus
+      ? { x: normXtoWorld(snap.focus.x), z: normYtoWorld(snap.focus.y) }
+      : fallbackFocus(puck, { x: this.puckVelSmX, z: this.puckVelSmZ })
+    const ahead = dead || !this.timeline ? [] : puckAhead(this.timeline, this.camDead, this.clockPos)
+    return { dt: gameDt, aspect: this.camera.aspect, puck, carrier, focus, ahead, dead: dead ? { x: dead.x, z: dead.z } : null }
+  }
+
+  /** Put the camera at `p` (a pose the camera behaviours chose). */
+  private applyPose(p: CamPose): void {
+    this.applyFov(p.fov)
+    this.camera.up.set(0, 1, 0)
+    this.camera.position.set(p.px, p.py, p.pz)
+    this.camera.lookAt(p.lx, p.ly, p.lz)
+    this.camLook = { x: p.lx, y: p.ly, z: p.lz }
+    this.lastCamYaw = null
+  }
+
+  /** The springs shadow a pose drawn by a behaviour camera (a later shot starts from it). */
+  private syncSprings(p: CamPose): void {
+    this.camX = snapSpring(p.px)
+    this.camY = snapSpring(p.py)
+    this.camZ = snapSpring(p.pz)
+    this.lookX = snapSpring(p.lx)
+    this.lookY = snapSpring(p.ly)
+    this.lookZ = snapSpring(p.lz)
+    this.fov = snapSpring(p.fov)
+  }
+
+  private applyDebugCam(): void {
+    if (!this.debugCam) return
+    const d = this.debugCam
+    this.applyFov(d.fov ?? 35)
+    this.camera.up.set(0, 1, 0)
+    this.camera.position.set(d.px, d.py, d.pz)
+    this.camera.lookAt(d.lx, d.ly, d.lz)
   }
 
   // ── Emit ──────────────────────────────────────────────────────────────────

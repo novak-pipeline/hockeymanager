@@ -39,6 +39,8 @@ export type ScenarioKind =
   | 'offGlass'
   | 'looseRace'
   | 'dumpInRace'
+  | 'boardCheckNear'
+  | 'endToEndRush'
 
 export const SCENARIO_KINDS: readonly ScenarioKind[] = [
   'breakaway', 'twoOnOne', 'ozCycleShot', 'ppSetPlay', 'goalReplay',
@@ -46,6 +48,7 @@ export const SCENARIO_KINDS: readonly ScenarioKind[] = [
   'dZoneCoverage', 'offsideCall', 'faceoffNeutral', 'faceoffDefensive',
   'breakoutPlay', 'forecheckTurnover', 'nzRegroup', 'systemHome', 'systemAway',
   'trailingPush', 'rimAround', 'offGlass', 'looseRace', 'dumpInRace',
+  'boardCheckNear', 'endToEndRush',
 ]
 
 /** Human label + how much game time to show around the moment (lead before, tail after).
@@ -83,6 +86,10 @@ export const SCENARIO_META: Record<ScenarioKind, { label: string; lead: number; 
   offGlass:        { label: 'Puck off the glass',             lead: 4,  tail: 6 },
   looseRace:       { label: 'Loose-puck race',                lead: 3,  tail: 6 },
   dumpInRace:      { label: 'Dump-in and the race to it',     lead: 4,  tail: 7 },
+  // W3 S7 (the camera; owner: the near boards were cropped on the board check):
+  // a hit on the camera's boards, and a rush from one end to a shot at the other
+  boardCheckNear:  { label: 'Board check on the near boards', lead: 8,  tail: 6 },
+  endToEndRush:    { label: 'End-to-end rush',                lead: 12, tail: 4 },
 }
 
 export interface ScenarioHit {
@@ -194,6 +201,25 @@ export function findScenarios(
     }
     if (ev.type === 'shot') {
       const side = sideOf(ev.shooter)
+      // W3 S7: the puck came out of the shooters' own zone and went the length
+      // of the ice to this shot within 12 s, no whistle, no turnover
+      if (puckTrack.length) {
+        const sgn = Math.sign(ev.target.x) || 1
+        let lo = 0
+        let hi = puckTrack.length - 1
+        while (lo < hi) {
+          const mid = (lo + hi + 1) >> 1
+          if (puckTrack[mid]!.abs <= t) lo = mid
+          else hi = mid - 1
+        }
+        let k = lo
+        while (k > 0 && t - puckTrack[k]!.abs < 12 && puckTrack[k]!.x * sgn > -0.25) k--
+        const t0 = puckTrack[k]!.abs
+        const turnover = evs.some((y) => y.abs > t0 && y.abs < t && (y.ev.type === 'takeaway' || y.ev.type === 'giveaway' || (y.ev.type === 'pass' && !y.ev.completed)))
+        if (puckTrack[k]!.x * sgn <= -0.25 && t - t0 < 12 && t - t0 > 3 && !stopBetween(t0, t) && !turnover) {
+          push({ kind: 'endToEndRush', absT: t, period: ev.period, side, note: `own zone to a shot in ${(t - t0).toFixed(1)} s, ${outcome(i)}`, quality: 1 + (outcome(i) === 'goal' ? 0.5 : 0) + (12 - (t - t0)) / 24 })
+        }
+      }
       // W3 S5: down one or two in the last five minutes of the third
       const lead = side === 'home' ? goalsH - goalsA : goalsA - goalsH
       if (ev.period === 3 && ev.t >= REG - 300 && lead < 0 && lead >= -2) {
@@ -258,6 +284,10 @@ export function findScenarios(
       const side = sideOf(ev.by)
       const q = (ev.force ?? 0.5) + (ev.knockdown ? 1 : 0) + (ev.kind === 'openIce' ? 0.3 : 0) + (ev.targetHadPuck ? 0.2 : 0)
       push({ kind: 'bigHit', absT: t, period: ev.period, side, note: `${ev.kind ?? 'hit'}${ev.force !== undefined ? ` force ${ev.force.toFixed(2)}` : ''}${ev.knockdown ? ', knockdown' : ''}`, quality: q })
+      // W3 S7: a check into the near boards (the broadcast camera's side, world −z)
+      if (ev.pos.y < -0.8 && (ev.kind === 'boards' || ev.pinned)) {
+        push({ kind: 'boardCheckNear', absT: t, period: ev.period, side, note: `near-boards ${ev.kind ?? 'hit'}${ev.pinned ? ', pinned' : ''}${ev.force !== undefined ? ` force ${ev.force.toFixed(2)}` : ''}`, quality: q + (ev.pinned ? 0.5 : 0) })
+      }
     } else if (ev.type === 'whistle' && ev.reason === 'offside' && ev.pos) {
       // The offending side attacks the zone the puck is in. Which way each side
       // attacks this period: away from its own goalie.

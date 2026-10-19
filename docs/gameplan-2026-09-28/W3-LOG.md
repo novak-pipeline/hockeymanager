@@ -420,3 +420,68 @@ Owner saves backed up and SHA1-verified unchanged (2 files) by the script and by
 - Icings fell from ~5 to ~3 a team-game (bodies and the swept check stop long clears). There is no NHL icing target in `matchTargets.json`; it needs one from the API before S9.
 - VT13 aimless (+3 / 60) and VT14 (+0.5 / 60) moved up with the livelier puck; both stay inside their gates.
 - The drawn puck sweeps off the stick over a frame or two (the renderer's release), which the drawn VT20 cannot attribute to a stick on a rim or a dump (they have no event).
+
+## S7 the camera (2026-10-19)
+
+The owner's standing notes for the slice: "camera misses things", "speed changes on highlights" (fixed in W2: the speed never changes without user input), and the board-check clip, where the near boards were cropped so the pin and the glass flex could not be seen. VT9 framing was red on almost every clip since W1.
+
+### What changed (W3-DESIGN item 7, docs/fm-study/SPEC.md §7)
+
+- **The camera is built from behaviours** (new `src/render3d/camera/`, pure, no THREE, so the renderer and an offline harness run the same code):
+  - `limits.ts`: **the limited follower**. One axis (pan, tilt, lens, boom) chasing its target as a critically damped spring inside a max speed, a max acceleration (braking included: it starts slowing in time to stop on the target) and a max change of acceleration (the ease into and out of a move). Long frames (a hitch) are integrated in 1/120 s substeps. It runs on **game time** (a 2× playback is a sped-up broadcast, not a twitchier camera).
+  - `broadcast.ts`: **the default broadcast camera**. Rig: the high sideline gantry (28° down, 108 ft out; the body trucks 60% with the play and pans the rest; one zone of ice across the frame, wider through the neutral zone). Focus: the sim's published focus, pulled halfway toward where the stream says the puck will be 0.6 s on; the next faceoff at a stoppage. Framing rules: the puck held inside ±0.6 of the screen (±0.55 vertically), where it will be over the next second (0.2-1.0 s, read off the stream) inside ±0.7 when that fits, the carrier inside ±0.2 (the middle third is ±1/3). The rules clamp where the focus may put the frame. **Auto-zoom** widens the lens (to 124 ft) when the play outruns the pan. **Boom**: as the puck, the focus or the coming puck nears the near boards (24 ft → 11 ft, straight wall and near corners), the camera rises 11° and the frame's bottom edge goes from just inside the boards (−38 ft) to past them and the glass (−48 ft). Limits (game s): pan 80 ft/s, 120 ft/s², 900 ft/s³; tilt 45 / 90 / 600; lens 45 / 70 / 350; boom 3 / 12 / 80 per s.
+  - `nearBoards.ts`: the near boards (straight wall and the two near corners), shared by the boom, the renderer and VT9.
+  - `arena.ts` **near-boards softening**: while the boom is up, the near dasher and its cap thin out (a screen-door dither, 70% at the centre, no transparency sorting) in a 26 ft window around the puck, so a pinned man's legs read through the boards; the glass above and its flex are untouched.
+  - `ahead.ts`: the puck over the next second from the timeline, stopping at the next stoppage.
+  - `replay.ts`: **replay angles**. W2's replay timing is unchanged (goal −5 s to +1.2 s at 0.6×, VT5). The build-up is seen from **end-zone high** (over the end boards behind the net it went into), the finish from **behind the net** (low through the glass, from 1.6 s before the goal), one cut between them. Each is a locked-off position that pans, tilts and zooms on the puck with its own limited followers. `MatchViewer` turns it on with `setReplay(goalAbsT)` and off with `setReplay(null)`.
+  - `cuts.ts`: **director cuts at stoppages only**, and the cut-request API (below).
+  - `stoppages.ts`: the dead windows (moved out of the renderer; the camera's copy also opens one at each period's end, so a period's opening draw is a cut, not a pan across the ice).
+- **The sim publishes the focus** (`src/engine/agent/focus.ts`; additive `FrameEvent.focus`, normalized, live play only): the carrier's next 0.6 s of skating, or the man a pass is going to (led 0.3 s), or the free puck 0.6 s ahead by the sim's own puck physics (a copy of the puck; the physics' last-contact note is put back), pulled 20% toward the skaters near that point. Read-only: no sim state, no random numbers. The reel's pins (seeds 1000-1011, the same as S6) found the same moments and their fingerprints matched. `timeline.ts` interpolates it (`PosSnapshot.focus`). Streams without it (the classic engines) fall back to the puck led by its own travel.
+- **Never a cut mid-play** (`rink3dRenderer.ts`). A director shot in game time is taken only while the play is dead (a whistle until the drop, or the goal sequence) with at least 0.9 s of it left, and every cut-away ends 0.6 s before the drop, so the cut back is at the stoppage too. The broadcast camera itself cuts only at a stoppage, when the next faceoff is more than 50 ft from the frame (it used to cut on any puck jump > 25 ft). The director's `goalReplay` shot (a fixed corner angle that sat on the celebration) is declined: the replay camera shows the goal. `penaltyBox` (declined before: no set) is now a cut that follows the penalised man. A robbery `saveReplay` that lands in live play is declined.
+- **Probe** (additive optional): `cam.lx/ly/lz` (the look point), `cam.nearCut`, `cam.cut`.
+- New golden scenarios `boardCheckNear` (a boards hit with the man on the camera's wall) and `endToEndRush` (out of the shooters' own zone to a shot inside 12 s, no whistle, no turnover), with reel checklists.
+
+### The cut-request API (for the fights module, or any presenter)
+
+```ts
+import type { CameraCutConsumer, CameraCutRequest } from '@render3d/camera/cuts'
+const r = renderer as Partial<CameraCutConsumer>
+r.requestCut?.({ kind: 'fight', players: [a, b], holdMs: 6000 })   // 'goal' | 'penalty' | 'faceoff' | 'fight'
+```
+
+Optional `at: {x, z}` (world ft) frames a point instead of players (default for 'faceoff': the next faceoff dot); `waitMs` (default 4000) is how long a request made in live play waits for the next stoppage (0 = now or never). Returns true when taken now or queued, false when declined (nobody of those ids on the ice, or live with `waitMs: 0`). The close-up follows its subject (the midpoint of the players), from the broadcast side at eye level, or from the ice side when the subject is on the near boards (the lens never stands in the crowd). It ends at `holdMs` or 0.6 s before the drop, whichever is first.
+
+### VT9, strict
+
+VT9 now asks, on live broadcast frames: the drawn puck inside the **safe area** (5% in from every edge) on ≥ 99% (it was "on screen"); the carrier in the middle third on ≥ 90%; **no pan or tilt acceleration over the camera's limit** (+25% for the noise of a finite difference over 0.1 s windows): 0; **no cut in live play** (declared, or the look point jumping > 8 ft in a frame): 0; **board play visible**: with the puck within 7 ft of the near boards, the boards at the puck in the frame and the near dasher softened, ≥ 95%; and in **replays** the puck on screen on ≥ 95% of frames. Unit tests: a live cut, an over-limit pan and unsoftened board play are each red.
+
+Offline (`src/render3d/camera/camera.test.ts`, the same camera code over generated agent games at 60 Hz, sim positions): 2 games green; on 3 games at the reel's 2.35:1 window the puck sits in the safe area 100.0%, the carrier in the middle third 98.4-98.5%, board play visible 99.5-99.7%, 0 over-limit samples, 0 live cuts. The worst 20 s window of each game reads 98.0-99.5% safe-area (the reel clips are the play's hardest moments, so this is the number tuned against).
+
+| Clip | VT9 before (reel S6, old rule: on screen / middle third) | VT9 after (reel S7, strict) |
+|---|---|---|
+| ozCycleShot | 90.7% / 62.5% (red) | safe area 100% / 98.6%; 0 over, 0 cuts; board play 100% (green) |
+| goalReplay | 98.4% / 72.2% (red) | 100% / 100%; replay puck on screen 96.4% (green) |
+| saveRebound | 83.9% / 66.5% (red) | 100% / 98.1%; board play 100% (green) |
+| rimAround | 79.6% / – (red) | 100% / –; board play 100% (green) |
+| dumpInRace, offGlass, looseRace | 6 of 7 S6 clips red | dumpInRace 100% / 100% (green) |
+| breakaway (S5 reel) | red | 100% / 99.7%; replay 99.3% (green) |
+| boardCheckNear (new) | – | 100% / 100%; board play 100% (1632 frames) (green) |
+| endToEndRush (new) | – | 100% / 96.3%; replay 99.6% (green) |
+
+On the first S7 recording three clips were still red (the board check at 90.4% safe area: a cross-ice puck then a rim behind the net outran a pan tuned at 80 ft/s²; the boom lagged a rim into the corner; one 0.1 s frame hitch read as an over-limit acceleration). Fixed by the faster pan/tilt limits, the aim pulled toward the coming puck, a quicker boom, the substeps, and the period-end stoppage.
+
+### Reel S7
+
+`K:/Hockey Game/.cache/reel-s7/reel.html`, recorded with `npm run reel -- "--out=K:/Hockey Game/.cache/reel-s7" --only=goalReplay,ozCycleShot,saveRebound,rimAround,dumpInRace,breakaway,boardCheckNear,endToEndRush` (labelled s7; the search over seeds 1000-1011 picked the S6 moments again, plus the two new clips). Eight clips: a breakaway goal, an offensive-zone cycle into a shot, a goal with its replay, a save-rebound scramble, a rim round the end boards, a dump-in race, a board check on the near boards, an end-to-end rush.
+
+- **VT9 green on all 8.** Green: VT1, VT4-VT17, VT19, VT21.
+- Red, not this slice's: VT2 on breakaway (two men drawn coming out of the bench door during the post-goal change, dead time, while the sim already has them at the faceoff: the line-change class, not the camera); VT3 on saveRebound (the in-tight jam class); VT18 on ozCycleShot (the delayed-offside touch S6 logged); VT20 on breakaway, saveRebound and rimAround (the S6 drawn-sweep and corner-boards cases).
+
+Owner saves backed up and SHA1-verified unchanged (2 files) by the script and by hand. The app ran from this worktree's own `out/` with a node_modules junction, `HOCKEY_USER_DATA` on a scratch copy (the script's) and `HOCKEY_OFFSCREEN=1`. The owner's rig assets were copied in for the build and deleted afterwards with `out/`; nothing of them is committed.
+
+### Left for later
+
+- The arena has no penalty-box set: the penalty cut follows the man to the box but there is no box to sit in.
+- The goal-sequence shots (celebration, bench, crowd) are still the W2 spring shots; they cut at the stoppage and never in live play, but they are not yet built from the behaviours.
+- The other presets (overhead, end zone, follow) keep their W2 pipeline; only the broadcast camera (the owner's) and the replay are behaviour cameras.
+- `FrameEvent.focus` is agent-engine only; the classic engines use the renderer's fallback.
