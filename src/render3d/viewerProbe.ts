@@ -93,7 +93,15 @@ export interface ProbeFrame {
   dead: boolean
   w: number
   h: number
-  cam: { x: number; y: number; z: number; fov: number; preset: string }
+  cam: {
+    x: number; y: number; z: number; fov: number; preset: string
+    /** W3 S7 (optional: older probes): the look point (world ft). */
+    lx?: number; ly?: number; lz?: number
+    /** W3 S7: the near boards softened for board play this frame (0..1). */
+    nearCut?: number
+    /** W3 S7: the camera hard-cut on this frame (a director's cut, a seek, a snap). */
+    cut?: boolean
+  }
   puck: { x: number; y: number; z: number; sx: number; sy: number; onScreen: boolean; simX: number; simZ: number }
   carrier: string | null
   /** The shooter / passer the renderer holds in a wind-up (choreo), if any. */

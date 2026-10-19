@@ -369,6 +369,13 @@ export type FrameEvent = GameEventBase & {
    * Detectors: a man leaving a free puck alone then is obeying the linesman.
    */
   delayedOffside?: 'home' | 'away'
+  /**
+   * Additive (agent engine, W3 S7): where the play is about to be, for the
+   * camera - the carrier's next stride, the man a pass is going to, or where
+   * a free puck will be (the puck path predictor), pulled a little toward the
+   * skaters near it. Normalized like `puck`; live play only.
+   */
+  focus?: XY
 }
 
 export type GameEvent =

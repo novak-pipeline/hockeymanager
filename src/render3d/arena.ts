@@ -72,6 +72,8 @@ export class Arena {
   /** Goal-light housings behind each net: [-X end, +X end]. */
   readonly goalLamps: THREE.MeshStandardMaterial[] = []
   private readonly crowdUniforms = { uTime: { value: 0 }, uExcite: { value: 0 } }
+  /** W3 S7: the near dasher softened around board play (x: centre, y: half-width ft, z: strength 0..1). */
+  private readonly nearCutUniform = { value: new THREE.Vector3(0, 26, 0) }
   private ribbonTex: THREE.CanvasTexture | null = null
   private iceMap: THREE.Texture | null = null
 
@@ -296,6 +298,7 @@ export class Arena {
     this.group.add(reflective(sweptMesh([{ o: 0, y: 0 }, { o: 0, y: BOARD_H }], faceMat, 0, DASHER_PERIOD_FT)))
     // cap rail + outer skin
     const capMat = new THREE.MeshStandardMaterial({ color: 0x1b2230, roughness: 0.5, side: THREE.DoubleSide })
+    for (const m of [faceMat, capMat]) this.softenNearBoards(m)
     this.group.add(reflective(sweptMesh([{ o: 0, y: BOARD_H }, { o: 0, y: BOARD_H + 0.12 }, { o: 0.75, y: BOARD_H + 0.12 }, { o: 0.75, y: 0 }], capMat)))
 
     // glass: faint, reflective, with a bright top edge
@@ -329,6 +332,45 @@ export class Arena {
       posts.setMatrixAt(i, m)
     })
     this.group.add(posts)
+  }
+
+  /**
+   * W3 S7: board play on the near boards (the camera's side) is hidden by the
+   * dasher - a pinned man's legs, the puck on the wall. While the broadcast
+   * camera's boom is up, the near dasher and cap thin out (a screen-door
+   * dither, no transparency sorting) in a window around the play, so the
+   * pin reads; the glass above (and its flex) is untouched.
+   */
+  private softenNearBoards(mat: THREE.MeshStandardMaterial): void {
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uNearCut = this.nearCutUniform
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', `#include <common>
+varying vec3 vCutWorld;`)
+        .replace('#include <project_vertex>', `#include <project_vertex>
+#ifdef USE_INSTANCING
+  vCutWorld = (modelMatrix * instanceMatrix * vec4(transformed, 1.0)).xyz;
+#else
+  vCutWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;
+#endif`)
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>
+varying vec3 vCutWorld;
+uniform vec3 uNearCut;`)
+        .replace('#include <clipping_planes_fragment>', `#include <clipping_planes_fragment>
+  if (uNearCut.z > 0.0 && vCutWorld.z < -14.0) {
+    float fx = 1.0 - smoothstep(uNearCut.y * 0.6, uNearCut.y, abs(vCutWorld.x - uNearCut.x));
+    float keep = 1.0 - 0.7 * uNearCut.z * fx;
+    float n = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    if (n > keep) discard;
+  }`)
+    }
+    mat.customProgramCacheKey = () => 'near-cut'
+  }
+
+  /** W3 S7: soften the near dasher around world x `x` by `strength` (0 = solid). */
+  setNearCut(strength: number, x: number): void {
+    this.nearCutUniform.value.set(x, 26, Math.max(0, Math.min(1, strength)))
   }
 
   // ── glass flex (a body driven into the boards) ─────────────────────────

@@ -90,6 +90,8 @@ export interface PosSnapshot {
   /** The agent engine's job per skater index (W3: "puck", "chase", "mark:<id>"…; absent = not emitted). */
   homeJobs?: (string | undefined)[]
   awayJobs?: (string | undefined)[]
+  /** W3 S7: the sim's camera focus (where the play is about to be), normalized; live play only. */
+  focus?: XY
 }
 
 export interface ClockLabel {
@@ -357,6 +359,7 @@ export class MatchTimeline {
         : {}),
       ...(dom.home.some((s) => s.facing !== undefined) ? { homeFacing: blendFacing(a.home, b.home, f), awayFacing: blendFacing(a.away, b.away, f) } : {}),
       ...jobsOf(dom),
+      ...focusOf(a, b, f, stoppageT),
     }
   }
 
@@ -472,7 +475,15 @@ function snapshotOf(frame: FrameEvent): PosSnapshot {
     ...(frame.puckZ !== undefined ? { puckZ: frame.puckZ } : {}),
     ...(frame.home.some((s) => s.facing !== undefined) ? { homeFacing: frame.home.map((s) => s.facing), awayFacing: frame.away.map((s) => s.facing) } : {}),
     ...jobsOf(frame),
+    ...(frame.focus ? { focus: { ...frame.focus } } : {}),
   }
+}
+
+/** The sim's focus between two frames (W3 S7): lerped while both carry one, else the one that does. */
+function focusOf(a: FrameEvent, b: FrameEvent, f: number, stoppageT: number | null): Pick<PosSnapshot, 'focus'> {
+  if (a.focus && b.focus && stoppageT === null) return { focus: lerpXY(a.focus, b.focus, f) }
+  const one = f < 0.5 ? a.focus ?? null : b.focus ?? null
+  return one ? { focus: { ...one } } : {}
 }
 
 /** Jobs per skater index, when the engine emits them (additive W3 field). */

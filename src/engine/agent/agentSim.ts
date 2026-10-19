@@ -89,6 +89,7 @@ import { jobName, newTeamPlan, setJob } from './plans'
 import { emptyAgentTelemetry, type AgentTelemetry } from './telemetry'
 import { ACTION_FLOOR, PUCK_SPEED, settleFloor, windupFloor, type ActName } from './constraints'
 import { pathAt } from './puckPath'
+import { playFocus } from './focus'
 import { LEVEL, levelDefOffset, levelOffset, rDef, rLevel, type CarrierAction, type Side, type World } from './world'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
@@ -2740,6 +2741,15 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       g.pos.y = clamp(s.goalie.y / HALF_Y, -1, 1)
     }
     const pk = deadAt ?? puck
+    // W3 S7: the camera's focus (read-only: no state, no random numbers)
+    const fc = deadAt === null && !pending
+      ? playFocus({
+        puck,
+        carrier: w.carrier && recv !== w.carrier ? w.carrier : null,
+        passTo: !w.carrier && w.passTo ? w.passTo : null,
+        skaters: [...H.skaters, ...A.skaters],
+      })
+      : null
     ctx.stream.push({
       t: T(),
       playT: P(),
@@ -2754,6 +2764,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
       ...(deadAt === null && puck.z > 0.05 ? { puckZ: Math.round(puck.z * 10) / 10 } : {}),
       ...(bodyTouch ? { puckTouch: bodyTouch.player.id } : {}),
       ...(w.delayedOffside ? { delayedOffside: w.delayedOffside === H ? 'home' as const : 'away' as const } : {}),
+      ...(fc ? { focus: { x: Math.round(clamp(fc.x / HALF_X, -1, 1) * 1000) / 1000, y: Math.round(clamp(fc.y / HALF_Y, -1, 1) * 1000) / 1000 } } : {}),
       ...sysSnap()
     })
     bodyTouch = null
