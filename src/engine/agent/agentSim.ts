@@ -834,6 +834,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
           if (!changing.has(s)) liveShape(s, d)
           continue
         }
+        if (bout) continue // (the new strength goes out when the fighters are led off: endBout)
         creditShift(s, now)
         deploySide(s, true)
       }
@@ -2918,7 +2919,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     codeDue = null
     if (!c) return false
     const hs = sideOf(c.hitter)
-    if (!hs || !c.side.skaters.includes(c.answerer) || boutDue || bout) return false
+    if (!hs || !c.side.skaters.includes(c.answerer) || !hs.skaters.includes(c.hitter) || boutDue || bout) return false
     const absNow = absBase + clock
     // Gloves off, or just a shove after the whistle (roughing).
     const willing = (c.hitter.player.fighting ?? 50) + r01(c.hitter.player.ratings.mental.aggression) * 40
@@ -2945,6 +2946,11 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     const gap = Math.max(Math.hypot(d.h.x - spot.x, d.h.y - spot.y), Math.hypot(d.a.x - spot.x, d.a.y - spot.y))
     const plan = planFight(fighterOf(d.h.player, d.h.energy), fighterOf(d.a.player, d.a.energy), d.rng, approachSeconds(gap))
     bout = { plan, start: now, ang: Math.atan2(d.h.y - d.a.y, d.h.x - d.a.x), spot, h: d.h, a: d.a }
+    // a fighter on his way to the bench for a change stays out: he has business first
+    for (const ch of changing.values()) {
+      for (let i = ch.swaps.length - 1; i >= 0; i--) if (ch.swaps[i].out === d.h || ch.swaps[i].out === d.a) ch.swaps.splice(i, 1)
+    }
+    for (const s of sides) for (const b of [d.h, d.a]) s.leaving.delete(b)
     for (const b of [d.h, d.a]) setAct(b, 'fight', plan.boxAt)
     const ref = (s: 'home' | 'away' | null) => (s === 'home' ? d.h.player.id : s === 'away' ? d.a.player.id : null)
     ev({
@@ -2956,7 +2962,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   function stepBout(): void {
     const b = bout!
     const tau = now - b.start
-    if (tau >= b.plan.boxAt) return endBout()
+    // (both men stay on the ice for the bout; if one is somehow gone, it is over)
+    if (tau >= b.plan.boxAt || !H.skaters.includes(b.h) || !A.skaters.includes(b.a)) return endBout()
     const fc = fighterCmds(b.plan, tau, b.ang, b.spot, b.h, b.a)
     cmds.set(b.h, fc.home)
     cmds.set(b.a, fc.away)

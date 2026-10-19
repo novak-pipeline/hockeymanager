@@ -97,10 +97,19 @@ describe('fights in the agent engine', () => {
   const game = () => agentSimGame(team(0), team(1), resolve, { seed, intensity: 1 })
 
   it('the bout holds the stoppage: both men on the ice at the spot, clock stopped, majors when they are led off', () => {
-    const g = game()
+    // several games and pairings (boil-overs and the code; a fighter may have been mid-change or just penalised)
+    const seeds = Array.from({ length: 40 }, (_, k) => k + 1).filter((s) => rollFightPlan(s, 1).length > 0).slice(0, 6)
+    let judged = 0
+    for (const [k, sd] of seeds.entries()) {
+    const g = agentSimGame(team(k), team(k + 3), resolve, { seed: sd, intensity: 1 })
     const fights = g.stream.filter((e): e is FightEvent => e.type === 'fight')
-    expect(fights.length).toBeGreaterThan(0)
     for (const f of fights) {
+      judged++
+      // both men are in every frame from the drop until they are led off
+      for (const fr of g.stream) {
+        if (fr.type !== 'frame' || playAbsT(fr) < playAbsT(f) + 0.01 || playAbsT(fr) > playAbsT(f) + f.boxAt - 0.3) continue
+        expect(fr.home.some((x) => x.player === f.home) && fr.away.some((x) => x.player === f.away), `seed ${sd}: a fighter left the ice at ${(playAbsT(fr) - playAbsT(f)).toFixed(2)} s`).toBe(true)
+      }
       const at = playAbsT(f)
       const i = g.stream.indexOf(f)
       // a whistle right before it
@@ -134,7 +143,9 @@ describe('fights in the agent engine', () => {
         }
       }
     }
-  }, 60000)
+    }
+    expect(judged).toBeGreaterThan(3)
+  }, 120000)
 
   it('is deterministic (same seed, same stream)', () => {
     const a = JSON.stringify(game().stream)
