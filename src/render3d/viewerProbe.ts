@@ -71,6 +71,8 @@ export interface ProbeViewerState {
   mode: string
   /** Instant replay on screen. */
   replay: boolean
+  /** Additive: what the replay on screen is about (replay package): 'goal' | 'bigSave' | 'bigHit' | 'fight' | 'chance'. */
+  replayKind?: string
   /** A goal is between the horn and the replay (celebration wall timer running). */
   replayPending: boolean
   /** Fast-forward spin between highlights. */

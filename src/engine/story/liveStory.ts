@@ -34,7 +34,10 @@ import {
   BENCH_TURNOVER, LT_CONTRACT_YEAR, LT_DRAFTED_OPP, LT_DRAFTED_OWN, LT_DROUGHT, LT_DROUGHT_LIVE, LT_FORMER_CLUB,
   LT_MILESTONE, LT_MILESTONE_LIVE, LT_POINT_STREAK, LT_POINT_STREAK_LIVE, LT_RIVALRY, LT_ROOKIE, LT_SEASON_SERIES,
   LT_SHUTOUTS, LT_SHUTOUT_BID, LT_SHUTOUT_RUN, ROOM_TRAINER, ROOM_VETERAN,
+  LT_BAD_BLOOD, LT_HEAT_ANSWER, LT_HEAT_FACE, LT_HEAT_REPEAT, LT_HEAT_STAR, LT_HEAT_TEAM,
 } from './liveStoryPools'
+import { computeGameHeat, gameHeatAt, topScorers, type GameHeat } from './rivalryHeat'
+import { pairKey, type CarriedHeat, type HeatIncident } from '@engine/shared/heat'
 
 export type LiveSide = 'home' | 'away'
 
@@ -128,6 +131,37 @@ export interface LiveStoryFacts {
   bench?: BenchFacts
   /** Standing cards shown on recent watched games: they sit this one out. */
   resting?: string[]
+  /** Rivalry heat carried in from earlier meetings (league/heatLedger.ts). Additive. */
+  heat?: LiveHeatFacts
+}
+
+/** Two men with history from an earlier meeting, one dressed on each side tonight. */
+export interface LiveHeatPair {
+  /** Who did it (the hitter, the man penalised; a fight: the home fighter that night). */
+  byId: string
+  /** Who it was done to. */
+  onId: string
+  kind: 'fight' | 'bigHit' | 'cheapShot' | 'afterWhistle' | 'feud'
+  /** Carried heat, 0..1. */
+  heat: number
+  /** "Nov 12". */
+  date: string
+  /** '' (this season) or ' last season' / ' in 2025' — appended to the date. */
+  seasonTail: string
+  /** Meetings both have dressed for since (tonight not counted). */
+  meetingsSince: number
+  /** cheapShot / afterWhistle: the call, as the sim named it. */
+  infraction?: string
+  /** bigHit: it put him down. */
+  down?: boolean
+  /** feud: the club they shared. */
+  club?: string
+}
+
+export interface LiveHeatFacts {
+  /** The club pairing's carried heat, 0..1. */
+  team: number
+  pairs: LiveHeatPair[]
 }
 
 /* ─────────────────────────── outputs ─────────────────────────── */
@@ -135,6 +169,8 @@ export interface LiveStoryFacts {
 export type LowerThirdKind =
   | 'pointStreak' | 'drought' | 'contractYear' | 'drafted' | 'formerClub' | 'rookie'
   | 'milestone' | 'shutoutRun' | 'shutouts' | 'shutoutBid' | 'seasonSeries' | 'rivalry'
+  /** Rivalry heat: history from an earlier meeting / tonight's run-ins. */
+  | 'badBlood' | 'heat'
 
 export type BenchKind =
   | 'captainRally' | 'turnover' | 'penaltyBox' | 'debut' | 'benched' | 'sore' | 'feudShift' | 'feudGoal'
@@ -503,6 +539,47 @@ export function buildLiveCards(f: LiveStoryFacts): Card[] {
 /** Cards whose fact holds for weeks: they rest between broadcasts. */
 const STANDING = new Set<LowerThirdKind>(['contractYear', 'drafted', 'formerClub', 'rookie', 'shutouts'])
 
+/* ─────────────────────────── rivalry heat ─────────────────────────── */
+
+/** Team heat this high (with penalties or a fight to show for it) puts up HEATING UP. */
+export const HEAT_TEAM_CARD = 0.42
+/** A card about a run-in in live play waits at most this long for the whistle. */
+export const HEAT_WAIT_S = 60
+
+const NTH_WORDS = ['', 'first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth']
+const nthWord = (n: number): string => NTH_WORDS[n] ?? ordinal(n)
+
+/** Rivalry seeds the night: a grudge match starts warmer than a rivalry night. */
+export function carriedHeatOf(f: LiveStoryFacts): CarriedHeat {
+  const riv = f.rivalry ? (/grudge/i.test(f.rivalry.label) ? 0.55 : 0.35) : 0
+  return {
+    team: Math.max(riv, f.heat?.team ?? 0),
+    pairs: (f.heat?.pairs ?? []).map((p) => ({ a: p.byId, b: p.onId, heat: p.heat })),
+  }
+}
+
+/** Tonight's heat, from the stream and what the clubs and the men carried in. */
+export function liveHeatOf(stream: GameStream, f: LiveStoryFacts): GameHeat {
+  const byId = new Map(f.players.map((p) => [p.id, p]))
+  return computeGameHeat(stream, {
+    sideOf: (pid) => byId.get(pid)?.side ?? null,
+    stars: new Set(topScorers(f.players).keys()),
+    carried: carriedHeatOf(f),
+  })
+}
+
+/** The BAD BLOOD card for a pair with history ('' when a slot can't be filled truthfully). */
+function badBloodText(p: LiveHeatPair, nameOf: (id: string) => string, key: string): string {
+  if ((p.kind === 'cheapShot' || p.kind === 'afterWhistle') && (!p.infraction || GENERIC_INFRACTION.test(p.infraction))) return ''
+  if (p.kind === 'feud' && !p.club) return ''
+  const n = p.meetingsSince + 1
+  return render(LT_BAD_BLOOD, { kind: p.kind, first: p.meetingsSince === 0 }, `${key}:bb:${pairKey(p.byId, p.onId)}`, {
+    a: surname(nameOf(p.byId)), b: surname(nameOf(p.onId)), date: p.date, seasonTail: p.seasonTail,
+    nth: nthWord(n), Nth: capFirst(nthWord(n)), hitVerb: p.down ? 'flattened' : 'hammered',
+    infraction: (p.infraction ?? '').toLowerCase(), club: p.club ?? '',
+  })
+}
+
 /* ─────────────────────────── the plan ─────────────────────────── */
 
 interface LtMoment {
@@ -572,12 +649,23 @@ export function planLiveStory(stream: GameStream, f: LiveStoryFacts, opts: PlanO
   const feudShiftSeen = new Set<string>()
 
   const nameOf = (pid: string): string => byId.get(pid)?.name ?? pid
+  const heat = liveHeatOf(stream, f)
+  const carriedPairs = (f.heat?.pairs ?? []).filter((p) => byId.has(p.byId) && byId.has(p.onId) && sideOf(p.byId) !== sideOf(p.onId))
+  const carriedByKey = new Map(carriedPairs.map((p) => [pairKey(p.byId, p.onId), p]))
   const scoreLine = (): string => us ? `${score[us]}–${score[them!]}` : ''
   const userPlayer = (pid: string): boolean => !!us && sideOf(pid) === us
 
   /** Options for a lower-third at a whistle: the men on the ice right now. */
-  const whistleMoment = (at: number, period: number, t: number): void => {
-    const options: LtMoment['options'] = []
+  const whistleMoment = (at: number, period: number, t: number, extra: LtMoment['options'] = []): void => {
+    const options: LtMoment['options'] = [...extra]
+    // Two men with history from an earlier meeting, both on the ice.
+    for (const p of carriedPairs) {
+      const sa = sideOf(p.byId)
+      const sb = sideOf(p.onId)
+      if (!sa || !sb || !onIce[sa].has(p.byId) || !onIce[sb].has(p.onId)) continue
+      const text = badBloodText(p, nameOf, key)
+      if (text) options.push({ cardId: `bb:${pairKey(p.byId, p.onId)}`, playerId: p.onId, kind: 'badBlood', side: sb, title: 'BAD BLOOD', text, score: 150 + Math.round(p.heat * 40) })
+    }
     for (const side of ['home', 'away'] as const) {
       for (const pid of onIce[side]) {
         for (const c of cardsByPlayer.get(pid) ?? []) {
@@ -650,6 +738,118 @@ export function planLiveStory(stream: GameStream, f: LiveStoryFacts, opts: PlanO
   }
   const goalsTonightOf = new Map<string, number>()
 
+  /* ── rivalry heat: tonight's run-ins, placed at the stoppage after them ── */
+  const whistles: Array<{ at: number; period: number }> = []
+  const faceoffs: number[] = []
+  for (const ev of stream) {
+    if (ev.type === 'whistle' && ev.reason !== 'goal') whistles.push({ at: abs(ev), period: ev.period })
+    else if (ev.type === 'faceoff') faceoffs.push(abs(ev))
+  }
+  /** The whistle that ends live play after a run-in (null if it is too far off). */
+  const liveAt = (t: number): { at: number; period: number } | null => {
+    const w = whistles.find((x) => x.at >= t - 0.5)
+    return w && w.at - t <= HEAT_WAIT_S ? { at: w.at + 1, period: w.period } : null
+  }
+  /** At a stoppage (a penalty call, a fight): after the call's own graphic, or with the next set. */
+  const stoppageAt = (t: number): number => {
+    const fo = faceoffs.find((x) => x > t)
+    return fo !== undefined && fo - t < 240 ? Math.max(t + 9, fo - 3.5) : t + 9
+  }
+  const clockOf = (inc: HeatIncident): { clock: string; period: string } => ({ clock: clockText(inc.t), period: periodWord(inc.period) })
+  const tonightByPair = new Map<string, HeatIncident[]>()
+  const hitCount = new Map<string, number>()
+  const faceOptions = new Map<string, LtMoment['options'][number]>()
+  const ranks = topScorers(f.players)
+  const pointsOf = (pid: string): number => { const p = byId.get(pid); return p ? p.seasonGoals + p.seasonAssists : 0 }
+  for (const inc of heat.incidents) {
+    if (inc.kind === 'chirp') continue
+    const k = pairKey(inc.by, inc.on)
+    const prior = tonightByPair.get(k) ?? []
+    const carried = carriedByKey.get(k)
+    const a = surname(nameOf(inc.by))
+    const b = surname(nameOf(inc.on))
+    const ik = `${key}:heat:${inc.period}:${Math.round(inc.t)}:${k}`
+    const opts: LtMoment['options'] = []
+    const boil = (): void => {
+      if (!carried) return
+      const text = badBloodText(carried, nameOf, key)
+      if (text) opts.push({ cardId: `bb:${k}`, playerId: carried.onId, kind: 'badBlood', side: sideOf(carried.onId) ?? 'home', title: 'BAD BLOOD', text, score: 205 })
+    }
+    if (inc.kind === 'goalInFace') {
+      const first = prior.find((x) => x.kind !== 'hit')
+      const text = first
+        ? render(LT_HEAT_FACE, { when: 'tonight' }, ik, { s: a, o: b, ...clockOf(first), date: '', seasonTail: '' })
+        : carried
+          ? render(LT_HEAT_FACE, { when: 'before' }, ik, { s: a, o: b, clock: '', period: '', date: carried.date, seasonTail: carried.seasonTail })
+          : ''
+      if (text) faceOptions.set(`${inc.period}:${inc.t}:${inc.by}`, { cardId: `hf:${k}`, playerId: inc.by, kind: 'heat', side: inc.side, title: 'BAD BLOOD', text, score: 188 })
+      continue
+    }
+    tonightByPair.set(k, [...prior, inc])
+    let at: number | null = null
+    let period = inc.period
+    if (inc.kind === 'hit' || inc.kind === 'bigHit') {
+      const hk = `${inc.by}>${inc.on}`
+      const n = (hitCount.get(hk) ?? 0) + 1
+      hitCount.set(hk, n)
+      const firstHit = prior.find((x) => (x.kind === 'hit' || x.kind === 'bigHit') && x.by === inc.by)
+      if (firstHit && (n >= 3 || (n >= 2 && inc.kind === 'bigHit' && inc.down === true))) {
+        opts.push({
+          cardId: `hr:${hk}:${n}`, playerId: inc.on, kind: 'heat', side: inc.side, title: 'BAD BLOOD',
+          text: render(LT_HEAT_REPEAT, { kind: 'hit' }, ik, { a, b, n: NUMBER_WORDS[n] ?? String(n), nth: nthWord(n), Nth: capFirst(nthWord(n)), infraction: '', ...clockOf(firstHit) }),
+          score: 170,
+        })
+      }
+      if (inc.kind === 'bigHit') boil()
+      const w = liveAt(inc.absT)
+      if (w) { at = w.at; period = w.period }
+    } else if (inc.kind === 'cheapShot' || inc.kind === 'afterWhistle') {
+      const inf = inc.infraction ?? ''
+      if (inf && !GENERIC_INFRACTION.test(inf)) {
+        const infraction = inf.toLowerCase()
+        // a real run-in first: a big hit, a call, a fight (a routine check is not one)
+        const runIn = prior.find((x) => x.kind !== 'hit')
+        if (runIn) {
+          opts.push({
+            cardId: `hp:${k}:${Math.round(inc.absT)}`, playerId: inc.on, kind: 'heat', side: inc.side, title: 'BAD BLOOD',
+            text: render(LT_HEAT_REPEAT, { kind: 'penalty' }, ik, { a, b, infraction, n: '', nth: '', Nth: '', ...clockOf(runIn) }),
+            score: 175,
+          })
+        } else if (inc.kind === 'cheapShot' && ranks.has(inc.on)) {
+          const victim = byId.get(inc.on)
+          const abbr = victim?.side === 'home' ? f.homeAbbr : f.awayAbbr
+          opts.push({
+            cardId: `hs:${inc.on}`, playerId: inc.on, kind: 'heat', side: inc.side, title: 'TOP SCORER',
+            text: render(LT_HEAT_STAR, { rank: ranks.get(inc.on)! }, ik, { a, b, infraction, InfractionCap: capFirst(infraction), abbr, pts: String(pointsOf(inc.on)) }),
+            score: 165,
+          })
+        }
+      }
+      boil()
+      at = stoppageAt(inc.absT)
+    } else if (inc.kind === 'fight') {
+      const cause = prior.find((x) => x.kind !== 'fight')
+      const inf = cause?.infraction ?? ''
+      if (cause && (cause.kind === 'hit' || cause.kind === 'bigHit' || (inf && !GENERIC_INFRACTION.test(inf)))) {
+        const hitCause = cause.kind === 'hit' || cause.kind === 'bigHit'
+        opts.push({
+          cardId: `ha:${k}`, playerId: cause.on, kind: 'heat', side: sideOf(cause.on) ?? inc.side, title: 'BAD BLOOD',
+          text: render(LT_HEAT_ANSWER, { cause: hitCause ? 'hit' : 'penalty' }, ik, {
+            x: surname(nameOf(cause.on)), y: surname(nameOf(cause.by)), infraction: inf.toLowerCase(), ...clockOf(cause),
+          }),
+          score: 210,
+        })
+      } else boil()
+      at = stoppageAt(inc.absT)
+    }
+    if (at !== null && opts.length > 0) lt.push({ at, period, options: opts.sort((x, y) => y.score - x.score) })
+  }
+  let hitsSoFar = 0
+  let pimSoFar = 0
+  let fightsSoFar = 0
+  let teamTries = 0
+  const fightEvents = stream.some((e) => e.type === 'fight')
+
   for (const ev of stream) {
     switch (ev.type) {
       case 'frame': {
@@ -694,6 +894,12 @@ export function planLiveStory(stream: GameStream, f: LiveStoryFacts, opts: PlanO
       case 'faceoff':
         lastFaceoffAbs = abs(ev)
         break
+      case 'hit':
+        hitsSoFar++
+        break
+      case 'fight':
+        fightsSoFar++
+        break
       case 'shot': {
         const side = sideOf(ev.shooter as string)
         if (side) shotsFaced[side === 'home' ? 'away' : 'home']++
@@ -708,6 +914,8 @@ export function planLiveStory(stream: GameStream, f: LiveStoryFacts, opts: PlanO
         }
         break
       case 'penalty': {
+        pimSoFar += ev.minutes
+        if (!fightEvents && ev.infraction === 'fighting') fightsSoFar += 0.5
         const pid = ev.player as string
         if (userPlayer(pid) && ev.minutes === 2) box.set(pid, { until: ev.t + 120, period: ev.period, infraction: ev.infraction, minutes: ev.minutes })
         break
@@ -727,6 +935,8 @@ export function planLiveStory(stream: GameStream, f: LiveStoryFacts, opts: PlanO
         // Lower-third after the goal: a credited man's live card.
         const options: LtMoment['options'] = []
         credited.forEach((pid, i) => { const o = liveOption(pid, i === 0); if (o) options.push(o) })
+        const face = faceOptions.get(`${ev.period}:${ev.t}:${scorer}`)
+        if (face) options.push(face)
         if (options.length > 0) lt.push({ at: at + GOAL_SETTLE_S, period: ev.period, options: options.sort((a, b) => b.score - a.score) })
 
         // Bench beats (user's bench only).
@@ -786,7 +996,20 @@ export function planLiveStory(stream: GameStream, f: LiveStoryFacts, opts: PlanO
       case 'whistle': {
         if (ev.reason === 'goal') break
         const at = abs(ev) + 1
-        whistleMoment(at, ev.period, ev.t)
+        const heatExtra: LtMoment['options'] = []
+        const fights = Math.floor(fightsSoFar)
+        if (teamTries < 4 && gameHeatAt(heat, abs(ev)) >= HEAT_TEAM_CARD && (pimSoFar >= 10 || fights >= 1) && hitsSoFar >= 6) {
+          teamTries++
+          heatExtra.push({
+            cardId: 'heat:team', kind: 'heat', side: 'home', title: 'HEATING UP', score: 155,
+            text: render(LT_HEAT_TEAM, {}, `${key}:heatTeam`, {
+              pim: String(pimSoFar), hits: String(hitsSoFar), clock: clockText(ev.t), period: periodWord(ev.period),
+              homeAbbr: f.homeAbbr, awayAbbr: f.awayAbbr,
+              fightsTail: fights === 0 ? '' : fights === 1 ? ', plus a fight' : `, plus ${NUMBER_WORDS[fights] ?? fights} fights`,
+            }),
+          })
+        }
+        whistleMoment(at, ev.period, ev.t, heatExtra)
         if (bench && us) {
           // Sore about his minutes: a second-period whistle with him on the bench.
           if (ev.period === 2) {
@@ -891,7 +1114,7 @@ const URGENT_BENCH = 75
 
 /** Lower-thirds of one kind a night (default 1): variety over volume. Streaks
  *  and milestone chases can run twice — the second is usually the live sequel. */
-export const LT_KIND_CAP: Partial<Record<LowerThirdKind, number>> = { pointStreak: 2, milestone: 2, shutoutBid: 2 }
+export const LT_KIND_CAP: Partial<Record<LowerThirdKind, number>> = { pointStreak: 2, milestone: 2, shutoutBid: 2, badBlood: 2, heat: 2 }
 
 function schedule(lt: LtMoment[], bench: BenchCandidate[], busy: Array<[number, number]>, benchSide: LiveSide): LiveBeat[] {
   type Item = { at: number; period: number; lt?: LtMoment; bench?: BenchCandidate }

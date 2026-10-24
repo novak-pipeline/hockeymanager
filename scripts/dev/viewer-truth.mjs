@@ -75,7 +75,7 @@ export const CHECKLIST = {
   twoOnOne: ['Lanes filled?', 'Pass goes across or forward, not back?', 'Defender plays the pass?'],
   ozCycleShot: ['Puck moves with purpose along the wall?', 'Support players move, not stand?', 'The shot has a visible set-up?'],
   ppSetPlay: ['Formation recognisable (umbrella / 1-3-1)?', 'Puck moves with purpose?', 'PK box visible?'],
-  goalReplay: ['Celebration, bench, crowd?', 'Replay shows the puck going in?', 'Back to the faceoff cleanly?', 'Score never wrong?'],
+  goalReplay: ['Celebration, bench, crowd?', 'Replay shows the puck going in?', "Then behind the net (and from the shooter's side when he shot off a wing): each angle shows the puck go in?", 'Back to the faceoff cleanly?', 'Score never wrong?'],
   lineChangeOnFly: ['Right number of men?', 'Change through the bench door?', 'No ghosts / morphing through the boards?'],
   faceoffWinPlay: ['Everyone set before the drop?', 'Draw goes back?', 'A play follows?'],
   bigHit: ['Wind-up / approach visible?', 'Contact reads?', 'Reaction and puck consequence?'],
@@ -107,6 +107,10 @@ export const CHECKLIST = {
   // fights: the sequence at the stoppage (fight.ts / fightChoreo.ts)
   fightDown: ['Gloves and sticks on the ice?', 'Do they square up, grab, and trade punches you can read?', 'Does the man who goes down go down on a punch or in the clinch?', 'Linesmen step in and part them?', 'Everyone else backs off?', 'FIGHT card names both men and the result?'],
   fightDecision: ['Gloves and sticks on the ice?', 'Punches, then a clinch, then both spent?', 'Linesmen step in and part them?', 'Camera cuts in close and back out?', 'FIGHT card names both men and the result?'],
+  // the replay package: the period's highlights before the intermission screen
+  periodReel: ['Every goal of the period, first?', 'Then the best saves / hits / chances, each clip short?', 'Caption names the moment and the clock?', 'SKIP HIGHLIGHTS works, then the intermission?'],
+  // rivalry heat: a rematch carrying the last meeting's bad blood
+  rivalryHeat: ['BAD BLOOD card names the two men and what happened last time?', 'True to that first meeting (the hit / the fight / the call)?', 'Crowd louder than an ordinary night?', 'Would a hockey fan believe the line?'],
 }
 
 const sha1 = (file) => createHash('sha1').update(readFileSync(file)).digest('hex')
@@ -182,7 +186,7 @@ try {
     for (const sc of pins.scenarios) {
       if (ONLY && !String(ONLY).split(',').includes(sc.kind)) continue
       const label = `${engine}-${sc.kind}`
-      const opened = await win.evaluate((s) => window.__reel.watch(s.homeId, s.awayId, s.seed, s.engine), sc)
+      const opened = await win.evaluate((s) => window.__reel.watch(s.homeId, s.awayId, s.seed, s.engine, s.priorSeed), sc)
       const evCount = Number(String(opened).split('·')[1]?.trim().split(' ')[0])
       const fpOk = String(sc.fingerprint).startsWith(`${evCount}·`)
       // wait for THIS game's viewer with its renderer built (the previous clip's
@@ -235,6 +239,8 @@ try {
       const momentStills = [-0.4, 0, 0.25, 0.5, 0.8, 1.2, 1.8, 2.6, 3.5]
       const t0 = Date.now()
       const isGoal = sc.kind === 'goalReplay' || sc.kind === 'emptyNetLate'
+      // the period reel runs past the horn: record until the intermission screen is up
+      const isReel = sc.kind === 'periodReel'
       const maxWall = 90_000
       let st
       let replaySeen = false
@@ -254,10 +260,17 @@ try {
           await win.screenshot({ path: join(OUT, 'stills', `${label}.png`) }).catch(() => {})
         }
         // a period break inside the clip window: on with the clip (the owner would press Continue)
-        if (st.phase === 'intermission' && st.clock < sc.clipTo) { await win.evaluate(() => window.__viewerProbe.continueIntermission()); continue }
+        if (st.phase === 'intermission' && st.clock < sc.clipTo && !isReel) { await win.evaluate(() => window.__viewerProbe.continueIntermission()); continue }
+        // the reel handed over to the intermission: hold on it a moment (it is part of the flow), then done
+        if (st.phase === 'intermission' && isReel) {
+          await win.waitForTimeout(2500)
+          mkdirSync(join(OUT, 'stills'), { recursive: true })
+          await win.screenshot({ path: join(OUT, 'stills', `${label}-intermission.png`) }).catch(() => {})
+          break
+        }
         if (st.phase === 'intermission' || st.phase === 'postgame') break
         const pastClip = st.clock >= sc.clipTo && !st.replay && !st.replayPending
-        if (pastClip && (!isGoal || replaySeen || st.goalsSeen === 0 || Date.now() - t0 > 25_000)) break
+        if (pastClip && !isReel && (!isGoal || replaySeen || st.goalsSeen === 0 || Date.now() - t0 > 25_000)) break
         if (Date.now() - t0 > maxWall) break
       }
       const wallS = (Date.now() - t0) / 1000

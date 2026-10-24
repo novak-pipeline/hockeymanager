@@ -764,9 +764,9 @@ function Shell(props: { team: TeamInfo; engineVersion: string }): JSX.Element {
   useEffect(() => {
     if (!viewerProbeEnabled()) return
     const api = {
-      watch: async (homeId: string, awayId: string, seed: number, engine: 'classic' | 'agent'): Promise<string> => {
+      watch: async (homeId: string, awayId: string, seed: number, engine: 'classic' | 'agent', priorSeed?: number): Promise<string> => {
         setWatched(null)
-        const res = await client.devWatchFixture(homeId, awayId, seed, engine)
+        const res = await client.devWatchFixture(homeId, awayId, seed, engine, priorSeed)
         if (res.type !== 'watch' || !res.game) return res.type === 'error' ? `error: ${res.message}` : 'no game'
         setWatchMode('rink')
         setIceStart(null)

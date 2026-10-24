@@ -752,6 +752,9 @@ export interface QuickSimOptions {
   /** Rivalry heat 0..1 — scales the penalty rate for a chippier grudge match.
    *  Absent → 0 (an ordinary game, unchanged). */
   intensity?: number
+  /** Heat carried in from earlier meetings, 0..1 (shared/heat.ts fightHeatInput).
+   *  Additive: feeds the fight-frequency hook only. Absent → 0, unchanged. */
+  heat?: number
 }
 
 /**
@@ -923,7 +926,7 @@ export function quickSimGame(
 ): QuickSimResult {
   const rules = opts.rules ?? 'regularSeason'
   const rng = new Rng(opts.seed)
-  const fightTimes = rollFightPlan(opts.seed, opts.intensity ?? 0)
+  const fightTimes = rollFightPlan(opts.seed, opts.intensity ?? 0, opts.heat ?? 0)
   const injuryPlan = rollInGameInjury(opts.seed)
   const ctx: Ctx = {
     // A league on another rating scale (the imported real rosters) is read

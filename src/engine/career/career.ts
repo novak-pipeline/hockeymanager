@@ -940,6 +940,10 @@ import {
   type MediaCircuitRowView,
 } from './views'
 import type { ScoutingState, ScoutTarget, ScoutFocus, ScoutRecommendation } from '@domain/scouting'
+import { createHeatLedger, ingestGameHeat, pairsAcross, teamHeatBetween, type HeatLedgerState } from '@engine/league/heatLedger'
+import { computeGameHeat, topScorers } from '@engine/story/rivalryHeat'
+import { fightHeatInput } from '@engine/shared/heat'
+import type { LiveHeatFacts, LiveHeatPair } from '@engine/story/liveStory'
 
 /* ────────────────────────── legacy v1 view types (kept for compat) ────────────────────────── */
 
@@ -1657,6 +1661,8 @@ export class Career {
   private ownerRequest: OwnerRequest | null = null
   /** Feud arcs on the user's club (story audit 2026-10 §4; feudArc.ts). */
   private feud: FeudState = freshFeudState()
+  /** Rivalry heat carried from one meeting to the next (heatLedger.ts). */
+  private heatLedger: HeatLedgerState = createHeatLedger()
 
   /** The user GM's standing with each rival club (teamId → 0–100, 50 = neutral).
    *  Warms on completed trades, cools when you poach their RFA. Nudges how willing
@@ -8614,6 +8620,9 @@ export class Career {
     // Accumulate physical events into stats and compute per-game ratings
     // before merging into totals (so totals pick up the physical counts too).
     this.creditPhysicalStats(res)
+    // Rivalry heat: tonight's run-ins carry into the next meeting (before the
+    // totals merge, so "top scorer" means before tonight).
+    this.recordGameHeat(res, game.day)
     applyStandingsResult(this.standings, res)
     // World Chronicle: all-time head-to-head record for this matchup (pure observer).
     chronicleMeeting(this.chronicle, {
@@ -10278,6 +10287,7 @@ export class Career {
       const res = quickSimGame(home, away, this.storyResolve(), {
         seed: this.gameSeedFor(game),
         intensity: this.gameHeat(game),
+        heat: this.carriedFightHeat(game.homeTeamId, game.awayTeamId, game.day),
       })
       this.applyOutcome(game, res)
       outcomes.push(res)
@@ -11444,13 +11454,29 @@ export class Career {
    * always yields the same stream, which is what pins a golden scenario.
    * Reached only through the dev-gated `devWatchFixture` request.
    */
-  devExhibition(homeId: string, awayId: string, seed: number, engine: 'classic' | 'agent'): WatchedGame {
+  devExhibition(homeId: string, awayId: string, seed: number, engine: 'classic' | 'agent', priorSeed?: number): WatchedGame {
     const home = this.data.teams.get(asTeamId(homeId))
     const away = this.data.teams.get(asTeamId(awayId))
     if (!home || !away) throw new Error(`devExhibition: unknown team ${home ? awayId : homeId}`)
-    this.lastBroadcast = this.buildBroadcastContext(home.id, away.id, this.currentDay, false)
     const sim = engine === 'agent' ? this.watchSim() : fullSimGame
-    const res = sim(home, away, this.storyResolve(), { seed })
+    // A rematch (rivalry heat): the earlier meeting is re-simmed from its own
+    // seed and its heat carried in, from a scratch ledger — the save's real
+    // ledger is never touched, and the same (pair, seed, priorSeed) always
+    // plays the same rematch.
+    let heat = 0
+    const real = this.heatLedger
+    try {
+      if (priorSeed !== undefined) {
+        const prior = sim(home, away, this.storyResolve(), { seed: priorSeed })
+        this.heatLedger = createHeatLedger()
+        this.recordGameHeat(prior, Math.max(1, this.currentDay - 12))
+        heat = this.carriedFightHeat(home.id, away.id, this.currentDay)
+      }
+      this.lastBroadcast = this.buildBroadcastContext(home.id, away.id, this.currentDay, false)
+    } finally {
+      this.heatLedger = real
+    }
+    const res = sim(home, away, this.storyResolve(), heat > 0 ? { seed, heat } : { seed })
     this.noteLiveStoryShown(res.stream)
     return this.buildWatched(home.id, away.id, res.stream)
   }
@@ -11505,6 +11531,7 @@ export class Career {
       const res = sim(home, away, this.storyResolve(), {
         seed: this.gameSeedFor(game),
         intensity: this.gameHeat(game),
+        heat: this.carriedFightHeat(game.homeTeamId, game.awayTeamId, game.day),
       })
       if (isUser) this.noteLiveStoryShown(res.stream)
       this.applyOutcome(game, res)
@@ -11748,6 +11775,7 @@ export class Career {
         seed,
         rules: 'playoff',
         intensity: gameIntensity(this.rivalriesState, g.homeTeamId as string, g.awayTeamId as string).factor,
+        heat: this.carriedFightHeat(g.homeTeamId, g.awayTeamId, day),
       })
       if (res.decidedBy === 'shootout') throw new Error('playoff game decided by shootout')
       if (isUser && watchUser) this.noteLiveStoryShown(res.stream)
@@ -11762,6 +11790,7 @@ export class Career {
         decidedBy: res.decidedBy,
       }
       this.creditPhysicalStats(res)
+      this.recordGameHeat(res, day)
       applySeriesResult(po, g.seriesId, result)
       beatOutcomes.push(res)
       for (const pid of this.postGame(res, this.rngFor(7004, day, g.gameNumber), day)) played.add(pid)
@@ -23453,6 +23482,11 @@ export class Career {
     const riv = heat.label ? rivalryBetween(this.rivalriesState, home.id as string, away.id as string) : null
     const h2h = chronicleHeadToHead(this.chronicle, home.id as string, away.id as string)
 
+    const heatFacts = this.liveHeatFacts(home, away, day, {
+      home: new Set(story.filter((s) => s.side === 'home').map((s) => s.id)),
+      away: new Set(story.filter((s) => s.side === 'away').map((s) => s.id)),
+    })
+
     let bench: BenchFacts | undefined
     if (userSide) {
       const team = userSide === 'home' ? home : away
@@ -23503,6 +23537,7 @@ export class Career {
       players,
       ...(bench ? { bench } : {}),
       resting: [...this.liveStoryRest].filter(([, n]) => this.liveStoryWatched - n < LIVE_STORY_REST_GAMES).map(([id]) => id),
+      ...(heatFacts ? { heat: heatFacts } : {}),
     }
   }
 
@@ -23654,6 +23689,76 @@ export class Career {
     const ids = [game.homeTeamId as string, game.awayTeamId as string]
     if (ids.includes(this.userTeamId as string) && ids.includes(h.oppId)) return Math.max(base, 1)
     return base
+  }
+
+  /* ───────────── rivalry heat across games (heatLedger.ts) ───────────── */
+
+  /** The fight-frequency input for a meeting: real history between the clubs only. */
+  private carriedFightHeat(homeId: TeamId, awayId: TeamId, day: number): number {
+    return fightHeatInput(teamHeatBetween(this.heatLedger, homeId as string, awayId as string, this.year, day).heat)
+  }
+
+  /** A club's two top scorers this season (before tonight), as the heat model reads them. */
+  private heatPlayersOf(team: Team | undefined, side: 'home' | 'away'): Array<{ id: string; side: 'home' | 'away'; position: string; seasonGames: number; seasonGoals: number; seasonAssists: number }> {
+    if (!team) return []
+    return team.roster.map((id) => {
+      const p = this.data.players.get(id)
+      const t = this.totals.get(id)
+      return { id: id as string, side, position: p?.position ?? 'C', seasonGames: this.gp.get(id) ?? 0, seasonGoals: t?.goals ?? 0, seasonAssists: t?.assists ?? 0 }
+    })
+  }
+
+  /** Fold one finished NHL game's run-ins into the heat ledger. */
+  private recordGameHeat(res: GameOutcome, day: number): void {
+    const home = this.data.teams.get(res.homeTeamId)
+    const away = this.data.teams.get(res.awayTeamId)
+    if (!home || !away) return
+    const homeRoster = new Set(home.roster.map((id) => id as string))
+    const awayRoster = new Set(away.roster.map((id) => id as string))
+    const sideOf = (pid: string): 'home' | 'away' | null => (homeRoster.has(pid) ? 'home' : awayRoster.has(pid) ? 'away' : null)
+    const stars = topScorers([...this.heatPlayersOf(home, 'home'), ...this.heatPlayersOf(away, 'away')])
+    const g = computeGameHeat(res.stream, { sideOf, stars: new Set(stars.keys()) })
+    const homeIds: string[] = []
+    const awayIds: string[] = []
+    for (const [pid, s] of res.playerStats) {
+      if (s.toi <= 0) continue
+      const side = sideOf(pid as string)
+      if (side === 'home') homeIds.push(pid as string)
+      else if (side === 'away') awayIds.push(pid as string)
+    }
+    ingestGameHeat(this.heatLedger, {
+      year: this.year, day, date: dayToDateISO(this.year, day),
+      homeTeamId: res.homeTeamId as string, awayTeamId: res.awayTeamId as string,
+      homeIds, awayIds, incidents: g.incidents, pim: g.pim, fights: g.fights,
+    })
+  }
+
+  /** What tonight's two clubs and their men carry in (the live story's BAD BLOOD cards). */
+  private liveHeatFacts(home: Team, away: Team, day: number, dressed: { home: Set<string>; away: Set<string> }): LiveHeatFacts | undefined {
+    const team = teamHeatBetween(this.heatLedger, home.id as string, away.id as string, this.year, day).heat
+    const tail = (year: number): string => (year === this.year ? '' : year === this.year - 1 ? ' last season' : ` in ${year}`)
+    const pairs: LiveHeatPair[] = []
+    for (const r of pairsAcross(this.heatLedger, dressed.home, dressed.away, this.year, day)) {
+      const last = r.last
+      pairs.push({
+        byId: last.byId, onId: last.onId, kind: last.kind, heat: r.heatNow,
+        date: feudDate(last.date), seasonTail: tail(last.year), meetingsSince: r.meetingsSince,
+        ...(last.infraction ? { infraction: last.infraction } : {}),
+        ...(last.down ? { down: true } : {}),
+      })
+    }
+    // Feuding teammates who now dress for opposite clubs (feudArc.ts): the user's room.
+    const userTeam = this.data.teams.get(this.userTeamId)
+    for (const a of this.feud.arcs) {
+      const across = (dressed.home.has(a.aId) && dressed.away.has(a.bId)) || (dressed.away.has(a.aId) && dressed.home.has(a.bId))
+      if (!across || !userTeam || pairs.some((p) => (p.byId === a.aId && p.onId === a.bId) || (p.byId === a.bId && p.onId === a.aId))) continue
+      const iso = a.escalatedDate ?? a.raisedDate
+      const m = Number(iso.slice(5, 7))
+      const season = m >= 8 ? Number(iso.slice(0, 4)) : Number(iso.slice(0, 4)) - 1
+      pairs.push({ byId: a.aId, onId: a.bId, kind: 'feud', heat: 0.35, date: feudDate(iso), seasonTail: tail(season), meetingsSince: 0, club: userTeam.name })
+    }
+    if (team < 0.05 && pairs.length === 0) return undefined
+    return { team, pairs: pairs.slice(0, 6) }
   }
 
   /** The code: one of ours went down in-game. If a genuinely physical opponent
@@ -31988,6 +32093,7 @@ export class Career {
       gmJobMarket: this.gmJobMarket ? this.gmJobMarket.map((o) => ({ ...o })) : undefined,
       ownerRequest: this.ownerRequest ? { ...this.ownerRequest } : undefined,
       feudState: structuredClone(this.feud),
+      heatLedger: structuredClone(this.heatLedger),
       ...(this.intlPending ? { intlPending: structuredClone(this.intlPending) } : {}),
       gmRelationships: [...this.gmRelationships.entries()],
       gmReputation: structuredClone(this.gmRep),
@@ -32194,6 +32300,7 @@ export class Career {
     career.gmJobMarket = snapshot.gmJobMarket ? snapshot.gmJobMarket.map((o) => ({ ...o })) : null
     career.ownerRequest = snapshot.ownerRequest ? { ...snapshot.ownerRequest } : null
     if (snapshot.feudState) career.feud = structuredClone(snapshot.feudState)
+    career.heatLedger = snapshot.heatLedger ? structuredClone(snapshot.heatLedger) : createHeatLedger()
     if (snapshot.intlPending) career.intlPending = structuredClone(snapshot.intlPending)
     career.gmRelationships = new Map(snapshot.gmRelationships ?? [])
     career.gmRep = snapshot.gmReputation ? structuredClone(snapshot.gmReputation) : createGmReputation()

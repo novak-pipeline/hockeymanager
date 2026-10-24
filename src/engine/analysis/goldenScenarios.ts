@@ -43,6 +43,8 @@ export type ScenarioKind =
   | 'endToEndRush'
   | 'fightDown'
   | 'fightDecision'
+  | 'periodReel'
+  | 'rivalryHeat'
 
 export const SCENARIO_KINDS: readonly ScenarioKind[] = [
   'breakaway', 'twoOnOne', 'ozCycleShot', 'ppSetPlay', 'goalReplay',
@@ -50,7 +52,7 @@ export const SCENARIO_KINDS: readonly ScenarioKind[] = [
   'dZoneCoverage', 'offsideCall', 'faceoffNeutral', 'faceoffDefensive',
   'breakoutPlay', 'forecheckTurnover', 'nzRegroup', 'systemHome', 'systemAway',
   'trailingPush', 'rimAround', 'offGlass', 'looseRace', 'dumpInRace',
-  'boardCheckNear', 'endToEndRush', 'fightDown', 'fightDecision',
+  'boardCheckNear', 'endToEndRush', 'fightDown', 'fightDecision', 'periodReel', 'rivalryHeat',
 ]
 
 /** Human label + how much game time to show around the moment (lead before, tail after).
@@ -95,6 +97,10 @@ export const SCENARIO_META: Record<ScenarioKind, { label: string; lead: number; 
   // fights (agent engine `fight` event): one where a man goes down, one that ends with both spent
   fightDown:       { label: 'Fight: a man goes down',         lead: 3,  tail: 42 },
   fightDecision:   { label: 'Fight: both spent, linesmen in', lead: 3,  tail: 48 },
+  // the replay package: the end of the first period, its highlight reel, and the intermission
+  periodReel:      { label: 'First-period highlight reel',    lead: 10, tail: 0.5 },
+  // rivalry heat: a rematch (pinned with the earlier meeting's seed) and its BAD BLOOD card
+  rivalryHeat:     { label: 'Rematch: bad blood from the last meeting', lead: 24, tail: 14 },
 }
 
 export interface ScenarioHit {
@@ -451,6 +457,18 @@ export function findScenarios(
     }
   }
 
+  // The end of the first period, when it had something for the highlight reel.
+  {
+    const end = evs.find((x) => x.ev.type === 'periodEnd' && x.ev.period === 1)
+    if (end) {
+      const p1 = evs.filter((x) => x.ev.period === 1)
+      const goals = p1.filter((x) => x.ev.type === 'goal').length
+      const fights = p1.filter((x) => x.ev.type === 'fight').length
+      const bigHits = p1.filter((x) => x.ev.type === 'hit' && (x.ev.force ?? 0) >= 0.7).length
+      if (goals > 0) push({ kind: 'periodReel', absT: end.abs, period: 1, side: 'home', note: `P1: ${goals} goal(s), ${fights} fight(s), ${bigHits} big hit(s)`, quality: 1 + Math.min(3, goals) * 0.3 + fights * 0.3 + Math.min(3, bigHits) * 0.1 })
+    }
+  }
+
   // best first per kind; ties → earliest
   return out.sort((a, b) => (a.kind === b.kind ? b.quality - a.quality || a.absT - b.absT : SCENARIO_KINDS.indexOf(a.kind) - SCENARIO_KINDS.indexOf(b.kind)))
 }
@@ -479,6 +497,8 @@ export interface PinnedScenario extends ScenarioHit {
   /** Clip window, absolute game seconds. */
   clipFrom: number
   clipTo: number
+  /** A rematch: the seed of the earlier meeting whose heat it carries (dev exhibitions only). */
+  priorSeed?: number
 }
 
 /** Event count + final score: cheap proof that a re-simmed game is the pinned one. */

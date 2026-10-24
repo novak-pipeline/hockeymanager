@@ -280,7 +280,7 @@ export type WorkerRequestBody =
    * search pinned seeds for the ten golden scenarios. The renderer only sends
    * these when the main process enabled the dev probe (never when packaged).
    */
-  | { type: 'devWatchFixture'; homeId: string; awayId: string; seed: number; engine: 'classic' | 'agent' }
+  | { type: 'devWatchFixture'; homeId: string; awayId: string; seed: number; engine: 'classic' | 'agent'; priorSeed?: number }
   | { type: 'devFindScenarios'; engine: 'classic' | 'agent'; seeds: number[]; opponents?: string[] }
   /* ── screens ── */
   | { type: 'getDashboard' }

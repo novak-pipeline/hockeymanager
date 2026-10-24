@@ -571,7 +571,8 @@ export function vt9Framing(inp: VTInput): VTResult {
     run = []
   }
   for (const f of inp.frames) {
-    if (inReplay(f) && f.playing) {
+    // a hit / fight replay frames the man, not the puck
+    if (inReplay(f) && f.playing && (f.viewer?.replayKind === undefined || f.viewer.replayKind === 'goal' || f.viewer.replayKind === 'bigSave' || f.viewer.replayKind === 'chance')) {
       replayN++
       if (f.puck.onScreen) replayOn++
     }

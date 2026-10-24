@@ -2876,6 +2876,8 @@ export interface CareerSnapshot {
   ownerRequest?: import('@engine/league/ownerMeddling').OwnerRequest
   /** Feud arcs (story audit 2026-10 §4). Optional/additive. */
   feudState?: import('@engine/league/feudArc').FeudState
+  /** Rivalry heat carried between meetings (league/heatLedger.ts). Optional/additive — absent = no history. */
+  heatLedger?: import('@engine/league/heatLedger').HeatLedgerState
   /** An international tournament in progress (loop audit F18). Optional/additive. */
   intlPending?: {
     kind: import('@domain').IntlEventKind

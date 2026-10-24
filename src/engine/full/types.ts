@@ -182,6 +182,10 @@ export interface Ctx {
   /** Rivalry heat, 0 (ordinary game) → 1 (grudge match): scales the hit and
    *  penalty rates so a rivalry night is visibly chippier. Absent → 0. */
   intensity?: number
+  /** Heat the two clubs carry in from earlier meetings, 0..1 (shared/heat.ts;
+   *  league/heatLedger.ts). Additive. It already feeds the fight plan; an
+   *  engine may read it for post-whistle scrums and finishing checks. Absent → 0. */
+  heat?: number
   /** Tonight's fight plan (times + combatant rng), hash-derived per game so the
    *  main rng stream is untouched. Absent → no fights. */
   fights?: { times: number[]; next: number; rng: Rng }
