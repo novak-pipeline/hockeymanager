@@ -625,6 +625,11 @@ export type BreakoutPlan = 'up' | 'reverse' | 'wheel' | 'stretch' | 'rim'
 /** Neutral-zone regroup: back through the D and attack with speed, hit a stretch man, or dump it in and change. */
 export type RegroupPlan = 'controlled' | 'stretch' | 'dumpChange'
 export type EntryPlan = 'carry' | 'dump' | 'mixed'
+/** W3 S8, the power-play entry: the drop pass to a man coming with speed, the carry over the line, or dump it into the corner and retrieve. */
+export type PpEntryPlan = 'drop' | 'carry' | 'dump'
+export const PP_ENTRY_PLANS: readonly PpEntryPlan[] = ['drop', 'carry', 'dump']
+/** W3 S8, the penalty-kill shape in the zone (the 'aggressive' formation is the box with the pressure up). */
+export type PkShapePlan = 'box' | 'diamond'
 
 export const BREAKOUT_PLANS: readonly BreakoutPlan[] = ['up', 'reverse', 'wheel', 'stretch', 'rim']
 
@@ -643,12 +648,40 @@ export interface Playbook {
   screen: number
   /** The plays the team's tactics set over the system's own (forecheck, dZone, breakout, regroup, entry). */
   overrides: readonly string[]
+  /** W3 S8: the power-play set-up in their zone (the team's special-teams tactics: the coach writes them, the GM may change them). */
+  pp: PowerPlayFormation
+  /** W3 S8: relative weights of the power-play entries (drawn once per power-play rush up the ice). */
+  ppEntry: Readonly<Record<PpEntryPlan, number>>
+  /** W3 S8: the penalty-kill shape in our zone. */
+  pk: PkShapePlan
+  /** W3 S8: 0..1, how hard the kill pressures the puck (≥ PK_PRESSURE_AGGRESSIVE reads as the aggressive kill). */
+  pkPressure: number
+}
+
+/** W3 S8: a kill at or above this pressure is the aggressive (pressure) kill; below it, the passive one. */
+export const PK_PRESSURE_AGGRESSIVE = 0.6
+
+const PE = (drop: number, carry: number, dump: number): Record<PpEntryPlan, number> => ({ drop, carry, dump })
+/**
+ * W3 S8: each system's power-play entries and how hard it kills (our own
+ * reading of the standard identities; the numbers are design, not measured).
+ * The PP set-up and the kill's shape come from the team's special-teams
+ * tactics (SYSTEM_PP / SYSTEM_PK write them from the system).
+ */
+export const SYSTEM_SPECIAL: Record<CoachSystemId, { ppEntry: Record<PpEntryPlan, number>; pkPressure: number }> = {
+  lowEventTrap: { ppEntry: PE(0.3, 0.2, 0.5), pkPressure: 0.3 },
+  aggressiveForecheck: { ppEntry: PE(0.2, 0.2, 0.6), pkPressure: 0.85 },
+  speedTransition: { ppEntry: PE(0.5, 0.4, 0.1), pkPressure: 0.5 },
+  cyclePossession: { ppEntry: PE(0.4, 0.2, 0.4), pkPressure: 0.45 },
+  structuredTwoWay: { ppEntry: PE(0.45, 0.3, 0.25), pkPressure: 0.4 },
+  runAndGun: { ppEntry: PE(0.5, 0.4, 0.1), pkPressure: 0.8 },
+  defensiveShell: { ppEntry: PE(0.3, 0.2, 0.5), pkPressure: 0.15 },
 }
 
 const BO = (up: number, reverse: number, wheel: number, stretch: number, rim: number): Record<BreakoutPlan, number> => ({ up, reverse, wheel, stretch, rim })
 
 /** Each system's playbook (our own reading of the standard NHL identities; the numbers are design, not measured). */
-export const SYSTEM_PLAYBOOK: Record<CoachSystemId, Omit<Playbook, 'system' | 'overrides'>> = {
+export const SYSTEM_PLAYBOOK: Record<CoachSystemId, Omit<Playbook, 'system' | 'overrides' | 'pp' | 'ppEntry' | 'pk' | 'pkPressure'>> = {
   lowEventTrap: { forecheck: '1-3-1', dZone: 'zone', breakout: BO(0.3, 0.5, 0.2, 0, 0), regroup: 'controlled', entry: 'dump', pinch: 0.15, screen: 0.4 },
   aggressiveForecheck: { forecheck: '2-1-2', dZone: 'man', breakout: BO(0.6, 0, 0, 0, 0.4), regroup: 'dumpChange', entry: 'dump', pinch: 0.8, screen: 0.7 },
   speedTransition: { forecheck: '1-2-2', dZone: 'zone', breakout: BO(0.3, 0, 0.2, 0.5, 0), regroup: 'stretch', entry: 'carry', pinch: 0.4, screen: 0.5 },
@@ -700,12 +733,23 @@ export function playbookFor(system: CoachSystemId | string | null | undefined, t
   }
   // the pinch also reads the risk slider (profileToTactics writes it from riskTolerance)
   const pinch = clamp01(((base?.pinch ?? 0.35) + tactics.tempo.defensivePinch) / 2)
-  return { system: sys, forecheck, dZone, breakout, regroup, entry, pinch, screen: base?.screen ?? 0.5, overrides: [...new Set(overrides)] }
+  // W3 S8: special teams. The set-up and the kill's shape are the tactics'
+  // (the coach writes them from his system, the GM may change them); the
+  // 'aggressive' formation is the box with the pressure up, and a box or a
+  // diamond the GM picked over a pressure system's kills passively.
+  const st = tactics.specialTeams ?? { powerPlay: 'umbrella', penaltyKill: 'box' }
+  const special = sys ? SYSTEM_SPECIAL[sys] : null
+  const pk: PkShapePlan = st.penaltyKill === 'diamond' ? 'diamond' : 'box'
+  const basePress = special?.pkPressure ?? 0.4
+  const pkPressure = st.penaltyKill === 'aggressive' ? Math.max(basePress, 0.8) : Math.min(basePress, PK_PRESSURE_AGGRESSIVE - 0.1)
+  if (sys && st.powerPlay !== SYSTEM_PP[sys]) overrides.push('pp')
+  if (sys && st.penaltyKill !== SYSTEM_PK[sys]) overrides.push('pk')
+  return { system: sys, forecheck, dZone, breakout, regroup, entry, pinch, screen: base?.screen ?? 0.5, overrides: [...new Set(overrides)], pp: st.powerPlay, ppEntry: { ...(special?.ppEntry ?? PE(0.4, 0.3, 0.3)) }, pk, pkPressure }
 }
 
 /** The tactics a system's own playbook reads back unchanged (tests, dev scenarios): its forecheck and its man / zone choice. */
 export function tacticsForSystem(system: CoachSystemId, base: TeamTactics): TeamTactics {
-  return { ...base, forecheck: SYSTEM_FORECHECK[system], dZoneCoverage: SYSTEM_PLAYBOOK[system].dZone === 'man' ? 'man' : 'zone' }
+  return { ...base, forecheck: SYSTEM_FORECHECK[system], dZoneCoverage: SYSTEM_PLAYBOOK[system].dZone === 'man' ? 'man' : 'zone', specialTeams: { powerPlay: SYSTEM_PP[system], penaltyKill: SYSTEM_PK[system] } }
 }
 
 /**
@@ -721,6 +765,7 @@ export function systemPlaybook(profile: CoachProfile, roster?: Player[]): Playbo
         forecheck: SYSTEM_FORECHECK[profile.system],
         dZoneCoverage: dZoneFromStructure(profile.structure),
         tempo: { ...NEUTRAL_TACTICS.tempo, defensivePinch: knob(profile.riskTolerance, OFFENCE_GAIN) },
+        specialTeams: { powerPlay: SYSTEM_PP[profile.system], penaltyKill: SYSTEM_PK[profile.system] },
       }
   return playbookFor(profile.system, t)
 }

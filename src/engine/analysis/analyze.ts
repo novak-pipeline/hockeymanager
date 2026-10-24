@@ -38,6 +38,7 @@ import {
   thirdOf
 } from './rink'
 import { SHAPE_TEMPLATES, mergeShapeAccum, scoreShapes, type ShapeAccum, type ShapeSituation, type ShapeTemplate } from './shapes'
+import { judgeSpecialTeams } from './specialTeams'
 
 type Side = 'home' | 'away'
 type FrameEv = Extract<GameEvent, { type: 'frame' }>
@@ -940,5 +941,12 @@ export function analyzeGame(stream: GameStream, meta: GameMeta = {}): GameMetric
   }
   m.frameMinutes = (C['frame.sec'] ?? 0) / 60
   if (frameCount === 0) inc('stream.noFrames')
+  // W3 S8: special teams (power-play opportunities from the skaters on the ice, PP / SH goals)
+  {
+    const st = judgeSpecialTeams(stream)
+    inc('st.ppOpps', st.opps.home + st.opps.away)
+    inc('st.ppGoals', st.ppGoals)
+    inc('st.shGoals', st.shGoals)
+  }
   return m
 }

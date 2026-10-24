@@ -206,6 +206,15 @@ export function vt2Divergence(inp: VTInput): VTResult {
 }
 
 /* ── VT3 shot readability in wall time ───────────────────────────────────── */
+/**
+ * W3 S8 (reel S7, saveRebound): a jam - released inside `jamFt` of the goal
+ * centre (the goal mouth, on top of the goalie) - has no flight to draw: the
+ * flight test measures travel toward the net while the puck is still more than
+ * 3 ft out, and from the goal mouth it never is (the S7 red: a "snap" off a
+ * rebound from 1.3 ft out on the goal line, sliding wide along it). Like a tip,
+ * its read is the set-up; the flight is not judged.
+ */
+export const VT3_JAM_FT = 4
 export function vt3Shots(inp: VTInput): VTResult {
   const frames = inp.frames
   const shots = inp.events.filter((e) => e.type === 'shot' || e.type === 'missedShot')
@@ -243,10 +252,13 @@ export function vt3Shots(inp: VTInput): VTResult {
     const flight60 = flightWall * 60
     const need = s.shotType === 'slap' ? 0.6 : 0.3
     const catchRelease = s.shotType === 'oneTimer' || s.shotType === 'tip'
+    // (where it left the stick: the event's release point, else the drawn puck at the release)
+    const rel = s.x !== undefined && s.z !== undefined ? { x: s.x, z: s.z } : (after[0]?.puck ?? null)
+    const jam = rel !== null && Math.hypot(rel.x - netX, rel.z) <= VT3_JAM_FT
     judged++
     setups.push(setup)
-    flights.push(flight60)
-    const ok = (catchRelease || setup >= need) && flight60 >= 3
+    if (!jam) flights.push(flight60)
+    const ok = (catchRelease || setup >= need) && (jam || flight60 >= 3)
     if (!ok) {
       failed++
       if (ev.length < 6) ev.push(`${clk(s.absT)} ${s.shotType ?? 'shot'} by ${s.actor}: set-up ${f2(setup)} s wall (need ${need}), flight ${f2(flightWall)} s wall (${f1(flight60)} frames @60 Hz) at ${f2(near[0]!.speed)}×`)
@@ -255,7 +267,7 @@ export function vt3Shots(inp: VTInput): VTResult {
   return {
     id: 'VT3', name: 'Shot readability (wall time)',
     status: judged === 0 ? 'n/a' : failed / judged <= 0.1 ? 'green' : 'red',
-    rule: 'set-up ≥ 0.3 s wall (slap ≥ 0.6 s; one-timers exempt, tips not judged; a deke counts as set-up) and the drawn puck travelling to the net on ≥ 3 frames at 60 Hz, for ≥ 90% of shots',
+    rule: `set-up ≥ 0.3 s wall (slap ≥ 0.6 s; one-timers exempt, tips not judged; a deke counts as set-up) and the drawn puck travelling to the net on ≥ 3 frames at 60 Hz (a jam from within ${VT3_JAM_FT} ft of the goal centre has no flight to judge), for ≥ 90% of shots`,
     value: `${judged - failed}/${judged} shots readable; median set-up ${f2(pct(setups, 0.5))} s wall, median flight ${f1(pct(flights, 0.5))} frames @60 Hz`,
     evidence: ev,
   }
@@ -857,7 +869,8 @@ export function vt15Systems(inp: VTInput): VTResult {
   let judged = 0
   let red = false
   for (const team of ['home', 'away'] as const) {
-    for (const k of ['forecheck', 'dzone'] as const) {
+    // (W3 S8: the power play's set-up and the kill's shape too, read off the drawn bodies)
+    for (const k of ['forecheck', 'dzone', 'pp', 'pk'] as const) {
       const l = legibility(rep[team][k] as SeqCase<string>[])
       if (l.judged === 0) continue
       vals.push(`${team} ${k} ${l.matched}/${l.judged} ${Object.keys(l.table).join('/')}`)
@@ -870,9 +883,9 @@ export function vt15Systems(inp: VTInput): VTResult {
     }
   }
   return {
-    id: 'VT15', name: 'System legibility: the drawn forecheck and D-zone match the declared system',
+    id: 'VT15', name: 'System legibility: the drawn forecheck, D-zone and special teams match the declared system',
     status: labels.length === 0 || judged === 0 ? 'n/a' : red ? 'red' : 'green',
-    rule: `per team, the forecheck (2-1-2 / 1-2-2 pressure vs 1-3-1 / 1-4 sitting back, read off the drawn bodies) and the D-zone coverage (zone / man / collapse) match the play the sim declared on ≥ ${VT15.familyShare * 100}% of sequences (judged with ≥ ${VT15.minSeq})`,
+    rule: `per team, the forecheck (2-1-2 / 1-2-2 pressure vs 1-3-1 / 1-4 sitting back, read off the drawn bodies), the D-zone coverage (zone / man / collapse), the power-play set-up (umbrella / 1-3-1 / overload) and the kill's shape (box / diamond) match the play the sim declared on ≥ ${VT15.familyShare * 100}% of sequences (judged with ≥ ${VT15.minSeq})`,
     value: vals.join('; ') || 'no sequences',
     evidence: ev,
   }

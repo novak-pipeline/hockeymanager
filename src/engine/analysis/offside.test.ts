@@ -52,6 +52,22 @@ describe('offside judge', () => {
     expect(tagged.missed).toEqual([])
   })
 
+  it('a defender who takes it between two frames and brings it back over his line puts nobody offside (W3 S8, reel S7 VT18)', () => {
+    // the attackers (home) had it in their zone; it slid out over the line
+    // (home's men still deep in it), and away's a1 picked it up and pulled it
+    // back in in the same quarter second: red before (judged a delayed offside
+    // by home, then h2's later touch a missed call)
+    const fs = [
+      frame(39.75, 33, 'h1', [sk('h1', 34), sk('h2', 60)], [sk('a1', 29)]),
+      frame(40, 30, null, [sk('h1', 45), sk('h2', 60)], [sk('a1', 28)]),
+      frame(40.25, 23, null, [sk('h1', 44), sk('h2', 58)], [sk('a1', 26)]),
+      frame(40.5, 27, 'a1', [sk('h1', 43), sk('h2', 57)], [sk('a1', 26)]),
+      frame(40.75, 31, null, [sk('h1', 42), sk('h2', 56)], [sk('a1', 29)]),
+      frame(41, 33, 'h2', [sk('h1', 41), sk('h2', 34)], [sk('a1', 31)]),
+    ]
+    expect(judgeOffside(fs, []).missed).toEqual([])
+  })
+
   it('nobody is offside when the defenders put the puck into their own zone', () => {
     const fs = [
       frame(30, 20, 'a1', [sk('h1', 40)], [sk('a1', 19)]),

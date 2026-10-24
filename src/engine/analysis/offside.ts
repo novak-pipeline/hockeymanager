@@ -196,7 +196,13 @@ export function judgeOffside(frames0: readonly TPFrame[], whistles: readonly Off
       // who propelled it over: the last side to have it (this frame's carrier, else the last one seen)
       const pt = teamOf(p.carrier)
       // a poke / block / save since the last frame took it off the carrier's stick
-      const by = touchedNow ?? pt ?? prevTouch
+      // (W3 S8, reel S7 VT18: a DEFENDER who took it between the two frames is
+      // the one who brought it back over the line - the puck had left the zone
+      // and he pulled it back in: his side's touch, nobody offside. It used to
+      // go to the last side seen with it, the attackers, and opened a delayed
+      // offside the sim rightly never had.)
+      const gainedBy: 'home' | 'away' | null = ct !== null && ct !== team && f.carrier !== (p.carrier ?? null) ? ct : null
+      const by: 'home' | 'away' | null = gainedBy ?? touchedNow ?? pt ?? prevTouch
       if (by !== team) continue
       rep.entries++
       // the crossing instant, interpolated between the two frames

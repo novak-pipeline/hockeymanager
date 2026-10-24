@@ -55,6 +55,33 @@ describe('MatchTimeline', () => {
     expect(backtracks / checked).toBeLessThan(0.01)
   })
 
+  it('draws the puck on the straight line between frames, never faster than the stream moved it (W3 S8, reel S7 VT20)', () => {
+    // red before: the Catmull-Rom spline through a release (slow on the blade,
+    // then fast) eased in and caught up, so the drawn puck sped up past the
+    // sim's over the frames after a pass, and bulged round a corner outside
+    // the boards. The chord between two frames is the sim's own travel.
+    const { tl } = buildTimeline(3)
+    const frames = (tl as unknown as { frames: Array<{ absT: number; frame: { puck: { x: number; y: number } } }> }).frames
+    let checked = 0
+    let worst = 0
+    for (let i = 5; i < frames.length - 5 && checked < 1500; i += 3) {
+      const a = frames[i]!
+      const b = frames[i + 1]!
+      const span = b.absT - a.absT
+      if (span <= 0 || (tl as unknown as { firstStoppageBetween(x: number, y: number): number | null }).firstStoppageBetween(a.absT, b.absT) !== null) continue
+      const s0 = tl.sampleAt(a.absT + span * 0.25)
+      const s1 = tl.sampleAt(a.absT + span * 0.75)
+      if (!s0 || !s1) continue
+      const chord = Math.hypot((b.frame.puck.x - a.frame.puck.x) * 100, (b.frame.puck.y - a.frame.puck.y) * 42.5)
+      if (chord > 30) continue
+      const drawn = Math.hypot((s1.puck.x - s0.puck.x) * 100, (s1.puck.y - s0.puck.y) * 42.5)
+      worst = Math.max(worst, drawn - chord * 0.5)
+      checked++
+    }
+    expect(checked).toBeGreaterThan(300)
+    expect(worst).toBeLessThan(1e-6)
+  })
+
   it('final score matches the engine outcome', () => {
     const { tl, out } = buildTimeline(3)
     expect(tl.homeFinal).toBe(out.homeGoals)

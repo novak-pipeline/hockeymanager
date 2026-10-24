@@ -452,6 +452,36 @@
       "source": "nhlApiLegacy",
       "confidence": "measured"
     },
+    "specialTeams.ppPct": {
+      "value": 0.21,
+      "band": [
+        0.17,
+        0.24
+      ],
+      "source": "publicStatPages",
+      "confidence": "estimate",
+      "note": "NHL league power-play % ≈ 20-21% in recent seasons (NHL.com team stats); league PK% is its complement"
+    },
+    "specialTeams.ppOppsPerTeamGame": {
+      "value": 3.0,
+      "band": [
+        2.5,
+        3.7
+      ],
+      "source": "publicStatPages",
+      "confidence": "estimate",
+      "note": "NHL ≈ 3 power-play opportunities per team-game"
+    },
+    "specialTeams.shGoalsPerTeamGame": {
+      "value": 0.08,
+      "band": [
+        0.04,
+        0.13
+      ],
+      "source": "publicStatPages",
+      "confidence": "estimate",
+      "note": "NHL short-handed goals ≈ 0.07-0.09 per team-game"
+    },
     "shots.shootingPct": {
       "value": 0.10213710796558423,
       "band": [
@@ -927,6 +957,26 @@
       "note": "mean assigned distance to the textbook spot"
     },
     "shapeSim.ppUmbrella.defend": {
+      "value": null,
+      "band": [
+        0,
+        16
+      ],
+      "source": "coachingTemplates",
+      "confidence": "design",
+      "note": "mean assigned distance to the textbook spot"
+    },
+    "shapeSim.ppOverload.attack": {
+      "value": null,
+      "band": [
+        0,
+        16
+      ],
+      "source": "coachingTemplates",
+      "confidence": "design",
+      "note": "mean assigned distance to the textbook spot"
+    },
+    "shapeSim.ppOverload.defend": {
       "value": null,
       "band": [
         0,

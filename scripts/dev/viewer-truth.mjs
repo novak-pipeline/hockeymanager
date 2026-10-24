@@ -74,7 +74,7 @@ export const CHECKLIST = {
   breakaway: ['Readable start to finish?', 'Puck always visible?', 'Did the shooter set up, or did the shot just happen?', 'Goalie reaction plausible?'],
   twoOnOne: ['Lanes filled?', 'Pass goes across or forward, not back?', 'Defender plays the pass?'],
   ozCycleShot: ['Puck moves with purpose along the wall?', 'Support players move, not stand?', 'The shot has a visible set-up?'],
-  ppSetPlay: ['Formation recognisable (umbrella / 1-3-1)?', 'Puck moves with purpose?', 'PK box visible?'],
+  ppSetPlay: ['Formation recognisable (umbrella / 1-3-1 / overload)?', 'Puck moves with purpose (around the zone, across to the one-timer)?', 'A man in front of the goalie (the screen)?', 'PK box or diamond visible?'],
   goalReplay: ['Celebration, bench, crowd?', 'Replay shows the puck going in?', 'Back to the faceoff cleanly?', 'Score never wrong?'],
   lineChangeOnFly: ['Right number of men?', 'Change through the bench door?', 'No ghosts / morphing through the boards?'],
   faceoffWinPlay: ['Everyone set before the drop?', 'Draw goes back?', 'A play follows?'],
@@ -104,6 +104,8 @@ export const CHECKLIST = {
   dumpInRace: ['Does the dump come off the end boards believably (a hard dump dies, a rim keeps going)?', 'Does the forechecker skate to where it will come out?', 'Does the D get back to it in time?'],
   boardCheckNear: ['Can you see the hit on the near boards (both men, the pin, the glass)?', 'Does the camera rise rather than crop the boards?', 'Does the camera ease, never jerk?'],
   endToEndRush: ['Does the camera lead the rush up the ice (never chasing the puck off the edge)?', 'Is the puck always in frame?', 'No cut or speed change mid-play?'],
+  // W3 S8: special teams
+  pkClear: ['Can you see the kill\'s shape (box or diamond) before the clear?', 'Does a killer win it and fire it the length of the ice?', 'Does the power play have to regroup from its own end?'],
   // fights: the sequence at the stoppage (fight.ts / fightChoreo.ts)
   fightDown: ['Gloves and sticks on the ice?', 'Do they square up, grab, and trade punches you can read?', 'Does the man who goes down go down on a punch or in the clinch?', 'Linesmen step in and part them?', 'Everyone else backs off?', 'FIGHT card names both men and the result?'],
   fightDecision: ['Gloves and sticks on the ice?', 'Punches, then a clinch, then both spent?', 'Linesmen step in and part them?', 'Camera cuts in close and back out?', 'FIGHT card names both men and the result?'],

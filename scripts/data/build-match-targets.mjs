@@ -118,6 +118,10 @@ const metrics = {
   // Shots
   'shots.sogPerTeamGame': m(R.shotsOnGoal, around(R.shotsOnGoal, 0.12), 'nhlApiLegacy', 'measured'),
   'shots.goalsPerTeamGame': m(R.goals, around(R.goals, 0.12), 'nhlApiLegacy', 'measured'),
+  // W3 S8: special teams (league figures noted by hand; PK% = 100 - PP% league-wide)
+  'specialTeams.ppPct': m(0.21, [0.17, 0.24], 'publicStatPages', 'estimate', 'NHL league power-play % ≈ 20-21% in recent seasons (NHL.com team stats); league PK% is its complement'),
+  'specialTeams.ppOppsPerTeamGame': m(3.0, [2.5, 3.7], 'publicStatPages', 'estimate', 'NHL ≈ 3 power-play opportunities per team-game'),
+  'specialTeams.shGoalsPerTeamGame': m(0.08, [0.04, 0.13], 'publicStatPages', 'estimate', 'NHL short-handed goals ≈ 0.07-0.09 per team-game'),
   'shots.shootingPct': m(T.shooting.shootingPct, around(T.shooting.shootingPct, 0.12), 'nhlApiLegacy', 'measured'),
   'shots.blockedShare': (() => {
     const v = R.blockedShots / (R.shotsOnGoal + R.missedShots + R.blockedShots)
@@ -169,7 +173,7 @@ const metrics = {
 }
 
 // Shape-similarity bands (same for every template).
-for (const id of ['breakoutWall', 'ozLowCycle', 'ozPointShot', 'nzRegroup', 'rushEntry', 'pp131', 'ppUmbrella']) {
+for (const id of ['breakoutWall', 'ozLowCycle', 'ozPointShot', 'nzRegroup', 'rushEntry', 'pp131', 'ppUmbrella', 'ppOverload']) {
   metrics[`shapeSim.${id}.attack`] = m(null, [0, 16], 'coachingTemplates', 'design', 'mean assigned distance to the textbook spot')
   metrics[`shapeSim.${id}.defend`] = m(null, [0, 16], 'coachingTemplates', 'design', 'mean assigned distance to the textbook spot')
 }

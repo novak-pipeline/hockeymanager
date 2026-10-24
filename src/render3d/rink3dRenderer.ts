@@ -35,6 +35,8 @@ import {
   endzoneChooseEnd,
   puckCarriedOffset,
   puckTrackStep,
+  clampToRink,
+  gameStepDt,
   capLookYaw,
   broadcastFraming,
   followHeadingStep,
@@ -2207,6 +2209,9 @@ export class Rink3dRenderer implements MatchRenderer, CameraCutConsumer {
     // Puck position: if carried, sits on the carrier's blade
     let pTargetX: number
     let pTargetZ: number
+    // W3 S8 (VT20): the target is the sim's FREE puck (released from a swing
+    // the choreography still holds): tracked as free, never faster than it
+    let freeTarget = false
     const blade = carrierPose !== null ? this.bladePoint(carrierPose) : null
     // (a passer the choreography still holds in his swing while the SIM has
     // already given the puck to his receiver: the sim wins too - drawing it
@@ -2230,6 +2235,7 @@ export class Rink3dRenderer implements MatchRenderer, CameraCutConsumer {
       const off = Math.hypot(blade.x - puckWx, blade.z - puckWz) > SWING_HOLD_FT
       pTargetX = off ? puckWx : blade.x
       pTargetZ = off ? puckWz : blade.z
+      freeTarget = off
       this.carrierWx = carrierPose.worldX.pos
       this.carrierWz = carrierPose.worldZ.pos
     } else if (carrierPose !== null && carrierId !== snap.carrier) {
@@ -2239,6 +2245,7 @@ export class Rink3dRenderer implements MatchRenderer, CameraCutConsumer {
       const off = Math.hypot(this.puck.x - puckWx, this.puck.z - puckWz) > SWING_HOLD_FT
       pTargetX = off ? puckWx : this.puck.x
       pTargetZ = off ? puckWz : this.puck.z
+      freeTarget = off
       this.carrierWx = carrierPose.worldX.pos
       this.carrierWz = carrierPose.worldZ.pos
     } else if (carrierPose !== null) {
@@ -2256,7 +2263,13 @@ export class Rink3dRenderer implements MatchRenderer, CameraCutConsumer {
 
     // The drawn puck TRACKS the stream (loose) or the blade (carried); only a
     // carried↔loose handoff blends, over a few frames (math.ts puckTrackStep).
-    this.puck = puckTrackStep(this.puck, pTargetX, pTargetZ, carrierPose?.playerId ?? '', dt)
+    this.puck = puckTrackStep(this.puck, pTargetX, pTargetZ, freeTarget ? '' : (carrierPose?.playerId ?? ''), dt)
+    // ...and never outside the boards (W3 S8, VT20: the handoff correction
+    // carried a puck the sim held 0.3 ft inside the corner 1 ft out through it)
+    {
+      const c = clampToRink(this.puck.x, this.puck.z)
+      if (c.x !== this.puck.x || c.z !== this.puck.z) this.puck = { ...this.puck, x: c.x, z: c.z, cx: this.puck.cx + c.x - this.puck.x, cz: this.puck.cz + c.z - this.puck.z }
+    }
 
     // a loose puck rides the engine's height (agent engine: chips, saucers, clears; absent = on the ice)
     let puckY = carrierPose === null ? Math.max(0, snap.puckZ ?? 0) : 0
@@ -2655,7 +2668,9 @@ export class Rink3dRenderer implements MatchRenderer, CameraCutConsumer {
       pose.worldX = springStep(pose.worldX, wx, dt, pose.followHL)
       pose.worldZ = springStep(pose.worldZ, wz, dt, pose.followHL)
       // Nothing skates faster than a skater: a jump in the stream becomes a skate.
-      const c = capStep(px, pz, pose.worldX.pos, pose.worldZ.pos, dt, maxSpeed)
+      // (W3 S8, VT2: a skater's speed in GAME time - at a fast-forwarded stoppage
+      // the sim's men cover the ice faster per wall second, and so do their rigs)
+      const c = capStep(px, pz, pose.worldX.pos, pose.worldZ.pos, gameStepDt(dt, this.speed, this.playing), maxSpeed)
       if (c.capped) {
         pose.worldX = { pos: c.x, vel: (c.x - px) / dt }
         pose.worldZ = { pos: c.z, vel: (c.z - pz) / dt }

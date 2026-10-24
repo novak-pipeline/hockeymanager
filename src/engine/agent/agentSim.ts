@@ -84,7 +84,8 @@ import {
   type Puck
 } from './physics'
 import { BLUE_X, DOT_EZ_X, DOT_NZ_X, DOT_Y, GOAL_X, HALF_X, HALF_Y, NET_HALF_W, boardsClamp, distToBoards } from './rink'
-import { NET_ROLES, SHAPE_TUNING, DEKE, DEKE_LEVEL, REACH, S6_DEV, raceLeader, sharedPath, blockChance, decideCarrier, dekeDefRead, dekeGoalieRead, dekeSkill, pressureOn, realPressure, thinkSide, xgAt, type ThinkOut } from './brain'
+import { S8_DEV } from './specialTeams'
+import { NET_ROLES, PP_LANE, laneOpen, SHAPE_TUNING, DEKE, DEKE_LEVEL, REACH, S6_DEV, raceLeader, sharedPath, blockChance, decideCarrier, dekeDefRead, dekeGoalieRead, dekeSkill, pressureOn, realPressure, thinkSide, xgAt, type ThinkOut } from './brain'
 import { decideHit, resolveHit, type HitIntent } from './physical'
 import { jobName, newTeamPlan, setJob } from './plans'
 import { emptyAgentTelemetry, type AgentTelemetry } from './telemetry'
@@ -158,10 +159,18 @@ export const AGENT_TUNING = {
   // bodies) put penalties at 4.71 a team-game, over the band (W3-LOG S6).
   stickFoulK: 1.3,
   /** Misc stoppages per second of live play ("other": net off, high stick…). */
-  miscStopPerSec: 0.0028
+  miscStopPerSec: 0.0028,
+  /** The power play's finishing edge on the xG surface (was the const PP_SHOT_BOOST 1.12). */
+  // 1.12 -> 1.42 (W3 S8): compensates for the 5-on-4 finish the all-situations
+  // xG surface does not carry - the NHL power play scores ~1.3x more per shot
+  // than 5-on-5 from the same spots (a goalie moving with the puck, screens set
+  // with time) - and for the S8 kill (its lane and seam men, the box shading to
+  // the puck). With the S8 set-ups, entries and the lane read in and the old
+  // 1.12 the coach run read PP% 16.7 (S7 16.6): the play changed, not the finish.
+  ppFinishK: 1.42
 }
 
-const PP_SHOT_BOOST = 1.12
+/** The power play's finishing edge over the 5-on-5 xG surface (W3 S8: AGENT_TUNING.ppFinishK, tunable by the harness). */
 /**
  * Seconds from committing to a shot to the puck leaving the blade — a REAL sim
  * state (W2, owner: "shots happen instantly"): the shooter sets, slows and
@@ -1183,8 +1192,9 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
     }
     poke = null
     fumble = null
-    // One-timer: the receiver shoots on arrival.
-    const oneT = w.oneTimerFor === b
+    // One-timer: the receiver shoots on arrival (W3 S8: on the power play
+    // only through a lane - a killer who slid into it gets a caught puck, not a shot in the shins).
+    const oneT = w.oneTimerFor === b && !(S8_DEV.pp && s.powerPlay && laneOpen(oppOf(s).skaters, b.x, b.y, s.a) < PP_LANE.oneTimer)
     // Receive and settle (constraints.ts): the puck is not his to use until it
     // is on his blade and quiet - longer off a hard pass, shorter for good
     // hands. A one-timer is caught on the release.
@@ -1559,7 +1569,7 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
         if (now - lastSaveAt < 1.6) eff *= 1.3 // rebound, goalie scrambling
         if (slap) eff *= 1.05
         void gRatings
-        const strength = s.powerPlay ? PP_SHOT_BOOST : 1
+        const strength = s.powerPlay ? AGENT_TUNING.ppFinishK : 1
         const pGoal = opp.pulled
           ? 1
           : clamp(
@@ -2703,8 +2713,8 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
   /** W3 S4: each side's phase and system play (live 5v5 or not, as the brain last planned it). */
   function sysSnap(): { homeSystem?: string; awaySystem?: string } {
     if (deadAt !== null) return {}
-    const h = systemLabel(H.team.table, H.playbook, H.team.breakout?.plan ?? null)
-    const a = systemLabel(A.team.table, A.playbook, A.team.breakout?.plan ?? null)
+    const h = systemLabel(H.team.table, H.playbook, H.team.breakout?.plan ?? null, H.team.ppEntry?.plan ?? null)
+    const a = systemLabel(A.team.table, A.playbook, A.team.breakout?.plan ?? null, A.team.ppEntry?.plan ?? null)
     return { ...(h ? { homeSystem: h } : {}), ...(a ? { awaySystem: a } : {}) }
   }
 
@@ -2872,7 +2882,13 @@ export function agentPeriod(ctx: Ctx, home: TeamSim, away: TeamSim, spec: Period
    * the puck in the zone before they all get back out (NHL rule 83).
    */
   function checkOffside(s: Side, carried: boolean): boolean {
-    if (!anyOffside(s)) return false
+    // W3 S8 (reel S7 VT18): a man the puck is still sliding to (the reception
+    // glide, `recv`) is not yet in possession - over the line ahead of it he
+    // is offside like anyone else (he used to be excused as its carrier, and
+    // the frames, which name him only once it is on his blade, read it as a
+    // man offside touching the puck unwhistled)
+    const gliding = S8_DEV.glide && carried && w.carrier !== null && recv === w.carrier && w.carrier.x * s.a > BLUE_X + 1
+    if (!anyOffside(s) && !gliding) return false
     if (carried) {
       if (tm) { const off = s.skaters.filter((b) => b !== w.carrier && b.x * s.a > BLUE_X + 1); const k = `offC:${off.length}:${off.map((b) => (b.vx * s.a < -2 ? "out" : b.vx * s.a > 2 ? "in" : "still")).join("")}:cv${Math.round((w.carrier ? w.carrier.vx * s.a : 0) / 10) * 10}`; tm.dbg[k] = (tm.dbg[k] ?? 0) + 1 }
       callOffside(s, true)
