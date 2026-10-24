@@ -224,10 +224,13 @@ export const SHAPE_TEMPLATES: readonly ShapeTemplate[] = [
     strength: '5v4',
     puck: { x: 32, y: 4 },
     radiusFt: 12,
+    // (W3 S8: the flanks at the tops of the circles, 51 ft, where the
+    // one-timer is a look - they were drawn at 40, between the circles and
+    // the blue line, closer to a second and third point man than a flank)
     attack: [
       { role: 'point (puck)', x: 32, y: 4 },
-      { role: 'flank strong', x: 40, y: 30 },
-      { role: 'flank weak', x: 40, y: -30 },
+      { role: 'flank strong', x: 51, y: 29 },
+      { role: 'flank weak', x: 51, y: -29 },
       { role: 'net-front', x: 84, y: 0 },
       { role: 'low bumper', x: 72, y: 18 }
     ],
@@ -236,6 +239,29 @@ export const SHAPE_TEMPLATES: readonly ShapeTemplate[] = [
       { role: 'side strong', x: 64, y: 18 },
       { role: 'side weak', x: 64, y: -18 },
       { role: 'bottom (net-front)', x: 82, y: 0 }
+    ]
+  },
+  {
+    // W3 S8: the overload power play (strong-side triangle), against the box
+    id: 'ppOverload',
+    situation: 'settledOz',
+    label: 'Power play overload vs PK box',
+    system: 'Strong-side triangle (point, half-wall, goal line), net-front, a weak-side man at the back door; 4-man box shifted to the puck',
+    strength: '5v4',
+    puck: { x: 57, y: 33 },
+    radiusFt: 14,
+    attack: [
+      { role: 'half-wall (puck)', x: 57, y: 33 },
+      { role: 'point (strong)', x: 36, y: 20 },
+      { role: 'goal line (strong)', x: 80, y: 25 },
+      { role: 'net-front', x: 83, y: -3 },
+      { role: 'weak-side back door', x: 76, y: -15 }
+    ],
+    defend: [
+      { role: 'F strong (pressure)', x: 50, y: 24 },
+      { role: 'F weak (slot / seam)', x: 50, y: -4 },
+      { role: 'D strong (low)', x: 76, y: 16 },
+      { role: 'D weak (net-front)', x: 80, y: -6 }
     ]
   }
 ]

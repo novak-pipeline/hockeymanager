@@ -335,11 +335,16 @@ export class MatchTimeline {
       this.firstStoppageBetween(this.frames[i - 1].absT, frameAT) === null &&
       this.firstStoppageBetween(frameBT, this.frames[i + 2].absT) === null
 
+    // The puck is drawn on the straight line between frames, not the spline
+    // (W3 S8, reel S7 VT20): it travels in straight lines between contacts,
+    // and a spline through a release (slow on the blade, then fast) eased in
+    // and caught up - the drawn puck sped up ~12 ft/s over the frames after a
+    // pass or a rim, faster than the sim's ever went - and bulged round a
+    // corner 1 ft outside the boards. A chord between two points on the sheet
+    // stays on it (the rink is convex) and never outruns the sim's puck.
     const puck = stoppageT !== null
       ? (absT < stoppageT ? { ...a.puck } : { ...b.puck })
-      : smooth
-        ? splineXY(prev!.puck, a.puck, b.puck, after!.puck, f)
-        : lerpXY(a.puck, b.puck, f)
+      : lerpXY(a.puck, b.puck, f)
 
     // For player IDs use the dominant frame (same side-selection as carrier/blendOne)
     const dom = f < 0.5 ? a : b

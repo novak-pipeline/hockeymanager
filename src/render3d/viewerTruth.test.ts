@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ProbeFrame, ProbeGeometry, ProbeRig } from './viewerProbe'
-import { runViewerTruth, vt13Aimless, vt14Coverage, vt15Systems, vt17Grip, vt18Offside, vt1Bodies, vt11Hits, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt19GoalGeometry, vt20PuckSpeed, vt21LoosePuck, type VTInput } from './viewerTruth'
+import { runViewerTruth, vt3Shots, vt13Aimless, vt14Coverage, vt15Systems, vt17Grip, vt18Offside, vt1Bodies, vt11Hits, vt5Replay, vt6Clocks, vt7Faceoffs, vt8Changes, vt19GoalGeometry, vt20PuckSpeed, vt21LoosePuck, type VTInput } from './viewerTruth'
 
 const GEO: ProbeGeometry = { rinkHalfL: 100, rinkHalfW: 42.5, benchGates: { home: { x: -26, z: 41 }, away: { x: 26, z: 41 } } }
 
@@ -222,6 +222,21 @@ describe('viewer-truth detectors', () => {
 
   // W3 S6: the drawn puck. frame(i) runs 1/30 game-s per frame.
   const puckAt = (x: number, z: number) => ({ x, y: 0, z, sx: 800, sy: 450, onScreen: true, simX: x, simZ: z })
+  it('VT3 (W3 S8, reel S7 saveRebound) judges a shot\'s flight, but not a jam from the goal mouth', () => {
+    // a snap wound up 0.5 s wall, released at clock 101: the drawn puck slides along
+    // the goal line (it never travels to the net from more than 3 ft out)
+    const at = (rx: number, rz: number) => Array.from({ length: 150 }, (_, i) => {
+      const t = 100 + i / 30
+      const after = t >= 101
+      return frame(i, five('home'), { windup: !after ? 'h1' : null, puck: { x: rx, y: 0, z: after ? rz - (t - 101) * 25 : rz, sx: 800, sy: 450, onScreen: true, simX: rx, simZ: rz } })
+    })
+    const shot = (rx: number, rz: number) => [{ type: 'missedShot', absT: 101, actor: 'h1', netX: -89, shotType: 'snap', x: rx, z: rz }]
+    // from 1.3 ft out on the goal line (the S7 clip): a jam, no flight to judge - red before
+    expect(vt3Shots(input(at(-87.7, 1.15), { events: shot(-87.7, 1.15) })).status).toBe('green')
+    // the same puck from 20 ft out that never travels to the net: no flight, red
+    expect(vt3Shots(input(at(-69, 1.15), { events: shot(-69, 1.15) })).status).toBe('red')
+  })
+
   it('VT20 flags a free puck faster than any pass and a rebound faster than the shot (owner: "puck is zipping around too fast")', () => {
     const run = (v: number) => Array.from({ length: 30 }, (_, i) => frame(i, five('home'), { puck: puckAt(-40 + (v * i) / 30, 30) }))
     expect(vt20PuckSpeed(input(run(250))).status).toBe('red')

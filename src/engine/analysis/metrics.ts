@@ -157,6 +157,10 @@ export const METRICS: readonly MetricDef[] = [
   { id: 'shots.sogPerTeamGame', group: 'shots', label: 'Shots on goal per team-game', unit: '/team-game', digits: 1, compute: perTeamGame('shot.sog') },
   { id: 'shots.goalsPerTeamGame', group: 'shots', label: 'Goals per team-game', unit: '/team-game', digits: 2, compute: perTeamGame('goal.n') },
   { id: 'shots.shootingPct', group: 'shots', label: 'Shooting % (goals / SOG)', unit: 'share', digits: 3, compute: (g) => ratio(g.counts['goal.n'], g.counts['shot.sog']) },
+  // W3 S8: special teams (league PK% is 1 - PP%)
+  { id: 'specialTeams.ppPct', group: 'shots', label: 'Power-play % (PP goals / opportunities; league PK% is its complement)', unit: 'share', digits: 3, compute: (g) => ratio(g.counts['st.ppGoals'], g.counts['st.ppOpps']) },
+  { id: 'specialTeams.ppOppsPerTeamGame', group: 'shots', label: 'Power-play opportunities per team-game', unit: '/team-game', digits: 2, compute: perTeamGame('st.ppOpps') },
+  { id: 'specialTeams.shGoalsPerTeamGame', group: 'shots', label: 'Short-handed goals per team-game', unit: '/team-game', digits: 3, compute: perTeamGame('st.shGoals') },
   { id: 'shots.blockedShare', group: 'shots', label: 'Blocked share of shot attempts', unit: 'share', digits: 3, compute: (g) => ratio(g.counts['shot.blocked'], (g.counts['shot.sog'] ?? 0) + (g.counts['shot.blocked'] ?? 0) + (g.counts['shot.missed'] ?? 0)) },
   { id: 'shots.locationTvd', group: 'shots', label: 'Shot location vs NHL (distance×angle total-variation distance)', unit: 'TVD', digits: 3, headline: true, compute: () => NaN /* filled by compare() against the NHL grid */ },
   { id: 'shots.meanDist', group: 'shots', label: 'Mean shot distance (bin-centre estimate)', unit: 'ft', digits: 1, compute: () => NaN /* filled by compare() */ },

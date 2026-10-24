@@ -23,17 +23,19 @@ import { judgeActionFloor, judgeContacts } from '@engine/analysis/actions'
 import { AGENT_TUNING, GOALIE_READ, REBOUND, agentSimGame, emptyAgentTelemetry } from './agentSim'
 import { PUCK_PLAY, S6_DEV } from './brain'
 import { S6_PHYS } from './physics'
+import { PK_PLAY, ST_TILT, S8_DEV } from './specialTeams'
 import { judgePuckPlayStream, puckPlayLine } from '@engine/analysis/puckPlay'
-import { DEKE, PROGRESS, RUSH_PLAY, SCREEN, VAL } from './brain'
+import { DEKE, PP_LANE, PROGRESS, RUSH_PLAY, SCREEN, VAL } from './brain'
 import { DZ_GAP, MAN_COVER, S4_DEV } from './systems'
 import { IN_TIGHT, S5_DEV } from './carrierTilt'
 import { judgeGoalGeometry } from '@engine/analysis/goalGeometry'
 import { judgeFaceoffDots } from '@engine/analysis/faceoffRule'
 import { judgeSystems, legibility, systemFramesFromStream, type SeqCase } from '@engine/analysis/systemPlay'
-import { buildCoachProfile, coachFit, profileToTactics } from '@engine/league/coachProfile'
+import { PK_PRESSURE_AGGRESSIVE, buildCoachProfile, coachFit, playbookFor, profileToTactics } from '@engine/league/coachProfile'
 import { generateTeamStaff } from '@engine/league/staff'
 import { Rng, deriveSeed } from '@engine/shared/rng'
 import { carrierPlayLine, judgeCarrierPlay, sumCarrierPlay, type CarrierPlayReport } from '@engine/analysis/carrierPlay'
+import { judgeSpecialTeams, specialTeamsLine, sumSpecialTeams, type SpecialTeamsReport } from '@engine/analysis/specialTeams'
 
 function findModDb(): string | null {
   if (process.env.TP_VANILLA) return null
@@ -58,6 +60,15 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
   // TP_ABLATE=screen,boxOut,... (W3 S4): turn S4 parts off to see what each does to goals
   for (const k of (process.env.TP_ABLATE ?? '').split(',').filter(Boolean)) {
     // W3 S6: TP_ABLATE=s6 turns every S6 part off (the S5 puck), or name parts (path, atFeet, bodies, swept, rebound, misses, goalieRead, phys)
+    // W3 S8: TP_ABLATE=s8 turns every S8 part off (the S7 special teams), or name parts (pp, entry, pk, pkUp, flow, lanes, shRush)
+    if (k === 's8') {
+      for (const j of Object.keys(S8_DEV)) (S8_DEV as Record<string, boolean>)[j] = false
+      continue
+    }
+    if (k in S8_DEV) {
+      ;(S8_DEV as Record<string, boolean>)[k] = false
+      continue
+    }
     if (k === 's6') {
       S6_PHYS.on = false
       for (const j of Object.keys(S6_DEV)) (S6_DEV as Record<string, boolean>)[j] = false
@@ -70,7 +81,7 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
   for (const kv of (process.env.TP_SET ?? '').split(',').filter(Boolean)) {
     const [path, v] = kv.split('=') as [string, string]
     const [obj, key] = path.split('.') as [string, string]
-    const tbl = ({ PROGRESS, RUSH_PLAY, IN_TIGHT, AGENT_TUNING, SCREEN, VAL, DEKE, REBOUND, GOALIE_READ, PUCK_PLAY } as Record<string, Record<string, number>>)[obj]
+    const tbl = ({ PROGRESS, RUSH_PLAY, IN_TIGHT, AGENT_TUNING, SCREEN, VAL, DEKE, REBOUND, GOALIE_READ, PUCK_PLAY, PK_PLAY, ST_TILT, PP_LANE } as Record<string, Record<string, number>>)[obj]
     if (tbl && key in tbl) tbl[key] = Number(v)
   }
   if (process.env.TP_SCREEN) SCREEN.minShotFt = Number(process.env.TP_SCREEN)
@@ -139,8 +150,16 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
   const sysFc: SeqCase<string>[] = []
   const sysDz: SeqCase<string>[] = []
   const sysBo: SeqCase<string>[] = []
+  // W3 S8 VT15 for special teams: the PP set-up / entry, the kill's shape / pressure
+  // (declared by the frames; on an engine that declares nothing - TP_ABLATE=s8 - by the team's playbook)
+  const sysPp: SeqCase<string>[] = []
+  const sysPe: SeqCase<string>[] = []
+  const sysPk: SeqCase<string>[] = []
+  const sysPr: SeqCase<string>[] = []
   // W3 S5: the carrier detectors (ping-pong, breakaways, odd-man rushes, score state)
   const cps: CarrierPlayReport[] = []
+  // W3 S8: special teams (PP opportunities, PP% / PK%, goals by strength)
+  const sts: SpecialTeamsReport[] = []
   // W3 S6: the puck detectors and telemetry
   const pp = { liveMin: 0, overCap: 0, gained: 0, reboundFast: 0, skateThrough: 0, ignored: 0, intervals: 0 }
   const ppEx: string[] = []
@@ -208,6 +227,7 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
       else if (e.type === 'hit') hits++
     }
     cps.push(judgeCarrierPlay(out.stream))
+    sts.push(judgeSpecialTeams(out.stream))
     const gg = judgeGoalGeometry(out.stream)
     geoGoals += gg.goals
     geoBad += gg.bad.length
@@ -239,6 +259,13 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
         sysFc.push(...sr[side].forecheck)
         sysDz.push(...sr[side].dzone)
         sysBo.push(...sr[side].breakout)
+        const tm = side === 'home' ? home : away
+        const pb = playbookFor(tm.coachSystem, tm.tactics)
+        const fill = <C extends string>(cs: SeqCase<C>[], d: string): SeqCase<string>[] => cs.map((q) => ({ ...q, declared: q.declared ?? d }))
+        sysPp.push(...fill(sr[side].pp, pb.pp))
+        sysPe.push(...fill(sr[side].ppEntry, '?'))
+        sysPk.push(...fill(sr[side].pk, pb.pk))
+        sysPr.push(...fill(sr[side].pkPress, pb.pkPressure >= PK_PRESSURE_AGGRESSIVE ? 'aggressive' : 'passive'))
       }
     }
     liveMin += r.liveMin
@@ -260,7 +287,8 @@ it.skipIf(!process.env.TP_MEASURE)('team-play + calibration measurement', () => 
     `offside: entries ${entries} offside-entries ${offEntries} whistles ${offCalls} (${(offCalls / tg).toFixed(2)}/team-game) MISSED ${offMissed} (carried ${offMissedCarried}, delayed touch ${offMissed - offMissedCarried})`,
     `VT12 action floor: ${floorShort} short in ${floorRuns} acts/shots/passes - contact pairs: ${contactApart} apart in ${contactPairs} (tie-ups ${(tieUpEvents / tg).toFixed(1)}/team-game)`,
     `goal geometry: ${geoBad} illegal in ${geoGoals} goals - faceoff dots: ${foWrong} off the right painted dot in ${foJudged} judged (${foUnjudged} unjudged)`,
-    ...(['forecheck', 'D zone', 'breakouts'] as const).map((k, i) => { const l = legibility([sysFc, sysDz, sysBo][i]!); return `VT15 ${k}: ${l.matched}/${l.judged} family (${l.exact} exact) ${JSON.stringify(l.table)}` }),
+    ...(['forecheck', 'D zone', 'breakouts', 'PP set-up', 'PP entry', 'PK shape', 'PK pressure'] as const).map((k, i) => { const l = legibility([sysFc, sysDz, sysBo, sysPp, sysPe, sysPk, sysPr][i]!); return `VT15 ${k}: ${l.matched}/${l.judged} family (${l.exact} exact) ${JSON.stringify(l.table)}` }),
+    specialTeamsLine(sumSpecialTeams(sts), tg),
     carrierPlayLine(sumCarrierPlay(cps), liveMin),
     puckPlayLine(pp),
     `S6 sim: races ${s6.races} wonPredicted ${(s6.won / Math.max(1, s6.races)).toFixed(3)} sideWon ${(s6.sideWon / Math.max(1, s6.races)).toFixed(3)} gained ${s6.gained} overCap ${s6.overCap} swept ${s6.swept} freezeShare ${(s6.freezes / Math.max(1, s6.saves)).toFixed(3)} outOfPlay ${(s6.overGlass / games).toFixed(2)} icings ${(s6.icings / tg).toFixed(2)}`,

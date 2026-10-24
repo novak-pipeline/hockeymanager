@@ -26,7 +26,8 @@
  *
  * Pure tables and helpers; brain.ts picks them and turns them into jobs.
  */
-import type { BreakoutPlan, DZonePlan, ForecheckPlan, Playbook, RegroupPlan } from '@engine/league/coachProfile'
+import type { BreakoutPlan, DZonePlan, ForecheckPlan, Playbook, PpEntryPlan, RegroupPlan } from '@engine/league/coachProfile'
+import { specialLabel } from './specialTeams'
 import { BREAKOUT_PLANS } from '@engine/league/coachProfile'
 import { BREAKOUT, DZ_ZONE, TRANSITION, forecheck as forecheckSystem, type RoleSpot } from './templates'
 
@@ -272,8 +273,11 @@ export const SYSTEM_TILT = {
 export const S4_DEV = { screen: true, boxOut: true, tilts: true, hunt: true, man: true, trapHold: true, tables: true }
 
 /** The short label a frame carries for a side's phase and system (FrameEvent.homeSystem / awaySystem). */
-export function systemLabel(table: readonly RoleSpot[] | null, pb: Playbook, breakout: BreakoutPlan | null): string | undefined {
+export function systemLabel(table: readonly RoleSpot[] | null, pb: Playbook, breakout: BreakoutPlan | null, ppEntry: PpEntryPlan | null = null): string | undefined {
   if (!table) return undefined
+  // W3 S8: special teams ("pp:umbrella", "ppentry:drop", "pk:box/passive")
+  const st = specialLabel(table, pb, ppEntry)
+  if (st) return st
   if (BREAKOUT_TABLES.has(table)) return `breakout:${breakout ?? 'up'}`
   if (table === REGROUP) return 'regroup:controlled'
   if (table === TRANSITION_STRETCH) return 'regroup:stretch'

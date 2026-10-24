@@ -52,7 +52,7 @@ import {
 } from './templates'
 import { other, rDef, rLevel, type CarrierAction, type Side, type World } from './world'
 import { PLAN, planOf, setJob, type JobKind, type Plan } from './plans'
-import { ACTION_FLOOR } from './constraints'
+import { ACTION_FLOOR, windupFloor } from './constraints'
 import { pathAt, pathZ, predictPuck, type PuckPath } from './puckPath'
 import {
   BREAKOUT_OUTLET,
@@ -72,6 +72,24 @@ import {
 } from './systems'
 import type { BreakoutPlan } from '@engine/league/coachProfile'
 import { IN_TIGHT, PP_PATIENCE, S5_DEV, carrierTilt, tilted } from './carrierTilt'
+import {
+  PK_PLAY,
+  PK_TABLES,
+  PK_UP_PRESS,
+  PK_UP_STACK,
+  PP_ENTRY_TABLES,
+  PP_TABLES,
+  S8_DEV,
+  ST_TILT,
+  pickPpEntry,
+  pkPresserCap,
+  pkShape,
+  pkSystemOf,
+  ppEntryShape,
+  ppShape,
+  ppSystemOf
+} from './specialTeams'
+import { PK_PRESSURE_AGGRESSIVE } from '@engine/league/coachProfile'
 
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v)
 const r01 = rLevel
@@ -364,7 +382,23 @@ function rimSpeed(c: Body, at: XY, k: number): number {
  * carrier's own shot and, at a pass target, for "pass it to the man who can
  * shoot" (low-to-high to the point, the seam one-timer).
  */
-export function shotValue(me: Side, opps: readonly Body[], c: Body, x: number, y: number, eager: number, tight: boolean, goalie?: Body): number {
+/** The share of shots from (x, y) at the net `a` attacks that get past the bodies in the lane, read with the sim's own block odds (bodies led `leadS` s). */
+export function laneOpen(opps: readonly Body[], x: number, y: number, a: number, leadS = 0): number {
+  let lane = 1
+  const nx = a * GOAL_X
+  const L = Math.max(Math.hypot(nx - x, -y), 1)
+  for (const o of opps) {
+    const ox = o.x + o.vx * leadS
+    const oy = o.y + o.vy * leadS
+    const s1 = ((ox - x) * (nx - x) + (oy - y) * -y) / L
+    if (s1 < 3 || s1 > L - 5) continue
+    const d = Math.abs(-(ox - x) * (-y / L) + (oy - y) * ((nx - x) / L))
+    lane *= 1 - blockChance(o, d, false)
+  }
+  return lane
+}
+
+export function shotValue(me: Side, opps: readonly Body[], c: Body, x: number, y: number, eager: number, tight: boolean, goalie?: Body, leadS = 0): number {
   const a = me.a
   const xg = xgAt(x, y, a)
   // Bodies in the lane to the net take shots away.
@@ -373,10 +407,14 @@ export function shotValue(me: Side, opps: readonly Body[], c: Body, x: number, y
   const L = Math.max(Math.hypot(nx - x, -y), 1)
   // (The shooter reads the lane with the same odds the sim will resolve it
   // by — so he walks the line to open a lane instead of firing into shins.)
+  // (W3 S8: on the power play he reads it where they WILL be when the puck
+  // leaves his stick - `leadS` on: the kill steps into a lane during a wind-up)
   for (const o of opps) {
-    const s1 = ((o.x - x) * (nx - x) + (o.y - y) * -y) / L
+    const ox = o.x + o.vx * leadS
+    const oy = o.y + o.vy * leadS
+    const s1 = ((ox - x) * (nx - x) + (oy - y) * -y) / L
     if (s1 < 3 || s1 > L - 5) continue
-    const d = Math.abs(-(o.x - x) * (-y / L) + (o.y - y) * ((nx - x) / L))
+    const d = Math.abs(-(ox - x) * (-y / L) + (oy - y) * ((nx - x) / L))
     lane *= 1 - blockChance(o, d, false) * VAL.laneRead
   }
   // A man on him in tight will lift his stick.
@@ -525,6 +563,24 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
   const breakaway = live && netSideN === 0 && goalSideN === 0
   const oddMan = live && !breakaway && adv < GOAL_X - RUSH_PLAY.slotFt && netSideN <= 2 && inOnIt > netSideN && (adv < BLUE_X || w.t - me.entryAt < RUSH_PLAY.window)
   const inCorner = (x: number, y: number): boolean => (x * a > RUSH_PLAY.cornerAdv && Math.abs(y) > RUSH_PLAY.cornerY) || x * a > GOAL_X - 2
+  // W3 S8, special teams: the power play moves the puck the way its set-up
+  // does (a small tilt to the next role, specialTeams.ts flow), runs the
+  // entry this rush drew (the drop, the carry, the dump), and a killer with
+  // open ice in front of him (one of theirs goal-side at most) goes.
+  const ppSysC = S8_DEV.flow && me.powerPlay && table && PP_TABLES.has(table) ? ppSystemOf(table) : null
+  const ppFlow = ppSysC ? (ppSysC.flow[me.roles.get(c) ?? ''] ?? null) : null
+  const ppEntryPlan = S8_DEV.entry && me.powerPlay && table && PP_ENTRY_TABLES.has(table) ? (me.team.ppEntry?.plan ?? null) : null
+  if (ppEntryPlan === 'dump') {
+    tilt.dump *= ST_TILT.dump
+    tilt.carry /= ST_TILT.carry
+  } else if (ppEntryPlan !== null) {
+    tilt.carry *= ST_TILT.carry
+    tilt.dump /= ST_TILT.dump
+  }
+  if (S8_DEV.shRush && me.shorthanded && adv > -BLUE_X && goalSideN <= 1) {
+    tilt.carry = Math.max(tilt.carry, ST_TILT.shOpen)
+    tilt.shoot = Math.max(tilt.shoot, 1)
+  }
 
   // Teammates still offside: don't take the puck over the line yet.
   // (A mate gliding at the line counts: he will be over it before the puck.)
@@ -556,7 +612,11 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
   if (adv > BLUE_X && adv < GOAL_X - 1 && !opp.pulled) {
     // (the power play's patience: the weight follows the quality of the chance)
     const patience = me.powerPlay && S5_DEV.tilt ? clamp(xgAt(c.x, c.y, a) / PP_PATIENCE.xgRef, PP_PATIENCE.lo, PP_PATIENCE.hi) : 1
-    opts.push({ ev: tilted(shotValue(me, opps, c, c.x, c.y, eager, true, opp.goalie) * (breakaway ? RUSH_PLAY.finishK : 1), tilt.shoot * patience), act: { kind: 'shoot' } })
+    const ppLead = me.powerPlay && S8_DEV.pp ? windupFloor(Math.hypot(a * GOAL_X - c.x, c.y)) : 0
+    // W3 S8: the power play does not shoot into the kill's shins - with no
+    // lane he moves it (the set-up) and shoots when one opens.
+    if (!(ppLead > 0 && Math.hypot(a * GOAL_X - c.x, c.y) > PP_LANE.minFt && laneOpen(opps, c.x, c.y, a, ppLead) < PP_LANE.min))
+    opts.push({ ev: tilted(shotValue(me, opps, c, c.x, c.y, eager, true, opp.goalie, ppLead) * (breakaway ? RUSH_PLAY.finishK : 1), tilt.shoot * patience), act: { kind: 'shoot' } })
   }
 
   // --- Carry (8 headings) ---
@@ -744,7 +804,9 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
     // a pressured carrier protects it, chips it in or takes the hit.
     const backOk = (backOkBase && !transition) || settledOz || (pressed && !hasForward && !alone && !(transition && adv > VAL.rushNoBackX))
     for (const f of infos) {
-      if (f.back && !backOk) continue
+      // (W3 S8: the drop pass is a pass back by design)
+      const dropTo = ppEntryPlan === 'drop' && me.roles.get(f.r) === 'PPE_DROP' && adv > -BLUE_X - 10 && adv < BLUE_X - 4
+      if (f.back && !backOk && !dropTo) continue
       // On a breakaway only a clearly forward pass (the 2-on-0 feed) is a play.
       if (alone && (f.R.x - c.x) * a < 4) continue
       // Offside: never feed a man already over the line ahead of the puck.
@@ -760,7 +822,7 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       // A pass to a man who can SHOOT from where he takes it is worth his shot
       // (low-to-high to a point man with a screen in front, the seam feed).
       const radv = f.R.x * a
-      if (radv > BLUE_X && radv < GOAL_X - 1 && !opp.pulled) v = Math.max(v, shotValue(me, opps, f.r, f.R.x, f.R.y, eager, false, opp.goalie) * VAL.passShot)
+      if (radv > BLUE_X && radv < GOAL_X - 1 && !opp.pulled) v = Math.max(v, shotValue(me, opps, f.r, f.R.x, f.R.y, eager, false, opp.goalie, me.powerPlay && S8_DEV.pp ? f.d0 / f.speed : 0) * VAL.passShot)
       // Across the royal road to a shooter: the one-timer look (goalie moving).
       const royal =
         f.R.x * a > VAL.otMinX && Math.abs(f.R.y) >= VAL.otMinY && Math.abs(f.R.y) < VAL.otMaxY && Math.sign(f.R.y || 1) !== Math.sign(c.y || 1) && Math.abs(c.y) > 8
@@ -793,6 +855,8 @@ export function decideCarrier(w: World, me: Side, c: Body): CarrierAction {
       const role = me.roles.get(f.r)
       if (outlet !== null && role === outlet) ev += SYSTEM_TILT.outlet
       if (stretchTable && role === 'LANE_WEAK') ev += SYSTEM_TILT.stretch
+      if (ppFlow && role !== undefined && ppFlow.includes(role)) ev += ST_TILT.flow
+      if (dropTo) ev += ST_TILT.drop
       opts.push({ ev, act: { kind: 'pass', to: f.r, at: f.R, speed: f.speed, oneTimer } })
     }
   }
@@ -876,7 +940,9 @@ function supportTable(w: World, me: Side, withPuck: boolean, px: number): RoleSp
   // (by strength, not head count: a change on the fly has a man too many for a moment)
   const evenFive = S4_DEV.tables && !me.powerPlay && !me.shorthanded && !me.pulled && !opp.pulled && !(n === 4 && m === 4) && n >= 5 && m >= 5
   if (withPuck) {
-    if (me.powerPlay && px > BLUE_X) return n - m >= 2 ? PP_5V3 : powerPlay(me.tactics.specialTeams.powerPlay)
+    if (me.powerPlay && px > BLUE_X) return n - m >= 2 ? PP_5V3 : S8_DEV.pp ? ppShape(me.playbook.pp) : powerPlay(me.tactics.specialTeams.powerPlay)
+    // W3 S8: the power play's entry up the ice (drop, carry, dump), from our blue line on
+    if (S8_DEV.entry && me.powerPlay && !opp.pulled && n - m === 1 && px >= -BLUE_X && px < BLUE_X) return ppEntryShape(me.team.ppEntry?.plan ?? 'carry')
     if (px < SHAPE_TUNING.breakoutX) return evenFive ? breakoutShape(me.team.breakout?.plan ?? 'up') : BREAKOUT
     if (px < BLUE_X) return evenFive ? transitionShape(me.playbook.regroup, regrouping(w, me)) : TRANSITION
     if (w.t - me.entryAt < RUSH_WINDOW) return RUSH
@@ -884,7 +950,9 @@ function supportTable(w: World, me: Side, withPuck: boolean, px: number): RoleSp
     if (n === 4 && m === 4) return FOUR_ATTACK
     return px < 55 ? CYCLE_POINT : CYCLE
   }
-  if (me.shorthanded && px < -10) return n <= 3 ? PK_TRIANGLE : penaltyKill(me.tactics.specialTeams.penaltyKill)
+  if (me.shorthanded && px < (S8_DEV.pkUp ? -BLUE_X : -10)) return n <= 3 ? PK_TRIANGLE : S8_DEV.pk ? pkShape(me.playbook.pk) : penaltyKill(me.tactics.specialTeams.penaltyKill)
+  // W3 S8: the kill up ice - the aggressive kill forechecks, the passive one stands up at its blue line
+  if (S8_DEV.pkUp && me.shorthanded && n === 4 && m === 5 && !me.pulled) return pkPresserCap(me.playbook) === Infinity ? PK_UP_PRESS : PK_UP_STACK
   if (px > BLUE_X) return evenFive ? forecheckShape(me.playbook) : forecheck(me.tactics.forecheck)
   // the trap holds its 1-3-1 (the shell its 1-4) until the puck is over the red line
   if (evenFive && S4_DEV.trapHold && px > 0 && FORECHECK_CAP[me.playbook.forecheck] < Infinity) return forecheckShape(me.playbook)
@@ -1026,6 +1094,10 @@ function assignRoles(me: Side, pool: Body[], table: readonly RoleSpot[], targets
  * eyes); the box-out pair (agentSim) is the defence's answer. Calibrate.
  */
 export const SCREEN = { minShotFt: 45, outFt: 6 }
+/** W3 S8: a power-play shot from beyond `minFt` is taken only through a lane at least this open (laneOpen); a one-timer on the power play likewise (`oneTimer`), else he catches it. */
+export const PP_LANE = { min: 0.5, minFt: 22, oneTimer: 0.5 }
+/** W3 S8: the power play's net-front man screens at least this hard (the playbook's screen is the 5-on-5 one). */
+export const PP_SCREEN_K = 0.85
 
 /**
  * W3 S4, the 2-1-2's second forechecker: with their carrier below `fromX`
@@ -1129,6 +1201,8 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
   const side = tp.strong
   // W3 S4: each possession runs one breakout from the playbook, drawn when it starts.
   if (weHaveIt && tp.breakout?.poss !== w.possSince) tp.breakout = { plan: pickBreakout(me.playbook, Math.round(w.possSince * 20) * 2 + (a > 0 ? 1 : 0)), poss: w.possSince }
+  // W3 S8: each power-play rush up the ice runs one entry from the playbook (drop, carry, dump)
+  if (S8_DEV.entry && weHaveIt && me.powerPlay && tp.ppEntry?.poss !== w.possSince) tp.ppEntry = { plan: pickPpEntry(me.playbook, Math.round(w.possSince * 20) * 2 + (a > 0 ? 1 : 0)), poss: w.possSince }
 
   for (const b of [...plans.keys()]) if (!me.skaters.includes(b)) plans.delete(b)
   for (const b of me.leaving) setJob(plans, b, w.t, 'change')
@@ -1344,6 +1418,27 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
       }
     }
   }
+  // W3 S8, the kill in our zone: the man nearest the puck is on it - the
+  // passive kill only when it is in his area (on the perimeter the shape
+  // holds and the puck stays outside), the aggressive kill further out.
+  const pkZone = S8_DEV.pk && me.shorthanded && me.skaters.length >= 4 && threat !== null && threat.x * a < -BLUE_X
+  const pkAggr = me.playbook.pkPressure >= PK_PRESSURE_AGGRESSIVE
+  if (pkZone && threat) {
+    let near: Body | null = null
+    let nd = Infinity
+    for (const b of pool) {
+      if (chasers.has(b)) continue
+      const d = Math.hypot(b.x - threat.x, b.y - threat.y) - (b === me.presser ? 3 : 0)
+      if (d < nd) {
+        nd = d
+        near = b
+      }
+    }
+    const perimeter = Math.hypot(ownNetX - threat.x, threat.y) > PK_PLAY.perimeterFt
+    presser = near && (!perimeter || nd < (pkAggr ? PK_PLAY.areaAggressiveFt : PK_PLAY.areaFt)) ? near : null
+    lone = null
+    second = null
+  }
   me.presser = presser
   if (presser && threat) {
     const cx = threat.x
@@ -1360,7 +1455,11 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
     // W3 S4: how deep this forecheck sends F1 (the trap steers from the top of
     // the circles, the shell waits at their blue line; 2-1-2 / 1-2-2 go in).
     const fcCap = S4_DEV.trapHold && !me.powerPlay && !me.shorthanded && !me.ot && !opp.pulled ? FORECHECK_CAP[me.playbook.forecheck] : Infinity
-    if (cAdvForUs > fcCap - 3 && cAdvForUs > BLUE_X) {
+    // W3 S8: the passive kill's man on the puck goes no further than the red line
+    const pkCap = S8_DEV.pkUp && me.shorthanded && !pkZone ? pkPresserCap(me.playbook) : Infinity
+    if (pkCap < Infinity && cAdvForUs > pkCap - 3) {
+      cmds.set(presser, { tx: a * (pkCap - 4), ty: clamp(cy * 0.4, -18, 18), speed: presser.caps.top * 0.85, arrive: true, urgency: 0.8, faceX: cx, faceY: cy })
+    } else if (cAdvForUs > fcCap - 3 && cAdvForUs > BLUE_X) {
       // Contain: hold the middle at the cap, shaded to the puck side, facing
       // him — make him come up the ice into the system, take the middle away.
       cmds.set(presser, { tx: a * fcCap, ty: clamp(cy * 0.45, -22, 22), speed: presser.caps.top * 0.85, arrive: true, urgency: 0.8, faceX: cx, faceY: cy })
@@ -1402,13 +1501,18 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
       const vulnerable = onWall || csp < 7 || turnedAway || inHouse
       // A carrier standing still gets no respect: the man on him steps INTO
       // him (body and stick) instead of waiting a stick-length away.
-      const inside = vulnerable ? 3.2 : clamp(10 - pp * 4, 6, 10)
+      // (W3 S8, the kill: on the perimeter the aggressive kill goes at him,
+      // the passive one keeps the inside at a gap and takes the lane, and
+      // closes only when he bobbles it or turns his back.)
+      const perimeter = pkZone && Math.hypot(ownNetX - cx, cy) > PK_PLAY.perimeterFt
+      const inside = pkZone && perimeter ? (pkAggr ? PK_PLAY.gapAggressive : turnedAway || csp < 4 ? PK_PLAY.close : PK_PLAY.gapPassive) : vulnerable ? 3.2 : clamp(10 - pp * 4, 6, 10)
       cmds.set(presser, {
         tx: cx + ux * inside + threat.vx * 0.25,
         ty: cy + uy * inside + threat.vy * 0.25,
-        speed: presser.caps.top * (0.75 + pp * 0.25),
-        arrive: !vulnerable,
-        urgency: 0.75 + pp * 0.25,
+        // (the aggressive kill goes at him flat out)
+        speed: presser.caps.top * (perimeter && pkAggr ? 1 : 0.75 + pp * 0.25),
+        arrive: !vulnerable && !(perimeter && pkAggr),
+        urgency: perimeter && pkAggr ? 1 : 0.75 + pp * 0.25,
         // Face him while he's slow or still coming; once he has speed on
         // you, skate WITH him (angling him to the wall), not backward.
         ...(csp < 12 || dP > 16 ? { faceX: cx, faceY: cy } : {})
@@ -1454,6 +1558,24 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
         }
       })
       if (bi >= 0) used = used.filter((_, i) => i !== bi)
+    }
+  }
+  // W3 S8: on the power play the carrier IS one of the five (the quarterback,
+  // the half-wall...): the role he stands in is his, the others keep theirs.
+  if (shapeWithPuck && weHaveIt && carrier && PP_TABLES.has(table) && used.length > rest.length) {
+    let bi = -1
+    let bd = Infinity
+    used.forEach((s, i) => {
+      const tg = targets.get(s.role)!
+      const d = Math.hypot(tg.x - carrier.x, tg.y - carrier.y)
+      if (d < bd) {
+        bd = d
+        bi = i
+      }
+    })
+    if (bi >= 0) {
+      me.roles.set(carrier, used[bi]!.role)
+      used = used.filter((_, i) => i !== bi)
     }
   }
   // Re-plan only on a trigger: possession, the shape, the carrier (or their
@@ -1566,7 +1688,14 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
 
   // The shooting-lane man: when their carrier can shoot, a man covering nobody steps into the lane.
   let laneMan: Body | null = null
-  if (theyHaveIt && carrier && carrier.x * opp.a > BLUE_X + 5) {
+  // W3 S8: the kill's lane and seam men (specialTeams.ts PK_SYSTEMS)
+  const pkSys = pkZone && S8_DEV.lanes && PK_TABLES.has(table) ? pkSystemOf(table) : null
+  if (pkSys && theyHaveIt && carrier && carrier.x * opp.a > BLUE_X + 5) {
+    // the high man on the puck side takes the shooting lane (a point or flank shot)
+    const m = rest.find((b) => roles.get(b)?.role === pkSys.lane)
+    if (m && xgAt(carrier.x, carrier.y, opp.a) > 0.012) laneMan = m
+  }
+  if (!laneMan && theyHaveIt && carrier && carrier.x * opp.a > BLUE_X + 5) {
     const xg = xgAt(carrier.x, carrier.y, opp.a)
     if (xg > 0.025) {
       const lx = carrier.x + (ownNetX - carrier.x) * 0.3
@@ -1581,6 +1710,28 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
           laneMan = b
         }
       }
+    }
+  }
+
+  // The seam: the weak-side killer sits on the pass to their one-timer man
+  // (the open man across the slot from the puck), between him and the puck.
+  let seamMan: Body | null = null
+  let seamAt: XY | null = null
+  if (pkSys && theyHaveIt && carrier && Math.abs(carrier.y) > 6) {
+    const m = rest.find((b) => roles.get(b)?.role === pkSys.seam)
+    let best: Body | null = null
+    let bx = 0
+    for (const o of opp.skaters) {
+      if (o === carrier || opp.leaving.has(o) || Math.sign(o.y || 1) === Math.sign(carrier.y) || o.x * opp.a < PK_PLAY.seamMinX) continue
+      const x = xgAt(o.x, o.y, opp.a)
+      if (x > bx) {
+        bx = x
+        best = o
+      }
+    }
+    if (m && m !== laneMan && best) {
+      seamMan = m
+      seamAt = { x: carrier.x + (best.x - carrier.x) * PK_PLAY.seamK, y: carrier.y + (best.y - carrier.y) * PK_PLAY.seamK }
     }
   }
 
@@ -1665,6 +1816,12 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
         job = 'lane'
         mk = o
       }
+    } else if (b === seamMan && seamAt && carrier) {
+      t = seamAt
+      urgency = 0.85
+      faceX = carrier.x
+      faceY = carrier.y
+      job = 'seam'
     } else if (b === laneMan && carrier) {
       // Take away the lane — and inside 35 ft, when every man in the slot is
       // covered, collapse ONTO the carrier (the shell: a body goal-side of
@@ -1674,7 +1831,7 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
       const dN = Math.hypot(ownNetX - carrier.x, carrier.y)
       const covered = [...marks.values()]
       const slotOpen = opp.skaters.some((o) => o !== carrier && Math.hypot(o.x - ownNetX, o.y) < 30 && !covered.includes(o))
-      const f = dN < 35 && !slotOpen ? clamp(5 / Math.max(dN, 1), 0.1, 0.5) : 0.3
+      const f = dN < 35 && !slotOpen ? clamp(5 / Math.max(dN, 1), 0.1, 0.5) : pkSys ? PK_PLAY.laneK : 0.3
       t = { x: carrier.x + (ownNetX - carrier.x) * f, y: carrier.y + (0 - carrier.y) * f }
       urgency = dN < 35 ? 1 : 0.85
       faceX = carrier.x
@@ -1696,7 +1853,10 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
       // zone: he is the outlet and the shooter up top.
       const onPoint = inZone && b.player.position === 'D' && t.x * a < 45
       // (The net-front man holds the net front, and screens a shot from distance.)
-      if (S4_DEV.screen && spot.role === 'NET_FRONT' && inZone && carrier && carrier !== b && me.playbook.screen > 0) {
+      // W3 S8: on the power play the net-front role screens every shot from the top.
+      const ppSys = S8_DEV.pp && PP_TABLES.has(table) ? ppSystemOf(table) : null
+      const screenRole = spot.role === 'NET_FRONT' || (ppSys !== null && spot.role === ppSys.net)
+      if (S4_DEV.screen && screenRole && inZone && carrier && carrier !== b && (me.playbook.screen > 0 || ppSys)) {
         // W3 S4: the screen. With the puck up top (a shot from distance) the
         // net-front man stands on the shot line a stride off the crease, his
         // back to the goalie: as far onto it as the system asks.
@@ -1705,16 +1865,23 @@ export function thinkSide(w: World, me: Side, out: ThinkOut): void {
         if (L > SCREEN.minShotFt) {
           const sx = nx + ((carrier.x - nx) / L) * SCREEN.outFt
           const sy = (carrier.y / L) * SCREEN.outFt
-          const k = clamp(me.playbook.screen, 0, 1)
+          const k = clamp(ppSys ? Math.max(me.playbook.screen, PP_SCREEN_K) : me.playbook.screen, 0, 1)
           t = { x: t.x + (sx - t.x) * k, y: t.y + (sy - t.y) * k }
           job = 'screen'
           urgency = Math.max(urgency, 0.8)
           faceX = carrier.x
           faceY = carrier.y
         }
-      } else if (!(spot.role === 'NET_FRONT' && inZone)) {
+      } else if (!(screenRole && inZone)) {
         // (a loose puck of ours: open ice relative to the puck)
-        t = getOpen(w, me, opp.skaters, b, t, carrier ?? puck, onPoint)
+        // (W3 S8: the power play holds its shape - open ice along the line of his spot, not a wander)
+        t = getOpen(w, me, opp.skaters, b, t, carrier ?? puck, onPoint || ppSys !== null)
+        if (ppSys && spot.role === ppSys.oneTimer && carrier && carrier !== b) {
+          // the one-timer man: stick loaded, square to the passer
+          job = 'oneTimer'
+          faceX = carrier.x
+          faceY = carrier.y
+        }
         // He skates to his open ice with intent and stops on it — not a
         // creep that never quite arrives (the "standing" look).
         if (Math.hypot(t.x - b.x, t.y - b.y) > 3) urgency = Math.max(urgency, PLAN.supportUrgency)

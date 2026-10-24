@@ -28,12 +28,22 @@ import { judgeSystems, legibility, systemFramesFromStream, type SeqCase } from '
 import { tacticsForSystem, type CoachSystemId } from '@engine/league/coachProfile'
 import { carrierPlayLine, judgeCarrierPlay, sumCarrierPlay } from '@engine/analysis/carrierPlay'
 import { judgePuckPlayStream } from '@engine/analysis/puckPlay'
+import { judgeSpecialTeams, specialTeamsLine, sumSpecialTeams } from '@engine/analysis/specialTeams'
+import type { PenaltyKillFormation, PowerPlayFormation, Team } from '@domain'
 
 /** W3 S4 VT15 gate (design band, measured on the S4 engine: see W3-LOG S4). */
 const VT15_GATE = { forecheckFamily: 0.5, collapseLead: 0.12, pressureLead: 0.3 }
 
 /** W3 S5 carrier gate (design band; before/after in W3-LOG S5). */
 const CARRIER_GATE = { games: 8, pingShare: 0.1, netAttack: 0.9, corner: 0.12, caught: 0.33 }
+
+/**
+ * W3 S8 special-teams gate (design band; before/after in W3-LOG S8): the PP
+ * set-up read off the five bodies is the declared one (or its next of kin),
+ * the kill's shape and pressure separate the teams that run them, and the
+ * stream's PP% is a power play's, not a 5-on-5's.
+ */
+const S8_GATE = { ppFamily: 0.55, boxShare: 0.6, diamondLead: 0.15, pressureLead: 0.15, ppPct: [0.12, 0.32] as const }
 
 /** W3 S6 puck gate (design band; before/after in W3-LOG S6). */
 const S6_GATE = { games: 6, reboundFast: 2, gainedPer60: 1.5, throughPer60: 5, ignoredPer60: 1, raceWon: 0.45 }
@@ -556,6 +566,56 @@ describe('agent engine', () => {
     // D zone: the shell's collapse reads as a collapse far more often than a box team's coverage
     expect(share(dz, 'defensiveShell', 'collapse') - share(dz, 'structuredTwoWay', 'collapse')).toBeGreaterThan(VT15_GATE.collapseLead)
   }, 600000)
+
+  it('VT15 special teams: the power play and the kill are legible, the PP scores like one (W3 S8)', () => {
+    // Three special-teams set-ups against each other, home and away: the
+    // umbrella with a passive box, the 1-3-1 with the aggressive (pressure)
+    // box, the overload with a passive diamond. Before S8 nothing was
+    // declared and the kill had one shape and one pressure (W3-LOG S8).
+    const kits: Array<[PowerPlayFormation, PenaltyKillFormation]> = [['umbrella', 'box'], ['1-3-1', 'aggressive'], ['overload', 'diamond']]
+    const withKit = (t: Team, k: [PowerPlayFormation, PenaltyKillFormation]): Team => ({ ...t, tactics: { ...t.tactics, specialTeams: { powerPlay: k[0], penaltyKill: k[1] } } })
+    const pp = new Map<string, SeqCase<string>[]>()
+    const pk = new Map<string, SeqCase<string>[]>()
+    const press = new Map<string, SeqCase<string>[]>()
+    const sts = []
+    let g = 0
+    for (let i = 0; i < kits.length; i++) {
+      for (const swap of [false, true]) {
+        const [hk, ak] = swap ? [kits[(i + 1) % 3]!, kits[i]!] : [kits[i]!, kits[(i + 1) % 3]!]
+        const out = agentSimGame(withKit(team(g), hk), withKit(team(g + 7), ak), resolve, { seed: 6400 + g })
+        g++
+        sts.push(judgeSpecialTeams(out.stream))
+        const { frames, passes } = systemFramesFromStream(out.stream)
+        const r = judgeSystems(frames, passes)
+        for (const [side, k] of [['home', hk], ['away', ak]] as const) {
+          pp.set(k[0], [...(pp.get(k[0]) ?? []), ...r[side].pp])
+          pk.set(k[1], [...(pk.get(k[1]) ?? []), ...r[side].pk])
+          press.set(k[1], [...(press.get(k[1]) ?? []), ...r[side].pkPress])
+        }
+      }
+    }
+    const share = (m: Map<string, SeqCase<string>[]>, k: string, cls: string): number => {
+      const cs = (m.get(k) ?? []).filter((c) => c.declared)
+      return cs.length ? cs.filter((c) => c.classified === cls).length / cs.length : 0
+    }
+    const st = sumSpecialTeams(sts)
+    const lines = [...pp.keys()].map((k) => { const l = legibility(pp.get(k) ?? []); return `PP ${k}: ${l.exact}/${l.judged} ${JSON.stringify(l.table)}` })
+    for (const k of pk.keys()) lines.push(`PK ${k}: box ${share(pk, k, 'box').toFixed(2)} diamond ${share(pk, k, 'diamond').toFixed(2)} aggressive ${share(press, k, 'aggressive').toFixed(2)} (${(press.get(k) ?? []).length})`)
+    // eslint-disable-next-line no-console
+    console.log(`VT15 special teams:\n  ${lines.join('\n  ')}\n${specialTeamsLine(st, g * 2)}`)
+    for (const k of ['umbrella', '1-3-1', 'overload']) {
+      const l = legibility(pp.get(k) ?? [])
+      expect(l.judged, k).toBeGreaterThan(15)
+      expect(l.exactShare, `${k} ${lines.join(' | ')}`).toBeGreaterThan(S8_GATE.ppFamily)
+    }
+    expect(share(pk, 'box', 'box')).toBeGreaterThan(S8_GATE.boxShare)
+    expect(share(pk, 'diamond', 'diamond') - share(pk, 'box', 'diamond')).toBeGreaterThan(S8_GATE.diamondLead)
+    expect(share(press, 'aggressive', 'aggressive') - share(press, 'box', 'aggressive')).toBeGreaterThan(S8_GATE.pressureLead)
+    const opps = st.opps.home + st.opps.away
+    expect(opps).toBeGreaterThan(20)
+    expect(st.ppGoals / opps).toBeGreaterThan(S8_GATE.ppPct[0])
+    expect(st.ppGoals / opps).toBeLessThan(S8_GATE.ppPct[1])
+  }, 900000)
 
   it('plays the puck: a plausible speed, real bounces, nobody skates through it (W3 S6, VT20 / VT21)', () => {
     // src/engine/analysis/puckPlay.ts on the sim stream, plus the sim's own

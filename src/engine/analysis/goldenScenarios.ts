@@ -41,6 +41,7 @@ export type ScenarioKind =
   | 'dumpInRace'
   | 'boardCheckNear'
   | 'endToEndRush'
+  | 'pkClear'
 
 export const SCENARIO_KINDS: readonly ScenarioKind[] = [
   'breakaway', 'twoOnOne', 'ozCycleShot', 'ppSetPlay', 'goalReplay',
@@ -48,7 +49,7 @@ export const SCENARIO_KINDS: readonly ScenarioKind[] = [
   'dZoneCoverage', 'offsideCall', 'faceoffNeutral', 'faceoffDefensive',
   'breakoutPlay', 'forecheckTurnover', 'nzRegroup', 'systemHome', 'systemAway',
   'trailingPush', 'rimAround', 'offGlass', 'looseRace', 'dumpInRace',
-  'boardCheckNear', 'endToEndRush',
+  'boardCheckNear', 'endToEndRush', 'pkClear',
 ]
 
 /** Human label + how much game time to show around the moment (lead before, tail after).
@@ -90,6 +91,8 @@ export const SCENARIO_META: Record<ScenarioKind, { label: string; lead: number; 
   // a hit on the camera's boards, and a rush from one end to a shot at the other
   boardCheckNear:  { label: 'Board check on the near boards', lead: 8,  tail: 6 },
   endToEndRush:    { label: 'End-to-end rush',                lead: 12, tail: 4 },
+  // W3 S8 (special teams): the kill wins it in its own end and clears it the length of the ice
+  pkClear:         { label: 'Penalty kill: the clear',        lead: 12, tail: 6 },
 }
 
 export interface ScenarioHit {
@@ -416,6 +419,46 @@ export function findScenarios(
       if (f.z > 3.5 && boardsD(f.x, f.y) < 4) {
         push({ kind: 'offGlass', absT: f.abs, period: f.period, side: lastSide(i) ?? 'home', note: `puck off the glass ${f.z.toFixed(1)} ft up`, quality: 1 + Math.min(0.4, (f.z - 3.5) / 5) })
         while (i + 1 < fr.length && !fr[i + 1]!.carrier && fr[i + 1]!.abs - f.abs < 2) i++
+      }
+    }
+    // W3 S8, the kill's clear: shorthanded (4 on 5), a killer has it in his own
+    // zone and the puck leaves it past the red line with nobody of theirs
+    // touching it on the way; better the further it goes and when the penalty
+    // then runs out without a power-play goal (the kill).
+    {
+      const counts: { abs: number; home: number; away: number; homeNet: number }[] = []
+      for (const ev of stream) if (ev.type === 'frame') counts.push({ abs: playAbsT(ev, bases), home: ev.home.length, away: ev.away.length, homeNet: Math.sign(ev.homeGoalie.pos.x) })
+      for (let i = 1; i < fr.length; i++) {
+        const f = fr[i]!
+        const c = counts[i]
+        if (!f.live || !f.carrier || !c) continue
+        const side = sideOf(f.carrier)
+        const mine = side === 'home' ? c.home : c.away
+        const theirs = side === 'home' ? c.away : c.home
+        if (!(mine === 4 && theirs === 5)) continue
+        // our net: the home goalie's side for home (frames carry no attack sign)
+        const ownSign = side === 'home' ? c.homeNet : -c.homeNet
+        if (ownSign === 0 || f.x * ownSign < 25) continue
+        // the puck from here: out past the red line before anybody of theirs has it
+        let k = i
+        let cleared = -1
+        while (k + 1 < fr.length && fr[k + 1]!.live && fr[k + 1]!.abs - f.abs < 5) {
+          k++
+          const q = fr[k]!
+          if (q.carrier && sideOf(q.carrier) !== side) break
+          if (q.x * ownSign < 0) {
+            cleared = k
+            break
+          }
+        }
+        if (cleared < 0) continue
+        const far = fr.slice(cleared, Math.min(fr.length, cleared + 16)).reduce((m, q) => Math.max(m, -q.x * ownSign), 0)
+        // the kill: back to even strength within the next 2 minutes with no power-play goal in between
+        const goalAfter = evs.find((x) => x.abs > f.abs && x.abs < f.abs + 120 && x.ev.type === 'goal')
+        const evenAt = counts.find((q) => q.abs > f.abs && q.home === q.away)
+        const killed = evenAt !== undefined && (!goalAfter || goalAfter.abs > evenAt.abs)
+        push({ kind: 'pkClear', absT: f.abs, period: f.period, side, note: `shorthanded clear to ${Math.round(far)} ft${killed ? ', the penalty killed' : ''}`, quality: 1 + Math.min(0.5, far / 160) + (killed ? 0.4 : 0) })
+        while (i + 1 < fr.length && fr[i + 1]!.abs - f.abs < 8) i++
       }
     }
     // races: a free puck (not a pass or a shot) for >= 1 s, ending in a carrier; a dump-in when it went in over the blue line free

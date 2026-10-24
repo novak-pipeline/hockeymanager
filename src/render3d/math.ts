@@ -447,6 +447,14 @@ export function puckCarriedOffset(angle: number, side: 1 | -1 = 1): { dx: number
  * correction decays with a short half-life, so a pass leaving the blade blends
  * over a few frames but never trails. A handoff bigger than `snapFt` (a
  * stoppage reset, a seek) just snaps.
+ *
+ * W3 S8 (reel S7, VT20): a FREE puck (key '') is never drawn faster than its
+ * target moves. A pass or a rim leaving a blade the swing drew a little behind
+ * the sim's puck bled that correction off on top of the puck's own travel, so
+ * the drawn puck sped up 12 ft/s in the frames after the release with nothing
+ * touching it. Now its step is capped at the target's step (plus a slow
+ * `PUCK_CATCHUP_FTS` creep, so a puck that has stopped still settles onto the
+ * sim's): the correction bleeds off as the puck slows, never as a burst.
  */
 export interface PuckTrack {
   x: number
@@ -460,6 +468,8 @@ export interface PuckTrack {
 
 export const PUCK_HANDOFF_HL = 0.05
 export const PUCK_HANDOFF_SNAP_FT = 12
+/** A free puck's drawn step may exceed its target's by at most this speed (ft/s) while a correction bleeds off. */
+export const PUCK_CATCHUP_FTS = 3
 
 export function puckTrackStep(
   s: PuckTrack,
@@ -473,18 +483,76 @@ export function puckTrackStep(
   if (dt <= 0) return { x: tx, z: tz, cx: 0, cz: 0, key }
   let cx = s.cx
   let cz = s.cz
+  // where the target was last frame (the drawn puck minus its correction)
+  const ptx = s.x - s.cx
+  const ptz = s.z - s.cz
+  let snapped = false
   if (key !== s.key) {
     // re-base the correction so the drawn puck is continuous across the switch
     cx = s.x - tx
     cz = s.z - tz
-    if (Math.hypot(cx, cz) > snapFt) cx = cz = 0
+    if (Math.hypot(cx, cz) > snapFt) {
+      cx = cz = 0
+      snapped = true
+    }
   }
   const k = Math.pow(0.5, dt / hl)
   cx *= k
   cz *= k
   if (Math.abs(cx) < 1e-3) cx = 0
   if (Math.abs(cz) < 1e-3) cz = 0
-  return { x: tx + cx, z: tz + cz, cx, cz, key }
+  let x = tx + cx
+  let z = tz + cz
+  if (key === '' && !snapped && (cx !== 0 || cz !== 0)) {
+    // a free puck: no faster than the sim's (VT20)
+    const tStep = key === s.key ? Math.hypot(tx - ptx, tz - ptz) : Infinity
+    const dStep = Math.hypot(x - s.x, z - s.z)
+    const cap = tStep + PUCK_CATCHUP_FTS * dt
+    if (dStep > cap && Number.isFinite(cap)) {
+      x = s.x + ((x - s.x) / dStep) * cap
+      z = s.z + ((z - s.z) / dStep) * cap
+      cx = x - tx
+      cz = z - tz
+    }
+  }
+  return { x, z, cx, cz, key }
+}
+
+/**
+ * Keep a point (world ft) on the sheet: inside the boards' rounded rectangle
+ * (half-length 100, half-width 42.5, 28 ft corners), `inset` ft in from them
+ * (a puck's radius). W3 S8, VT20: the drawn puck never leaves the rink.
+ */
+export function clampToRink(x: number, z: number, inset = 0.2, halfL = 100, halfW = 42.5, r = 28): { x: number; z: number } {
+  const L = halfL - inset
+  const W = halfW - inset
+  const R = r - inset
+  let ax = Math.min(Math.abs(x), L)
+  let az = Math.min(Math.abs(z), W)
+  const cx = L - R
+  const cz = W - R
+  if (ax > cx && az > cz) {
+    const dx = ax - cx
+    const dz = az - cz
+    const d = Math.hypot(dx, dz)
+    if (d > R) {
+      ax = cx + (dx / d) * R
+      az = cz + (dz / d) * R
+    }
+  }
+  return { x: Math.sign(x) * ax || 0, z: Math.sign(z) * az || 0 }
+}
+
+/**
+ * The GAME time a rendered frame covers: wall dt × the playback rate while the
+ * clock runs. W3 S8 (reel S7, VT2): the skater speed cap ("nothing skates
+ * faster than a skater") was applied per WALL second, so in the dead time the
+ * viewer fast-forwards (the post-goal change) two men who came on at their
+ * door and skated to the faceoff in the sim were drawn crawling after them at
+ * 40 ft/s of wall time - 68 ft behind when live play resumed.
+ */
+export function gameStepDt(wallDt: number, speed: number, playing: boolean): number {
+  return playing ? wallDt * Math.max(1, speed) : wallDt
 }
 
 // ── camera angular-speed guard ───────────────────────────────────────────────

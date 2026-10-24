@@ -23,9 +23,9 @@
  */
 import type { Body } from './physics'
 import type { RoleSpot } from './templates'
-import type { BreakoutPlan } from '@engine/league/coachProfile'
+import type { BreakoutPlan, PpEntryPlan } from '@engine/league/coachProfile'
 
-export type JobKind = 'puck' | 'chase' | 'mark' | 'lane' | 'twoOnOne' | 'support' | 'screen' | 'spot' | 'change' | 'carry'
+export type JobKind = 'puck' | 'chase' | 'mark' | 'lane' | 'twoOnOne' | 'support' | 'screen' | 'spot' | 'change' | 'carry' | 'oneTimer' | 'seam'
 
 export interface Plan {
   role: string
@@ -60,6 +60,8 @@ export interface TeamPlan {
   chaser: Body | null
   /** W3 S4: the breakout this possession runs (systems.ts), drawn once per possession. */
   breakout: { plan: BreakoutPlan; poss: number } | null
+  /** W3 S8: the power-play entry this rush up the ice runs (specialTeams.ts), drawn once per possession. */
+  ppEntry: { plan: PpEntryPlan; poss: number } | null
 }
 
 /** Tunables (design; tuned on the target-flips metric and the VT13/VT14 detectors). */
@@ -106,7 +108,7 @@ export const PLAN = {
 }
 
 export function newTeamPlan(): TeamPlan {
-  return { key: '', strong: 1, table: null, at: -99, force: false, chaser: null, breakout: null }
+  return { key: '', strong: 1, table: null, at: -99, force: false, chaser: null, breakout: null, ppEntry: null }
 }
 
 /** The plan for `b` (created on first use: a new man has no plan → a trigger). */

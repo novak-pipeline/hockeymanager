@@ -30,6 +30,7 @@
 import { playAbsT } from '@domain'
 import type { GameStream } from '@domain/events'
 import { framesFromStream, type TPFrame } from './teamPlay'
+import { SHAPE_TEMPLATES, assignShape, type RolePoint } from './shapes'
 
 export interface SysFrame extends TPFrame {
   homeSystem?: string | undefined
@@ -39,6 +40,8 @@ export interface SysFrame extends TPFrame {
 export interface SysPass {
   t: number
   from: string
+  /** The man it was for (W3 S8: the drop pass's receiver). */
+  to?: string | undefined
   /** Release and target, rink feet. */
   a: { x: number; y: number }
   b: { x: number; y: number }
@@ -48,6 +51,11 @@ export interface SysPass {
 export type ForecheckClass = '2-1-2' | '1-2-2' | '1-3-1' | '1-4'
 export type DZoneClass = 'zone' | 'man' | 'collapse'
 export type BreakoutClass = 'up' | 'reverse' | 'wheel' | 'stretch' | 'rim' | 'carry'
+/** W3 S8: the power-play set-up, entry; the kill's shape and its pressure. */
+export type PpClass = 'umbrella' | '1-3-1' | 'overload'
+export type PpEntryClass = 'drop' | 'carry' | 'dump'
+export type PkClass = 'box' | 'diamond'
+export type PkPressClass = 'aggressive' | 'passive'
 
 export interface SeqCase<C> {
   t: number
@@ -62,6 +70,14 @@ export interface TeamSystems {
   forecheck: SeqCase<ForecheckClass>[]
   dzone: SeqCase<DZoneClass>[]
   breakout: SeqCase<BreakoutClass>[]
+  /** W3 S8: on the power play (this team 5 on 4, in their zone with the puck), the set-up its five stand in. */
+  pp: SeqCase<PpClass>[]
+  /** W3 S8: on the power play, how it got into their zone (the drop pass, the carry, the dump). */
+  ppEntry: SeqCase<PpEntryClass>[]
+  /** W3 S8: killing a penalty (4 on 5, in our zone), the shape its four stand in… */
+  pk: SeqCase<PkClass>[]
+  /** …and how hard its man on the puck plays a carrier on the perimeter. */
+  pkPress: SeqCase<PkPressClass>[]
 }
 
 export interface SystemsReport {
@@ -104,6 +120,42 @@ export const SYS = {
   reverseX: 78,
   stretchFt: 65,
   wallY: 30,
+  /** W3 S8 special teams: a set-up is read once the puck has been in their zone this long (s), from at least this many frames. */
+  stSettleS: 1,
+  stMinFrames: 3,
+  /** The zone (attack frame, ft): past their blue line by this much. */
+  stZoneX: 28,
+  /** The kill's pressure: each carrier on the perimeter (beyond this from the killers' net, ft), the closest any killer got to him while he had it; the median of those under `pressFt` is the aggressive kill. */
+  perimeterFt: 32,
+  pressFt: 9.5,
+  /** …over carriers who held it at least this many frames out there (0.75 s at the sim's 4 Hz). */
+  stintFrames: 3,
+  /** A drop pass: from the neutral zone, gaining no more than this (ft) toward their net (back, or square to a man coming), within this long (s) of the entry. */
+  dropGainFt: 3,
+  dropS: 4,
+}
+
+/**
+ * W3 S8: the textbook set-ups the special-teams classifier reads against (the
+ * shapes.ts diagrams, in the power play's attack frame, mirrored to the puck
+ * side): the umbrella, the 1-3-1 and the overload; the box and the diamond.
+ */
+const tpl = (id: string): { attack: readonly RolePoint[]; defend: readonly RolePoint[] } => {
+  const t = SHAPE_TEMPLATES.find((q) => q.id === id)
+  if (!t) throw new Error(`no shape template ${id}`)
+  return t
+}
+export const PP_CLASS_TEMPLATES: Record<PpClass, readonly RolePoint[]> = { umbrella: tpl('ppUmbrella').attack, '1-3-1': tpl('pp131').attack, overload: tpl('ppOverload').attack }
+export const PK_CLASS_TEMPLATES: Record<PkClass, readonly RolePoint[]> = { box: tpl('pp131').defend, diamond: tpl('ppUmbrella').defend }
+
+/** The nearest set-up (least mean distance over the best assignment) for points already in the attack frame, puck side mirrored to +y. */
+export function nearestSetup<C extends string>(pts: readonly { x: number; y: number }[], set: Record<C, readonly RolePoint[]>): { cls: C; meanFt: number } | null {
+  let best: { cls: C; meanFt: number } | null = null
+  for (const cls of Object.keys(set) as C[]) {
+    const r = assignShape(pts, set[cls])
+    if (r && (!best || r.meanFt < best.meanFt)) best = { cls, meanFt: r.meanFt }
+  }
+  return best
 }
 
 /** The neutral frames plus each side's declared system, and the stream's passes on the same clock. */
@@ -132,7 +184,7 @@ export function systemFramesFromStream(stream: GameStream): { frames: SysFrame[]
   const passes: SysPass[] = []
   for (const e of stream) {
     if (e.type !== 'pass') continue
-    passes.push({ t: playAbsT(e, base), from: e.from as string, a: { x: e.a.x * 100, y: e.a.y * 42.5 }, b: { x: e.b.x * 100, y: e.b.y * 42.5 }, completed: e.completed })
+    passes.push({ t: playAbsT(e, base), from: e.from as string, to: e.to as string, a: { x: e.a.x * 100, y: e.a.y * 42.5 }, b: { x: e.b.x * 100, y: e.b.y * 42.5 }, completed: e.completed })
   }
   return { frames, passes }
 }
@@ -203,7 +255,8 @@ export function dzoneFeatures(ours: readonly { x: number; y: number }[], theirs:
 
 /** VT15 on the stream (or on drawn frames, without breakouts). */
 export function judgeSystems(frames: readonly SysFrame[], passes: readonly SysPass[] = []): SystemsReport {
-  const rep: SystemsReport = { home: { forecheck: [], dzone: [], breakout: [] }, away: { forecheck: [], dzone: [], breakout: [] } }
+  const rep: SystemsReport = { home: { forecheck: [], dzone: [], breakout: [], pp: [], ppEntry: [], pk: [], pkPress: [] }, away: { forecheck: [], dzone: [], breakout: [], pp: [], ppEntry: [], pk: [], pkPress: [] } }
+  judgeSpecialTeams(frames, passes, rep)
   for (const team of ['home', 'away'] as const) {
     const ids = new Set<string>()
     for (const f of frames) for (const s of f[team]) ids.add(s.id)
@@ -294,6 +347,99 @@ export function judgeSystems(frames: readonly SysFrame[], passes: readonly SysPa
     closeDz()
   }
   return rep
+}
+
+/**
+ * W3 S8 (VT15 for special teams): each power play's set-up, entry, and the
+ * kill against it, read off the positions. A sequence is the power play (5 on
+ * 4) holding the puck in their zone; it is judged once settled (`stSettleS`),
+ * frame by frame against the textbook set-ups (nearestSetup), and its
+ * classification is the most frequent read. The kill's pressure is the median
+ * gap of its nearest man to a carrier out on the perimeter. An entry is the
+ * puck crossing their blue line under the power play's control: carried in
+ * (the carrier took it from a drop pass, a pass back to him from the neutral
+ * zone a moment before: the drop), or put in with nobody carrying it (the dump).
+ */
+function judgeSpecialTeams(frames: readonly SysFrame[], passes: readonly SysPass[], rep: SystemsReport): void {
+  for (const team of ['home', 'away'] as const) {
+    const ids = new Set<string>()
+    for (const f of frames) for (const s of f[team]) ids.add(s.id)
+    const theirs = team === 'home' ? 'away' : 'home'
+    let seq: { start: number; pp: PpClass[]; pk: PkClass[]; gaps: number[]; decPp: string[]; decPk: string[]; stint: { id: string; min: number; n: number } | null } | null = null
+    let lastAdv = -Infinity
+    let lastCarrier: string | null = null
+    let entryDecl: string | null = null
+    const endStint = (): void => {
+      // (a carrier who had it long enough for the kill to get to him - a one-timer is no read of the pressure)
+      if (seq?.stint && seq.stint.n >= SYS.stintFrames) seq.gaps.push(seq.stint.min)
+      if (seq) seq.stint = null
+    }
+    const close = (): void => {
+      endStint()
+      if (seq && seq.pp.length >= SYS.stMinFrames) {
+        const pp = mode(seq.pp)
+        const pk = mode(seq.pk)
+        const dPk = mode(seq.decPk)?.split(':')[1] ?? null
+        if (pp) rep[team].pp.push({ t: seq.start, team, declared: mode(seq.decPp)?.split(':')[1] ?? null, classified: pp })
+        if (pk) rep[theirs].pk.push({ t: seq.start, team: theirs, declared: dPk?.split('/')[0] ?? null, classified: pk })
+        if (seq.gaps.length >= 1) {
+          const g = [...seq.gaps].sort((p, q) => p - q)[Math.floor(seq.gaps.length / 2)]!
+          rep[theirs].pkPress.push({ t: seq.start, team: theirs, declared: dPk?.split('/')[1] ?? null, classified: g < SYS.pressFt ? 'aggressive' : 'passive', detail: `median gap ${g.toFixed(1)} ft` })
+        }
+      }
+      seq = null
+    }
+    for (const f of frames) {
+      const onPp = f.live && f.homeNetX !== 0 && f[team].length === 5 && f[theirs].length === 4
+      if (!onPp) {
+        close()
+        lastAdv = -Infinity
+        lastCarrier = null
+        continue
+      }
+      const ownNet = team === 'home' ? f.homeNetX : -f.homeNetX
+      const a = ownNet > 0 ? -1 : 1
+      const px = f.puck.x * a
+      const weHaveIt = f.carrier !== null && ids.has(f.carrier)
+      const theyHaveIt = f.carrier !== null && !weHaveIt
+      const ours = weHaveIt || (f.carrier === null && lastCarrier !== null && ids.has(lastCarrier))
+      const decl = team === 'home' ? f.homeSystem : f.awaySystem
+      const declPk = team === 'home' ? f.awaySystem : f.homeSystem
+      if (decl?.startsWith('ppentry:')) entryDecl = decl.split(':')[1] ?? null
+      // the entry: the puck over their blue line, the power play's (carried, or off our stick with nobody on it)
+      if (px >= SYS.blue + 0.7 && lastAdv < SYS.blue + 0.7 && lastAdv > -Infinity && ours) {
+        let cls: PpEntryClass = weHaveIt ? 'carry' : 'dump'
+        if (weHaveIt) {
+          const drop = passes.find((p) => p.completed && p.to === f.carrier && ids.has(p.from) && p.t <= f.t && p.t >= f.t - SYS.dropS && (p.b.x - p.a.x) * a <= SYS.dropGainFt && p.a.x * a < SYS.blue && p.a.x * a > -SYS.blue)
+          if (drop) cls = 'drop'
+        }
+        rep[team].ppEntry.push({ t: f.t, team, declared: entryDecl, classified: cls })
+        entryDecl = null
+      }
+      lastAdv = px
+      if (f.carrier !== null) lastCarrier = f.carrier
+      // the set-up: in their zone with the puck (a pass of ours in flight included)
+      if (px >= SYS.stZoneX && ours) {
+        if (!seq) seq = { start: f.t, pp: [], pk: [], gaps: [], decPp: [], decPk: [], stint: null }
+        if (f.t - seq.start < SYS.stSettleS) continue
+        const side = f.puck.y >= 0 ? 1 : -1
+        const toFrame = (q: { x: number; y: number }): { x: number; y: number } => ({ x: q.x * a, y: q.y * side })
+        const pp = nearestSetup(f[team].map(toFrame), PP_CLASS_TEMPLATES)
+        const pk = nearestSetup(f[theirs].map(toFrame), PK_CLASS_TEMPLATES)
+        if (pp) seq.pp.push(pp.cls)
+        if (pk) seq.pk.push(pk.cls)
+        if (decl?.startsWith('pp:')) seq.decPp.push(decl)
+        if (declPk?.startsWith('pk:')) seq.decPk.push(declPk)
+        const c = weHaveIt ? f[team].find((q) => q.id === f.carrier) : undefined
+        if (c && Math.hypot(c.x * a - 89, c.y) > SYS.perimeterFt) {
+          const g = Math.min(...f[theirs].map((q) => Math.hypot(q.x - c.x, q.y - c.y)))
+          if (seq.stint && seq.stint.id !== c.id) endStint()
+          if (Number.isFinite(g)) seq.stint = { id: c.id, min: Math.min(seq.stint?.min ?? Infinity, g), n: (seq.stint?.n ?? 0) + 1 }
+        } else endStint()
+      } else if (theyHaveIt || px < SYS.blue) close()
+    }
+    close()
+  }
 }
 
 /** The plays that read as each other's on a picture: the pressure forechecks (2-1-2 / 1-2-2), the sitting-back ones (1-3-1 / 1-4); the box coverages (zone / man) against the collapse. */
