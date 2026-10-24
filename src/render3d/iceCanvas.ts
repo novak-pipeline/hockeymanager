@@ -262,7 +262,7 @@ function boardSnow(ctx: CanvasRenderingContext2D, alpha: number): void {
 }
 
 /** Paint the full rink color texture. */
-export function buildIceCanvas(opts: { centerLogo?: (CanvasImageSource & { width: number; height: number }) | null } = {}): HTMLCanvasElement {
+export function buildIceCanvas(opts: { centerLogo?: (CanvasImageSource & { width: number; height: number }) | null; clean?: boolean } = {}): HTMLCanvasElement {
   const canvas = document.createElement('canvas')
   canvas.width = W
   canvas.height = H
@@ -328,8 +328,9 @@ export function buildIceCanvas(opts: { centerLogo?: (CanvasImageSource & { width
   ctx.fillStyle = 'rgba(236,242,247,0.14)'
   ctx.fillRect(0, 0, W, H)
 
-  scuffs(ctx, rng, false)
-  boardSnow(ctx, 0.22)
+  // clean: a fresh flood (art-style look test) — no skate scuffs, a touch of board snow
+  if (!opts.clean) scuffs(ctx, rng, false)
+  boardSnow(ctx, opts.clean ? 0.1 : 0.22)
   ctx.restore()
 
   return canvas
