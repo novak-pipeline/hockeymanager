@@ -281,8 +281,109 @@ export const ROOM_TRAINER: ContentVariant[] = [
   { id: 'r.tr.4', text: '{name} is still {gamesAway} out, the trainer says. {injuryCap}.' },
 ]
 
+/* ─────────────────────────── rivalry heat ─────────────────────────── */
+
+/**
+ * BAD BLOOD: two men with history from an earlier meeting share the ice.
+ * kind fight|bigHit|cheapShot|afterWhistle|feud; first = no meeting between
+ * them since (tonight is the first). Slots: {a} the aggressor, {b} the man it
+ * was done to (surnames), {date} "Nov 12", {seasonTail} '' | ' last season',
+ * {Nth}/{nth} tonight's meeting count since, {hitVerb} flattened|hammered,
+ * {infraction}, {club} (feud: the club they shared).
+ */
+export const LT_BAD_BLOOD: ContentVariant[] = [
+  { id: 'lt.bb.f1', conditions: { kind: 'fight', first: true }, text: 'First meeting since {a} and {b} fought on {date}{seasonTail}.' },
+  { id: 'lt.bb.f2', conditions: { kind: 'fight', first: true }, text: '{a} and {b} dropped the gloves on {date}{seasonTail}. Tonight is the first time they have shared the ice since.' },
+  { id: 'lt.bb.f3', conditions: { kind: 'fight', first: true }, text: 'The last time these two met, {a} and {b} fought. That was {date}{seasonTail}.' },
+  { id: 'lt.bb.f4', conditions: { kind: 'fight', first: false }, text: '{Nth} meeting since {a} and {b} fought on {date}{seasonTail}.' },
+  { id: 'lt.bb.f5', conditions: { kind: 'fight', first: false }, text: '{a} and {b} fought on {date}{seasonTail}. Tonight is the {nth} meeting since.' },
+  { id: 'lt.bb.f6', conditions: { kind: 'fight', first: false }, text: '{a} and {b} have history: a fight on {date}{seasonTail}, and this is the {nth} meeting since.' },
+
+  { id: 'lt.bb.h1', conditions: { kind: 'bigHit', first: true }, text: 'First meeting since {a} {hitVerb} {b} on {date}{seasonTail}.' },
+  { id: 'lt.bb.h2', conditions: { kind: 'bigHit', first: true }, text: '{b} has not seen {a} since {date}{seasonTail}, the night {a} {hitVerb} him.' },
+  { id: 'lt.bb.h3', conditions: { kind: 'bigHit', first: true }, text: 'Last time out, {a} {hitVerb} {b}. That was {date}{seasonTail}.' },
+  { id: 'lt.bb.h4', conditions: { kind: 'bigHit', first: false }, text: '{Nth} meeting since {a} {hitVerb} {b} on {date}{seasonTail}.' },
+  { id: 'lt.bb.h5', conditions: { kind: 'bigHit', first: false }, text: '{a} {hitVerb} {b} on {date}{seasonTail}. {Nth} meeting since.' },
+  { id: 'lt.bb.h6', conditions: { kind: 'bigHit', first: false }, text: '{b} and {a} again, the {nth} meeting since the hit on {date}{seasonTail}.' },
+
+  { id: 'lt.bb.c1', conditions: { kind: 'cheapShot', first: true }, text: 'First meeting since {a} went off for {infraction} on {b} on {date}{seasonTail}.' },
+  { id: 'lt.bb.c2', conditions: { kind: 'cheapShot', first: true }, text: 'Last time out, {a} went to the box for {infraction} on {b}. That was {date}{seasonTail}.' },
+  { id: 'lt.bb.c3', conditions: { kind: 'cheapShot', first: true }, text: '{b} gets his first look at {a} since the {infraction} call on {date}{seasonTail}.' },
+  { id: 'lt.bb.c4', conditions: { kind: 'cheapShot', first: false }, text: '{Nth} meeting since {a} went off for {infraction} on {b} on {date}{seasonTail}.' },
+  { id: 'lt.bb.c5', conditions: { kind: 'cheapShot', first: false }, text: '{a} and {b}: the {nth} meeting since the {infraction} call on {date}{seasonTail}.' },
+  { id: 'lt.bb.c6', conditions: { kind: 'cheapShot', first: false }, text: '{a} went to the box for {infraction} on {b} on {date}{seasonTail}. {Nth} meeting since.' },
+
+  { id: 'lt.bb.w1', conditions: { kind: 'afterWhistle', first: true }, text: 'First meeting since {a} went off for {infraction} on {b} after a whistle on {date}{seasonTail}.' },
+  { id: 'lt.bb.w2', conditions: { kind: 'afterWhistle', first: true }, text: 'Last time out, {a} and {b} kept going after the whistle and {a} got {infraction}. That was {date}{seasonTail}.' },
+  { id: 'lt.bb.w3', conditions: { kind: 'afterWhistle', first: true }, text: '{a} and {b} have not shared the ice since {date}{seasonTail}, when {a} took {infraction} after the whistle.' },
+  { id: 'lt.bb.w4', conditions: { kind: 'afterWhistle', first: false }, text: '{Nth} meeting since {a} took {infraction} on {b} after a whistle on {date}{seasonTail}.' },
+  { id: 'lt.bb.w5', conditions: { kind: 'afterWhistle', first: false }, text: '{a} and {b} went at it after the whistle on {date}{seasonTail}. {Nth} meeting since.' },
+  { id: 'lt.bb.w6', conditions: { kind: 'afterWhistle', first: false }, text: 'The {nth} meeting since {a} got {infraction} for going after {b} at a whistle on {date}{seasonTail}.' },
+
+  { id: 'lt.bb.d1', conditions: { kind: 'feud', first: true }, text: 'Old teammates, old feud: {a} and {b} were at odds in the {club} room from {date}{seasonTail}.' },
+  { id: 'lt.bb.d2', conditions: { kind: 'feud', first: true }, text: '{a} and {b} fell out as teammates in the {club} room. Tonight they are on opposite benches.' },
+  { id: 'lt.bb.d3', conditions: { kind: 'feud', first: true }, text: '{a} and {b} did not get along as teammates. Their feud dates to {date}{seasonTail}.' },
+  { id: 'lt.bb.d4', conditions: { kind: 'feud', first: false }, text: 'Old teammates, old feud: {a} and {b} were at odds in the {club} room from {date}{seasonTail}.' },
+  { id: 'lt.bb.d5', conditions: { kind: 'feud', first: false }, text: '{a} and {b} fell out as teammates in the {club} room. Tonight they are on opposite benches.' },
+  { id: 'lt.bb.d6', conditions: { kind: 'feud', first: false }, text: '{a} and {b} did not get along as teammates. Their feud dates to {date}{seasonTail}.' },
+]
+
+/**
+ * The same two men again tonight. kind hit = {a} has hit {b} {n} times
+ * tonight; kind penalty = {a} just went off for {infraction} on {b} after an
+ * earlier run-in between them. {clock}/{period}: when it started.
+ */
+export const LT_HEAT_REPEAT: ContentVariant[] = [
+  { id: 'lt.hr.h1', conditions: { kind: 'hit' }, text: '{a} hits {b} again, the {nth} time tonight.' },
+  { id: 'lt.hr.h2', conditions: { kind: 'hit' }, text: '{Nth} hit of the night by {a} on {b}. The first came at {clock} of the {period}.' },
+  { id: 'lt.hr.h3', conditions: { kind: 'hit' }, text: '{a} keeps finishing on {b}: {n} hits on him since {clock} of the {period}.' },
+  { id: 'lt.hr.p1', conditions: { kind: 'penalty' }, text: '{a} and {b} again. {a} goes off for {infraction}, after their run-in at {clock} of the {period}.' },
+  { id: 'lt.hr.p2', conditions: { kind: 'penalty' }, text: 'This has been building since {clock} of the {period}. {a} to the box for {infraction} on {b}.' },
+  { id: 'lt.hr.p3', conditions: { kind: 'penalty' }, text: '{a} goes for {infraction} on {b}. They have been at it since {clock} of the {period}.' },
+]
+
+/** A fight between two men who had a run-in earlier tonight. {x} was on the
+ *  receiving end of it, {y} did it; cause hit|penalty. */
+export const LT_HEAT_ANSWER: ContentVariant[] = [
+  { id: 'lt.ha.h1', conditions: { cause: 'hit' }, text: '{x} answers for the hit {y} put on him at {clock} of the {period}.' },
+  { id: 'lt.ha.h2', conditions: { cause: 'hit' }, text: 'That fight goes back to {clock} of the {period}, when {y} hit {x}.' },
+  { id: 'lt.ha.h3', conditions: { cause: 'hit' }, text: '{y} hit {x} at {clock} of the {period}. Now they have gone.' },
+  { id: 'lt.ha.p1', conditions: { cause: 'penalty' }, text: '{x} and {y} had been at it since the {infraction} call at {clock} of the {period}. Now they fight.' },
+  { id: 'lt.ha.p2', conditions: { cause: 'penalty' }, text: 'That fight started at {clock} of the {period}, with {y} going off for {infraction} on {x}.' },
+  { id: 'lt.ha.p3', conditions: { cause: 'penalty' }, text: '{y} took {infraction} on {x} at {clock} of the {period}. The gloves came off here.' },
+]
+
+/** A penalty taken on one of the other club's top two scorers. rank 1|2. */
+export const LT_HEAT_STAR: ContentVariant[] = [
+  { id: 'lt.hs.1a', conditions: { rank: 1 }, text: '{a} goes off for {infraction} on {b}. {b} leads {abbr} in scoring.' },
+  { id: 'lt.hs.1b', conditions: { rank: 1 }, text: '{InfractionCap} on {a}, and it was {b} he got. {b} has {pts} points, most on {abbr}.' },
+  { id: 'lt.hs.1c', conditions: { rank: 1 }, text: '{b} leads {abbr} with {pts} points. {a} just went off for {infraction} on him.' },
+  { id: 'lt.hs.2a', conditions: { rank: 2 }, text: '{a} goes off for {infraction} on {b}, second on {abbr} with {pts} points.' },
+  { id: 'lt.hs.2b', conditions: { rank: 2 }, text: '{b} is second on {abbr} with {pts} points. {a} just went off for {infraction} on him.' },
+  { id: 'lt.hs.2c', conditions: { rank: 2 }, text: '{InfractionCap} on {a}. The man he got was {b}, second in {abbr} scoring.' },
+]
+
+/** The night has turned chippy (team heat crossed the line). */
+export const LT_HEAT_TEAM: ContentVariant[] = [
+  { id: 'lt.ht.1', text: 'Through {clock} of the {period}: {pim} penalty minutes and {hits} hits{fightsTail}.' },
+  { id: 'lt.ht.2', text: '{homeAbbr} and {awayAbbr} have combined for {hits} hits and {pim} penalty minutes{fightsTail}.' },
+  { id: 'lt.ht.3', text: '{hits} hits and {pim} minutes in the box{fightsTail}, with {clock} gone in the {period}.' },
+  { id: 'lt.ht.4', text: '{pim} minutes in the box already{fightsTail}, and {hits} hits between these two.' },
+]
+
+/** A goal with a man the scorer has heat with on the ice. when tonight|before. */
+export const LT_HEAT_FACE: ContentVariant[] = [
+  { id: 'lt.hf.t1', conditions: { when: 'tonight' }, text: '{s} scores with {o} on the ice. They have been at it since {clock} of the {period}.' },
+  { id: 'lt.hf.t2', conditions: { when: 'tonight' }, text: 'Of all people, {o} was out there for that one. He and {s} have been going at each other since {clock} of the {period}.' },
+  { id: 'lt.hf.t3', conditions: { when: 'tonight' }, text: '{s} scores in front of {o}, the man he has been battling since {clock} of the {period}.' },
+  { id: 'lt.hf.b1', conditions: { when: 'before' }, text: '{s} scores with {o} on the ice. Their history goes back to {date}{seasonTail}.' },
+  { id: 'lt.hf.b2', conditions: { when: 'before' }, text: '{o} was out there for it. He and {s} have had bad blood since {date}{seasonTail}.' },
+  { id: 'lt.hf.b3', conditions: { when: 'before' }, text: '{s} scores in front of {o}, the man he has history with from {date}{seasonTail}.' },
+]
+
 /** Every pool, for the coverage tests and the prose audit. */
 export const LIVE_STORY_POOLS: Record<string, ContentVariant[]> = {
+  LT_BAD_BLOOD, LT_HEAT_REPEAT, LT_HEAT_ANSWER, LT_HEAT_STAR, LT_HEAT_TEAM, LT_HEAT_FACE,
   LT_POINT_STREAK, LT_POINT_STREAK_LIVE, LT_DROUGHT, LT_DROUGHT_LIVE, LT_CONTRACT_YEAR,
   LT_DRAFTED_OWN, LT_DRAFTED_OPP, LT_FORMER_CLUB, LT_ROOKIE, LT_MILESTONE, LT_MILESTONE_LIVE,
   LT_SHUTOUT_RUN, LT_SHUTOUTS, LT_SHUTOUT_BID, LT_SEASON_SERIES, LT_RIVALRY,

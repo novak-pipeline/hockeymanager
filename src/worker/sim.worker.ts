@@ -10,6 +10,7 @@ import { validateModDatabase, loadModDatabase } from '@data/modSchema'
 import { Career, buildTeamList } from '@engine/career/career'
 import { validateSnapshot } from '@engine/career/serialize'
 import { asTeamId } from '@domain'
+import { planLiveStory } from '@engine/story/liveStory'
 import type { WorkerRequest, WorkerResponse } from './protocol'
 import {
   SCENARIO_KINDS, SCENARIO_META, bestPerKind, findScenarios, streamFingerprint,
@@ -59,6 +60,28 @@ function devFindScenarios(
     }
     // stop once every kind has a user-side instance
     if (SCENARIO_KINDS.every((k) => best.get(k)?.side === 'home')) break
+  }
+  // Rivalry heat: a rematch of the user club against an opponent it met (an
+  // earlier exhibition, its own seed) — kept when the rematch puts a BAD BLOOD
+  // card up about the two men from that first meeting.
+  for (const [i, seed] of seeds.slice(0, 10).entries()) {
+    if (best.has('rivalryHeat')) break
+    const opp = opps[(i * 7 + 3) % opps.length]!
+    const priorSeed = seed + 50_000
+    const g = c.devExhibition(user, opp, seed, engine, priorSeed)
+    games += 2
+    const f = c.getBroadcastContext()?.liveStory
+    if (!f) continue
+    const beat = planLiveStory(g.stream, f).beats.find((b) => b.kind === 'badBlood')
+    if (!beat) continue
+    const home = new Set(g.homePlayerIds)
+    const meta = SCENARIO_META.rivalryHeat
+    best.set('rivalryHeat', {
+      kind: 'rivalryHeat', absT: beat.at, period: beat.at < 1200 ? 1 : beat.at < 2400 ? 2 : 3, side: 'home', note: beat.text, quality: 1,
+      label: meta.label, engine, homeId: user, awayId: opp, homeAbbr: g.homeAbbr, awayAbbr: g.awayAbbr,
+      seed, priorSeed, fingerprint: streamFingerprint(g.stream, (id) => home.has(id)),
+      clipFrom: Math.max(0, beat.at - meta.lead), clipTo: beat.at + meta.tail,
+    })
   }
   const scenarios = SCENARIO_KINDS.flatMap((k) => (best.has(k) ? [best.get(k)!] : []))
   return { type: 'devScenarios', scenarios, games, missing: SCENARIO_KINDS.filter((k) => !best.has(k)) }
@@ -115,7 +138,7 @@ function handle(req: WorkerRequest): WorkerResponse {
     }
     case 'devWatchFixture': {
       const c = must()
-      return { id: req.id, type: 'watch', view: c.view(), game: c.devExhibition(req.homeId, req.awayId, req.seed, req.engine) }
+      return { id: req.id, type: 'watch', view: c.view(), game: c.devExhibition(req.homeId, req.awayId, req.seed, req.engine, req.priorSeed) }
     }
     case 'devFindScenarios':
       return { id: req.id, ...devFindScenarios(must(), req.engine, req.seeds, req.opponents) }

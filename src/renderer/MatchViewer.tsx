@@ -45,7 +45,12 @@ import {
 import { fallbackBroadcastContext, ppRemaining } from './lib/broadcastContext'
 import { BroadcastOverlayLayer, Scorebug } from './components/broadcast/BroadcastOverlays'
 import { BenchCam, BigChanceAlert, FlowStrip, StoryLowerThird } from './components/broadcast/StoryOverlays'
-import { planLiveStory, type LiveBeat, type LiveStoryPlan } from '@engine/story/liveStory'
+import { liveHeatOf, planLiveStory, type LiveBeat, type LiveStoryPlan } from '@engine/story/liveStory'
+import { computeGameHeat, gameHeatAt, type GameHeat } from '@engine/story/rivalryHeat'
+import { pairKey } from '@engine/shared/heat'
+import {
+  goalReplayPackage, periodReel, stoppageReplays, type ReplayClip, type ReplayKind, type StoppageReplay,
+} from '../render2d/broadcast/replayPackage'
 import { buildGameFlow, chancesBetween, momentumAt, shotsUpTo, type BigChance, type GameFlow } from './lib/gameFlow'
 import { teamLogoUrl } from './components/Crest'
 
@@ -60,6 +65,9 @@ const LS_REPLAYS = 'hockeyMatchReplays'
 const LS_PANEL = 'hockeyMatchPanel'
 const LS_STORY = 'hockeyMatchStory'
 const LS_CHANCES = 'hockeyMatchBigChances'
+/** Replay package: the extra goal angles, and the intermission highlight reel (both on by default). */
+const LS_REPLAY_ANGLES = 'hockeyMatchReplayAngles'
+const LS_PERIOD_REEL = 'hockeyMatchPeriodReel'
 
 /** The story layer (story lower-thirds, bench cam, flow strip): on by default. */
 function readFlag(key: string): boolean {
@@ -117,6 +125,51 @@ const REPLAY_SPEED = 0.6
 
 function replaysOn(pref: ReplayPref, mode: PlaybackMode): boolean {
   return pref === 'on' || (pref === 'auto' && mode !== 'key')
+}
+
+/**
+ * A replay on screen: the goal package (main replay + extra angles), one
+ * stoppage replay (big save / big hit), or the intermission reel. The live
+ * moment is held while it runs and every clip ends where it should; Space,
+ * Enter or Esc skips the rest (the reel also has a SKIP button).
+ */
+interface ReplaySession {
+  kind: 'goal' | 'stoppage' | 'reel'
+  clips: ReplayClip[]
+  i: number
+  /** reel: the intermission it leads into, and a fast-forward to resume after it. */
+  period?: number
+  resumeJumpTo?: number | null
+}
+interface ReplayCaption {
+  session: ReplaySession['kind']
+  clip: ReplayClip
+  i: number
+  n: number
+  period?: number
+}
+
+const surnameOf = (full: string): string => {
+  const parts = full.trim().split(/\s+/)
+  return parts[parts.length - 1] ?? full
+}
+const PERIOD_WORDS = ['', '1ST', '2ND', '3RD']
+/** "GOAL · Kowalski (Brandt, Okafor) · 12:41" — the scorebug's voice: labels, no sentences. */
+function clipCaption(clip: ReplayClip, names: Record<string, string>): string {
+  const last = (id: string | undefined): string => (id ? surnameOf(names[id] ?? id) : '')
+  const m = Math.floor(Math.max(0, clip.t) / 60)
+  const clock = `${m}:${String(Math.floor(Math.max(0, clip.t) % 60)).padStart(2, '0')}`
+  const [a, b, ...more] = clip.who
+  switch (clip.kind) {
+    case 'goal': {
+      const helpers = [b, ...more].filter((x): x is string => !!x).map(last)
+      return `${clip.tag} · ${last(a)}${helpers.length ? ` (${helpers.join(', ')})` : ''} · ${clock}`
+    }
+    case 'bigSave': return `SAVE · ${last(a)} on ${last(b)} · ${clock}`
+    case 'bigHit': return `HIT · ${last(a)} on ${last(b)} · ${clock}`
+    case 'fight': return `FIGHT · ${last(a)} and ${last(b)} · ${clock}`
+    default: return `${clip.tag} · ${last(a)} · ${clock}`
+  }
 }
 
 // Plan-relative nudge multipliers (relative to current plan speed)
@@ -405,6 +458,21 @@ export function MatchViewer(props: {
   // ── Live story layer: lower-thirds, bench cam, the room, the flow strip ──────
   const [storyOn, setStoryOn] = useState<boolean>(() => readFlag(LS_STORY))
   const [chancePulls, setChancePulls] = useState<boolean>(() => readFlag(LS_CHANCES))
+  const [replayAngles, setReplayAngles] = useState<boolean>(() => readFlag(LS_REPLAY_ANGLES))
+  const [periodReelOn, setPeriodReelOn] = useState<boolean>(() => readFlag(LS_PERIOD_REEL))
+  const replayAnglesRef = useRef(replayAngles)
+  replayAnglesRef.current = replayAngles
+  const periodReelRef = useRef(periodReelOn)
+  periodReelRef.current = periodReelOn
+  const sessionRef = useRef<ReplaySession | null>(null)
+  const [replayCaption, setReplayCaption] = useState<ReplayCaption | null>(null)
+  /** Stoppage replays already shown (by their whistle). */
+  const stopDoneRef = useRef<Set<number>>(new Set())
+  const stopReplays: StoppageReplay[] = useMemo(() => stoppageReplays(game.stream), [game])
+  const stopReplaysRef = useRef(stopReplays)
+  stopReplaysRef.current = stopReplays
+  /** The crowd follows the night's heat (bucketed so the loop isn't re-tuned every frame). */
+  const crowdHeatRef = useRef<number>(-1)
   const [storyLT, setStoryLT] = useState<LiveBeat | null>(null)
   const [benchBeat, setBenchBeat] = useState<LiveBeat | null>(null)
   const [chanceBanner, setChanceBanner] = useState<BigChance | null>(null)
@@ -432,6 +500,14 @@ export function MatchViewer(props: {
   )
   const livePlanRef = useRef<LiveStoryPlan>(livePlan)
   livePlanRef.current = livePlan
+  // Rivalry heat tonight: the crowd's mood and the reel's ranking.
+  const gameHeat: GameHeat = useMemo(() => {
+    if (bctx.liveStory) return liveHeatOf(game.stream, bctx.liveStory)
+    const homeIds = new Set(game.homePlayerIds)
+    return computeGameHeat(game.stream, { sideOf: (id) => (homeIds.has(id) ? 'home' : 'away') })
+  }, [game, bctx])
+  const gameHeatRef = useRef<GameHeat>(gameHeat)
+  gameHeatRef.current = gameHeat
   const showBroadcastRef = useRef(true)
 
   /** Put one story beat up for its hold (one per channel; a new one replaces it). */
@@ -775,13 +851,22 @@ export function MatchViewer(props: {
 
     // ── Goal → replay schedule, on the game clock ───────────────────────────────
     if (replayActiveRef.current && currentAbsT >= replayEndAtRef.current) {
-      _endReplay()
+      _nextClip()
       return
     }
     const pending = pendingReplayRef.current
     if (pending && replaySkipRef.current && !replayActiveRef.current && currentAbsT >= pending.startAt) {
       _startReplay(pending.goalAbsT)
       return
+    }
+    // A big save or a big hit, once, at the whistle after it (never in live play).
+    if (!replayActiveRef.current && !replaySkipRef.current && !ffActiveRef.current && replaysOn(replayPrefRef.current, pendingModeRef.current)) {
+      const sr = stopReplaysRef.current.find((x) => !stopDoneRef.current.has(x.whistleAt) && currentAbsT >= x.startAt && currentAbsT - x.startAt < 1.5)
+      if (sr) {
+        stopDoneRef.current.add(sr.whistleAt)
+        _startSession({ kind: 'stoppage', clips: [sr.clip], i: 0 })
+        return
+      }
     }
     if (currentAbsT >= bannerUntilRef.current) {
       bannerUntilRef.current = Infinity
@@ -870,6 +955,17 @@ export function MatchViewer(props: {
       // Crowd reaction
       if (ev.type === 'shot' && ev.danger >= 0.6) sfx.crowd(0.55)
       if (ev.type === 'goal') sfx.crowd(1.0)
+    }
+
+    // ── The crowd's mood follows the night's heat ─────────────────────────────
+    if (!replayActiveRef.current) {
+      const h = gameHeatAt(gameHeatRef.current, currentAbsT)
+      const bucket = Math.round(h * 20) / 20
+      if (bucket !== crowdHeatRef.current) {
+        crowdHeatRef.current = bucket
+        renderer3dRef.current?.setCrowdHeat(bucket)
+        if (bucket >= 0.2) sfx.crowd(0.12 + 0.4 * bucket)
+      }
     }
 
     // ── Goal detection (score change) ─────────────────────────────────────────
@@ -1090,9 +1186,37 @@ export function MatchViewer(props: {
     cursorRef.current?.seek(toAbsT)
   }
 
-  /** Stop at the end of a period: pause, and put the intermission up. */
+  /**
+   * Stop at the end of a period: the period's highlight reel first (when it
+   * is on and the period had moments worth it), then the intermission.
+   */
   function _enterIntermission(period: number, resumeJumpTo: number | null): void {
     shownBreaksRef.current.add(period)
+    if (periodReelRef.current && rendererRef.current && gameDurationRef.current > 0) {
+      const heat = gameHeatRef.current
+      const heated = new Set(heat.incidents.filter((x) => x.kind !== 'chirp').map((x) => pairKey(x.by, x.on)))
+      const story = new Set(livePlanRef.current.beats.filter((b) => b.playerId).map((b) => b.playerId!))
+      const clips = periodReel(game.stream, period, {
+        chances: flowRef.current.chances.map((c) => ({ absT: c.absT, period: c.period, t: c.t, playerId: c.playerId, label: c.label, danger: c.danger })),
+        // the story layer and the night's bad blood lift a moment
+        boost: (ids: readonly string[], _kind: ReplayKind): number => {
+          let b = ids.some((id) => story.has(id)) ? 0.4 : 0
+          if (ids.length >= 2 && heated.has(pairKey(ids[0]!, ids[1]!))) b += 0.5
+          return b
+        },
+      })
+      if (clips.length > 0) {
+        clearBroadcast()
+        setStoppageChip(null)
+        _startSession({ kind: 'reel', clips, i: 0, period, resumeJumpTo })
+        return
+      }
+    }
+    _showIntermission(period, resumeJumpTo)
+  }
+
+  /** Pause, and put the intermission up. */
+  function _showIntermission(period: number, resumeJumpTo: number | null): void {
     pendingJumpRef.current = resumeJumpTo
     rendererRef.current?.pause()
     clearBroadcast()
@@ -1122,25 +1246,72 @@ export function MatchViewer(props: {
     rendererRef.current?.play()
   }
 
-  /** Cut to the instant replay: hold the live score, rewind to the build-up. */
+  /** Cut to the instant replay: hold the live score, rewind to the build-up (then the extra angles). */
   function _startReplay(goalAbsT: number): void {
+    pendingReplayRef.current = null
+    const clips = goalReplayPackage(game.stream, goalAbsT, { extraAngles: replayAnglesRef.current })
+    // W2/W3 S7 timing for the main replay, whatever the stream says
+    const main = clips[0]
+    if (main) {
+      main.from = Math.max(0, main.at - REPLAY_LEAD_S)
+      main.to = main.at + REPLAY_TAIL_S
+      main.speed = REPLAY_SPEED
+    }
+    _startSession({ kind: 'goal', clips, i: 0 })
+  }
+
+  /** Hold the live moment and play the session's first clip. */
+  function _startSession(session: ReplaySession): void {
     const r = rendererRef.current
     const dur = gameDurationRef.current
-    pendingReplayRef.current = null
-    if (!r || dur <= 0) { _endReplay(); return }
-    heldViewRef.current = viewRef.current
+    if (!r || dur <= 0 || session.clips.length === 0) {
+      sessionRef.current = session
+      _endReplay()
+      return
+    }
+    sessionRef.current = session
+    // keep the held moment across a session that follows straight on from another
+    if (!replayActiveRef.current) heldViewRef.current = viewRef.current
+    replaySkipRef.current = true
     renderer3dRef.current?.setBoardHold(true)
-    // W3 S7: the replay camera's angles (end-zone high, then behind the net)
-    renderer3dRef.current?.setReplay(goalAbsT)
     setReplayActive(true)
     replayActiveRef.current = true
-    replayEndAtRef.current = goalAbsT + REPLAY_TAIL_S
-    r.seekFraction(Math.max(0, goalAbsT - REPLAY_LEAD_S) / dur)
-    r.setSpeed(REPLAY_SPEED)
+    _playClip()
+  }
+
+  function _playClip(): void {
+    const s = sessionRef.current
+    const r = rendererRef.current
+    const dur = gameDurationRef.current
+    const clip = s?.clips[s.i]
+    if (!s || !clip || !r || dur <= 0) { _endReplay(); return }
+    // W3 S7 camera: 'auto' = end-zone high then behind the net; the package's
+    // extra angles, a save from behind the net, a hit tight on the man hit
+    renderer3dRef.current?.setReplay(clip.at, clip.angle === 'auto'
+      ? {}
+      : { mode: clip.angle, net: clip.net, side: clip.side, ...(clip.subject ? { subject: clip.subject } : {}) })
+    replayEndAtRef.current = clip.to
+    r.seekFraction(Math.max(0, clip.from) / dur)
+    r.setSpeed(clip.speed)
     r.play()
+    setReplayCaption({ session: s.kind, clip, i: s.i, n: s.clips.length, ...(s.period !== undefined ? { period: s.period } : {}) })
+  }
+
+  /** The clip ran its window: the next angle / moment, or back to the game. */
+  function _nextClip(): void {
+    const s = sessionRef.current
+    if (s && s.i + 1 < s.clips.length) {
+      s.i++
+      _playClip()
+      return
+    }
+    _endReplay()
   }
 
   function _endReplay(): void {
+    const session = sessionRef.current
+    sessionRef.current = null
+    setReplayCaption(null)
     replaySeqRef.current++
     replaySkipRef.current = false
     pendingReplayRef.current = null
@@ -1156,6 +1327,9 @@ export function MatchViewer(props: {
     replayActiveRef.current = false
     setGoalBanner(null)
     if (goalBannerTimerRef.current) clearTimeout(goalBannerTimerRef.current)
+    // the reel hands back to the horn with the picture held (the intermission
+    // follows): a paused cut, never a frame of bodies snapping in "live" play
+    if (session?.kind === 'reel') rendererRef.current?.pause()
     if (live) rendererRef.current?.seekFraction(live.progress)
     // Resume normal plan speed and re-sync the commentary/SFX cursors to the
     // resume point so normal play doesn't replay a burst of crossed events.
@@ -1169,6 +1343,7 @@ export function MatchViewer(props: {
       const planSpd = currentSpeed(planRef.current, at)
       rendererRef.current?.setSpeed(planSpd * nudgeRef.current)
     }
+    if (session?.kind === 'reel' && session.period !== undefined) _showIntermission(session.period, session.resumeJumpTo ?? null)
   }
 
   // ── Auto-scroll ticker ────────────────────────────────────────────────────────
@@ -1257,6 +1432,7 @@ export function MatchViewer(props: {
       phase: phaseRef.current,
       mode: pendingModeRef.current,
       replay: replayActiveRef.current,
+      ...(replayActiveRef.current && sessionRef.current ? { replayKind: sessionRef.current.clips[sessionRef.current.i]?.kind ?? 'goal' } : {}),
       replayPending: replaySkipRef.current && !replayActiveRef.current,
       ff: ffActiveRef.current,
       nudge: nudgeRef.current,
@@ -1345,6 +1521,8 @@ export function MatchViewer(props: {
       resumeRef.current = { absT: 0, playing: true, mode: pendingModeRef.current }
     }
     if (replayActiveRef.current || replaySkipRef.current) {
+      sessionRef.current = null
+      setReplayCaption(null)
       replaySkipRef.current = false
       heldViewRef.current = null
       replayActiveRef.current = false
@@ -1390,6 +1568,22 @@ export function MatchViewer(props: {
     if (!next) clearStory()
   }
 
+  function handleReplayAnglesToggle(): void {
+    const next = !replayAngles
+    setReplayAngles(next)
+    writeFlag(LS_REPLAY_ANGLES, next)
+    // off mid-package: this angle is the last one
+    const s = sessionRef.current
+    if (!next && s?.kind === 'goal') s.clips = s.clips.slice(0, s.i + 1)
+  }
+
+  function handlePeriodReelToggle(): void {
+    const next = !periodReelOn
+    setPeriodReelOn(next)
+    writeFlag(LS_PERIOD_REEL, next)
+    if (!next && sessionRef.current?.kind === 'reel') _endReplay()
+  }
+
   function handleChanceToggle(): void {
     const next = !chancePulls
     setChancePulls(next)
@@ -1424,6 +1618,7 @@ export function MatchViewer(props: {
       // Seeking back re-arms the cues after the seek point.
       const fired = firedCuesRef.current
       for (const c of planRefB.current.game) if (c.at > at) fired.delete(c.id)
+      for (const w of [...stopDoneRef.current]) if (w > at) stopDoneRef.current.delete(w)
       // A scrub past a break skips it; a scrub back before one re-arms it.
       for (const b of matchIndexRef.current.intermissions) {
         if (b.absT <= at) shownBreaksRef.current.add(b.period)
@@ -1714,6 +1909,28 @@ export function MatchViewer(props: {
             <div style={{ ...replayBadgeStyle, ...(showBroadcast ? { top: 48 } : {}) }}>REPLAY</div>
           )}
 
+          {/* Replay package: the angle / the moment, and the reel's place in the period */}
+          {replayActive && replayCaption && (
+            <div style={replayCaptionStyle} role="status" aria-live="polite">
+              {replayCaption.session === 'reel' && replayCaption.period !== undefined && (
+                <div style={{ fontSize: 10, letterSpacing: 2, color: '#ffd700', fontWeight: 800 }}>
+                  {(PERIOD_WORDS[replayCaption.period] ?? 'OT')} PERIOD HIGHLIGHTS · {replayCaption.i + 1}/{replayCaption.n}
+                </div>
+              )}
+              {replayCaption.session === 'goal' && replayCaption.n > 1 && (
+                <div style={{ fontSize: 10, letterSpacing: 2, color: '#ffd700', fontWeight: 800 }}>
+                  {replayCaption.clip.angleLabel} · {replayCaption.i + 1}/{replayCaption.n}
+                </div>
+              )}
+              <div style={{ fontSize: 13, fontWeight: 700 }}>{clipCaption(replayCaption.clip, game.playerNames)}</div>
+            </div>
+          )}
+          {replayActive && replayCaption?.session === 'reel' && (
+            <button className="bc-skip" onClick={() => _endReplay()} title="Skip the period highlights (Space)">
+              SKIP HIGHLIGHTS ›
+            </button>
+          )}
+
           {/* Stoppage chip */}
           {stoppageChip && (
             <div style={stoppageChipStyle}>{stoppageChip}</div>
@@ -1819,6 +2036,14 @@ export function MatchViewer(props: {
                 {p === 'auto' ? 'Auto' : p === 'on' ? 'On' : 'Off'}
               </button>
             ))}
+            <button className="btn"
+              title={replayAngles ? 'Goal replays: the main replay only' : 'Goal replays: add the view from behind the net and from the shooter\'s side'}
+              style={{ fontSize: 12, padding: '4px 10px', ...(replayAngles ? speedActiveStyle : {}) }}
+              onClick={handleReplayAnglesToggle}>Extra angles</button>
+            <button className="btn"
+              title={periodReelOn ? 'Skip the highlights of each period at intermission' : 'Show the highlights of each period at intermission'}
+              style={{ fontSize: 12, padding: '4px 10px', ...(periodReelOn ? speedActiveStyle : {}) }}
+              onClick={handlePeriodReelToggle}>Period reel</button>
             {commentaryOn && boothState?.status === 'unavailable' && (
               <span style={{ color: MUTED, fontSize: 11 }} title="The booth's recorded lines aren't installed (docs/COMMENTARY-BOOTH.md). The ticker still carries the call.">
                 Booth: commentary audio not installed
@@ -2000,6 +2225,15 @@ const replayBadgeStyle: CSSProperties = {
   fontSize: 11, letterSpacing: 2,
   padding: '3px 10px', borderRadius: 6,
   pointerEvents: 'none', zIndex: 14,
+}
+
+const replayCaptionStyle: CSSProperties = {
+  position: 'absolute', bottom: 14, left: 14,
+  background: 'rgba(8,10,18,0.82)',
+  borderLeft: '3px solid #ffd700',
+  color: '#fff', padding: '6px 12px', borderRadius: 4,
+  pointerEvents: 'none', zIndex: 14,
+  display: 'flex', flexDirection: 'column', gap: 2,
 }
 
 const stoppageChipStyle: CSSProperties = {

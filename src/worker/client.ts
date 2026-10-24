@@ -119,8 +119,8 @@ export class SimClient {
   }
 
   /** DEV ONLY (viewer-truth runner): a pinned exhibition, not applied to the career. */
-  devWatchFixture(homeId: string, awayId: string, seed: number, engine: 'classic' | 'agent'): Promise<WorkerResponse> {
-    return this.send({ type: 'devWatchFixture', homeId, awayId, seed, engine }, 5 * 60_000)
+  devWatchFixture(homeId: string, awayId: string, seed: number, engine: 'classic' | 'agent', priorSeed?: number): Promise<WorkerResponse> {
+    return this.send({ type: 'devWatchFixture', homeId, awayId, seed, engine, ...(priorSeed !== undefined ? { priorSeed } : {}) }, 5 * 60_000)
   }
 
   /** DEV ONLY: search pinned seeds for the ten golden scenarios. */

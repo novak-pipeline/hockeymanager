@@ -89,7 +89,7 @@ import { MOMENT_CHOREOGRAPHY, type MomentCue, type ShotCue } from '@render2d/bro
 import { BroadcastCamera, fallbackFocus, type BroadcastInput } from './camera/broadcast'
 import { puckAhead } from './camera/ahead'
 import { deadWindowAt, deadWindowsOf, type DeadWindow } from './camera/stoppages'
-import { ReplayCamera } from './camera/replay'
+import { ReplayCamera, type ReplayMode } from './camera/replay'
 import { closeUpPose, CUT_END_BEFORE_DROP_S, CUT_WAIT_MS, type CameraCutConsumer, type CameraCutRequest } from './camera/cuts'
 import type { CamPose } from './camera/project'
 
@@ -1741,13 +1741,24 @@ export class Rink3dRenderer implements MatchRenderer, CameraCutConsumer {
    * goal it shows went in at `goalAbsT`. null = the replay is over. The replay
    * camera shows it from end-zone high, then from behind the net.
    */
-  setReplay(goalAbsT: number | null): void {
+  setReplay(goalAbsT: number | null, opts: { mode?: ReplayMode; net?: 1 | -1; side?: 1 | -1; subject?: string } = {}): void {
+    this.replaySubject = null
     if (goalAbsT === null || !this.timeline) {
       this.replayCam = null
       return
     }
     const s = this.timeline.sampleAt(goalAbsT)
-    this.replayCam = new ReplayCamera(goalAbsT, s && s.puck.x < 0 ? -1 : 1)
+    const net = opts.net ?? (s && s.puck.x < 0 ? -1 : 1)
+    this.replayCam = new ReplayCamera(goalAbsT, net, { ...(opts.mode ? { mode: opts.mode } : {}), ...(opts.side ? { side: opts.side } : {}) })
+    this.replaySubject = opts.subject ?? null
+  }
+
+  /** The replay package's tight clips follow a man (a hit replay: the man it was done to). */
+  private replaySubject: string | null = null
+  /** Rivalry heat (story/rivalryHeat.ts), 0..1: the crowd never settles below it. */
+  private crowdHeat = 0
+  setCrowdHeat(h: number): void {
+    this.crowdHeat = Math.max(0, Math.min(1, h))
   }
 
   private moment: { until: number; crowd: number } | null = null
@@ -2139,7 +2150,7 @@ export class Rink3dRenderer implements MatchRenderer, CameraCutConsumer {
       awayScore: score.away,
       period: clock.period,
       clock: clock.text,
-      excite: Math.max(crowdExcitement(this.sinceGoal), this.moment && performance.now() < this.moment.until ? this.moment.crowd : 0),
+      excite: Math.max(crowdExcitement(this.sinceGoal), this.moment && performance.now() < this.moment.until ? this.moment.crowd : 0, this.crowdHeat * 0.45),
       goalFlash,
     })
   }
@@ -3027,7 +3038,10 @@ export class Rink3dRenderer implements MatchRenderer, CameraCutConsumer {
     if (this.replayCam) {
       const pm = this.puckMesh.position
       const ahead = this.timeline ? puckAhead(this.timeline, [], this.clockPos, [0.15, 0.3]) : []
-      const pose = this.replayCam.step(gameDt, this.clockPos, this.camera.aspect, { x: this.puck.x, y: pm.y, z: this.puck.z }, ahead)
+      const subj = this.replaySubject ? this.allPoses().find((q) => q.playerId === this.replaySubject && q.rig.visible) : undefined
+      const pose = subj
+        ? this.replayCam.step(gameDt, this.clockPos, this.camera.aspect, { x: subj.worldX.pos, y: 3, z: subj.worldZ.pos })
+        : this.replayCam.step(gameDt, this.clockPos, this.camera.aspect, { x: this.puck.x, y: pm.y, z: this.puck.z }, ahead)
       if (this.replayCam.cut) this.camCutFrame = true
       this.syncSprings(pose)
       this.applyPose(pose)

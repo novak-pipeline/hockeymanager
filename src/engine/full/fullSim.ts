@@ -2584,6 +2584,9 @@ export interface FullSimOptions {
   /** Rivalry heat 0..1 — scales hits and penalties for a chippier grudge match.
    *  Absent → 0 (an ordinary game, unchanged). */
   intensity?: number
+  /** Heat carried in from earlier meetings, 0..1 (shared/heat.ts fightHeatInput).
+   *  Additive: feeds the fight-frequency hook and `Ctx.heat`. Absent → 0, unchanged. */
+  heat?: number
   /** Optional diagnostic sink (shot kinds/danger, beats, stoppages) for tests. */
   telemetry?: FullSimTelemetry
 }
@@ -2650,12 +2653,13 @@ export function runGame(
 ): GameOutcome {
   const rules = opts.rules ?? 'regularSeason'
   const rng = new Rng(opts.seed)
-  const fightTimes = rollFightPlan(opts.seed, opts.intensity ?? 0)
+  const fightTimes = rollFightPlan(opts.seed, opts.intensity ?? 0, opts.heat ?? 0)
   const injuryPlan = rollInGameInjury(opts.seed)
   const ctx: Ctx = {
     rng, stream: [], stats: new Map(), telemetry: opts.telemetry ?? null,
     levelAvg: gameLevelAvg(home, away, resolve),
     scoringMult: playoffScoringMult(rules), intensity: opts.intensity,
+    ...(opts.heat ? { heat: opts.heat } : {}),
     ...(fightTimes.length > 0 ? { fights: { times: fightTimes, next: 0, rng: fightRngFor(opts.seed) } } : {}),
     ...(injuryPlan ? { injury: { plan: injuryPlan, rng: inGameInjuryRngFor(opts.seed), done: false } } : {}),
   }
