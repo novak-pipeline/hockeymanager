@@ -73,6 +73,11 @@ export function buildHighlights(stream: GameStream): HighlightSegment[] {
       case 'hit':
         raw.push({ startAbsT: Math.max(0, at - 2), endAbsT: at + 2, kind: 'hit', importance: 1 })
         break
+
+      // the agent engine's fight: the gloves dropping until the linesmen part them
+      case 'fight':
+        raw.push({ startAbsT: Math.max(0, at - 3), endAbsT: at + ev.separateAt + 3, kind: 'fight', importance: 2 })
+        break
     }
   }
 
@@ -151,6 +156,9 @@ export function buildComprehensive(stream: GameStream): HighlightSegment[] {
     switch (ev.type) {
       case 'shot':
         lastShot = { at, danger: ev.danger }
+        break
+      case 'fight':
+        raw.push({ startAbsT: Math.max(0, at - 3), endAbsT: at + ev.separateAt + 3, kind: 'fight', importance: 2 })
         break
       case 'penalty':
         if (ev.infraction === 'fighting') {

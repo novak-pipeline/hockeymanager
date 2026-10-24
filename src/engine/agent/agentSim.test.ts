@@ -224,8 +224,11 @@ describe('agent engine', () => {
     let streamHits = 0
     let passesTimed = 0
     // (8 games, W3 S6: the against-the-push share is a ~2.5% rate; on 4 games one
-    // case either way moved it across the 3% bound with no engine change)
-    for (let i = 0; i < 8; i++) {
+    // case either way moved it across the 3% bound with no engine change.
+    // 12 since fights: a fight re-rolls the rest of its game, and on 8 games one
+    // extra case read 3.04% with nothing hit-related changed. Same bound; over
+    // these seeds 12 games give 2.6% with fights vs 2.5% without, 16 give 2.6 / 2.2.)
+    for (let i = 0; i < 12; i++) {
       const out = agentSimGame(team(i), team(i + 6), resolve, { seed: 970 + i })
       const fl = judgeActionFloor(out.stream)
       const ct = judgeContacts(out.stream)

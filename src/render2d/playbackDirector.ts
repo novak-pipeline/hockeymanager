@@ -48,6 +48,9 @@ export const GOAL_STOPPAGE_SHOWN_S = 8.5
 /** The cut lands this long before the drop: the set and the drop play at 1×. */
 const PRE_DROP_S = 4
 
+/** After a fight the stoppage plays this long past the linesmen parting them (the FIGHT card goes up). */
+const FIGHT_TAIL_S = 4
+
 /** A stoppage shorter than this plays through (a cut would save nothing). */
 const MIN_CUT_S = 3
 
@@ -157,14 +160,17 @@ function _planFull(stream: GameStream, duration: number): SpeedSegment[] {
   let cursor = 0
   let whistle: { at: number; goal: boolean } | null = null
   let lastGoalAt = -Infinity
+  // a fight at this stoppage plays at 1× until the linesmen have them apart (+ a beat)
+  let fightUntil = -Infinity
   for (const ev of stream) {
     if (ev.type === 'goal') lastGoalAt = at(ev)
+    if (ev.type === 'fight') fightUntil = at(ev) + ev.separateAt + FIGHT_TAIL_S
     if (ev.type === 'whistle') {
       const w = at(ev)
       whistle = { at: w, goal: ev.reason === 'goal' || w - lastGoalAt < 1.5 }
     } else if (ev.type === 'faceoff' && whistle !== null) {
       const drop = at(ev)
-      const from = whistle.at + (whistle.goal ? GOAL_STOPPAGE_SHOWN_S : STOPPAGE_SHOWN_S)
+      const from = Math.max(whistle.at + (whistle.goal ? GOAL_STOPPAGE_SHOWN_S : STOPPAGE_SHOWN_S), fightUntil < drop ? fightUntil : -Infinity)
       const to = drop - PRE_DROP_S
       if (to - from >= MIN_CUT_S && from > cursor) {
         segs.push({ fromAbsT: cursor, toAbsT: from, speed: LIVE_SPEED })

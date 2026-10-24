@@ -106,6 +106,9 @@ export const CHECKLIST = {
   endToEndRush: ['Does the camera lead the rush up the ice (never chasing the puck off the edge)?', 'Is the puck always in frame?', 'No cut or speed change mid-play?'],
   // W3 S8: special teams
   pkClear: ['Can you see the kill\'s shape (box or diamond) before the clear?', 'Does a killer win it and fire it the length of the ice?', 'Does the power play have to regroup from its own end?'],
+  // fights: the sequence at the stoppage (fight.ts / fightChoreo.ts)
+  fightDown: ['Gloves and sticks on the ice?', 'Do they square up, grab, and trade punches you can read?', 'Does the man who goes down go down on a punch or in the clinch?', 'Linesmen step in and part them?', 'Everyone else backs off?', 'FIGHT card names both men and the result?'],
+  fightDecision: ['Gloves and sticks on the ice?', 'Punches, then a clinch, then both spent?', 'Linesmen step in and part them?', 'Camera cuts in close and back out?', 'FIGHT card names both men and the result?'],
 }
 
 const sha1 = (file) => createHash('sha1').update(readFileSync(file)).digest('hex')

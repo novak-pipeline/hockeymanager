@@ -21,6 +21,7 @@
 import type { GameStream, GoalEvent } from '@domain'
 import type { BroadcastContext, BroadcastStoryline } from '@engine/story/broadcastStorylines'
 import { playAbsT } from '@domain'
+import { fightCardFacts, fightResultLine } from './fightCard'
 import { BOOTH_LINES, linesFor, nameSlotPosition, type BoothLine, type BoothMoment } from './commentaryLibrary'
 import type {
   BroadcastPlan,
@@ -386,7 +387,8 @@ export function directBroadcast(
         const fight = ev.infraction === 'fighting'
         if (fight) {
           // Both fighters get a major at the same instant — call it once.
-          const dup = game.some((c) => c.channel === 'commentary' && c.moment === 'fight' && Math.abs(c.at - at) < 1)
+          // (the agent engine's fight event called it already, up to a minute before the majors)
+          const dup = game.some((c) => c.channel === 'commentary' && c.moment === 'fight' && at - c.at > -1 && at - c.at < 60)
           if (!dup) {
             say(game, 'game', at, 'fight', `fight:${at}`, { priority: 3 })
             if (presentationOn) shot(game, 'game', at, 3000, 'penaltyBox', { delayMs: 4000, playerId: ev.player })
@@ -396,6 +398,17 @@ export function directBroadcast(
           if (presentationOn) overlay(game, 'game', at, 6500, 3, { kind: 'penaltyCall', playerId: ev.player, infraction: ev.infraction, minutes: ev.minutes }, 300)
           if (presentationOn && !compact) shot(game, 'game', at, 2500, 'penaltyBox', { delayMs: 1500, playerId: ev.player })
         }
+        break
+      }
+      case 'fight': {
+        // The FIGHT card when the linesmen have them apart (the result is known by then).
+        if (presentationOn) {
+          const facts = fightCardFacts(ev, (id) => surnameOf(nameOf(id)))
+          const result = fightResultLine(facts, stableSeed(`${gameKey}|fight|${at}`))
+          overlay(game, 'game', at + ev.separateAt, 7000, 3, { kind: 'fightCard', homeId: ev.home as string, awayId: ev.away as string, winnerId: (ev.winner as string | null) ?? null, result })
+        }
+        // the call goes up as the gloves come off (the majors come later, at the box)
+        say(game, 'game', at, 'fight', `fight:${at}`, { priority: 3 })
         break
       }
       case 'hit': {

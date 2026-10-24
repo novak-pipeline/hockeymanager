@@ -61,6 +61,7 @@ import { computeComposites, overall, ratedOverall, ratedPotential, overallToStar
 import { quickSimGame } from '@engine/quick/quickSim'
 import { fullSimGame } from '@engine/full/fullSim'
 import { agentSimGame } from '@engine/agent/agentSim'
+import { fightMoraleDeltas } from '@engine/agent/fight'
 import type { GameOutcome, GamePlayerStat } from '@engine/shared/outcome'
 import {
   applyGameResult as applyStandingsResult,
@@ -8731,6 +8732,11 @@ export class Career {
     const away = this.data.teams.get(res.awayTeamId)!
     applyResultMorale({ team: home, players: this.data.players, won: res.homeGoals > res.awayGoals })
     applyResultMorale({ team: away, players: this.data.players, won: res.awayGoals > res.homeGoals })
+    // A fight in a watched game (agent engine): the winner walks taller (fight.ts).
+    for (const [id, d] of fightMoraleDeltas(res.stream, (id) => this.data.players.get(id))) {
+      const p = this.data.players.get(id)
+      if (p) p.morale = Math.max(0, Math.min(100, p.morale + d))
+    }
     // Role vs. talent: a star buried down the lineup (or healthy-scratched)
     // sours; a depth player handed a big role gets a lift. Deterministic.
     for (const t of [home, away]) {

@@ -318,6 +318,24 @@ export function PenaltyCall(props: { ctx: BroadcastContext; playerId: string; in
   )
 }
 
+/** The FIGHT card: both men (home first), and the result as the scorebug prints it. */
+export function FightCard(props: { ctx: BroadcastContext; homeId: string; awayId: string; winnerId: string | null; result: string }): JSX.Element {
+  const hp = props.ctx.players[props.homeId]
+  const ap = props.ctx.players[props.awayId]
+  const lead = props.winnerId === props.awayId ? ap : hp
+  const c = colorsFor(props.ctx, lead?.side ?? 'home')
+  const tag = (p: typeof hp, abbr: string) => `${p?.jerseyNumber !== undefined ? `#${p.jerseyNumber} ` : ''}${p?.name ?? 'Unknown'} (${abbr})`
+  return (
+    <div className="bc-card bc-texture" style={{ '--bc-team': c.main } as CSSProperties}>
+      {lead && <FaceCutout player={lead} color={c.main} className="face" />}
+      <div className="txt">
+        <div className="k">FIGHT · {tag(ap, props.ctx.awayAbbr)} vs {tag(hp, props.ctx.homeAbbr)}</div>
+        <div className="d">{props.result}. Five-minute majors</div>
+      </div>
+    </div>
+  )
+}
+
 export function MomentCaption(props: { caption: string }): JSX.Element {
   return (
     <div className="bc-caption">
@@ -457,6 +475,7 @@ export function BroadcastOverlayLayer(props: {
           }
           case 'powerPlay': node = null; break
           case 'penaltyCall': node = <PenaltyCall ctx={ctx} playerId={d.playerId} infraction={d.infraction} minutes={d.minutes} />; break
+          case 'fightCard': node = <FightCard ctx={ctx} homeId={d.homeId} awayId={d.awayId} winnerId={d.winnerId} result={d.result} />; break
         }
         if (!node) return null
         return (

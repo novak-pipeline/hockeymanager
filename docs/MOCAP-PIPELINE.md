@@ -186,3 +186,26 @@ re-solves them on the owner's own proportions locally.
 - **Not usable from this batch:** the overhead drone clip (no pose), the
   crowded drill and the phone-panned training clip (the tracker swaps between
   overlapping skaters), the skates-only close-ups.
+
+## Fights (2026-10-18): footage tried, key poses shipped
+
+The on-ice fight (`src/engine/agent/fight.ts`, `src/render3d/fightChoreo.ts`)
+needed paired motion: two men, full body, side-on. Four Pexels clips were
+licence-checked and downloaded to `K:/mocap-lab/raw/fights/` (MANIFEST.md):
+4761806 "Two men sparring in kick boxing", 4761707, 4761709 (cottonbro studio)
+and 8611524 (RDNE Stock project). Only 4761806 shows both men full body and
+side-on, and it was not usable:
+
+- the men fill about a quarter of the frame height behind the ring ropes;
+  MediaPipe (Heavy, `--poses 2`) tracked both (305 of 340 frames), but
+- arm depth is the weak axis exactly where a punch happens (the extension
+  lands in the camera axis): forearms solved 0.34-0.67 ft and left/right
+  asymmetric, no clean forward extension at the punch peaks;
+- filtered jitter 0.11-0.15 ft/frame^2 (the hockey pilot: 0.03-0.06), and the
+  guard loop flips the body mid-segment (`K:/mocap-lab/work/fights/tracks/*.png`).
+
+The others are close-ups (no full body) or a stare-down. So the fight clips
+(`fight_drop`, `fight_stance`, `fight_grab`, `fight_punch_R`, `fight_punch_L`,
+`fight_hit_react`, `fight_clinch`, and the linesmen's `official_separate`) are
+authored as key poses in `scripts/blender/clips.py`, upper body only so the
+skating legs stay the code's. Nothing from the footage is in the repo.
