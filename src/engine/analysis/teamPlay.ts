@@ -304,7 +304,8 @@ export function judgeTeamPlay(frames: readonly TPFrame[], opt: TPOptions = {}): 
     // --- VT16 crease camping (carrier inside the inner home plate) ---
     if (carrier && carrierTeam) {
       const atkNet = carrierTeam === 'h' ? -f.homeNetX : f.homeNetX
-      const inside = inHomePlate(carrier.x, carrier.y, atkNet, 20)
+      // (W3 S8: a carrier tied up in front - the defender's hold, not his choice - is not camping; the spell restarts when he is free)
+      const inside = inHomePlate(carrier.x, carrier.y, atkNet, 20) && carrier.act !== 'tieUp'
       if (!inside || !carrySpell || carrySpell.id !== carrier.id) carrySpell = inside ? { id: carrier.id, since: f.t, flagged: false } : null
       else if (!carrySpell.flagged && f.t - carrySpell.since > TP.creaseCampS) {
         carrySpell.flagged = true

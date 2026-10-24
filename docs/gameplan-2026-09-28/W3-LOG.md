@@ -485,3 +485,141 @@ Owner saves backed up and SHA1-verified unchanged (2 files) by the script and by
 - The goal-sequence shots (celebration, bench, crowd) are still the W2 spring shots; they cut at the stoppage and never in live play, but they are not yet built from the behaviours.
 - The other presets (overhead, end zone, follow) keep their W2 pipeline; only the broadcast camera (the owner's) and the replay are behaviour cameras.
 - `FrameEvent.focus` is agent-engine only; the classic engines use the renderer's fallback.
+
+## S8 special teams (2026-10-24)
+
+The owner's standing note for the slice: ppSetPlay was "too glitchy to read" (reel v0, 1/5). PP% sat at ~14-17% against the NHL's ~20%.
+
+### What changed (W3-DESIGN item 3, the special-teams half)
+
+- **Systems as data** (new `src/engine/agent/specialTeams.ts`, picked in `brain.ts supportTable`, labelled on the frames as `pp:umbrella`, `ppentry:drop`, `pk:box/passive`). The PP set-up and the kill's shape come from the team's special-teams tactics: the coach writes them from his system (`SYSTEM_PP` / `SYSTEM_PK`), and the GM can change them. The entry weights and the kill's pressure come from the system (`coachProfile.ts SYSTEM_SPECIAL`, new `Playbook.pp / ppEntry / pk / pkPressure`). The 'aggressive' formation is the box with pressure ≥ 0.8. A box or diamond the GM picks kills passively.
+  - **Power play in their zone**:
+    - umbrella: QB up top, two flanks at the tops of the circles, net front, low man;
+    - 1-3-1: QB, half-wall, bumper in the slot, weak-side one-timer at the dot, net front;
+    - overload: strong point, half-wall, goal line, net front, back door.
+
+    The carrier stands in one of the five roles (the role nearest him is his). The others hold their spots with lateral get-open only.
+  - **Puck movement**: a small tilt (`ST_TILT.flow` 0.003) on the pass to the role the set-up moves the puck to next. The one-timer feed across the seam keeps its S5 value.
+  - **Net-front screen**: the PP's net man screens every shot from the top (`PP_SCREEN_K` 0.85).
+  - **One-timer looks**: the weak-side man has a `oneTimer` job, square to the passer.
+  - **The lane read** (new): on the PP, a shot from beyond 22 ft is taken only through a lane at least half open, read where the killers will be at the release (`PP_LANE`, `laneOpen`). A one-timer whose lane a killer slid into is caught, not fired into his shins. Before this change, ~47% of PP attempts were blocked (NHL ~25-28%), almost all of them caught-and-fired one-timers the kill had slid across to block.
+  - **Entries**: one per PP rush, drawn by `pickPpEntry` from a hash of the possession (not the sim RNG):
+    - drop: a forward trails the carrier and takes the drop over the line;
+    - carry;
+    - dump and retrieve: both wide men go in after it.
+
+    The drop pass is allowed as a back pass. Entries are tilts, not scripts, like the S4 breakouts.
+  - **Penalty kill in our zone**: box (two up, two down) or diamond (one up, two sides, one in front), shaded to the puck. The man nearest the puck plays it:
+    - passive kill: only inside his area (18 ft), at a 13 ft gap from the inside on the perimeter;
+    - aggressive kill: out to 32 ft, flat out to 3.4 ft.
+  - **Lanes**: the high man on the puck side takes the shooting lane from the point (38% of the way out). The weak-side man sits on the seam to their one-timer. The low weak-side man boxes out the net front.
+  - **Kill up ice**: the aggressive kill forechecks with one man in and the second forward high. The passive kill stands up at its blue line (two forwards across it, two D behind), and its man on the puck goes no further than the red line.
+  - **Clears and shorthanded rushes**: the S5 kill tilt (chip, the long clear) is unchanged. A killer with open ice (at most one opponent goal-side) gets his carry and shot weight back.
+  - **6v5, 4v4, 3v3 OT**: unchanged, because the design's S8 row does not include them.
+- Dev switches: `S8_DEV` (pp, entry, pk, pkUp, flow, lanes, shRush, glide). In the measure harness, `TP_ABLATE=s8` with `TP_SET=AGENT_TUNING.ppFinishK=1.12` is the S7 engine.
+- **Contract**: nothing added. The labels use the S4 optional `homeSystem` / `awaySystem`.
+
+### Detectors
+
+- **VT15 for special teams** (`systemPlay.ts judgeSpecialTeams`): reads the positions against the shapes.ts diagrams. A new `ppOverload` template was added, and the umbrella's flanks moved to the tops of the circles (51 ft). It reads:
+  - the PP set-up per settled zone sequence: the nearest set-up by optimal assignment, with the puck side mirrored;
+  - the kill's shape;
+  - the kill's pressure: for each carrier who held the puck 0.75 s on the perimeter, the closest a killer got to him; the median under 9.5 ft is the aggressive kill;
+  - PP entries: carried, dumped, or carried off a drop pass.
+
+  It runs in the viewer VT15 (pp and pk added) and in the measure harness. The stream gate in `agentSim.test` uses the generated league: umbrella with a passive box, 1-3-1 with an aggressive box, overload with a passive diamond.
+- **PP%, PK%, SH goals** (`analysis/specialTeams.ts`): opportunities are read from the skaters on the ice.
+  - Scorecard rows: `specialTeams.ppPct`, `ppOppsPerTeamGame`, `shGoalsPerTeamGame`.
+  - matchTargets bands: 0.17-0.24, 2.5-3.7, 0.04-0.13. These are NHL league figures noted by hand (`estimate` confidence).
+
+Imported league, coach systems. Before is the S7 engine (240 games); after is S8 merged with the fights (480 games).
+
+| VT15 | before | after |
+|---|---|---|
+| PP set-up read as declared (all) | 0.56 | **0.73** |
+| umbrella / 1-3-1 / overload | 0.79 / 0.26 / 0.38 | 0.82 / **0.69** / 0.36 |
+| PK box / diamond read as declared | 0.85 / 0.65 | 0.78 / 0.51 |
+| PK pressure: aggressive kills read aggressive / passive kills read aggressive | 0.58 / 0.56 (no difference) | **0.51 / 0.32** |
+| PP entries read as declared (drop / carry / dump) | nothing declared | 0.08 / 0.83 / 0.33 |
+
+- The overload is the hardest set-up to read: its triangle reads as an umbrella's flank and low man whenever the puck swings. The stream gate only holds it to a lead over the other kits.
+- The diamond lost legibility: its presser and lane man pull it into a box.
+- The drop pass is rare: the pass to the trailing man rarely beats the carry.
+
+### Calibration (imported league, 480 games, seeds 7000-7479)
+
+| | S7 DB | S8 DB | S7 coach | S8 coach | NHL band |
+|---|---|---|---|---|---|
+| goals / team-game | 3.02 | **3.10** | 3.13 | **3.12** | 2.70-3.43 |
+| 5v5 goals | 1.93 | 1.93 | 1.98 | 1.97 | |
+| PP opportunities | 3.58 | 3.44 | 3.55 | 3.40 | 2.5-3.7 |
+| PP goals | 0.52 | 0.68 | 0.59 | 0.63 | |
+| **PP%** | 14.6 | **19.6** | 16.6 | **18.6** | 17-24 |
+| **PK%** | 85.4 | **80.4** | 83.4 | **81.4** | |
+| SH goals | 0.108 | 0.062 | 0.087 | 0.088 | 0.04-0.13 |
+| shots on goal | 30.4 | 31.2 | 31.6 | 31.8 | 26.4-33.6 |
+| shooting % | 9.93 | 9.94 | 9.89 | 9.81 | 9.0-11.4 |
+| penalties | 4.35 | 3.98 | 4.31 | 3.97 | 2.97-4.46 |
+
+- 5v5 goals are unchanged.
+- Penalties fell by ~0.35: the passive kill does not chase, so it commits fewer stick fouls.
+- **One scalar changed: `AGENT_TUNING.ppFinishK` (formerly the const `PP_SHOT_BOOST`) 1.12 → 1.42.** It compensates for two things:
+  - the 5-on-4 finish that the all-situations xG surface does not carry (the NHL power play scores more per shot than 5v5 from the same spots);
+  - the S8 kill (lanes, seam, the box shading to the puck).
+
+  With every S8 part in and the old 1.12, the coach run read PP% 16.7 (S7: 16.6): the play changed, but the finish did not.
+- The S8 columns were re-measured after merging the fights (improve-loop 1fe91d1).
+
+### Reel S7 cleanup
+
+1. **VT2 (breakaway: two men drawn at the bench door while the sim had them at the faceoff, up to 68 ft apart).**
+   - Root cause: the skater speed cap ("nothing skates faster than a skater", 40 ft/s) was applied per WALL second. In the fast-forwarded dead time after a goal, the sim's new men skated from their door to the faceoff several times faster per wall second than their rigs were allowed to, so they were 68 ft behind when live play resumed.
+   - Fix: the cap is in game time (`math.ts gameStepDt`).
+   - Test: `puckTrack.test` (at 10× playback: ~60 ft behind before, within a stride after).
+   - The S7 pins, replayed exactly (fingerprints match), read VT2 green.
+2. **VT3 (saveRebound: an in-tight "snap" drawn with no flight).**
+   - Root cause: the release was 1.3 ft off the goal line at the goal mouth, a jam off the rebound that slid wide along the line. VT3's flight test counts travel toward the net while the puck is more than 3 ft out, and from there it never is.
+   - Fix: a jam has no flight to draw, so like a tip it is read on its set-up only (`VT3_JAM_FT` 4). The probe now gives missed shots their release point.
+   - Test: `viewerTruth.test` (red before the fix).
+3. **VT20 (a drawn rim or pass speeding up ~12 ft/s after release; the puck 1 ft outside the corner boards).**
+   - Root causes:
+     - the timeline drew the puck on a Catmull-Rom spline, which through a release (slow on the blade, then fast) eased in and then caught up faster than the sim, and bulged around corners;
+     - the blade-to-free handoff bled its correction off on top of the puck's own travel.
+   - Fixes:
+     - the puck is drawn on a straight line between frames, which never outruns the sim's puck and stays on the convex sheet;
+     - a free puck's drawn step is capped at its target's (plus a 3 ft/s creep);
+     - a target the swing released is tracked as free;
+     - the drawn puck is clamped inside the rounded boards.
+   - Tests: `timeline.test`, `puckTrack.test`. VT20 is green on all S7 pins and on reel S8.
+4. **VT18 (ozCycleShot: an unwhistled delayed-offside touch). Sim and judge were both wrong.**
+   - Sim: a man the puck was still sliding to (the reception glide) was excused as its carrier when he crossed the line ahead of it. He is now offside (`checkOffside`, `S8_DEV.glide`).
+   - Judge: a defender who took the puck between two frames and pulled it back over his own line was not counted as the side that sent it in, so a delayed offside was opened against the attackers. Fixed in `offside.ts`; test in `offside.test` (red before the fix).
+   - Stream-judge misses fell from 21-23 to 3-7 per 480 games.
+
+Also: VT16 no longer counts a carrier tied up in front of the net, since the hold is the defender's. A tie-up scrum showed up as one case in the gate sample.
+
+### Reel S8
+
+`K:/Hockey Game/.cache/reel-s8/reel.html`, recorded with `npm run reel -- "--out=K:/Hockey Game/.cache/reel-s8" --only=ppSetPlay,pkClear,breakaway,saveRebound` (labelled s8). Four clips:
+
+- a PP set play into a goal (8 OZ passes);
+- a shorthanded clear to 97 ft, with the penalty killed (the new `pkClear` scenario);
+- a breakaway goal;
+- a save and a rebound attempt.
+
+Detector results:
+
+- Green: VT1-VT8, VT10, VT12-VT14, VT16, VT18-VT20. This includes VT2, VT3 and VT20, the S7 reds.
+- Red:
+  - VT9 on saveRebound: carrier in the middle third 85%, against a 90% bound;
+  - VT17 on pkClear: the clearing man's blade 0.35 ft off the ice on a one-handed clear (19 carried frames);
+  - VT21 on ppSetPlay: one man drawn 0.98 ft from a free puck's path at 43 ft/s, against a 1 ft bound.
+- VT15 is n/a (one sequence per clip).
+
+Safety: the owner's saves were backed up and SHA1-verified unchanged (2 files), by the script and by hand. The app ran from this worktree's own `out/`, with `HOCKEY_USER_DATA` on a scratch copy and `HOCKEY_OFFSCREEN=1`. The owner's rig assets were copied in for the build and deleted afterwards along with `out/`. Nothing derived from them is committed.
+
+### Left for later
+
+- The overload and the diamond read poorly, and the drop pass is rare. Scripting the entry (first pass, then the routes) is plan work.
+- The aggressive presser rarely gets within stick reach before the puck moves: median closest gap 8.5 ft, against the passive kill's 11.
+- 'en' goals run ~0.3 a team-game, which is high. They come from late pulls and delayed-penalty pulls, not from S8.

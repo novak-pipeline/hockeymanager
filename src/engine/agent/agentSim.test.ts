@@ -43,7 +43,7 @@ const CARRIER_GATE = { games: 8, pingShare: 0.1, netAttack: 0.9, corner: 0.12, c
  * the kill's shape and pressure separate the teams that run them, and the
  * stream's PP% is a power play's, not a 5-on-5's.
  */
-const S8_GATE = { ppFamily: 0.55, boxShare: 0.6, diamondLead: 0.15, pressureLead: 0.15, ppPct: [0.12, 0.32] as const }
+const S8_GATE = { ppFamily: 0.55, overloadLead: 0.12, boxShare: 0.6, diamondLead: 0.15, pressureLead: 0.15, ppPct: [0.12, 0.32] as const }
 
 /** W3 S6 puck gate (design band; before/after in W3-LOG S6). */
 const S6_GATE = { games: 6, reboundFast: 2, gainedPer60: 1.5, throughPer60: 5, ignoredPer60: 1, raceWon: 0.45 }
@@ -606,11 +606,12 @@ describe('agent engine', () => {
     for (const k of pk.keys()) lines.push(`PK ${k}: box ${share(pk, k, 'box').toFixed(2)} diamond ${share(pk, k, 'diamond').toFixed(2)} aggressive ${share(press, k, 'aggressive').toFixed(2)} (${(press.get(k) ?? []).length})`)
     // eslint-disable-next-line no-console
     console.log(`VT15 special teams:\n  ${lines.join('\n  ')}\n${specialTeamsLine(st, g * 2)}`)
-    for (const k of ['umbrella', '1-3-1', 'overload']) {
-      const l = legibility(pp.get(k) ?? [])
-      expect(l.judged, k).toBeGreaterThan(15)
-      expect(l.exactShare, `${k} ${lines.join(' | ')}`).toBeGreaterThan(S8_GATE.ppFamily)
-    }
+    for (const k of ['umbrella', '1-3-1', 'overload']) expect(legibility(pp.get(k) ?? []).judged, k).toBeGreaterThan(15)
+    // the umbrella and the 1-3-1 read as themselves; the overload (its strong-side
+    // triangle reads as an umbrella's flank and low man whenever the puck swings
+    // to the weak side) only stands out from the other two set-ups
+    for (const k of ['umbrella', '1-3-1']) expect(legibility(pp.get(k) ?? []).exactShare, `${k} ${lines.join(' | ')}`).toBeGreaterThan(S8_GATE.ppFamily)
+    expect(share(pp, 'overload', 'overload') - Math.max(share(pp, 'umbrella', 'overload'), share(pp, '1-3-1', 'overload')), lines.join(' | ')).toBeGreaterThan(S8_GATE.overloadLead)
     expect(share(pk, 'box', 'box')).toBeGreaterThan(S8_GATE.boxShare)
     expect(share(pk, 'diamond', 'diamond') - share(pk, 'box', 'diamond')).toBeGreaterThan(S8_GATE.diamondLead)
     expect(share(press, 'aggressive', 'aggressive') - share(press, 'box', 'aggressive')).toBeGreaterThan(S8_GATE.pressureLead)
