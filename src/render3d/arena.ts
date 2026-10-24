@@ -76,12 +76,23 @@ export class Arena {
   private readonly nearCutUniform = { value: new THREE.Vector3(0, 26, 0) }
   private ribbonTex: THREE.CanvasTexture | null = null
   private iceMap: THREE.Texture | null = null
+  private iceLogo: (CanvasImageSource & { width: number; height: number }) | null = null
+  /** Art style (artStyle.ts): a freshly flooded sheet, no skate scuffs. Off = the default look. */
+  private cleanIce = false
 
   /** Repaint the ice with the home club's logo at centre ice (null = the league roundel). */
   setCenterLogo(img: (CanvasImageSource & { width: number; height: number }) | null): void {
     if (!this.iceMap) return
-    this.iceMap.image = buildIceCanvas({ centerLogo: img })
+    this.iceLogo = img
+    this.iceMap.image = buildIceCanvas({ centerLogo: img, clean: this.cleanIce })
     this.iceMap.needsUpdate = true
+  }
+
+  /** Art-style look test: repaint the sheet clean (no scuffs). */
+  setCleanIce(on: boolean): void {
+    if (this.cleanIce === on) return
+    this.cleanIce = on
+    this.setCenterLogo(this.iceLogo)
   }
 
   private homeLogo: LogoImage | null = null

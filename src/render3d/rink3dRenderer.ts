@@ -58,6 +58,7 @@ import { isLance, isOneHanded, measureGrip, type GripSample } from './gripTruth'
 import { blendGrip, chooseGrip, gripBend, type GripInput, type GripState, type GripWeights } from './gripState'
 import { loadAthleteAssets, loadOwnerAssets, mergeClips, type AthleteAssets, type BakedClip, type OwnerAssets, type OwnerTextures } from './gltfAthlete'
 import { withMocapClips } from './animCatalog'
+import { ArtStyleRuntime, artStyleSpec, type ArtStyle } from './artStyle'
 import { AtlasUploader, type Rect } from './atlasUpload'
 import { OwnerKitPainter, buildOwnerAtlasCanvas, clothesMaterial, gearMaterial, loadTexture, visorMaterial } from './ownerKit'
 
@@ -127,11 +128,13 @@ export interface Render3dOptions {
   locomotion?: LocoMode
   /** Video-mocap pilot clips stand in for their slots (animCatalog withMocapClips). Off by default. */
   mocap?: boolean
+  /** Art-direction look test (artStyle.ts): 'current' (default) = the semi-realistic look, untouched. */
+  artStyle?: ArtStyle
 }
 // Bake-off verdict (docs/graphics/BLENDER-PIPELINE.md): the Blender body wins;
 // the code stride stays (locked to sim speed), authored cycles add crossovers +
 // backward skating, authored actions ride on top. Procedural is the fallback.
-export const RENDER3D_DEFAULTS: Required<Render3dOptions> = { athletes: 'auto', locomotion: 'hybrid', mocap: false }
+export const RENDER3D_DEFAULTS: Required<Render3dOptions> = { athletes: 'auto', locomotion: 'hybrid', mocap: false, artStyle: 'current' }
 
 // Near regulation (3" across, 1" thick) — a touch big so it reads; the halo does the rest at distance.
 const PUCK_R = 0.14
@@ -313,6 +316,11 @@ export class Rink3dRenderer implements MatchRenderer, CameraCutConsumer {
   private readonly camera: THREE.PerspectiveCamera
   private composer!: EffectComposer
   private bloom!: UnrealBloomPass
+  /** Non-default art style (null = 'current': nothing restyled). */
+  private art: ArtStyleRuntime | null = null
+  private hemiLight!: THREE.HemisphereLight
+  private keyLight!: THREE.DirectionalLight
+  private readonly rimLights: THREE.DirectionalLight[] = []
   private arena!: Arena
   private batch!: AthleteBatch
   private atlasCanvas!: HTMLCanvasElement
@@ -588,11 +596,22 @@ export class Rink3dRenderer implements MatchRenderer, CameraCutConsumer {
     if (inst.assets && !(viewerProbeEnabled() && safeLocal('hockey.dev.hitPhysics') === 'off')) inst.hitPhys = await HitPhysics.create()
     inst.locoMode = inst.owner && !opts.locomotion ? 'clip' : o.locomotion
     inst.mocap = o.mocap
+    const spec = artStyleSpec(o.artStyle)
+    if (spec) {
+      inst.art = new ArtStyleRuntime(spec, new THREE.Vector3(20, 160, -72))
+      renderer.toneMapping = spec.toneMapping
+      renderer.toneMappingExposure = spec.exposure
+      if (inst.ownerPainter) {
+        inst.ownerPainter.flatten = spec.kitFlatten
+        inst.ownerPainter.numberScale = spec.numberScale
+      }
+    }
 
     inst.camera.aspect = w / h
     inst.camera.updateProjectionMatrix()
 
     inst.buildScene()
+    inst.applyArtStyle()
     inst.buildPost(w, h)
     // Compile every program now, so the first line change / goal never hitches
     // on a shader compile mid-game. compile() skips INVISIBLE objects (bench
@@ -740,6 +759,7 @@ export class Rink3dRenderer implements MatchRenderer, CameraCutConsumer {
     // rim lights from the ends so the athletes separate from the white ice.
     const hemi = new THREE.HemisphereLight(0xe4ecff, 0x2a2e36, 0.75)
     this.scene.add(hemi)
+    this.hemiLight = hemi
 
     const key = new THREE.DirectionalLight(0xfff7ee, 1.35)
     // Tilted toward the broadcast side just enough (|z/y| > 0.4) that its mirror
@@ -759,6 +779,7 @@ export class Rink3dRenderer implements MatchRenderer, CameraCutConsumer {
     key.shadow.normalBias = 0.03
     key.shadow.radius = 3
     this.scene.add(key, key.target)
+    this.keyLight = key
 
     // Goal lights: red wash behind each net, dark until a goal.
     for (const side of ['left', 'right'] as const) {
@@ -774,6 +795,7 @@ export class Rink3dRenderer implements MatchRenderer, CameraCutConsumer {
       // game camera (a low rim light made a blinding ice glare).
       rim.position.set(x * 110, 95, x * 20)
       this.scene.add(rim)
+      this.rimLights.push(rim)
     }
   }
 
@@ -788,9 +810,42 @@ export class Rink3dRenderer implements MatchRenderer, CameraCutConsumer {
     this.composer.addPass(new RenderPass(this.scene, this.camera))
     // Subtle: only the rig fixtures, video board, goal lamps and hot ice
     // specular cross the threshold — broadcast glow, not a music video.
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(w, h), 0.3, 0.5, 1.35)
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(w, h), this.art?.spec.bloom ?? 0.3, 0.5, 1.35)
     this.composer.addPass(this.bloom)
     this.composer.addPass(new OutputPass())
+    if (this.art) this.composer.addPass(this.art.gradePass())
+  }
+
+  /**
+   * Art-direction look test (artStyle.ts): restyle lights, ice and every
+   * athlete material in memory, and give each rig an outline hull. 'current'
+   * returns at once — the default look is untouched.
+   */
+  private applyArtStyle(): void {
+    const art = this.art
+    if (!art) return
+    const s = art.spec
+    this.hemiLight.color.setHex(s.hemi.sky)
+    this.hemiLight.groundColor.setHex(s.hemi.ground)
+    this.hemiLight.intensity = s.hemi.intensity
+    this.keyLight.intensity = s.key
+    this.keyLight.shadow.radius = s.keyShadowRadius
+    for (const r of this.rimLights) r.intensity = s.rims
+    this.scene.environmentIntensity = s.envIntensity
+    this.arena.reflectUniforms.uReflectStrength.value = s.iceReflect
+    this.arena.setCleanIce(s.cleanIce)
+    const gear = new Set<THREE.Material>(this.ownerGearMats)
+    const seen = new Set<THREE.Material>()
+    for (const rig of this.batch.rigs) {
+      const mats = Array.isArray(rig.mesh.material) ? rig.mesh.material : [rig.mesh.material]
+      for (const m of mats) {
+        if (seen.has(m)) continue
+        seen.add(m)
+        if (m instanceof THREE.MeshStandardMaterial) art.stylize(m, gear.has(m))
+      }
+    }
+    const hullMat = art.outlineMaterial()
+    if (hullMat) for (const rig of this.batch.rigs) art.addHull(rig.mesh, hullMat)
   }
 
   private buildPuck(): void {
@@ -1300,7 +1355,7 @@ export class Rink3dRenderer implements MatchRenderer, CameraCutConsumer {
       this.ownerAtlasDirty = true
       return
     }
-    paintJerseySlot(this.atlasCanvas, p.rig.slot, kit, num, p.rig.goalie)
+    paintJerseySlot(this.atlasCanvas, p.rig.slot, kit, num, p.rig.goalie, this.art?.spec.numberScale ?? 1)
     this.atlasUp?.mark(slotRect(this.atlasCanvas, p.rig.slot))
     this.atlasDirty = true
   }
@@ -2027,6 +2082,7 @@ export class Rink3dRenderer implements MatchRenderer, CameraCutConsumer {
     // shadow and main passes each used to re-traverse the whole scene)
     this.scene.updateMatrixWorld()
     if (this.quality < 2) this.renderReflection()
+    this.art?.frame(this.camera, this.renderer.domElement.clientHeight || 720)
     this.composer.render(dt)
     if (this.probeSink) this.emitProbe(dt)
     const cpu = performance.now() - t0

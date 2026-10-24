@@ -189,7 +189,7 @@ function stripes(ctx: CanvasRenderingContext2D, x: number, y: number, w: number,
 }
 
 /** Paint one player's sweater/sleeves/socks into his atlas slot. */
-export function paintJerseySlot(atlas: HTMLCanvasElement, slot: number, kit: Kit, num: number, goalie: boolean): void {
+export function paintJerseySlot(atlas: HTMLCanvasElement, slot: number, kit: Kit, num: number, goalie: boolean, numberScale = 1): void {
   const ctx = atlas.getContext('2d')!
   const S = ATLAS_SLOT_PX
   const ox = (slot % ATLAS_GRID) * S
@@ -216,14 +216,14 @@ export function paintJerseySlot(atlas: HTMLCanvasElement, slot: number, kit: Kit
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
   ctx.lineJoin = 'round'
-  const fontPx = Math.round(tH * (goalie ? 0.36 : 0.42))
+  const fontPx = Math.round(tH * (goalie ? 0.36 : 0.42) * numberScale)
   ctx.font = `900 ${fontPx}px "Arial Black", Impact, sans-serif`
   const backY = y(t0 + 0.62 * (t1 - t0))
   ctx.lineWidth = Math.max(3, fontPx * 0.12)
   ctx.strokeStyle = css(kit.numberOutline)
-  ctx.strokeText(numStr, ox + S * 0.5, backY, S * 0.3)
+  ctx.strokeText(numStr, ox + S * 0.5, backY, S * 0.3 * numberScale)
   ctx.fillStyle = css(kit.number)
-  ctx.fillText(numStr, ox + S * 0.5, backY, S * 0.3)
+  ctx.fillText(numStr, ox + S * 0.5, backY, S * 0.3 * numberScale)
   // front crest at u = 0 / 1 (wraps the lathe seam)
   const crestY = y(t0 + 0.6 * (t1 - t0))
   const cr = tH * 0.14
