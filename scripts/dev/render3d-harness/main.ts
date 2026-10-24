@@ -44,6 +44,8 @@ const r = await Impl.create(host, colors, {
   ...(q.has('loco') ? { locomotion: q.get('loco') as 'code' | 'clip' | 'hybrid' } : {}),
   // ?mocap=1: the video-mocap pilot clips stand in for their slots (docs/MOCAP-PIPELINE.md)
   ...(q.get('mocap') === '1' ? { mocap: true } : {}),
+  // ?style=current|cleanBroadcast|cartoony: the art-direction look test (src/render3d/artStyle.ts)
+  ...(q.has('style') ? { artStyle: q.get('style') as 'current' | 'cleanBroadcast' | 'cartoony' } : {}),
 })
 r.setEventStream(out.stream)
 // ?logo=1: generated stand-in club logos (the real ones are mod logo-pack data, never in the repo)

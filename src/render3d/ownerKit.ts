@@ -47,6 +47,9 @@ const css = (hex: number) => `#${hex.toString(16).padStart(6, '0')}`
 
 export class OwnerKitPainter {
   private readonly teams = new Map<string, HTMLCanvasElement>()
+  /** Art style (artStyle.ts): baked fold shading pulled toward one tone (0 = as authored), number size. */
+  flatten = 0
+  numberScale = 1
 
   private constructor(private readonly src: Partial<Record<Role, Source>>) {}
 
@@ -66,7 +69,7 @@ export class OwnerKitPainter {
 
   /** The team's sweater (no number): kit colour per texel class × shade. Cached per kit. */
   team(role: Role, kit: Kit): HTMLCanvasElement {
-    const key = `${role}:${kit.jersey}:${kit.trim}:${kit.trim2}:${kit.pants}:${kit.socks}`
+    const key = `${role}:${kit.jersey}:${kit.trim}:${kit.trim2}:${kit.pants}:${kit.socks}:${this.flatten}`
     const hit = this.teams.get(key)
     if (hit) return hit
     const s = this.src[role] ?? this.src.skater!
@@ -84,7 +87,8 @@ export class OwnerKitPainter {
         o[i + 1] = d[i + 1]!
         o[i + 2] = d[i + 2]!
       } else {
-        const sh = k[i + 1]! / 200
+        const sh0 = k[i + 1]! / 200
+        const sh = sh0 + (Math.min(1, 0.55 + sh0 * 0.45) - sh0) * this.flatten
         const p = pal[cls]!
         o[i] = p[0]! * sh
         o[i + 1] = p[1]! * sh
@@ -152,16 +156,17 @@ export class OwnerKitPainter {
       ctx.save()
       ctx.translate(b.x + b.w / 2, b.y + b.h / 2)
       ctx.rotate(rot)
-      const px = Math.max(6, Math.round(bh * 0.95))
+      const big = k.startsWith('number') ? this.numberScale : 1
+      const px = Math.max(6, Math.round(bh * 0.95 * big))
       ctx.font = `${weight} ${px}px "Arial Black", Impact, sans-serif`
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
       ctx.lineJoin = 'round'
       ctx.lineWidth = Math.max(1.5, px * 0.1)
       ctx.strokeStyle = css(outline)
-      ctx.strokeText(str, 0, px * 0.04, bw)
+      ctx.strokeText(str, 0, px * 0.04, bw * big)
       ctx.fillStyle = css(fill)
-      ctx.fillText(str, 0, px * 0.04, bw)
+      ctx.fillText(str, 0, px * 0.04, bw * big)
       ctx.restore()
     }
     const numStr = String(num)
