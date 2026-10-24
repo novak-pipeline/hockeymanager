@@ -1327,6 +1327,9 @@ export function MatchViewer(props: {
     replayActiveRef.current = false
     setGoalBanner(null)
     if (goalBannerTimerRef.current) clearTimeout(goalBannerTimerRef.current)
+    // the reel hands back to the horn with the picture held (the intermission
+    // follows): a paused cut, never a frame of bodies snapping in "live" play
+    if (session?.kind === 'reel') rendererRef.current?.pause()
     if (live) rendererRef.current?.seekFraction(live.progress)
     // Resume normal plan speed and re-sync the commentary/SFX cursors to the
     // resume point so normal play doesn't replay a burst of crossed events.
